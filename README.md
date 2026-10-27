@@ -47,6 +47,12 @@ ou sur un fond topographique DXF.
   de chaque axe en prolonge la saisie.
 - **Dévers** : anneau à dévers imposé de 1,5 % vers l'extérieur, constant sur site en pente (ou cône sur plan incliné),
   profil en long des rives, variation des dévers de chaque branche, flèches de dévers sur le plan.
+- **Épures de giration (T et X)** : semi-remorque de 16,50 m (largeur 2,55 m, empattement du tracteur 3,80 m, sellette
+  à 0,50 m, pivot – essieu 7,80 m, pivot – arrière 12,00 m), modèle cinématique (tractrices). Pour chaque branche
+  secondaire : tourne-à-droite et tourne-à-gauche, entrant et sortant ; le conducteur s'écarte vers l'extérieur de sa
+  voie, les tourne-à-gauche sont concentriques à Ris / Rie. Surface balayée, traces et silhouettes du véhicule sur le
+  calque `GIRA_EPURE` ; empiètements sur les bordures (tolérance : BDD en interurbain, caniveau en urbain) et sur les
+  îlots en saillie signalés dans Contrôles et marqués d'une croix. Case à cocher dans l'onglet Carrefour.
 - **Visibilité** (onglet dédié, calque `GIRA_VISIBILITE`) : giratoire, quart d'anneau à gauche vu depuis un observateur à
   15 m en amont du cédez-le-passage (recul réglable), au milieu de la voie d'entrée ; carrefours en T et en X,
   triangles œil – point de conflit – cible à D = V85 × t de part et d'autre, cotés ; tableau par branche.
@@ -84,6 +90,7 @@ js/capacity-plan.js capacité des carrefours plans à priorité (T, X)
 js/bypass.js        voie directe de tourne-à-droite (by-pass)
 js/dims.js          cotations de type DAO
 js/crossing.js      passages piétons, abaissés de trottoir et bandes d'éveil de vigilance
+js/swept.js         épures de giration (semi-remorque)
 js/profile.js       profil en travers type de l'anneau (SVG, DXF)
 js/viewer.js        rendu canvas (projet, DXF, HUD)
 js/geom.js          géométrie (droites, arcs, raccordements, décalages)

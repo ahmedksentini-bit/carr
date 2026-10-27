@@ -81,7 +81,7 @@ export const TAD = { interurbain: { R: 42, w: 4 }, urbain: { R: 20, w: 3.5 } };
 export const PLAN = {
   interurbain: {
     main: {
-      wLane: 3.5, nLanes: 1, camber: 2.5, pente: '', regime: 'cedez', v85: 90, tVis: '', dObs: '',
+      wLane: 3.5, nLanes: 1, camber: 2.5, pente: '', regime: 'cedez', v85: 90, tVis: '', dObs: '', epure: true,
       // TAG : voie de 2,75–3,25 m + îlot a (0,25–2 m), largeur centrale ≤ 5 m ; déport 1/15 ; sifflet 20–30 m ;
       // alignement droit ≥ 10 m ; stockage 20–50 m (40–60 m avec PL) ; présignalisation 58,5 m.
       tag: { on: true, width: 3, island: 2, raised: true, storage: 30, sifflet: 25, align: 10, deport: '', presig: 58.5 },
@@ -91,7 +91,7 @@ export const PLAN = {
   },
   urbain: {
     main: {
-      wLane: 3, nLanes: 1, camber: 2.5, pente: '', regime: 'cedez', v85: 50, tVis: '', dObs: '',
+      wLane: 3, nLanes: 1, camber: 2.5, pente: '', regime: 'cedez', v85: 50, tVis: '', dObs: '', epure: true,
       tag: { on: false, width: 3, island: 1, raised: false, storage: 15, sifflet: 15, align: 5, deport: '', presig: 20 },
     },
     sec: { wLane: 3, camber: 2.5, R: 8 },
@@ -122,7 +122,7 @@ export function planParams(prj) {
   const dObs = num(p.dObs, regime === 'stop' ? 4 : 15);
   return {
     main: p.main || ['', ''], wLane, nLanes, camber: num(p.camber, d.camber), pente: p.pente ?? '', regime,
-    v85: num(p.v85, d.v85), tVis, dObs, tag, c,
+    v85: num(p.v85, d.v85), tVis, dObs, tag, c, epure: p.epure ?? d.epure,
   };
 }
 

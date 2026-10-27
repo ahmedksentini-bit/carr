@@ -10,6 +10,7 @@ import { fmt, fmtGis, upright, autoCenter, branchDirection, frame, sideBandPrims
 import { buildApproach, aciBranch, aciCircles, crossLine, targetX0 } from './approach.js';
 import { makeDims } from './dims.js';
 import { crossing, crossingPrims, cutAtX, polyOf, closedSegs } from './crossing.js';
+import { sweep, conflicts, polyPath, SEMI } from './swept.js';
 
 const { add, sub, mul, dot, norm, rot90, neg, ang, L } = G;
 const pick = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
@@ -158,7 +159,7 @@ export function buildPlan(prj) {
   const gaps = { 1: [], [-1]: [] };
   for (const s of secs) {
     const b = s.b, idx = s.idx, name = b.name;
-    const { fr, isl, target, aci, hasIsland } = geo.get(s);
+    const { fr, isl, target, aci, hasIsland, K } = geo.get(s);
     const nIn = Math.max(1, +b.nIn || 1), nOut = Math.max(1, +b.nOut || 1), wl = +b.wLane;
     const wIn = nIn * wl, wOut = nOut * wl, { le, ls, Re, Rs } = s;
     const x0 = targetX0(target, 0);
@@ -195,7 +196,7 @@ export function buildPlan(prj) {
       W, Ws: fr.Ws, Wp, target,
       entry: { ...en, curbW: Wp(en.curb), Tc: W(en.fil.Tc), Tl: W(en.fil.Tl), C: W(en.fil.C), F: W(en.F) },
       exit: { ...ex, curbW: Wp(ex.curb), Tc: W(ex.fil.Tc), Tl: W(ex.fil.Tl), C: W(ex.fil.C), F: W(ex.F) },
-      island, cross, stop: stop && { a: W(stop.a), b: W(stop.b) }, stopX: stopX && { a: W(stopX.a), b: W(stopX.b) },
+      island, cross, K, stop: stop && { a: W(stop.a), b: W(stop.b) }, stopX: stopX && { a: W(stopX.a), b: W(stopX.b) },
       gis: fmtGis(fr.theta, unit), angle: Math.acos(G.clamp(Math.abs(dot(s.u, uM)), 0, 1)),
     };
     const xs = [toM(bd.entry.Tc).x, toM(bd.exit.Tc).x];
@@ -347,6 +348,78 @@ export function buildPlan(prj) {
       }
       if (ch.length) sideBandPrims(ch, bands, prj.context === 'urbain' ? 'TROTTOIR' : 'ACCOTEMENT').forEach(Pp);
     }
+  }
+
+  // Épures de giration (semi-remorque) : tourne-à-droite et tourne-à-gauche, entrant et sortant, de chaque branche
+  // secondaire. Trajectoire guide du milieu de l'essieu avant : le conducteur s'écarte vers l'extérieur de sa voie
+  // (0,30 m de marge) ; parallèle aux bordures pour les tourne-à-droite, concentrique aux cercles Ris / Rie (bord
+  // intérieur de la trajectoire, ACI) pour les tourne-à-gauche. La surface balayée est comparée aux bordures (tolérance :
+  // BDD en interurbain, caniveau en urbain) et aux îlots en saillie (aucune tolérance).
+  D.epures = [];
+  if (P.epure) {
+    const curbs = [], islands = [...holes];
+    for (const sg of [1, -1]) for (const piece of cutPolyline(edges[sg], gaps[sg])) curbs.push(rnd(piece));
+    for (const bd of bds) {
+      if (bd.role !== 'secondaire') continue;
+      curbs.push(bd.entry.curbW, bd.exit.curbW);
+      if (bd.island?.outline) islands.push(...(bd.island.pieces || [bd.island.outline]));
+    }
+    const tolC = prj.context === 'urbain' ? sec.caniveau : sec.bdd, tolI = 0.05;
+    const hv = SEMI.w / 2, m = 0.3, lead = 40, cw = (u) => ({ x: u.y, y: -u.x }); // cw : rotation de −90°
+    const wApp = widened ? P.tag.width : P.wLane; // voie d'où part le tourne-à-gauche entrant
+    for (const bd of bds) {
+      if (bd.role !== 'secondaire' || !bd.K) continue;
+      const { W, sY, u } = bd, dNear = mul(uM, -sY), dFar = mul(uM, sY), le = bd.entry.w, ls = bd.exit.w;
+      const aciCurb = !!bd.island?.aci;
+      const moves = [];
+      // Tourne-à-droite : décalé de la bordure de (voie − demi-largeur − marge).
+      const dR = (w) => Math.max(hv + 0.2, w - hv - m);
+      const TcX = bd.exit.Tc, TcE = bd.entry.Tc;
+      moves.push(['tourne-à-droite entrant', -1, G.offsetPath([L(sub(TcX, mul(dNear, lead)), TcX), ...G.revPath(bd.exit.curbW)], dR(Math.min(P.wLane, ls)))]);
+      moves.push(['tourne-à-droite sortant', -1, G.offsetPath([...bd.entry.curbW, L(TcE, add(TcE, mul(dNear, lead)))], dR(Math.min(P.wLane, le)))]);
+      {
+        // Tourne-à-gauche entrant : depuis la voie de TAG, autour du centre de Ris, puis dans la voie de sortie.
+        const Ris = bd.K.Ris, C = W(bd.K.Cs);
+        const Rg = Math.max(Ris + hv + 0.1, Math.min(Ris + wApp - hv - 0.1, Ris + ls - hv - m)), T1 = add(C, mul(Ym, -sY * Rg));
+        let end, tail;
+        if (aciCurb && bd.exit.ctrl.length >= 3) {
+          end = add(C, mul(norm(sub(W(bd.exit.ctrl[2]), C)), Rg));
+          tail = G.offsetPath(G.revPath(bd.exit.curbW).slice(-2), Ris + ls - Rg);
+        } else { end = add(C, mul(cw(u), Rg)); tail = [L(end, add(end, mul(u, lead)))]; }
+        moves.push(['tourne-à-gauche entrant', 1, [L(sub(T1, mul(dFar, lead)), T1), G.A(C, Rg, ang(sub(T1, C)), ang(sub(end, C)), true), ...tail]]);
+      }
+      {
+        // Tourne-à-gauche sortant : voie d'entrée, autour du centre de Rie, puis voies directes opposées.
+        const Rie = bd.K.Rie, C = W(bd.K.Ce);
+        const Rg = Math.max(Rie + hv + 0.1, Math.min(Rie + le - hv - m, Rie + half - hv - 0.1)), T3 = add(C, mul(cw(dFar), Rg));
+        let start, head;
+        if (aciCurb && bd.entry.ctrl.length >= 3) {
+          start = add(C, mul(norm(sub(W(bd.entry.ctrl[2]), C)), Rg));
+          head = G.offsetPath(bd.entry.curbW.slice(0, 2), Rie + le - Rg);
+        } else { start = add(C, mul(cw(neg(u)), Rg)); head = [L(add(start, mul(u, lead)), start)]; }
+        moves.push(['tourne-à-gauche sortant', 1, [...head, G.A(C, Rg, ang(sub(start, C)), ang(sub(T3, C)), true), L(T3, add(T3, mul(dFar, lead)))]]);
+      }
+      for (const [label, turn, guide] of moves) {
+        const sw = sweep(guide, turn);
+        if (!sw) continue;
+        Pp({ k: 'fill', L: 'EPURE', role: 'epure', rings: [closedSegs(sw.poly)] });
+        Pp({ k: 'path', L: 'EPURE', segs: polyPath(sw.outer) });
+        Pp({ k: 'path', L: 'EPURE', segs: polyPath(sw.inner) });
+        for (const pose of sw.poses) for (const r of pose) Pp({ k: 'path', L: 'EPURE', segs: closedSegs(r), closed: true });
+        const hitC = conflicts(sw.poly, curbs, tolC), hitI = conflicts(sw.poly, islands, tolI);
+        const marks = [];
+        for (const h of [...hitC, ...hitI].sort((x, y) => y.depth - x.depth)) if (marks.every((q) => G.dist(h.p, q) > 3)) marks.push(h.p);
+        for (const p of marks.slice(0, 6)) Pp({ k: 'cross', L: 'EPURE', p, size: 1.5 });
+        const maxD = (hs) => Math.max(...hs.map((h) => h.depth));
+        const what = [
+          hitC.length ? `la bordure de ${fmt(maxD(hitC), 2)} m (tolérance ${fmt(tolC, 2)} m)` : '',
+          hitI.length ? `un îlot en saillie de ${fmt(maxD(hitI), 2)} m` : '',
+        ].filter(Boolean).join(' et ');
+        if (what) issues.push({ lvl: 'warn', bi: bd.idx, msg: `${bd.name} : épure ${SEMI.label}, ${label} : le véhicule dépasse ${what} (croix sur le plan) ; augmenter le rayon, reculer l'îlot ou prévoir une surlargeur.` });
+        D.epures.push({ name: bd.name, label, ok: !what });
+      }
+    }
+    if (D.epures.length && D.epures.every((e) => e.ok)) issues.push({ lvl: 'info', msg: `Épures ${SEMI.label} : aucun empiètement sur les bordures ni sur les îlots en saillie.` });
   }
 
   // Axe de la route principale

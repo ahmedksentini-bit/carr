@@ -689,7 +689,9 @@ function buildStaticPanels() {
     fld('plan.tag.align', 'Alignement droit avant le sifflet', 'm') +
     fld('plan.tag.deport', 'Longueur de déport des bords', 'm', { ph: 'auto' }) +
     fld('plan.tag.presig', 'Présignalisation (nez peint)', 'm') +
-    '<p class="note">Visibilité depuis les branches secondaires : onglet Visibilité.</p>';
+    '<h3>Épures de giration</h3>' +
+    '<label class="chk"><input type="checkbox" data-k="plan.epure"> Semi-remorque 16,50 m : tourne-à-droite et tourne-à-gauche de chaque branche</label>' +
+    '<p class="note">Surface balayée tracée sur le calque GIRA_EPURE ; les empiètements sur les bordures et îlots sont signalés dans Contrôles. Visibilité depuis les branches secondaires : onglet Visibilité.</p>';
   $('#visFields').innerHTML =
     '<label class="chk"><input type="checkbox" data-k="section.visOn"> Dessiner les zones de visibilité sur le plan</label>' +
     '<div data-for="giratoire">' +
