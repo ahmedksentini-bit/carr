@@ -254,7 +254,14 @@ function buildRoundabout(prj, ext = {}) {
     if (!S.length) return;
     P({ k: 'path', L: 'BORDURE', segs: S });
     let d = 0;
-    for (const [, w] of bands) {
+    for (const [nm, w] of bands) {
+      if (nm === 'trottoir') {
+        // Surface du trottoir, entre la bordure et la contre-bordure.
+        const a = G.offsetPath(S, -d), b = G.offsetPath(S, -(d + w));
+        if (a.length && b.length) {
+          P({ k: 'fill', L: 'TROTTOIR', role: 'trottoir', rings: [[...a, L(G.segEnd(a[a.length - 1]), G.segEnd(b[b.length - 1])), ...G.revPath(b), L(G.segStart(b[0]), G.segStart(a[0]))]] });
+        }
+      }
       d += w;
       const o = G.offsetPath(S, -d);
       if (o.length) P({ k: 'path', L: bandLayer, segs: o });
