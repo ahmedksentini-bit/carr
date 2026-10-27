@@ -884,11 +884,12 @@ function renderBranchForm() {
       <h4>Voie de sortie (depuis la route principale)</h4>
       ${fld('ls', 'Largeur de sortie ls', 'm', { branch: true, ph: 'auto' })}
       ${fld('Rs', 'Rayon de bordure côté sortie Rs', 'm', { branch: true, ph: 'auto' })}
-      <h4>Îlot séparateur de la branche</h4>
+      <h4>Îlot séparateur de la branche (ACI, Fig. 25)</h4>
       ${islandType}
-      ${fld('island.base', 'Largeur de l\'îlot (tête)', 'm', { branch: true, ph: 'auto' })}
-      ${fld('island.length', 'Longueur de l\'îlot', 'm', { branch: true, ph: 'auto' })}
-      ${fld('island.gap', 'Retrait de la tête / bord principal', 'm', { branch: true, ph: 'auto' })}
+      ${fld('island.length', 'Hauteur du triangle de construction H', 'm', { branch: true, ph: 'auto' })}
+      ${fld('island.Ris', 'Rayon Ris (tourne-à-gauche vers la secondaire)', 'm', { branch: true, ph: 'auto' })}
+      ${fld('island.Rie', 'Rayon Rie (tourne-à-gauche vers la principale)', 'm', { branch: true, ph: 'auto' })}
+      ${fld('island.gap', 'Retrait de l\'îlot en saillie / rive de la principale', 'm', { branch: true, ph: 'auto' })}
       ${profile('le bord de la chaussée principale')}`;
   } else {
     host.innerHTML = `${head}
@@ -936,7 +937,11 @@ function refreshBranchOut() {
       ['Chaussée de la branche l', `${fmt(bd.l)} m`],
       ['le / ls retenues', `${fmt(bd.entry.w)} / ${fmt(bd.exit.w)} m`],
       ['Re / Rs retenus', `${fmt(bd.entry.R)} / ${fmt(bd.exit.R)} m`],
-      ['Îlot (largeur × longueur)', islTxt],
+      ...(bd.island?.aci ? [
+        ['Triangle H / b1 / b2', `${fmt(bd.h)} / ${fmt(0.55 * bd.l)} / ${fmt(1.45 * bd.l)} m`],
+        ['Ris / Rie (giration)', `${fmt(bd.island.aci.Ris)} / ${fmt(bd.island.aci.Rie)} m`],
+        ['Têtes d\'îlot central (A / B)', `${fmt(S.D.plan.LdA, 1)} / ${fmt(S.D.plan.LdB, 1)} m du centre`],
+      ] : [['Îlot séparateur', 'aucun']]),
       ['Visibilité requise', bd.vis ? `${fmt(bd.vis.D, 0)} m de part et d'autre` : '—'],
     ]);
     return;

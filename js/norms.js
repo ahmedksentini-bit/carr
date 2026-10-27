@@ -317,8 +317,16 @@ function planHint(key, prj, br) {
         if (br.island?.type === 'physique' && b < 1.9) return H('Îlot en saillie : 1,90 m mini pour une balise J5', 'warn');
         return H(auto ? `auto : ${f(b)} m` : 'ACI : ≥ 1,90 m avec balise J5', auto ? '' : 'ok');
       }
-      case 'island.length': return H(inter ? `auto : 4l = ${f(a.h)} m (triangle de construction)` : `auto : ${f(a.h)} m`);
-      case 'island.gap': return H('ACI : nez en retrait de 1 m du bord de la principale');
+      case 'island.length': return H(`auto : H = 4l = ${f(4 * a.l)} m ; base 2l, b1 = 0,55l = ${f(0.55 * a.l)} m (sortie), b2 = 1,45l = ${f(1.45 * a.l)} m (entrée)`);
+      case 'island.Ris': {
+        const w = P.tag.on ? P.tag.island : 0;
+        return H(`auto : 2l + a = ${f(2 * a.l + w)} m — bord gauche du tourne-à-gauche principale → secondaire (fixe la tête d'îlot côté TAG)`);
+      }
+      case 'island.Rie': {
+        const w = P.tag.on ? P.c : 0;
+        return H(`auto : 2l + b = ${f(2 * a.l + w)} m — bord gauche du tourne-à-gauche secondaire → principale (b = largeur de l'îlot central)`);
+      }
+      case 'island.gap': return H('ACI : îlot en saillie à 1,50 m de la rive de la principale');
       case 'pente': return auto ? H('auto : pente du site') : Math.abs(v) > 2 ? H('ACI : ≤ 2 % sur les 10 à 20 m avant le carrefour', 'warn') : H('ACI : ≤ 2 % près du carrefour', 'ok');
       case 'camber': return H(inter ? '2,5 % en toit (≈ ARP)' : '2,5 % par défaut');
       default: return undefined;
@@ -359,7 +367,7 @@ function checkPlan(prj, D) {
     if (bd.role !== 'secondaire') continue;
     const br = prj.branches[bd.idx], deg = (bd.angle * 180) / Math.PI;
     if (deg < 70) add('warn', bd.name, `Incidence de ${f(deg, 0)}° sur la route principale (70 à 110° attendus) : réaligner la branche.`);
-    for (const k of ['le', 'ls', 'Re', 'Rs', 'island.base', 'pente']) {
+    for (const k of ['le', 'ls', 'Re', 'Rs', 'pente']) {
       const h = planHint(k, prj, br);
       if (h?.lvl && h.lvl !== 'ok') add(h.lvl, bd.name, `${LBL[k] || k} — ${h.txt}`);
     }

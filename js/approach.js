@@ -108,8 +108,7 @@ export function buildApproach(cfg, issues) {
   // --- Îlot séparateur (ou tête de TPC). Enveloppe peinte = triangle de construction (rives gauches des voies
   // d'entrée et de sortie) ; îlot en saillie en retrait de la BDG de cette enveloppe ; zébra entre les deux.
   let island = null;
-  if (cfg.hasIsland && target.kind === 'line' && th <= 0) island = dropIsland(cfg, issues);
-  else if (cfg.hasIsland) {
+  if (cfg.hasIsland) {
     const head = offsetTarget(target, isl.gap);
     const g = Math.max(0, isl.bdg || 0);
     const Hi0 = { x: x0, y: ai + hb }, Ti0 = { x: xT, y: ai + th }, Ho0 = { x: x0, y: ai - hb }, To0 = { x: xT, y: ai - th };
@@ -181,33 +180,145 @@ export function buildApproach(cfg, issues) {
   return { en, ex, island };
 }
 
-// Îlot de branche secondaire d'un carrefour plan (ACI) : goutte d'eau définie par ses bordures — triangle de base b
-// au bord de la principale et de hauteur h, tête arrondie (rHead) en retrait de `gap`, pointe arrondie (rTip).
-// La peinture suit la même forme : rive à la BDG autour de l'îlot en saillie, ou contour de l'îlot peint et zébra.
-function dropIsland(cfg, issues) {
-  const { name, idx, target, ai, x0, xT, hb, isl } = cfg;
-  const head = offsetTarget(target, isl.gap);
-  const Hi = { x: x0, y: ai + hb }, Ho = { x: x0, y: ai - hb }, Tp = { x: xT, y: ai };
-  const di = norm(sub(Hi, Tp)), dO = norm(sub(Ho, Tp));
-  let mi = rot90(di); if (mi.y > 0) mi = neg(mi);
-  let mo = rot90(dO); if (mo.y < 0) mo = neg(mo);
-  const vi = G.lineLine(Tp, di, head.p, head.d), vo = G.lineLine(Tp, dO, head.p, head.d);
-  const maxT = vi && vo ? Math.max(0.05, G.dist(vi.p, vo.p) / 2) : 1e4;
-  const fi = filletToTarget(Tp, di, mi, head, isl.rHead, maxT), fo = filletToTarget(Tp, dO, mo, head, isl.rHead, maxT);
-  if (!(fi && fo && fi.t > 0 && fo.t > 0)) {
-    issues.push({ lvl: 'warn', bi: idx, msg: `${name} : îlot séparateur trop petit pour être dessiné (vérifier base et longueur).` });
-    return null;
+// ---------------------------------------------------------------------------------------------------------------
+// Branche secondaire d'un carrefour plan selon l'ACI (§3.2 et 3.3, Fig. 24 et 25, Tableau 8). Repère local de la
+// branche : x le long de l'axe vers l'extérieur, y à gauche (voie d'entrée, y > 0).
+// - Triangle de construction : hauteur H = 4l sur un axe décalé de 0,50 m vers la sortie, base sur le bord de la
+//   principale, demi-bases b1 = 0,55l côté sortie et b2 = 1,45l côté entrée.
+// - Enveloppe peinte de l'îlot : bord côté sortie = cercle de giration Ris (tourne-à-gauche principale → secondaire),
+//   bord côté entrée = cercle Rie (tourne-à-gauche secondaire → principale). Chaque cercle est inscrit dans le
+//   triangle (tangent au côté correspondant) et tangent au bord de voie de la principale qu'il longe : bord gauche
+//   de la voie de TAG pour Ris (Ris = 2l + a), bord gauche des voies directes opposées pour Rie (Rie = 2l + b).
+//   Queue raccordée à l'axe de la secondaire par Rre ≈ 8l (entrée) et Rrs ≈ 16l (sortie).
+// - Îlot en saillie : enveloppe en retrait de la BDG, nez côté principale à 1,50 m de la rive, nez amont de 1 m.
+// - Bordures : parallèles aux bords de l'îlot à le / ls, raccordées au bord de la principale par Re = 2l / Rs = 4l
+//   et à la chaussée courante de la secondaire par un rayon Rr.
+// aci : { H, b1, b2, off, Ris, Rie, lineIs, lineIe ({ p, d, n }, n vers la branche), Rre, Rrs, rn, nose, g }.
+
+const arcPQ = (c, r, p, q) => A(c, r, ang(sub(p, c)), ang(sub(q, c)), G.cross(sub(p, c), sub(q, c)) > 0);
+const onCircle = (c, r, toward) => add(c, mul(norm(sub(toward, c)), r));
+
+// Cercles de giration Ris / Rie de l'îlot et triangle de construction, en repère local.
+export function aciCircles(target, aci) {
+  const yt = -aci.off, x0t = targetX0(target, yt);
+  const apex = { x: x0t + aci.H, y: yt }, Pe = { x: x0t, y: yt + aci.b2 }, Ps = { x: x0t, y: yt - aci.b1 };
+  const sideLine = (P, Q, inside) => { const d = norm(sub(Q, P)); let n = rot90(d); if (dot(n, sub(inside, P)) < 0) n = neg(n); return { p: P, d, n }; };
+  const off = (ln, r) => ({ p: add(ln.p, mul(ln.n, r)), d: ln.d });
+  const cut = (l1, l2) => G.lineLine(l1.p, l1.d, l2.p, l2.d)?.p || null;
+  const Cs = cut(off(aci.lineIs, aci.Ris), off(sideLine(Ps, apex, Pe), aci.Ris));
+  const Ce = cut(off(aci.lineIe, aci.Rie), off(sideLine(Pe, apex, Ps), aci.Rie));
+  return Cs && Ce ? { Cs, Ce, Ris: aci.Ris, Rie: aci.Rie, tri: [Pe, apex, Ps] } : null;
+}
+
+export function aciBranch(cfg, issues) {
+  const { name, idx, target, xEnd, isl, le, ls, wIn, wOut, Re, Rs, aci } = cfg;
+  const fail = (msg) => { issues.push({ lvl: 'err', bi: idx, msg: `${name} : ${msg}` }); return null; };
+  const K = aciCircles(target, aci);
+  if (!K) return fail('îlot ACI impossible (cercles de giration Ris / Rie parallèles au triangle).');
+  const { Cs, Ce, Ris, Rie } = K;
+  let nT = rot90(target.d);
+  if (nT.x < 0) nT = neg(nT);
+  const sd = (p) => dot(sub(p, target.p), nT); // distance au bord de la principale, positive vers la branche
+  const pair = circleCircle(Cs, Ris, Ce, Rie);
+  if (pair.length < 2) return fail(`les cercles Ris = ${fmt(Ris, 1)} m et Rie = ${fmt(Rie, 1)} m ne se recoupent pas : îlot impossible.`);
+  const [tipLow, tipHigh] = sd(pair[0]) < sd(pair[1]) ? pair : [pair[1], pair[0]];
+
+  // Enveloppe peinte : lentille Ris ∩ Rie et queue Rre / Rrs tangente à l'axe (y = 0).
+  const tail = (C, R, Rr, s) => {
+    const dy = s * Rr - C.y, h2 = (Rr + R) ** 2 - dy * dy;
+    if (h2 <= 0) return null;
+    const Q = { x: C.x + Math.sqrt(h2), y: s * Rr };
+    return { Q, Rr, T: onCircle(C, R, Q), A0: { x: Q.x, y: 0 } };
+  };
+  const te = tail(Ce, Rie, aci.Rre, 1), ts = tail(Cs, Ris, aci.Rrs, -1);
+  const tailOk = te && ts && sd(te.T) < sd(tipHigh) && sd(ts.T) < sd(tipHigh);
+  const envelope = tailOk
+    ? [arcPQ(Ce, Rie, tipLow, te.T), arcPQ(te.Q, te.Rr, te.T, te.A0), ...(G.dist(te.A0, ts.A0) > 1e-6 ? [L(te.A0, ts.A0)] : []),
+      arcPQ(ts.Q, ts.Rr, ts.A0, ts.T), arcPQ(Cs, Ris, ts.T, tipLow)]
+    : [arcPQ(Ce, Rie, tipLow, tipHigh), arcPQ(Cs, Ris, tipHigh, tipLow)];
+
+  // Îlot en saillie : lentille en retrait de g, nez côté principale (rayon ajusté) à `nose` de la rive, nez amont rn.
+  const g = Math.max(0, aci.g || 0), rs = Ris - g, re = Rie - g;
+  const fillet = (r, low) => {
+    const p = circleCircle(Cs, rs - r, Ce, re - r);
+    if (p.length < 2) return null;
+    return (sd(p[0]) < sd(p[1])) === low ? p[0] : p[1];
+  };
+  let rb = 1, Fb = fillet(rb, true);
+  for (let lo = 0.5, hi = Math.min(rs, re) * 0.8, k = 0; k < 50 && lo < hi; k++) {
+    const m = (lo + hi) / 2, F = fillet(m, true);
+    if (!F) { hi = m; continue; }
+    rb = m; Fb = F;
+    if (sd(F) - m < aci.nose) lo = m; else hi = m;
   }
-  // Pointe très effilée (b ≪ h) : rayon réduit pour que l'arrondi n'occupe pas plus de 1,5 m de chaque côté.
-  const half = Math.acos(G.clamp(dot(di, dO), -1, 1)) / 2;
-  const tip = G.filletCorner(fo.Tl, Tp, fi.Tl, Math.min(isl.rTip, 1.5 * Math.tan(half)), 0.45, 0.45);
-  const hs = G.dist(fi.Tc, fo.Tc) > 1e-6 ? [L(fi.Tc, fo.Tc)] : [];
-  const outline = [...(tip ? [L(fo.Tl, tip.T1), tip.arc, L(tip.T2, fi.Tl)] : [L(fo.Tl, Tp), L(Tp, fi.Tl)]), fi.arc, ...hs, G.revSeg(fo.arc)];
-  const tipP = tip ? G.segAt(tip.arc, 0.5) : Tp;
-  const ccw = G.polyArea(G.samplePath(outline, 0.5)) > 0; // à gauche du contour = intérieur si sens trigonométrique
-  const base = { closed: true, tip: tipP, headIn: fi.Tc, headOut: fo.Tc };
-  if (isl.type === 'peint') return { ...base, outline: null, curb: null, paint: [outline], hatch: [G.samplePath(outline, 0.3)] };
-  const g = Math.max(0, isl.bdg || 0);
-  const paint = g > 0 ? [G.offsetPath(outline, ccw ? -g : g)].filter((p) => p.length) : [];
-  return { ...base, outline, curb: outline, paint, hatch: null };
+  const Ft = fillet(aci.rn, false);
+  let raised = null, headIn = tipLow, headOut = tipLow, noseP = null;
+  if (Fb && Ft && sd(Ft) > sd(Fb)) {
+    const Teb = onCircle(Ce, re, Fb), Tsb = onCircle(Cs, rs, Fb), Tst = onCircle(Cs, rs, Ft), Tet = onCircle(Ce, re, Ft);
+    raised = [arcPQ(Fb, rb, Teb, Tsb), arcPQ(Cs, rs, Tsb, Tst), arcPQ(Ft, aci.rn, Tst, Tet), arcPQ(Ce, re, Tet, Teb)];
+    headIn = Teb; headOut = Tsb; noseP = sub(Fb, mul(nT, rb));
+  } else if (isl.type !== 'peint') issues.push({ lvl: 'warn', bi: idx, msg: `${name} : îlot trop étroit pour être en saillie (nez de 1 m) : seule l'enveloppe peinte est dessinée.` });
+
+  // Zébra : queue de l'enveloppe en amont du nez de l'îlot en saillie (ou toute l'enveloppe d'un îlot peint).
+  const envPoly = G.samplePath(envelope, 0.3);
+  let hatch = null;
+  if (isl.type === 'peint' || !raised) hatch = [envPoly];
+  else if (g > 0) {
+    // Partie x ≥ xc d'un polygone (l'enveloppe et le trou de l'îlot sont coupés au même endroit).
+    const xc = Ft.x, clip = (poly) => {
+      const kept = [];
+      for (let i = 0; i < poly.length; i++) {
+        const p = poly[i], q = poly[(i + 1) % poly.length];
+        if (p.x >= xc) kept.push(p);
+        if ((p.x - xc) * (q.x - xc) < 0) kept.push(G.lerp(p, q, (xc - p.x) / (q.x - p.x)));
+      }
+      return kept.length >= 3 ? kept : null;
+    };
+    const env = clip(envPoly), hole = clip(G.samplePath(raised, 0.3));
+    if (env) hatch = hole ? [env, hole] : [env];
+  }
+  const painted = isl.type === 'peint' || g > 0;
+  const island = {
+    closed: true, outline: isl.type === 'peint' ? null : raised, curb: isl.type === 'peint' ? null : raised,
+    paint: painted ? [envelope] : [], hatch: painted ? hatch : null,
+    tip: tailOk ? te.A0 : tipHigh, headIn, headOut,
+    aci: { ...K, tipLow, tipHigh, te, ts, raised: !!raised, noseP, noseFoot: noseP && sub(noseP, mul(nT, sd(noseP))), H: aci.H },
+  };
+
+  // Bordures : parallèle au bord de l'îlot à la largeur de voie, raccordée à la chaussée courante (Rr) et au bord
+  // de la principale (Re / Rs), arcs tangents.
+  const Rr = isl.Rr || 8 * (wIn + wOut);
+  const side = (s, w, wa, R, C, Rc, label) => {
+    const RK = Rc + w, yF = s * wa;
+    let F = { x: xEnd, y: yF };
+    // Raccordement à la principale : cercle de rayon R tangent au bord de la principale et extérieur au cercle K.
+    const pl = add(target.p, mul(nT, R)), hits = G.lineCircle(pl, target.d, C, RK + R).map((t) => add(pl, mul(target.d, t)));
+    if (!hits.length) return fail(`raccordement ${label} impossible (rayon ${fmt(R, 1)} m).`);
+    const Fc = hits.reduce((m, p) => (!m || s * p.y > s * m.y ? p : m), null);
+    const Tc = sub(Fc, mul(nT, R)), Tk = onCircle(C, RK, Fc);
+    // Raccordement à la chaussée courante (y = s·wa) : arc de rayon Rr extérieur au cercle K.
+    const dy = yF + s * Rr - C.y, h2 = (Rr + RK) ** 2 - dy * dy;
+    let curb, ctrl, fil;
+    if (h2 > 0 && s * (C.y + s * RK) > wa + 0.05) {
+      const Q = { x: C.x + Math.sqrt(h2), y: yF + s * Rr }, T1 = { x: Q.x, y: yF }, T2 = onCircle(C, RK, Q);
+      if (T2.x <= Tk.x + 0.05) return fail(`bordure ${label} : rayons trop grands pour la longueur de l'îlot.`);
+      F = { x: Math.max(xEnd, T1.x + 5), y: yF };
+      curb = [L(F, T1), arcPQ(Q, Rr, T1, T2), arcPQ(C, RK, T2, Tk), arcPQ(Fc, R, Tk, Tc)];
+      ctrl = [F, T1, T2];
+      fil = { C: Fc, Tl: Tk, Tc, arc: curb[curb.length - 1], r: R, t: 1 };
+    } else {
+      // Îlot et voie tiennent dans la chaussée courante : bordure droite, raccordée directement à la principale.
+      const fl = filletToTarget(F, { x: -1, y: 0 }, { x: 0, y: s }, target, R);
+      if (!fl) return fail(`raccordement ${label} impossible (rayon ${fmt(R, 1)} m).`);
+      curb = [L(F, fl.Tl), fl.arc];
+      ctrl = [F];
+      fil = { C: fl.C, Tl: fl.Tl, Tc: fl.Tc, arc: fl.arc, r: R, t: fl.t };
+    }
+    const tipDir = norm(rot90(sub(tipLow, C))), dI = tipDir.x > 0 ? tipDir : neg(tipDir);
+    const ext = { x: C.x, y: C.y + s * Rc }, dim = s > 0 ? [ext, add(ext, { x: 0, y: w })] : [add(ext, { x: 0, y: -w }), ext];
+    return { s, w, wa, R, H: tipLow, T: ext, dI, F, ctrl, fil, curb, wRing: null, dim };
+  };
+  const en = side(1, le, wIn, Re, Ce, Rie, 'côté entrée (Re)');
+  const ex = side(-1, ls, wOut, Rs, Cs, Ris, 'côté sortie (Rs)');
+  return en && ex ? { en, ex, island } : null;
 }

@@ -21,8 +21,11 @@ ou sur un fond topographique DXF.
   ACI Rg × Rg/4, décalage à gauche, bordures Rg/50), îlot peint ou absent, **TPC** avec sa largeur.
 - **Carrefours en T et en X** (ACI, chapitre « Carrefours plans ») : route principale = paire de branches la plus
   alignée (ou choisie), profil conservé ; voie de tourne-à-gauche avec présignalisation, déport des bords au 1/15,
-  alignement droit, sifflet, stockage et îlot central en saillie ; branches secondaires avec rayons Re = 2l et Rs = 4l,
-  voies sup(l/2 ; 3) et l/2 + 0,50, îlot séparateur de longueur 4l à nez de 1 m en retrait de 1 m ; régime
+  alignement droit, sifflet, stockage et îlot central en saillie ; branches secondaires construites selon l'ACI (Fig. 24
+  et 25, Tableau 8) : triangle de construction H = 4l, b1 = 0,55l, b2 = 1,45l (axe décalé de 0,50 m vers la sortie),
+  îlot formé par les cercles de giration Ris = 2l + a et Rie = 2l + b, queue raccordée à l'axe par Rre ≈ 8l et Rrs ≈ 16l,
+  îlot en saillie à 1,50 m de la rive avec nez de 1 m ; bordures parallèles à l'îlot à le = sup(l/2 ; 3) et
+  ls = l/2 + 0,50, raccordées par Re = 2l et Rs = 4l ; têtes des îlots centraux aux points de tangence de Ris et Rie ; régime
   cédez-le-passage (T'2) ou STOP ; triangles de visibilité D = V85 × t (8 à 11 s selon régime et TAG).
 - **Dessin** : bordures, raccordements tangents, îlots, chaussée, ligne de cédez-le-passage, marquages,
   cotations, triangles de construction, trajectoire de déflexion.
@@ -132,12 +135,15 @@ IDRRIM (2015) et des supports de cours qui reprennent les tableaux SETRA. À vé
 
 Pour les carrefours plans :
 
-- l'îlot de la branche secondaire est une goutte d'eau symétrique (triangle de hauteur 4l, tête de 1 m de rayon, rive
-  peinte à la BDG autour) : la répartition 0,55l / 1,45l
-  de la base et les rayons Rre = 8l, Rrs = 16l de la figure ACI ne sont pas reproduits fidèlement ;
+- îlot de la branche secondaire (ACI Fig. 25) : chaque cercle de giration est pris tangent au côté correspondant du
+  triangle et au bord de voie de la principale qu'il longe (bord gauche de la TAG pour Ris, des voies directes opposées
+  pour Rie) ; les conditions exactes de placement ne sont pas écrites dans le guide (écart possible d'environ 1 m sur
+  la pointe). Les raccordements Rre / Rrs sont tangents au cercle de giration et à l'axe de la secondaire. Le GCU ne
+  donnant pas de construction d'îlot, la même construction est appliquée en urbain ;
 - l'îlot central en saillie est dessiné à 0,30 m (5u) en retrait de l'enveloppe peinte, biseau compris (nez arrondi là
   où il ne reste qu'1 m de large), et seulement si a ≥ 1,20 m ;
-- en urbain, le guide CERTU renvoie à l'épure de giration pour les rayons : la valeur par défaut de 8 m est à vérifier ;
+- en urbain, le GCU (2010, §7.3.4) donne 6 à 8 m (8 à 12 m en périurbain avec PL) et renvoie à l'épure de giration :
+  la valeur par défaut de 8 m est à vérifier ; aucune épure de giration PL n'est tracée par l'application ;
 - le raccordement du dévers de la secondaire sur le bord de la principale n'est pas décrit par l'ACI (modèle de principe).
 
 L'altimétrie est un modèle de principe (avant-projet) : elle ne remplace pas un calcul de profils sur MNT.

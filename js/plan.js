@@ -7,7 +7,7 @@ import * as G from './geom.js';
 import { islandDims, planParams, secondaryAuto, sectionParams, sideBands } from './norms.js';
 import { addDeversPlan } from './devers.js';
 import { fmt, fmtGis, upright, autoCenter, branchDirection, frame, sideBandPrims } from './common.js';
-import { buildApproach, crossLine, targetX0 } from './approach.js';
+import { buildApproach, aciBranch, aciCircles, crossLine, targetX0 } from './approach.js';
 import { makeDims } from './dims.js';
 import { crossing, crossingPrims, cutAtX, polyOf, closedSegs } from './crossing.js';
 
@@ -99,32 +99,50 @@ export function buildPlan(prj) {
 
   // --- Profil en travers de la route principale et zones de tourne-à-gauche
   const half = P.nLanes * P.wLane, c = P.c, a = P.tag.island;
-  let Lm = 6;
-  for (const s of secs) {
-    const sinp = Math.max(0.3, Math.abs(dot(s.u, Ym))), cotp = Math.sqrt(1 - sinp * sinp) / sinp;
-    Lm = Math.max(Lm, (islandDims(prj, s.b).b / 2 + Math.max(s.le, s.ls) + 1) / sinp + Math.max(s.Re, s.Rs) * (1 + cotp) + 2);
-  }
-  // Fin des îlots centraux : au droit du prolongement des bords des chaussées secondaires sur l'axe de la principale,
-  // à 1 m en retrait (côté A : le bord le plus proche de A ; côté B : le plus proche de B).
-  let XdA = Infinity, XdB = -Infinity;
-  for (const s of secs) {
-    const isl = islandDims(prj, s.b), hb0 = isl.type === 'aucun' ? 0 : isl.b / 2, wl = +s.b.wLane;
-    const n = rot90(s.u), dX = dot(s.u, uM), dY = dot(s.u, Ym);
-    if (Math.abs(dY) < 1e-6) continue;
-    for (const yE of [hb0 + Math.max(1, +s.b.nIn || 1) * wl, -(hb0 + Math.max(1, +s.b.nOut || 1) * wl)]) {
-      const qx = dot(n, uM) * yE, qy = dot(n, Ym) * yE, X = qx - (qy * dX) / dY;
-      XdA = Math.min(XdA, X); XdB = Math.max(XdB, X);
-    }
-  }
-  const LdA = Math.max(1, Number.isFinite(XdA) ? 1 - XdA : Lm), LdB = Math.max(1, Number.isFinite(XdB) ? XdB + 1 : Lm);
   const tagA = P.tag.on && secs.some((s) => s.sY > 0); // sens A→B : tourne à gauche vers +Y, voie côté A
   const tagB = P.tag.on && secs.some((s) => s.sY < 0); // sens B→A : tourne à gauche vers −Y, voie côté B
   const widened = tagA || tagB;
+  const hw = widened ? half + c / 2 : half;
   const { storage: Ls, sifflet: Lsif, align: Lal, deport: Ldep, presig: Lpre } = P.tag;
-  // La zone élargie couvre au moins le débouché (Lm) ; sans TAG de ce côté, l'îlot va de la fin d'îlot à l'alignement.
+
+  // Géométrie ACI de chaque branche secondaire (Tableau 8, Fig. 25) : repère, bord de la principale (cible) et
+  // cercles de giration de l'îlot. Ris = 2l + a est tangent au bord gauche de la voie de TAG d'où viennent les
+  // tourne-à-gauche ; Rie = 2l + b au bord gauche des voies directes opposées (b = largeur totale de l'îlot central) ;
+  // sans îlot central, a = b = 0 et les deux cercles sont tangents à l'axe de la principale.
+  const localLine = (fr, Y, sY) => ({
+    p: fr.toL(toW(0, Y)), d: { x: dot(uM, fr.u), y: dot(uM, fr.n) }, n: { x: sY * dot(Ym, fr.u), y: sY * dot(Ym, fr.n) },
+  });
+  const geo = new Map();
+  for (const s of secs) {
+    const fr = frame(O, s.u), isl = islandDims(prj, s.b), l = s.auto.l, I = s.b.island || {};
+    const target = { kind: 'line', p: fr.toL(toW(0, s.sY * hw)), d: { x: dot(uM, s.u), y: dot(uM, fr.n) } };
+    const aci = {
+      H: pick(I.length, 4 * l), b1: 0.55 * l, b2: 1.45 * l, off: 0.5,
+      Ris: pick(I.Ris, 2 * l + (widened ? a : 0)), Rie: pick(I.Rie, 2 * l + (widened ? c : 0)),
+      lineIs: localLine(fr, widened ? s.sY * (c / 2 - a) : 0, s.sY), lineIe: localLine(fr, widened ? (-s.sY * c) / 2 : 0, s.sY),
+      Rre: 8 * l, Rrs: 16 * l, rn: 1, nose: pick(I.gap, 1.5), g: isl.bdg,
+    };
+    geo.set(s, { fr, isl, target, aci, hasIsland: isl.type !== 'aucun', K: aciCircles(target, aci) });
+  }
+  // Demi-longueur du débouché (estimation majorante : demi-base du triangle, voie, rayon de bordure).
+  let Lm = 6;
+  for (const s of secs) {
+    const sinp = Math.max(0.3, Math.abs(dot(s.u, Ym))), cotp = Math.sqrt(1 - sinp * sinp) / sinp;
+    Lm = Math.max(Lm, (1.45 * s.auto.l + Math.max(s.le, s.ls) + 1) / sinp + Math.max(s.Re, s.Rs) * (1 + cotp) + 2);
+  }
+  // Têtes des îlots centraux (ACI §2.5.5) : aux points de tangence des cercles de giration avec les bords de voie de la
+  // principale. Branche côté +Y : Ris fixe la tête côté A (TAG A→B), Rie celle côté B ; symétrique côté −Y. Pour un X,
+  // chaque tête est concernée par deux cercles : on retient le point le plus éloigné du centre.
+  let XdA = Infinity, XdB = -Infinity;
+  for (const [s, gm] of geo) {
+    if (!gm.K) continue;
+    const xs = toM(gm.fr.W(gm.K.Cs)).x, xe = toM(gm.fr.W(gm.K.Ce)).x;
+    if (s.sY > 0) { XdA = Math.min(XdA, xs); XdB = Math.max(XdB, xe); } else { XdB = Math.max(XdB, xs); XdA = Math.min(XdA, xe); }
+  }
+  const LdA = Math.max(1, Number.isFinite(XdA) ? -XdA : Lm), LdB = Math.max(1, Number.isFinite(XdB) ? XdB : Lm);
+  // La zone élargie couvre au moins le débouché (Lm) ; sans TAG de ce côté, l'îlot va de sa tête à l'alignement.
   const fullLen = (hasTag, Ld) => (!widened ? 0 : hasTag ? Ld + Ls + Lsif + Lal : Math.max(Ld + Lal, Lm));
   const lenA = fullLen(tagA, LdA), lenB = fullLen(tagB, LdB);
-  const hw = widened ? half + c / 2 : half;
   const lenEnd = (q, len) => {
     const reach = widened ? len + Ldep + Lpre + 15 : Lm + 30;
     if (q.b.length) return Math.max(reach, Lm + +q.b.length);
@@ -140,27 +158,24 @@ export function buildPlan(prj) {
   const gaps = { 1: [], [-1]: [] };
   for (const s of secs) {
     const b = s.b, idx = s.idx, name = b.name;
-    const isl = islandDims(prj, b);
-    const hasIsland = isl.type !== 'aucun';
-    const hb = hasIsland ? isl.b / 2 : 0, h = isl.h;
+    const { fr, isl, target, aci, hasIsland } = geo.get(s);
     const nIn = Math.max(1, +b.nIn || 1), nOut = Math.max(1, +b.nOut || 1), wl = +b.wLane;
     const wIn = nIn * wl, wOut = nOut * wl, { le, ls, Re, Rs } = s;
-    const fr = frame(O, s.u);
-    const target = { kind: 'line', p: fr.toL(toW(0, s.sY * hw)), d: { x: dot(uM, s.u), y: dot(uM, fr.n) } };
     const x0 = targetX0(target, 0);
     if (!(x0 > 0)) { issues.push({ lvl: 'err', bi: idx, msg: `${name} : branche parallèle à la route principale.` }); continue; }
-    const xT = x0 + h;
-    const flare = Math.max(0, hb + Math.max(le, ls) - Math.min(wIn, wOut));
+    const h = hasIsland ? aci.H : 0, xT = x0 + h;
     let xEnd = b.length ? x0 + +b.length : Math.min(Math.max(dot(sub(s.far, O), s.u), xT + 40), xT + 80);
-    xEnd = Math.max(xEnd, xT + Math.max(10, 15 * flare) + 20);
-    const ap = buildApproach({
-      name, idx, target, a: 0, ai: 0, x0, xT, xEnd, hb, th: 0, hasIsland, isl, le, ls, wIn, wOut, Re, Rs,
-      labels: { en: 'de bordure côté entrée', ex: 'de bordure côté sortie' },
-      flareLvl: 'info', // avec Rs = 4l, l'arc commence normalement en amont de l'îlot
-    }, issues);
+    xEnd = Math.max(xEnd, xT + 30);
+    const ap = hasIsland
+      ? aciBranch({ name, idx, target, xEnd, isl, le, ls, wIn, wOut, Re, Rs, aci }, issues)
+      : buildApproach({
+        name, idx, target, a: 0, ai: 0, x0, xT: x0 + 10, xEnd, hb: 0, th: 0, hasIsland: false, isl, le, ls, wIn, wOut, Re, Rs,
+        labels: { en: 'de bordure côté entrée', ex: 'de bordure côté sortie' }, flareLvl: 'info',
+      }, issues);
     if (!ap) continue;
     const { W, Wp } = fr;
     const { en, ex } = ap;
+    xEnd = Math.max(xEnd, en.F.x, ex.F.x);
     // Passage piéton à ppRecul du bord de la principale, îlot coupé en refuge.
     let cross = null;
     if (sec.pp) {
@@ -172,11 +187,11 @@ export function buildPlan(prj) {
       outline: ap.island.outline && Wp(ap.island.outline), curb: ap.island.curb && Wp(ap.island.curb), closed: ap.island.closed,
       paint: ap.island.paint.map(Wp), hatch: ap.island.hatch && ap.island.hatch.map((poly) => poly.map(W)),
       tip: ap.island.tip && W(ap.island.tip), headIn: W(ap.island.headIn), headOut: W(ap.island.headOut),
-      pieces: cross?.pieces[0] ? cross.pieces[0].map((poly) => Wp(closedSegs(poly))) : null,
+      pieces: cross?.pieces[0] ? cross.pieces[0].map((poly) => Wp(closedSegs(poly))) : null, aci: ap.island.aci,
     };
     const stop = crossLine(en, target, 0.25), stopX = crossLine(ex, target, 0.25);
     const bd = {
-      idx, id: b.id, name, role: 'secondaire', sY: s.sY, l: s.auto.l, theta: fr.theta, u: s.u, n: fr.n, a: 0, ai: 0, x0, xT, xEnd, h, b: isl.b, hb, th: 0, isl,
+      idx, id: b.id, name, role: 'secondaire', sY: s.sY, l: s.auto.l, theta: fr.theta, u: s.u, n: fr.n, a: 0, ai: 0, x0, xT, xEnd, h, b: isl.b, hb: 0, th: 0, isl,
       W, Ws: fr.Ws, Wp, target,
       entry: { ...en, curbW: Wp(en.curb), Tc: W(en.fil.Tc), Tl: W(en.fil.Tl), C: W(en.fil.C), F: W(en.F) },
       exit: { ...ex, curbW: Wp(ex.curb), Tc: W(ex.fil.Tc), Tl: W(ex.fil.Tl), C: W(ex.fil.C), F: W(ex.F) },
@@ -355,8 +370,19 @@ export function buildPlan(prj) {
       }
       for (const p of bd.island.paint) if (p.length) Pp({ k: 'path', L: 'MARQUAGE', segs: p, wm: 0.15 });
       if (bd.island.hatch) Pp({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(bd.island.hatch, bd.theta + Math.PI / 4, 1.0), wm: 0.12 });
-      const t1 = W({ x: x0, y: isl.b / 2 }), t2 = W({ x: xT, y: 0 }), t3 = W({ x: x0, y: -isl.b / 2 });
-      Pp({ k: 'path', L: 'CONSTRUCTION', segs: [L(t1, t2), L(t2, t3), L(t3, t1)] });
+      // Construction ACI : triangle (H, b1, b2), cercles de giration Ris / Rie, retrait du nez de l'îlot en saillie.
+      const K = bd.island.aci;
+      if (K) {
+        const [t1, t2, t3] = K.tri.map(W);
+        Pp({ k: 'path', L: 'CONSTRUCTION', segs: [L(t1, t2), L(t2, t3), L(t3, t1)] });
+        for (const [C, R, other, nm] of [[K.Cs, K.Ris, K.Ce, 'Ris'], [K.Ce, K.Rie, K.Cs, 'Rie']]) {
+          const Cw = W(C), p = W(add(C, mul(norm(sub(C, other)), R)));
+          Pp({ k: 'circle', L: 'CONSTRUCTION', c: Cw, r: R });
+          Pp({ k: 'cross', L: 'CONSTRUCTION', p: Cw, size: 0.8 });
+          dims.radius(p, norm(sub(Cw, p)), `${nm} = ${fmt(R, 2)}`, { len: 3 * TH });
+        }
+        if (K.noseP) dims.aligned(W(K.noseFoot), W(K.noseP), 0, fmt(G.dist(K.noseFoot, K.noseP), 2), { side: -1 });
+      }
     }
     if (bd.cross) crossingPrims(bd.cross, W, sec, sec.pmr).forEach(Pp);
     // Cotations de la branche, comme au giratoire : largeurs le / ls perpendiculaires aux voies, en amont du
@@ -365,10 +391,14 @@ export function buildPlan(prj) {
       Pp({ k: 'cross', L: 'CONSTRUCTION', p: sd.C, size: 0.8 });
       Pp({ k: 'path', L: 'CONSTRUCTION', segs: [L(sd.C, sd.Tc), L(sd.C, sd.Tl)] });
       // Au-delà du passage piéton s'il y en a un.
-      const xs = Math.max(G.clamp(sd.fil.Tl.x + 2, x0 + 2, Math.max(x0 + 2, xT - 2)), bd.cross ? bd.cross.x2 + 1.5 : -Infinity);
-      const pIsl = add(sd.H, mul(sd.dI, (xs - sd.H.x) / sd.dI.x));
-      const mOut = sd.s > 0 ? rot90(sd.dI) : neg(rot90(sd.dI));
-      const [p1, p2] = sd.s > 0 ? [pIsl, add(pIsl, mul(mOut, sd.w))] : [add(pIsl, mul(mOut, sd.w)), pIsl];
+      let p1, p2;
+      if (sd.dim) [p1, p2] = sd.dim; // îlot ACI : au plus large de l'îlot, entre son bord et la bordure parallèle
+      else {
+        const xs = Math.max(G.clamp(sd.fil.Tl.x + 2, x0 + 2, Math.max(x0 + 2, xT - 2)), bd.cross ? bd.cross.x2 + 1.5 : -Infinity);
+        const pIsl = add(sd.H, mul(sd.dI, (xs - sd.H.x) / sd.dI.x));
+        const mOut = sd.s > 0 ? rot90(sd.dI) : neg(rot90(sd.dI));
+        [p1, p2] = sd.s > 0 ? [pIsl, add(pIsl, mul(mOut, sd.w))] : [add(pIsl, mul(mOut, sd.w)), pIsl];
+      }
       dims.aligned(W(p1), W(p2), 0, `${sd.s > 0 ? 'le' : 'ls'} = ${fmt(sd.w, 2)}`, { side: -1 });
       const mid = G.segAt(sd.fil.arc, 0.5);
       dims.radius(W(mid), norm(sub(sd.C, W(mid))), `${sd.s > 0 ? 'Re' : 'Rs'} = ${fmt(sd.R, 2)}`);
@@ -378,16 +408,19 @@ export function buildPlan(prj) {
       // STOP : ligne continue de 0,50 m ; cédez-le-passage : T'2 de 0,50 m (0,50 / 0,50), en limite de chaussée prioritaire.
       const st = P.regime === 'stop' ? { wm: 0.5 } : { wm: 0.5, dash: [0.5, 0.5], lt: 'CLP' };
       Pp({ k: 'path', L: 'MARQUAGE', segs: [L(bd.stop.a, bd.stop.b)], ...st });
-      text('MARQUAGE', W({ x: x0 + 4, y: bd.hb + bd.entry.w / 2 }), P.regime === 'stop' ? 'STOP' : 'CÉDEZ', bd.theta - Math.PI / 2, 'center', TH * 1.2);
+      const yLane = bd.entry.dim ? (bd.entry.dim[0].y + bd.entry.dim[1].y) / 2 : bd.hb + bd.entry.w / 2;
+      text('MARQUAGE', W({ x: x0 + 4, y: yLane }), P.regime === 'stop' ? 'STOP' : 'CÉDEZ', bd.theta - Math.PI / 2, 'center', TH * 1.2);
     }
-    // Axe de la secondaire : continu le long de l'îlot puis discontinu
-    const xs = bd.island ? xT : x0, xc = Math.min(xEnd, xs + 30);
+    // Axe de la secondaire : continu en amont de la queue de l'îlot (ou du triangle) puis discontinu
+    const tailX = bd.island?.aci?.te && bd.island.aci.ts ? Math.max(bd.island.aci.te.A0.x, bd.island.aci.ts.A0.x) : xT;
+    const xs = bd.island ? tailX : x0, xc = Math.min(xEnd, xs + 30);
     Pp({ k: 'path', L: 'MARQUAGE', segs: [L(W({ x: xs, y: 0 }), W({ x: xc, y: 0 }))], wm: 0.15 });
     if (xEnd > xc + 1) Pp({ k: 'path', L: 'MARQUAGE', segs: [L(W({ x: xc, y: 0 }), W({ x: xEnd, y: 0 }))], wm: 0.15, dash: [3, 10], lt: 'T1' });
     // Triangles de visibilité : œil à 2 m du bord droit de la branche, en arrière de la ligne ;
     // cible sur l'axe de la voie prioritaire, à D = V85 × t de part et d'autre.
     const Dv = (P.v85 / 3.6) * P.tVis;
-    const obs = W({ x: x0 + P.dObs, y: Math.max(bd.hb + 0.5, bd.hb + bd.entry.w - 2) });
+    const yOut = cutAtX(bd.entry.curb, x0 + P.dObs)?.y;
+    const obs = W({ x: x0 + P.dObs, y: yOut != null ? yOut - 2 : Math.max(bd.hb + 0.5, bd.hb + bd.entry.w - 2) });
     const om = toM(obs), sY = bd.sY;
     const tNear = toW(om.x + sY * Dv, sY * P.wLane / 2), tFar = toW(om.x - sY * Dv, -sY * P.wLane / 2);
     bd.vis = { obs, tNear, tFar, D: Dv };
@@ -407,7 +440,7 @@ export function buildPlan(prj) {
     // Étiquettes
     text('COTATION', W({ x: xEnd + 4 + 2 * TH, y: 0 }), bd.name, bd.theta + Math.PI / 2, 'center', TH * 1.6);
     text('COTATION', W({ x: xEnd + 4, y: 0 }), `${bd.gis} · ${fmt((bd.angle * 200) / Math.PI, 1)} gr / principale`, bd.theta + Math.PI / 2, 'center', TH * 0.9);
-    if (bd.island) text('COTATION', W({ x: x0 + bd.h * 0.55, y: 0 }), `îlot ${fmt(isl.b, 2)} × ${fmt(bd.h, 2)}`, bd.theta, 'center', TH * 0.75);
+    if (bd.island?.aci) text('COTATION', W({ x: x0 + bd.h + 2 * TH, y: -1.5 * TH }), `îlot ACI : H = ${fmt(bd.h, 2)} · b1 = ${fmt(0.55 * bd.l, 2)} · b2 = ${fmt(1.45 * bd.l, 2)}`, bd.theta, 'left', TH * 0.7);
   }
   for (const bd of bds) {
     if (bd.role !== 'principale') continue;
