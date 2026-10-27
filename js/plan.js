@@ -8,8 +8,9 @@ import { islandDims, planParams, secondaryAuto } from './norms.js';
 import { addDeversPlan } from './devers.js';
 import { fmt, fmtGis, upright, autoCenter, branchDirection, frame } from './common.js';
 import { buildApproach, crossLine, targetX0 } from './approach.js';
+import { makeDims } from './dims.js';
 
-const { add, sub, mul, dot, norm, rot90, ang, L } = G;
+const { add, sub, mul, dot, norm, rot90, neg, ang, L } = G;
 const pick = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
 
 // Découpe une polyligne fonction de X (points triés) en retirant les intervalles `gaps`.
@@ -180,6 +181,7 @@ export function buildPlan(prj) {
   // ================= Primitives de dessin =================
   const Pp = (o) => prims.push(o);
   const text = (lay, p, s, rot = 0, align = 'center', hh = TH) => Pp({ k: 'text', L: lay, p, s, rot: upright(rot), align, h: hh });
+  const dims = makeDims(Pp, TH);
   const pathM = (pts) => pts.slice(1).map((p, i) => L(toW(pts[i].x, pts[i].y), toW(p.x, p.y)));
   const RT = 150; // raccordement des changements de largeur de la chaussée principale
 
@@ -282,11 +284,18 @@ export function buildPlan(prj) {
       const t1 = W({ x: x0, y: isl.b / 2 }), t2 = W({ x: xT, y: 0 }), t3 = W({ x: x0, y: -isl.b / 2 });
       Pp({ k: 'path', L: 'CONSTRUCTION', segs: [L(t1, t2), L(t2, t3), L(t3, t1)] });
     }
+    // Cotations de la branche, comme au giratoire : largeurs le / ls perpendiculaires aux voies, en amont du
+    // raccordement, et rayons Re / Rs par flèche sur l'arc.
     for (const sd of [bd.entry, bd.exit]) {
       Pp({ k: 'cross', L: 'CONSTRUCTION', p: sd.C, size: 0.8 });
       Pp({ k: 'path', L: 'CONSTRUCTION', segs: [L(sd.C, sd.Tc), L(sd.C, sd.Tl)] });
-      const mid = G.segAt(sd.fil.arc, 0.5), toC = norm(sub(sd.fil.C, mid));
-      text('COTATION', W(add(mid, mul(toC, 1.6 * TH))), `${sd.s > 0 ? 'Re' : 'Rs'} = ${fmt(sd.R, 2)}`, ang(rot90(toC)) + bd.theta);
+      const xs = G.clamp(sd.fil.Tl.x + 2, x0 + 2, Math.max(x0 + 2, xT - 2));
+      const pIsl = add(sd.H, mul(sd.dI, (xs - sd.H.x) / sd.dI.x));
+      const mOut = sd.s > 0 ? rot90(sd.dI) : neg(rot90(sd.dI));
+      const [p1, p2] = sd.s > 0 ? [pIsl, add(pIsl, mul(mOut, sd.w))] : [add(pIsl, mul(mOut, sd.w)), pIsl];
+      dims.aligned(W(p1), W(p2), 0, `${sd.s > 0 ? 'le' : 'ls'} = ${fmt(sd.w, 2)}`, { side: -1 });
+      const mid = G.segAt(sd.fil.arc, 0.5);
+      dims.radius(W(mid), norm(sub(sd.C, W(mid))), `${sd.s > 0 ? 'Re' : 'Rs'} = ${fmt(sd.R, 2)}`);
     }
     Pp({ k: 'path', L: 'AXE', segs: [L(W({ x: x0 - 1, y: 0 }), W({ x: xEnd + 3, y: 0 }))] });
     if (bd.stop) {
@@ -294,9 +303,7 @@ export function buildPlan(prj) {
       const st = P.regime === 'stop' ? { wm: 0.5 } : { wm: 0.5, dash: [0.5, 0.5], lt: 'CLP' };
       Pp({ k: 'path', L: 'MARQUAGE', segs: [L(bd.stop.a, bd.stop.b)], ...st });
       text('MARQUAGE', W({ x: x0 + 4, y: bd.hb + bd.entry.w / 2 }), P.regime === 'stop' ? 'STOP' : 'CÉDEZ', bd.theta - Math.PI / 2, 'center', TH * 1.2);
-      text('COTATION', add(G.lerp(bd.stop.a, bd.stop.b, 0.5), mul(bd.u, 2.2 + TH)), `le = ${fmt(bd.entry.w, 2)}`, bd.theta + Math.PI / 2);
     }
-    if (bd.stopX) text('COTATION', add(G.lerp(bd.stopX.a, bd.stopX.b, 0.5), mul(bd.u, 2.2 + TH)), `ls = ${fmt(bd.exit.w, 2)}`, bd.theta + Math.PI / 2);
     // Axe de la secondaire : continu le long de l'îlot puis discontinu
     const xs = bd.island ? xT : x0, xc = Math.min(xEnd, xs + 30);
     Pp({ k: 'path', L: 'MARQUAGE', segs: [L(W({ x: xs, y: 0 }), W({ x: xc, y: 0 }))], wm: 0.15 });
@@ -324,12 +331,32 @@ export function buildPlan(prj) {
     text('COTATION', toW(sg * (Lx + 4 + 2 * TH), 0), bd.name, ang(uM) + Math.PI / 2, 'center', TH * 1.6);
     text('COTATION', toW(sg * (Lx + 4), 0), `route principale · ${bd.gis}`, ang(uM) + Math.PI / 2, 'center', TH * 0.9);
   }
-  if (widened) {
-    text('COTATION', toW(0, -(hw + 2 * TH)), `chaussée ${fmt(2 * half, 2)} m portée à ${fmt(2 * hw, 2)} m (déport 1/${fmt(Ldep / (c / 2), 0)})`, ang(uM), 'center', TH * 0.8);
-    const lab = `TAG ${fmt(P.tag.width, 2)} + îlot ${fmt(a, 2)} · stockage ${fmt(Ls, 0)} m · sifflet ${fmt(Lsif, 0)} m`;
-    if (tagA) text('COTATION', toW(-(Lm + Ls / 2), -(c / 2 + 1.2 * TH)), lab, ang(uM), 'center', TH * 0.7);
-    if (tagB) text('COTATION', toW(Lm + Ls / 2, c / 2 + 1.2 * TH), lab, ang(uM), 'center', TH * 0.7);
-  }
+  // Route principale : profil en travers coté (voies, TAG, îlot) et, le long du bord, longueurs de la zone de TAG.
+  // Côté A en repère principal ; côté B par symétrie centrale.
+  const voie = (w) => `${P.nLanes > 1 ? 'voies' : 'voie'} ${fmt(w, 2)}`;
+  const mainDims = (has, len, sg) => {
+    const f = (X, Y) => toW(sg * X, sg * Y);
+    if (!widened) {
+      if (sg < 0) return;
+      const Xc = -(Lm + 20);
+      dims.chain([f(Xc, -half), f(Xc, 0), f(Xc, half)], 0, [voie(half), voie(half)]);
+      return;
+    }
+    const Xal = -len, Xdep = Xal - Ldep, Xpre = Xdep - Lpre;
+    const off = -2.2 * TH, lab = (s, v) => `${s} ${fmt(v, 1)}`;
+    if (has) {
+      const Xd = -Lm, Xc = Xd - Ls, Xs = Xc - Lsif, Xm = (Xd + Xc) / 2;
+      dims.chain([f(Xm, -hw), f(Xm, -c / 2), f(Xm, c / 2 - a), f(Xm, c / 2), f(Xm, hw)], 0, [voie(half), `TAG ${fmt(P.tag.width, 2)}`, `îlot ${fmt(a, 2)}`, voie(half)]);
+      dims.chain([f(Xpre, -hw), f(Xdep, -hw), f(Xal, -hw), f(Xs, -hw), f(Xc, -hw), f(Xd, -hw)], off,
+        [lab('présignalisation', Lpre), lab('déport', Ldep), lab('alignement', Lal), lab('sifflet', Lsif), lab('stockage', Ls)]);
+    } else {
+      const Xm = (Xal - Lm) / 2;
+      dims.chain([f(Xm, -hw), f(Xm, -c / 2), f(Xm, c / 2), f(Xm, hw)], 0, [voie(half), `îlot ${fmt(c, 2)}`, voie(half)]);
+      dims.chain([f(Xpre, -hw), f(Xdep, -hw), f(Xal, -hw)], off, [lab('présignalisation', Lpre), lab('déport', Ldep)]);
+    }
+  };
+  mainDims(tagA, lenA, 1);
+  mainDims(tagB, lenB, -1);
 
   // ================= Points d'implantation =================
   const pt = (name, p, bi = null, k = '') => points.push({ n: points.length + 1, name, p, bi, kind: k });
