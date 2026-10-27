@@ -15,7 +15,7 @@ export const SITES = {
 };
 
 // Débit d'un mouvement en uvp/h (PL = k uvp, arrondi à l'unité supérieure, plafonné à 2500).
-function uvp(traffic, o, d) {
+export function uvp(traffic, o, d) {
   const v = +(traffic?.od?.[o]?.[d]) || 0;
   if (v <= 0) return 0;
   const k = +traffic?.uvpPL || 2, pl = Math.max(0, Math.min(100, +(traffic?.pl?.[o]) || 0)) / 100;

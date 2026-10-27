@@ -61,6 +61,7 @@
       <div class="tabs" role="tablist">
         <button data-tab="projet" class="on">Projet</button>
         <button data-tab="anneau" id="tabRingBtn">Anneau</button>
+        <button data-tab="profil">Profil</button>
         <button data-tab="branches">Branches</button>
         <button data-tab="devers">Dévers</button>
         <button data-tab="controles">Contrôles <span id="chkBadge" class="badge"></span></button>
@@ -128,6 +129,10 @@
         <h3>Centre</h3>
         <label class="chk"><input id="centerAuto" type="checkbox"> Centre calculé à l'intersection des axes</label>
         <div class="row">
+          <button id="btnPlaceCenter" title="Cliquez ensuite la position du centre sur le plan (touche C)">Placer le centre sur la carte</button>
+          <span class="note">ou glissez le losange du centre ; les branches se réorientent vers lui.</span>
+        </div>
+        <div class="row">
           <label class="fld"><span class="lb">X</span><input data-k="center.x" type="text" inputmode="decimal"></label>
           <label class="fld"><span class="lb">Y</span><input data-k="center.y" type="text" inputmode="decimal"></label>
         </div>
@@ -147,6 +152,14 @@
           <div id="planOut" class="kv"></div>
         </div>
         <div id="ringGuide" class="guide"></div>
+      </div>
+
+      <div class="tab" id="tab-profil" hidden>
+        <p class="note">Rg, Ri, le, ls et l'îlot sont mesurés aux rives peintes ; les bords de chaussée sont à la BDD (extérieur) ou à la BDG (côté îlots) de ces rives. Valeurs vides : valeurs par défaut du contexte.</p>
+        <div id="sectionFields"></div>
+        <h3>Profil en travers type de l'anneau</h3>
+        <div id="profileSvg" class="chart profile"></div>
+        <div class="row"><button id="btnProfilDxf" class="primary">Exporter le profil type (DXF)</button></div>
       </div>
 
       <div class="tab" id="tab-branches" hidden>

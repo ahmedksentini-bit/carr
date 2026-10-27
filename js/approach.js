@@ -105,43 +105,77 @@ export function buildApproach(cfg, issues) {
   const ex = side(-1, cfg.ls, cfg.wOut, cfg.Rs, lab.ex);
   if (!en || !ex) return null;
 
-  // --- Îlot séparateur (ou tête de TPC)
+  // --- Îlot séparateur (ou tête de TPC). Enveloppe peinte = triangle de construction (rives gauches des voies
+  // d'entrée et de sortie) ; îlot en saillie en retrait de la BDG de cette enveloppe ; zébra entre les deux.
   let island = null;
   if (cfg.hasIsland) {
     const head = offsetTarget(target, isl.gap);
-    const Hi = { x: x0, y: ai + hb }, Ti = { x: xT, y: ai + th }, Ho = { x: x0, y: ai - hb }, To = { x: xT, y: ai - th };
-    const di = norm(sub(Hi, Ti)), dO = norm(sub(Ho, To));
+    const g = Math.max(0, isl.bdg || 0);
+    const Hi0 = { x: x0, y: ai + hb }, Ti0 = { x: xT, y: ai + th }, Ho0 = { x: x0, y: ai - hb }, To0 = { x: xT, y: ai - th };
+    const di = norm(sub(Hi0, Ti0)), dO = norm(sub(Ho0, To0));
     let mi = rot90(di); if (mi.y > 0) mi = neg(mi);
     let mo = rot90(dO); if (mo.y < 0) mo = neg(mo);
-    // Sur une cible droite, la tête peut être entièrement arrondie (goutte d'eau) : tangences bornées à mi-largeur.
-    let maxT = 1e4;
-    if (head.kind === 'line') {
-      const vi = G.lineLine(Ti, di, head.p, head.d), vo = G.lineLine(To, dO, head.p, head.d);
-      if (vi && vo) maxT = Math.max(0.05, G.dist(vi.p, vo.p) / 2);
+    // Rives de l'enveloppe peinte, de la rive de la cible (anneau ou chaussée principale) jusqu'à la pointe.
+    const onTarget = (p, d) => {
+      if (target.kind === 'circle') { const ts = G.lineCircle(p, d, O0, target.R); return ts.length ? add(p, mul(d, ts[0])) : null; }
+      const h = G.lineLine(p, d, target.p, target.d);
+      return h ? h.p : null;
+    };
+    const pIn = onTarget(Ti0, di), pOut = onTarget(To0, dO);
+    const paint = th <= 0
+      ? (pIn && pOut ? [[L(pIn, Ti0), L(Ti0, pOut)]] : [])
+      : [pIn ? [L(pIn, Ti0), L(Ti0, { x: xEnd, y: a + th })] : [], pOut ? [L(pOut, To0), L(To0, { x: xEnd, y: a - th })] : []];
+    // Zone de l'enveloppe (fermée le long de la rive de la cible), pour le zébra.
+    let envelope = null;
+    if (th <= 0 && pIn && pOut) {
+      const back = target.kind === 'circle'
+        ? G.samplePath([A(O0, target.R, ang(pOut), ang(pIn), true)], 0.5)
+        : [pOut, pIn];
+      envelope = [pIn, Ti0, ...back];
     }
-    const fi = filletToTarget(Ti, di, mi, head, isl.rHead, maxT);
-    const fo = filletToTarget(To, dO, mo, head, isl.rHead, maxT);
-    const headSeg = (p, q, ccw) => (head.kind === 'circle' ? A(O0, head.R, ang(p), ang(q), ccw) : G.dist(p, q) > 1e-6 ? L(p, q) : null);
-    if (fi && fo && fi.t > 0 && fo.t > 0) {
-      let outline, curb, rive, tipP = null;
+    if (isl.type === 'peint' && th <= 0) {
+      island = envelope ? { outline: null, curb: null, closed: true, paint, hatch: [envelope], tip: Ti0, headIn: pIn, headOut: pOut } : null;
+    } else {
+      // Bords de l'îlot en saillie : rives décalées de la BDG vers l'intérieur ; pointe à leur intersection.
+      let Ti = add(Ti0, mul(mi, g)), To = add(To0, mul(mo, g));
       if (th <= 0) {
-        const tip = G.filletCorner(fo.Tl, Ti, fi.Tl, isl.rTip, 0.45, 0.45);
-        const hs = headSeg(fi.Tc, fo.Tc, false);
-        outline = [...(tip ? [L(fo.Tl, tip.T1), tip.arc, L(tip.T2, fi.Tl)] : [L(fo.Tl, Ti), L(Ti, fi.Tl)]), fi.arc, ...(hs ? [hs] : []), G.revSeg(fo.arc)];
-        curb = outline;
-        // Marquage de rive à 0,50 m des bordures (côtés et pointe ; parcours trigonométrique → vers la droite).
-        rive = [G.offsetPath(outline.slice(0, tip ? 3 : 2), -0.5)];
-        tipP = tip ? G.segAt(tip.arc, 0.5) : Ti;
-      } else {
-        const Fo = { x: xEnd, y: a - th }, Fi = { x: xEnd, y: a + th };
-        const hs = headSeg(fo.Tc, fi.Tc, true);
-        const eOut = G.roundPolyline([Fo, To, fo.Tl], [0, 20, 0]), eIn = G.roundPolyline([fi.Tl, Ti, Fi], [0, 20, 0]);
-        curb = [...eOut, fo.arc, ...(hs ? [hs] : []), G.revSeg(fi.arc), ...eIn];
-        outline = [...curb, L(Fi, Fo)];
-        rive = [G.offsetPath(eOut, 0.5), G.offsetPath(eIn, 0.5)];
+        const hx = G.lineLine(Ti, di, To, dO);
+        if (hx) { Ti = hx.p; To = hx.p; }
       }
-      island = { outline, curb, closed: th <= 0, rive, tip: tipP, headIn: fi.Tc, headOut: fo.Tc };
-    } else issues.push({ lvl: 'warn', bi: idx, msg: `${name} : îlot séparateur trop petit pour être dessiné (vérifier base / longueur).` });
+      // Sur une cible droite, la tête peut être entièrement arrondie (goutte d'eau) : tangences bornées à mi-largeur.
+      let maxT = 1e4;
+      if (head.kind === 'line') {
+        const vi = G.lineLine(Ti, di, head.p, head.d), vo = G.lineLine(To, dO, head.p, head.d);
+        if (vi && vo) maxT = Math.max(0.05, G.dist(vi.p, vo.p) / 2);
+      }
+      const fi = filletToTarget(Ti, di, mi, head, isl.rHead, maxT);
+      const fo = filletToTarget(To, dO, mo, head, isl.rHead, maxT);
+      const headSeg = (p, q, ccw) => (head.kind === 'circle' ? A(O0, head.R, ang(p), ang(q), ccw) : G.dist(p, q) > 1e-6 ? L(p, q) : null);
+      if (fi && fo && fi.t > 0 && fo.t > 0 && Ti.x > x0) {
+        let outline, curb, tipP = null;
+        if (th <= 0) {
+          const tip = G.filletCorner(fo.Tl, Ti, fi.Tl, isl.rTip, 0.45, 0.45);
+          const hs = headSeg(fi.Tc, fo.Tc, false);
+          outline = [...(tip ? [L(fo.Tl, tip.T1), tip.arc, L(tip.T2, fi.Tl)] : [L(fo.Tl, Ti), L(Ti, fi.Tl)]), fi.arc, ...(hs ? [hs] : []), G.revSeg(fo.arc)];
+          curb = outline;
+          tipP = tip ? G.segAt(tip.arc, 0.5) : Ti;
+        } else {
+          const Fo = { x: xEnd, y: To.y }, Fi = { x: xEnd, y: Ti.y };
+          const hs = headSeg(fo.Tc, fi.Tc, true);
+          const eOut = G.roundPolyline([Fo, To, fo.Tl], [0, 20, 0]), eIn = G.roundPolyline([fi.Tl, Ti, Fi], [0, 20, 0]);
+          curb = [...eOut, fo.arc, ...(hs ? [hs] : []), G.revSeg(fi.arc), ...eIn];
+          outline = [...curb, L(Fi, Fo)];
+        }
+        // Zébra : pointe peinte en avant du nez de l'îlot en saillie (les bandes latérales de BDG restent nues).
+        let hatch = null;
+        if (th <= 0 && envelope) {
+          const tx = (tipP || Ti).x;
+          const at = (H0, T0) => G.lerp(H0, T0, (tx - H0.x) / (T0.x - H0.x));
+          if (tx < Ti0.x - 0.05) hatch = [[at(Hi0, Ti0), Ti0, at(Ho0, To0)]];
+        }
+        island = { outline, curb, closed: th <= 0, paint, hatch, tip: tipP, headIn: fi.Tc, headOut: fo.Tc };
+      } else issues.push({ lvl: 'warn', bi: idx, msg: `${name} : îlot séparateur trop petit pour être dessiné en saillie (vérifier base, longueur et BDG).` });
+    }
   }
   return { en, ex, island };
 }

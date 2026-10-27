@@ -61,6 +61,20 @@ export function branchDirection(b, O, Rd) {
   return { pl, far, Q, segDir };
 }
 
+// Premier franchissement, en partant du centre, du cercle (O, R) par la polyligne pl (orientée de O vers
+// l'extérieur) : point J, direction du segment porteur et sommets suivants. null si la polyligne reste à l'intérieur.
+export function polylineAfter(pl, O, R) {
+  if (G.dist(pl[0], O) >= R) return { J: pl[0], dir: norm(sub(pl[1], pl[0])), rest: pl.slice(1) };
+  for (let i = 0; i < pl.length - 1; i++) {
+    const p = pl[i], q = pl[i + 1];
+    if (G.dist(q, O) < R) continue;
+    const d = norm(sub(q, p)), ts = G.lineCircle(p, d, O, R);
+    if (!ts.length) return null;
+    return { J: add(p, mul(d, ts[1])), dir: d, rest: pl.slice(i + 1) };
+  }
+  return null;
+}
+
 export function circleCircle(c1, r1, c2, r2) {
   const d = G.dist(c1, c2);
   if (d < 1e-9 || d > r1 + r2 || d < Math.abs(r1 - r2)) return [];

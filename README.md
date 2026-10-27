@@ -24,6 +24,15 @@ ou sur un fond topographique DXF.
   cédez-le-passage (T'2) ou STOP ; triangles de visibilité D = V85 × t (8 à 11 s selon régime et TAG).
 - **Dessin** : bordures, raccordements tangents, îlots, chaussée, ligne de cédez-le-passage, marquages,
   cotations, triangles de construction, trajectoire de déflexion.
+- **Rives peintes et bords de chaussée (giratoire)** : Rg, Ri, le, ls et le triangle de l'îlot sont mesurés aux
+  rives peintes ; bords de chaussée à la BDD (extérieur) et à la BDG (îlot central, îlots séparateurs). Îlot
+  séparateur : enveloppe peinte = triangle de construction, îlot en saillie en retrait de la BDG, zébra en pointe.
+- **Abords** : caniveau, bordure, trottoir et contre-bordure en urbain, berme en interurbain, cotés sur le plan ;
+  **profil en travers type** de l'anneau généré automatiquement (onglet Profil, export DXF), avec les vues de
+  bordures (3 cm bande franchissable, 6 cm îlot central) et les pentes.
+- **Branches** : alignement droit dirigé vers le centre près de l'anneau, puis raccordement à l'axe saisi, qu'elles
+  suivent jusqu'au bout (polylignes à plusieurs segments). Le centre se place sur la carte (outil C) ou se déplace
+  à la souris ; les branches se réorientent vers lui.
 - **Dévers** : anneau à dévers imposé de 1,5 % vers l'extérieur, constant sur site en pente (ou cône sur plan incliné),
   profil en long des rives, variation des dévers de chaque branche, flèches de dévers sur le plan.
 - **Contrôles** : comparaison des valeurs aux recommandations du guide, excentrement des axes, déflexion,
@@ -53,6 +62,8 @@ js/norms.js         valeurs par défaut et contrôles SETRA / CERTU
 js/devers.js        modèle altimétrique et dévers
 js/capacity.js      trafic HPM et capacité des entrées (modèle de type Girabase)
 js/bypass.js        voie directe de tourne-à-droite (by-pass)
+js/dims.js          cotations de type DAO
+js/profile.js       profil en travers type de l'anneau (SVG, DXF)
 js/viewer.js        rendu canvas (projet, DXF, HUD)
 js/geom.js          géométrie (droites, arcs, raccordements, décalages)
 js/dxf-parse.js     lecture DXF        js/dxf-write.js   écriture DXF R12
@@ -118,6 +129,9 @@ du code. Elle n'est pas homologuée : comparer les résultats avec Girabase avan
 
 ## Limites connues
 
+- Les largeurs par défaut de BDD (1,00 m), BDG (0,50 m) et berme (1,50 m) en interurbain sont des valeurs de départ
+  à ajuster dans l'onglet Profil ; elles ne sont pas tirées du guide.
+- Rives peintes, BDD / BDG, abords et branches courbes ne sont pas encore appliqués aux carrefours en T et en X.
 - Voie directe de tourne-à-droite : rayon, largeur d'îlot et longueurs sont fixés aux valeurs ACI (module `bypass.js`) ;
   la clothoïde d'entrée et la variante « réinsertion avec cédez-le-passage » ne sont pas dessinées.
 - Capacité : giratoires seulement ; les carrefours plans (T, X) ne sont pas encore calculés.

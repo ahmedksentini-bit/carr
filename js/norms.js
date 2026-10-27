@@ -38,6 +38,32 @@ const num = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
 
 export const isPlan = (prj) => prj.kind === 'T' || prj.kind === 'X';
 
+// Profil en travers. Les rayons Rg / Ri et les largeurs le / ls / la sont mesurés aux rives peintes ;
+// les bords de chaussée sont à la BDG (côté gauche du sens de circulation) ou à la BDD (côté droit) de ces rives ;
+// la BDD est commune à l'anneau et aux branches pour que les bords se raccordent aux points de tangence.
+// Au-delà du bord de chaussée : caniveau, bordure, trottoir et contre-bordure en urbain, berme en interurbain.
+// Vues (hauteurs) des bordures : 3 cm côté anneau pour la bande franchissable, 6 cm pour l'îlot central.
+export const SECTION = {
+  interurbain: {
+    rive: true, bdd: 1, bdgRing: 0.5, bdgBr: 0.5,
+    caniveau: 0, bordure: 0, trottoir: 0, cBordure: 0, bordureVue: 0.14, trottoirPente: 2,
+    berme: 1.5, bermePente: 8, bfPente: 4, bfVue: 0.03, ilotVue: 0.06, axeR: 80,
+  },
+  urbain: {
+    rive: false, bdd: 0, bdgRing: 0, bdgBr: 0,
+    caniveau: 0.25, bordure: 0.15, trottoir: 2.5, cBordure: 0.1, bordureVue: 0.14, trottoirPente: 2,
+    berme: 0, bermePente: 8, bfPente: 4, bfVue: 0.03, ilotVue: 0.06, axeR: 40,
+  },
+};
+export function sectionParams(prj) {
+  const d = SECTION[prj.context], s = prj.section || {}, out = {};
+  for (const k in d) out[k] = typeof d[k] === 'boolean' ? s[k] ?? d[k] : num(s[k], d[k]);
+  return out;
+}
+
+// Voie directe de tourne-à-droite : rayon en axe de la chaussée et largeur de chaussée (hors bandes dérasées).
+export const TAD = { interurbain: { R: 42, w: 4 }, urbain: { R: 20, w: 3.5 } };
+
 // Carrefours plans (T, X) d'après l'ACI (chap. « Carrefours plans ») et le CERTU (« Carrefours urbains »).
 // l : largeur de la chaussée de la branche secondaire (somme de ses voies).
 export const PLAN = {
@@ -107,7 +133,7 @@ export function islandDims(prj, br) {
   const i = br.island || {};
   if (isPlan(prj)) {
     const d = PLAN[prj.context].island, a = secondaryAuto(prj, br);
-    return { type: i.type || 'physique', b: num(i.base, d.base), h: num(i.length, a.h), gap: num(i.gap, d.gap), rHead: d.rHead, rTip: d.rTip, shift: 0, autoShift: 0, Rr: a.Rr };
+    return { type: i.type || 'physique', b: num(i.base, d.base), h: num(i.length, a.h), gap: num(i.gap, d.gap), rHead: d.rHead, rTip: d.rTip, shift: 0, autoShift: 0, Rr: a.Rr, bdg: sectionParams(prj).bdgBr };
   }
   const Rg = +prj.ring.Rg;
   const autoShift = prj.context === 'interurbain' && Rg > 15 ? (0.5 + Rg / 50) / 2 : 0;
@@ -115,12 +141,13 @@ export function islandDims(prj, br) {
     type: i.type || 'physique',
     b: num(i.base, Rg / 4),
     h: num(i.length, Rg),
-    gap: num(i.gap, PRESETS[prj.context].island.gap),
+    gap: num(i.gap, Math.max(PRESETS[prj.context].island.gap, sectionParams(prj).bdd)), // tête hors de la chaussée de l'anneau
     rHead: Math.max(0.3, Rg / 50),
     rTip: Math.max(0.3, Rg / 50),
     shift: br.tpc?.on ? 0 : num(i.shift, autoShift),
     autoShift,
     Rr: 4 * Rg,
+    bdg: sectionParams(prj).bdgBr, // retrait de l'îlot en saillie par rapport à l'enveloppe peinte
   };
 }
 

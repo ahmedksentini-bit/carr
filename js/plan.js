@@ -146,7 +146,8 @@ export function buildPlan(prj) {
     const { W, Wp } = fr;
     const { en, ex } = ap;
     const island = ap.island && {
-      outline: Wp(ap.island.outline), curb: Wp(ap.island.curb), closed: ap.island.closed, rive: ap.island.rive.map(Wp),
+      outline: ap.island.outline && Wp(ap.island.outline), curb: ap.island.curb && Wp(ap.island.curb), closed: ap.island.closed,
+      paint: ap.island.paint.map(Wp), hatch: ap.island.hatch && ap.island.hatch.map((poly) => poly.map(W)),
       tip: ap.island.tip && W(ap.island.tip), headIn: W(ap.island.headIn), headOut: W(ap.island.headOut),
     };
     const stop = crossLine(en, target, 0.25), stopX = crossLine(ex, target, 0.25);
@@ -243,7 +244,7 @@ export function buildPlan(prj) {
   for (const bd of bds) {
     if (bd.role !== 'secondaire') continue;
     rings.push(orient([...G.revPath(bd.exit.curbW), L(bd.exit.F, bd.entry.F), ...bd.entry.curbW, L(bd.entry.Tc, bd.exit.Tc)], false));
-    if (bd.island && bd.isl.type !== 'peint') rings.push(orient(bd.island.outline, true));
+    if (bd.island?.outline) rings.push(orient(bd.island.outline, true));
   }
   Pp({ k: 'fill', L: 'CHAUSSEE', rings, role: 'chaussee', rule: 'nonzero' });
 
@@ -259,14 +260,13 @@ export function buildPlan(prj) {
     Pp({ k: 'path', L: 'BORDURE', segs: bd.exit.curbW });
     Pp({ k: 'path', L: 'LIMITE', segs: [L(bd.exit.F, bd.entry.F)] });
     if (bd.island) {
-      if (isl.type === 'peint') {
-        Pp({ k: 'path', L: 'MARQUAGE', segs: bd.island.curb, closed: true, wm: 0.15 });
-        Pp({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(G.samplePath(bd.island.outline, 0.3), bd.theta + Math.PI / 4, 1.0), wm: 0.12 });
-      } else {
+      // Enveloppe peinte (triangle de construction), zébra, îlot en saillie en retrait de la BDG.
+      if (bd.island.outline) {
         Pp({ k: 'fill', L: 'ILOT_SEP', rings: [bd.island.outline], role: 'ilot' });
         Pp({ k: 'path', L: 'ILOT_SEP', segs: bd.island.curb, closed: true });
-        for (const rv of bd.island.rive || []) if (rv.length) Pp({ k: 'path', L: 'MARQUAGE', segs: rv, wm: 0.15 });
       }
+      for (const p of bd.island.paint) if (p.length) Pp({ k: 'path', L: 'MARQUAGE', segs: p, wm: 0.15 });
+      if (bd.island.hatch) Pp({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(bd.island.hatch, bd.theta + Math.PI / 4, 1.0), wm: 0.12 });
       const t1 = W({ x: x0, y: isl.b / 2 }), t2 = W({ x: xT, y: 0 }), t3 = W({ x: x0, y: -isl.b / 2 });
       Pp({ k: 'path', L: 'CONSTRUCTION', segs: [L(t1, t2), L(t2, t3), L(t3, t1)] });
     }

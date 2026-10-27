@@ -10,6 +10,8 @@ export const THEMES = {
       AXE_SAISI: { stroke: '#facc15', w: 1.4, dash: [7, 5] },
       AXE: { stroke: '#f87171', w: 1, dash: [16, 4, 3, 4] },
       BORDURE: { stroke: '#f5f5f5', w: 1.6 },
+      TROTTOIR: { stroke: '#cbd5e1', w: 1 },
+      ACCOTEMENT: { stroke: '#94a3b8', w: 1, dash: [6, 4] },
       ILOT_CENTRAL: { stroke: '#f5f5f5', w: 1.6, fill: { ilot: 'rgba(74,140,82,0.62)', franchissable: 'rgba(190,176,150,0.5)' } },
       ILOT_SEP: { stroke: '#f5f5f5', w: 1.6, fill: { ilot: 'rgba(74,140,82,0.62)' } },
       MARQUAGE: { stroke: '#ffffff', w: 1 },
@@ -28,6 +30,8 @@ export const THEMES = {
       AXE_SAISI: { stroke: '#b45309', w: 1.4, dash: [7, 5] },
       AXE: { stroke: '#dc2626', w: 1, dash: [16, 4, 3, 4] },
       BORDURE: { stroke: '#111827', w: 1.6 },
+      TROTTOIR: { stroke: '#475569', w: 1 },
+      ACCOTEMENT: { stroke: '#64748b', w: 1, dash: [6, 4] },
       ILOT_CENTRAL: { stroke: '#111827', w: 1.6, fill: { ilot: 'rgba(134,190,120,0.7)', franchissable: 'rgba(214,200,170,0.75)' } },
       ILOT_SEP: { stroke: '#111827', w: 1.6, fill: { ilot: 'rgba(134,190,120,0.7)' } },
       MARQUAGE: { stroke: '#4b5563', w: 1 },
@@ -142,7 +146,7 @@ function arrowHead(ctx, x0, y0, x1, y1, size) {
 export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
   if (!D) return;
   const T = THEMES[theme];
-  const order = ['CHAUSSEE', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'BORDURE', 'MARQUAGE', 'AXE', 'DEVERS', 'COTATION'];
+  const order = ['CHAUSSEE', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'AXE', 'DEVERS', 'COTATION'];
   ctx.lineCap = 'butt'; ctx.lineJoin = 'round';
   for (const layer of order) {
     if (vis[layer] === false) continue;

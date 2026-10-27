@@ -2,15 +2,19 @@
 // Repère local d'une branche : origine au centre O de l'anneau, x le long de l'axe vers l'extérieur,
 // y vers la gauche (vu depuis le centre). L'entrée est du côté +y, la sortie du côté −y
 // (circulation à droite, anneau parcouru dans le sens trigonométrique).
+// Rg, Ri, le, ls et le triangle de l'îlot sont mesurés aux rives peintes ; les bords de chaussée sont à la BDD
+// (extérieur) ou à la BDG (côté îlot central et îlots séparateurs) de ces rives.
 import * as G from './geom.js';
-import { islandDims } from './norms.js';
+import { islandDims, sectionParams, TAD } from './norms.js';
 import { addDevers } from './devers.js';
-import { fmt, fmtGis, upright, autoCenter, branchDirection, frame } from './common.js';
+import { fmt, fmtGis, upright, autoCenter, branchDirection, frame, nearFar, polylineAfter } from './common.js';
 import { buildApproach, crossLine } from './approach.js';
 import { buildPlan } from './plan.js';
 import { buildBypass } from './bypass.js';
+import { makeDims } from './dims.js';
 
 const { add, sub, mul, dot, norm, rot90, neg, ang, polar, L, A } = G;
+const num = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
 
 export { fmt, fmtGis, autoCenter };
 
@@ -19,22 +23,34 @@ export function buildDesign(prj) {
   return prj.kind === 'T' || prj.kind === 'X' ? buildPlan(prj) : buildRoundabout(prj);
 }
 
-// ext : longueurs minimales des branches (abscisse locale), imposées par les voies directes de tourne-à-droite.
+// Largeurs des abords au-delà du bord de chaussée : [libellé, largeur] (urbain : caniveau, bordure, trottoir,
+// contre-bordure ; interurbain : berme).
+export function sideBands(prj, sec = sectionParams(prj)) {
+  const list = prj.context === 'urbain'
+    ? [['caniveau', sec.caniveau], ['bordure', sec.bordure], ['trottoir', sec.trottoir], ['contre-bordure', sec.cBordure]]
+    : [['berme', sec.berme]];
+  return list.filter(([, w]) => w > 0);
+}
+
+// ext : longueurs minimales des alignements droits (abscisse locale), imposées par les voies directes de tourne-à-droite.
 function buildRoundabout(prj, ext = {}) {
-  const ring = prj.ring;
+  const ring = prj.ring, sec = sectionParams(prj);
   const Rg = +ring.Rg, la = +ring.la, bf = +ring.bf || 0;
-  const Ri = Rg - la, Rb = Ri - bf;
+  const Ri = Rg - la;            // rive intérieure (peinture)
+  const Rpi = Ri - sec.bdgRing;  // bord intérieur de la chaussée annulaire
+  const Rb = Rpi - bf;           // îlot central infranchissable
+  const Rpo = Rg + sec.bdd;      // bord extérieur de la chaussée annulaire
   const unit = prj.opts?.angleUnit || 'gon';
   const TH = +prj.opts?.textH || 0.8;
   const issues = [], prims = [], points = [], bds = [];
-  const D = { kind: 'giratoire', ok: false, O: null, Rg, la, bf, Ri, Rb, branches: bds, prims, points, issues };
+  const D = { kind: 'giratoire', ok: false, O: null, Rg, la, bf, Ri, Rpi, Rb, Rpo, sec, branches: bds, prims, points, issues };
 
   let O = prj.center.auto ? autoCenter(prj.branches) : null;
   if (!O && prj.center.x != null) O = { x: +prj.center.x, y: +prj.center.y };
   if (!O) return D;
   D.O = O;
   if (!(Rg > 0) || !(Ri > 0)) { issues.push({ lvl: 'err', msg: 'Rayons incohérents : il faut Rg > la (Ri = Rg − la > 0).' }); return D; }
-  if (Rb <= 0) issues.push({ lvl: 'err', msg: 'Bande franchissable plus large que l\'îlot central.' });
+  if (Rb <= 0) issues.push({ lvl: 'err', msg: 'BDG et bande franchissable plus larges que l\'îlot central.' });
   const target = { kind: 'circle', R: Rg };
 
   prj.branches.forEach((b, idx) => {
@@ -49,43 +65,83 @@ function buildRoundabout(prj, ext = {}) {
     const nIn = Math.max(1, +b.nIn || 1), nOut = Math.max(1, +b.nOut || 1), wl = +b.wLane;
     const wIn = nIn * wl, wOut = nOut * wl;
     const le = +b.le, ls = +b.ls, Re = +b.Re, Rs = +b.Rs;
-
-    // --- Axe de calcul de la branche
-    const { far, Q, segDir } = branchDirection(b, O, Rg + h + 10);
+    const pl = nearFar(b.axis, O), far = pl[pl.length - 1];
     if (G.dist(far, O) < Rg + 5) { issues.push({ lvl: 'err', bi: idx, msg: `${name} : l'axe saisi doit sortir de l'anneau (> Rg + 5 m).` }); return; }
-    let u, a;
-    if (b.radial !== false) { u = norm(sub(Q, O)); a = 0; }
-    else {
+
+    // --- Axe de la branche : alignement droit dirigé vers le centre sur la longueur utile (îlot, évasement,
+    // marge, voie directe éventuelle), puis raccordement de rayon sec.axeR à l'axe saisi, qu'il suit ensuite.
+    const shiftEst = hasIsland && !th && isl.type !== 'aucun' ? isl.shift : 0;
+    const flare = Math.max(0, hb + Math.max(le, ls) + shiftEst - th - Math.min(wIn, wOut));
+    const Lmin = Math.max(Rg + h + Math.max(10, 15 * flare) + 20, ext[idx] || 0);
+    let u, a = 0, cont = null;
+    if (b.radial !== false) {
+      let pa = polylineAfter(pl, O, Lmin + 15);
+      if (pa) {
+        const defl = Math.acos(G.clamp(dot(norm(sub(pa.J, O)), pa.dir), -1, 1));
+        pa = polylineAfter(pl, O, Lmin + sec.axeR * Math.tan(defl / 2) + 2) || pa;
+        u = norm(sub(pa.J, O));
+        const pts = [add(O, mul(u, Lmin)), pa.J, ...pa.rest.filter((p) => G.dist(p, pa.J) > 0.5)];
+        cont = G.roundPolyline(pts, pts.map((_, i) => (i > 0 && i < pts.length - 1 ? sec.axeR : 0)));
+      } else u = norm(sub(far, O));
+    } else {
+      const { Q, segDir } = branchDirection(b, O, Rg + h + 10);
       u = dot(segDir, sub(Q, O)) < 0 ? neg(segDir) : segDir;
       a = dot(sub(Q, O), rot90(u));
       if (Math.abs(a) > Rg * 0.6) { issues.push({ lvl: 'err', bi: idx, msg: `${name} : axe trop excentré (${fmt(a)} m) — axe radial utilisé.` }); u = norm(sub(Q, O)); a = 0; }
     }
     const { theta, n, W, Ws, Wp } = frame(O, u);
-
     const x0 = Math.sqrt(Rg * Rg - a * a), xT = x0 + h;
     // Axe du triangle de construction (décalé vers la gauche de l'usager entrant, ACI).
     const ai = hasIsland && !th && isl.type !== 'aucun' ? a - isl.shift : a;
-    const flare = Math.max(0, hb + Math.max(le, ls) + Math.abs(ai - a) - th - Math.min(wIn, wOut));
-    // Longueur dessinée par défaut : jusqu'à l'extrémité de l'axe saisi, bornée à 40–80 m au-delà de l'îlot.
-    let xEnd = b.length ? x0 + +b.length : Math.min(Math.max(dot(sub(far, O), u), xT + 40), xT + 80);
-    xEnd = Math.max(xEnd, xT + Math.max(10, 15 * flare) + 20, ext[idx] || 0);
+    let xEnd;
+    if (cont) {
+      xEnd = Lmin;
+      if (b.length) cont = G.pathHead(cont, Math.max(0, +b.length - (Lmin - x0)));
+    } else {
+      xEnd = b.length ? x0 + +b.length : Math.min(Math.max(dot(sub(far, O), u), xT + 40), xT + 80);
+      xEnd = Math.max(xEnd, Lmin);
+    }
+    if (cont && !cont.length) cont = null;
 
     const ap = buildApproach({ name, idx, target, a, ai, x0, xT, xEnd, hb, th, hasIsland, isl, le, ls, wIn, wOut, Re, Rs }, issues);
     if (!ap) return;
     const { en, ex } = ap;
-    const island = ap.island && {
-      outline: Wp(ap.island.outline), curb: Wp(ap.island.curb), closed: ap.island.closed, rive: ap.island.rive.map(Wp),
-      tip: ap.island.tip && W(ap.island.tip), headIn: W(ap.island.headIn), headOut: W(ap.island.headOut),
+    const off = (d) => (cont ? G.offsetPath(cont, d) : []);
+    // Rives (peinture) et bords de chaussée, de l'extrémité de la branche jusqu'à la tangence sur l'anneau.
+    en.edge = G.offsetPath(en.curb, -sec.bdd);
+    ex.edge = G.offsetPath(ex.curb, sec.bdd);
+    const full = (contPath, local) => [...G.revPath(contPath), ...Wp(local)];
+    const side = (sd, s, wa) => {
+      const paintW = full(off(s * (th + wa)), sd.curb), edgeW = full(off(s * (th + wa + sec.bdd)), sd.edge);
+      return {
+        ...sd, paintW, edgeW, edgeCont: off(s * (th + wa + sec.bdd)), curbW: paintW,
+        F: G.segStart(edgeW[0]), Fpaint: G.segStart(paintW[0]),
+        Tc: W(sd.fil.Tc), Tl: W(sd.fil.Tl), C: W(sd.fil.C),
+      };
     };
-
-    // --- Ligne de cédez-le-passage (bande de 0,50 m le long de l'anneau)
+    let island = null;
+    if (ap.island) {
+      const I = ap.island;
+      island = {
+        outline: I.outline && Wp(I.outline), curb: I.curb && Wp(I.curb), closed: I.closed, paint: I.paint.map(Wp),
+        hatch: I.hatch && I.hatch.map((poly) => poly.map(W)), tip: I.tip && W(I.tip), headIn: W(I.headIn), headOut: W(I.headOut),
+      };
+      // TPC : îlot en saillie et rives prolongés le long de l'axe courbe.
+      if (th > 0 && cont && island.curb) {
+        const g = Math.max(0, isl.bdg || 0);
+        const cOut = off(-(th - g)), cIn = off(th - g);
+        island.curb = [...G.revPath(cOut), ...island.curb, ...cIn];
+        island.outline = [...island.curb, L(G.segEnd(island.curb[island.curb.length - 1]), G.segStart(island.curb[0]))];
+        island.paint = island.paint.map((p, k) => [...p, ...off(k === 0 ? th : -th)]);
+      }
+    }
     const yl = crossLine(en, target, 0.25), xl = crossLine(ex, target, 0.25);
-
     const bd = {
-      idx, id: b.id, name, role: 'branche', theta, u, n, a, ai, x0, xT, xEnd, h, b: isl.b, hb, th, isl, W, Ws, Wp,
-      entry: { ...en, curbW: Wp(en.curb), Tc: W(en.fil.Tc), Tl: W(en.fil.Tl), C: W(en.fil.C), F: W(en.F) },
-      exit: { ...ex, curbW: Wp(ex.curb), Tc: W(ex.fil.Tc), Tl: W(ex.fil.Tl), C: W(ex.fil.C), F: W(ex.F) },
+      idx, id: b.id, name, role: 'branche', theta, u, n, a, ai, x0, xT, xEnd, h, b: isl.b, hb, th, isl, W, Ws, Wp, cont,
+      entry: side(en, 1, wIn), exit: side(ex, -1, wOut),
       island, yieldStart: yl?.a, yieldEnd: yl?.b, exitStart: xl?.a, exitEnd: xl?.b, gis: fmtGis(theta, unit),
+      farAxis: cont ? G.segEnd(cont[cont.length - 1]) : W({ x: xEnd, y: a }),
+      farDir: cont ? norm(sub(G.segEnd(cont[cont.length - 1]), G.segAt(cont[cont.length - 1], 0.98))) : u,
     };
     bd.entry.phiTc = ang(sub(bd.entry.Tc, O));
     bd.exit.phiTc = ang(sub(bd.exit.Tc, O));
@@ -94,7 +150,7 @@ function buildRoundabout(prj, ext = {}) {
 
   bds.sort((p, q) => G.normAng(p.theta) - G.normAng(q.theta));
   D.ok = true;
-  D.zoomR = Rg + Math.max(Rg, ...bds.map((bd) => bd.h)) + 15;
+  D.zoomR = Rpo + Math.max(Rg, ...bds.map((bd) => bd.h)) + 15;
   D.mini = prj.context === 'urbain' && Rg < 12;
 
   // Déflexion (méthode des trois points) : trajectoire passant, au droit de la rive de l'anneau, à 2 m de la
@@ -122,33 +178,40 @@ function buildRoundabout(prj, ext = {}) {
 
   // ================= Primitives de dessin =================
   const P = (o) => prims.push(o);
-  const text = (L_, p, s, rot = 0, align = 'center', h = TH) => P({ k: 'text', L: L_, p, s, rot: upright(rot), align, h });
+  const text = (lay, p, s, rot = 0, align = 'center', h = TH) => P({ k: 'text', L: lay, p, s, rot: upright(rot), align, h });
+  const dims = makeDims(P, TH);
+  const rive = (segs, opt = {}) => { if (sec.rive && segs.length) P({ k: 'path', L: 'MARQUAGE', segs, wm: 0.15, ...opt }); };
 
-  // Anneau : bord extérieur (arcs entre branches), bord intérieur, îlot central.
-  const ringArcs = [];
-  if (!bds.length) P({ k: 'circle', L: 'BORDURE', c: O, r: Rg });
+  // Anneau : rives peintes (Rg entre les branches, Ri) et bords de chaussée (Rg + BDD, Ri − BDG).
+  const ringEdge = [];
+  if (!bds.length) {
+    P({ k: 'circle', L: 'BORDURE', c: O, r: Rpo });
+    if (sec.rive) P({ k: 'circle', L: 'MARQUAGE', c: O, r: Rg, wm: 0.15 });
+  }
   bds.forEach((bd, i) => {
     const nx = bds[(i + 1) % bds.length];
     const span = bds.length === 1 ? G.TAU : G.ccwSweep(bd.theta, nx.theta);
     const gap = G.ccwSweep(bd.entry.phiTc, nx.exit.phiTc);
     if (gap < span && gap > 1e-4) {
-      const arc = A(O, Rg, bd.entry.phiTc, nx.exit.phiTc, true);
-      ringArcs[i] = arc;
-      P({ k: 'path', L: 'BORDURE', segs: [arc] });
+      ringEdge[i] = A(O, Rpo, bd.entry.phiTc, nx.exit.phiTc, true);
+      rive([A(O, Rg, bd.entry.phiTc, nx.exit.phiTc, true)]);
     } else {
       issues.push({ lvl: 'err', msg: `${bd.name} / ${nx.name} : branches trop proches, les raccordements Re/Rs se chevauchent sur l'anneau.` });
     }
   });
-  P({ k: 'circle', L: 'ILOT_CENTRAL', c: O, r: Ri });
+  if (sec.rive) P({ k: 'circle', L: 'MARQUAGE', c: O, r: Ri, wm: 0.15 });
+  P({ k: 'circle', L: 'BORDURE', c: O, r: Rpi });
   if (bf > 0 && Rb > 0) P({ k: 'circle', L: 'ILOT_CENTRAL', c: O, r: Rb });
 
-  // Voies directes de tourne-à-droite (cases « TAD » de l'onglet Capacité) : de la branche i à la suivante.
+  // Voies directes de tourne-à-droite (case « TAD ») : de la branche i à la suivante.
   const bpFrom = new Map(), bpTo = new Set();
   let need = null;
   bds.forEach((bd, i) => {
     if (!prj.traffic?.tad?.[bd.id] || bds.length < 2) return;
-    const nx = bds[(i + 1) % bds.length];
-    const r = buildBypass(D, bd, nx, ringArcs[i]);
+    const nx = bds[(i + 1) % bds.length], br = prj.branches[bd.idx], T0 = TAD[prj.context];
+    const r = buildBypass(D, bd, nx, ringEdge[i], {
+      R: num(br.tadR, T0.R), w: num(br.tadW, T0.w), bdg: sec.bdgBr, bdd: sec.bdd, bddBr: sec.bdd, urbain: prj.context === 'urbain',
+    });
     if (r.error) { issues.push({ lvl: 'err', bi: bd.idx, msg: `${bd.name} → ${nx.name} : voie directe de tourne-à-droite non dessinée (${r.error}).` }); return; }
     if (r.needK > bd.xEnd || r.needJ > nx.xEnd) {
       need = need || { ...ext };
@@ -156,61 +219,84 @@ function buildRoundabout(prj, ext = {}) {
       need[nx.idx] = Math.max(need[nx.idx] || 0, r.needJ + 1);
       return;
     }
+    if (prj.context === 'interurbain' && r.rin < 40) issues.push({ lvl: 'warn', bi: bd.idx, msg: `${bd.name} → ${nx.name} : rive intérieure de la voie directe de rayon ${fmt(r.rin, 1)} m < 40 m (ACI).` });
+    if (prj.context === 'interurbain' && r.rin > 75) issues.push({ lvl: 'info', bi: bd.idx, msg: `${bd.name} → ${nx.name} : rive intérieure de rayon ${fmt(r.rin, 1)} m (ACI : de préférence < 75 m).` });
     r.to = nx;
     bpFrom.set(i, r);
     bpTo.add((i + 1) % bds.length);
   });
-  // Branches trop courtes pour la décélération ou l'insertion : on les allonge et on reconstruit (une fois).
+  // Alignements droits trop courts pour la décélération ou l'insertion : on les allonge et on reconstruit (une fois).
   if (need && !ext.again) return buildRoundabout(prj, { ...need, again: true });
   D.bypasses = [...bpFrom.entries()].map(([i, r]) => ({ ...r, from: bds[i].name, to: r.to.name }));
 
+  // Bords extérieurs de chaussée par secteur (de l'extrémité d'une branche à celle de la suivante, terrain à droite).
+  const sectors = bds.map((bd, i) => {
+    const nx = bds[(i + 1) % bds.length];
+    if (bpFrom.has(i)) return [...G.revPath(bd.entry.edgeCont), ...bpFrom.get(i).right, ...nx.exit.edgeCont];
+    return [...bd.entry.edgeW, ...(ringEdge[i] ? [ringEdge[i]] : []), ...G.revPath(nx.exit.edgeW)];
+  });
+
   // Remplissage chaussée (règle pair-impair : trous = îlots).
   const outer = [];
-  bds.forEach((bd, i) => {
-    if (!bpTo.has(i)) outer.push(...G.revPath(bd.exit.curbW));
-    outer.push(L(bd.exit.F, bd.entry.F));
-    if (bpFrom.has(i)) outer.push(...bpFrom.get(i).right);
-    else { outer.push(...bd.entry.curbW); if (ringArcs[i]) outer.push(ringArcs[i]); }
-  });
-  const rings = bds.length ? [outer] : [[{ t: 'C', c: O, r: Rg }]];
-  rings.push([{ t: 'C', c: O, r: Ri }]);
-  bds.forEach((bd) => { if (bd.island && bd.isl.type !== 'peint') rings.push(bd.island.outline); });
+  bds.forEach((bd, i) => outer.push(L(bd.exit.F, bd.entry.F), ...sectors[i]));
+  const rings = bds.length ? [outer] : [[{ t: 'C', c: O, r: Rpo }]];
+  rings.push([{ t: 'C', c: O, r: Rpi }]);
+  bds.forEach((bd) => { if (bd.island?.outline) rings.push(bd.island.outline); });
   for (const r of bpFrom.values()) rings.push(r.island);
   P({ k: 'fill', L: 'CHAUSSEE', rings, role: 'chaussee' });
-  if (bf > 0 && Rb > 0) P({ k: 'fill', L: 'ILOT_CENTRAL', rings: [[{ t: 'C', c: O, r: Ri }], [{ t: 'C', c: O, r: Rb }]], role: 'franchissable' });
+  if (bf > 0 && Rb > 0) P({ k: 'fill', L: 'ILOT_CENTRAL', rings: [[{ t: 'C', c: O, r: Rpi }], [{ t: 'C', c: O, r: Rb }]], role: 'franchissable' });
   P({ k: 'fill', L: 'ILOT_CENTRAL', rings: [[{ t: 'C', c: O, r: Math.max(0, Rb) }]], role: 'ilot' });
 
-  // Voies directes : bords, îlot de séparation, marquage.
+  // Bords de chaussée et abords (caniveau, bordure, trottoir, contre-bordure / berme).
+  const bands = sideBands(prj, sec), bandLayer = prj.context === 'urbain' ? 'TROTTOIR' : 'ACCOTEMENT';
+  sectors.forEach((S) => {
+    if (!S.length) return;
+    P({ k: 'path', L: 'BORDURE', segs: S });
+    let d = 0;
+    for (const [, w] of bands) {
+      d += w;
+      const o = G.offsetPath(S, -d);
+      if (o.length) P({ k: 'path', L: bandLayer, segs: o });
+    }
+    if (d > 0) {
+      const o = G.offsetPath(S, -d);
+      if (o.length) P({ k: 'path', L: 'LIMITE', segs: [L(G.segStart(S[0]), G.segStart(o[0])), L(G.segEnd(S[S.length - 1]), G.segEnd(o[o.length - 1]))] });
+    }
+  });
+
+  // Voies directes : îlot de séparation, bords côté îlot, rives, axe.
   for (const r of bpFrom.values()) {
     P({ k: 'fill', L: 'ILOT_SEP', rings: [r.island], role: 'ilot' });
-    P({ k: 'path', L: 'BORDURE', segs: r.right });
     P({ k: 'path', L: 'ILOT_SEP', segs: [L(r.noseJ, G.segEnd(r.left[r.left.length - 1])), ...G.revPath(r.left), L(G.segStart(r.left[0]), r.noseK)] });
-    for (const rv of r.rive) P({ k: 'path', L: 'MARQUAGE', segs: rv, wm: 0.15 });
+    for (const rv of r.rive) rive(rv);
     for (const ds of r.dashes) P({ k: 'path', L: 'MARQUAGE', segs: ds, wm: 0.15, dash: [3, 1.33], lt: 'T3' });
     P({ k: 'path', L: 'AXE', segs: r.axis });
     P({ k: 'cross', L: 'CONSTRUCTION', p: r.C, size: 1 });
     P({ k: 'path', L: 'CONSTRUCTION', segs: [L(r.C, r.T1), L(r.C, r.T2)] });
-    const toC = norm(sub(r.C, r.labelAt));
-    text('COTATION', add(r.labelAt, mul(toC, 3 + TH)), `TAD direct · R int. ${fmt(r.rin, 0)} m · voie 4,00`, ang(rot90(toC)), 'center', TH * 0.8);
+    const mid = G.segAt(r.arc, 0.5);
+    dims.radius(mid, norm(sub(r.C, mid)), `R axe ${fmt(r.Rc, 2)} · chaussée ${fmt(r.w, 2)}`, { len: 3 * TH });
   }
 
   bds.forEach((bd, i) => {
     const { W, a, ai, x0, xT, xEnd, isl } = bd;
-    // Bordures d'entrée / sortie (raccourcies au nez de l'îlot de séparation d'une voie directe)
-    const prev = (i - 1 + bds.length) % bds.length;
-    P({ k: 'path', L: 'BORDURE', segs: bpFrom.has(i) ? bpFrom.get(i).entryCut : bd.entry.curbW });
-    P({ k: 'path', L: 'BORDURE', segs: bpTo.has(i) ? bpFrom.get(prev).exitCut : bd.exit.curbW });
-    P({ k: 'path', L: 'LIMITE', segs: [L(bd.exit.F, bd.entry.F)] });
-    // Îlot
-    if (bd.island) {
-      if (isl.type === 'peint' && !bd.th) {
-        P({ k: 'path', L: 'MARQUAGE', segs: bd.island.curb, closed: true, wm: 0.15 });
-        const poly = G.samplePath(bd.island.outline, 0.3);
-        P({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(poly, bd.theta + Math.PI / 4, 1.0), wm: 0.12 });
-      } else {
-        P({ k: 'fill', L: 'ILOT_SEP', rings: [bd.island.outline], role: 'ilot' });
-        P({ k: 'path', L: 'ILOT_SEP', segs: bd.island.curb, closed: bd.island.closed });
-        for (const rv of bd.island.rive || []) if (rv.length) P({ k: 'path', L: 'MARQUAGE', segs: rv, wm: 0.15 });
+    // Rives d'entrée / de sortie (raccourcies au nez de l'îlot d'une voie directe)
+    rive(bd.entry.paintW);
+    rive(bd.exit.paintW);
+    // Îlot séparateur : enveloppe peinte (triangle de construction), zébra, îlot en saillie en retrait de la BDG.
+    const I = bd.island;
+    if (I) {
+      if (I.outline) {
+        P({ k: 'fill', L: 'ILOT_SEP', rings: [I.outline], role: 'ilot' });
+        P({ k: 'path', L: 'ILOT_SEP', segs: I.curb, closed: I.closed });
+        if (prj.context === 'urbain' && sec.bordure > 0 && I.closed) {
+          const inward = G.polyArea(G.samplePath(I.outline, 1)) > 0 ? sec.bordure : -sec.bordure;
+          const o = G.offsetPath(I.outline, inward);
+          if (o.length) P({ k: 'path', L: 'TROTTOIR', segs: o, closed: true });
+        }
+      }
+      if (sec.rive || isl.type === 'peint') {
+        for (const p of I.paint) if (p.length) P({ k: 'path', L: 'MARQUAGE', segs: p, wm: 0.15 });
+        if (I.hatch) P({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(I.hatch, bd.theta + Math.PI / 4, 1.0), wm: 0.12 });
       }
     }
     // Triangle de construction
@@ -221,15 +307,15 @@ function buildRoundabout(prj, ext = {}) {
     if (bd.defl) {
       P({ k: 'path', L: 'CONSTRUCTION', segs: [bd.defl.arc], dash: [1.5, 1] });
       const m = G.segAt(bd.defl.arc, 0.5);
-      text('CONSTRUCTION', G.add(m, mul(norm(sub(m, bd.defl.arc.c)), TH)), `déflexion R ≈ ${fmt(bd.defl.R, 0)} m`, ang(sub(m, bd.defl.arc.c)) + Math.PI / 2, 'center', TH * 0.7);
+      text('CONSTRUCTION', add(m, mul(norm(sub(m, bd.defl.arc.c)), TH)), `déflexion R ≈ ${fmt(bd.defl.R, 0)} m`, ang(sub(m, bd.defl.arc.c)) + Math.PI / 2, 'center', TH * 0.7);
     }
-    // Centres et rayons de raccordement
     for (const sd of [bd.entry, bd.exit]) {
       P({ k: 'cross', L: 'CONSTRUCTION', p: sd.C, size: 0.8 });
       P({ k: 'path', L: 'CONSTRUCTION', segs: [L(sd.C, sd.Tc), L(sd.C, sd.Tl)] });
     }
-    // Axe projet
-    P({ k: 'path', L: 'AXE', segs: [L(W({ x: 0, y: a }), W({ x: xEnd + 3, y: a }))] });
+    // Axe projet : alignement droit puis raccordement à l'axe saisi.
+    P({ k: 'path', L: 'AXE', segs: [L(W({ x: 0, y: a }), W({ x: xEnd, y: a })), ...(bd.cont || [])] });
+    P({ k: 'path', L: 'LIMITE', segs: [L(bd.exit.F, bd.entry.F)] });
     // Marquage : cédez-le-passage, ligne axiale d'approche, voies multiples
     if (bd.yieldStart && bd.yieldEnd) {
       const a0 = ang(bd.yieldStart) + bd.theta, a1 = ang(bd.yieldEnd) + bd.theta;
@@ -239,43 +325,40 @@ function buildRoundabout(prj, ext = {}) {
       const xs = bd.island ? xT : x0;
       const xc = Math.min(xEnd, xs + 30);
       P({ k: 'path', L: 'MARQUAGE', segs: [L(W({ x: xs, y: bd.island ? ai : a }), W({ x: Math.min(xc, xs + 8), y: a })), L(W({ x: Math.min(xc, xs + 8), y: a }), W({ x: xc, y: a }))], wm: 0.15 });
-      if (xEnd > xc + 1) P({ k: 'path', L: 'MARQUAGE', segs: [L(W({ x: xc, y: a }), W({ x: xEnd, y: a }))], wm: 0.15, dash: [3, 10], lt: 'T1' });
+      const dashed = [...(xEnd > xc + 1 ? [L(W({ x: xc, y: a }), W({ x: xEnd, y: a }))] : []), ...(bd.cont || [])];
+      if (dashed.length) P({ k: 'path', L: 'MARQUAGE', segs: dashed, wm: 0.15, dash: [3, 10], lt: 'T1' });
     }
     for (const [sd, nl] of [[bd.entry, Math.max(1, +prj.branches[bd.idx].nIn || 1)], [bd.exit, Math.max(1, +prj.branches[bd.idx].nOut || 1)]]) {
       for (let k = 1; k < nl; k++) {
         const s = sd.s, fr = k / nl, wl = sd.wa / nl;
         const pA = W({ x: xEnd, y: a + s * (bd.th + k * wl) }), pB = W({ x: xT, y: a + s * (bd.th + k * wl) });
         const pC = W(add(sd.H, mul(s > 0 ? rot90(sd.dI) : neg(rot90(sd.dI)), sd.w * fr)));
-        P({ k: 'path', L: 'MARQUAGE', segs: [L(pA, pB), L(pB, add(pC, mul(bd.u, 1.5)))], wm: 0.15, dash: [3, 1.33], lt: 'T3' });
+        const contLane = bd.cont ? G.revPath(G.offsetPath(bd.cont, s * (bd.th + k * wl))) : [];
+        P({ k: 'path', L: 'MARQUAGE', segs: [...contLane, L(pA, pB), L(pB, add(pC, mul(bd.u, 1.5)))], wm: 0.15, dash: [3, 1.33], lt: 'T3' });
       }
     }
-    // Cotations de branche
-    const lbl = (sd, nm, val) => {
-      const mid = G.segAt(sd.fil.arc, 0.5), C = sd.fil.C;
-      const toC = norm(sub(C, mid));
-      const p = W(add(mid, mul(toC, 1.6 * TH)));
-      text('COTATION', p, `${nm} = ${fmt(val, 2)}`, ang(rot90(toC)) + bd.theta);
-    };
-    lbl(bd.entry, 'Re', bd.entry.R);
-    lbl(bd.exit, 'Rs', bd.exit.R);
-    const wLbl = (start, end, nm, val) => {
-      if (!start || !end) return;
-      const m = G.lerp(start, end, 0.5), p = W(mul(norm(m), Rg + 1.2 + TH));
-      text('COTATION', p, `${nm} = ${fmt(val, 2)}`, bd.theta + Math.PI / 2);
-    };
-    wLbl(bd.yieldStart, bd.yieldEnd, 'le', bd.entry.w);
-    wLbl(bd.exitStart, bd.exitEnd, 'ls', bd.exit.w);
-    const tip = W({ x: xEnd + 4 + 2 * TH, y: a });
-    text('COTATION', tip, bd.name, bd.theta + Math.PI / 2, 'center', TH * 1.6);
-    text('COTATION', W({ x: xEnd + 4, y: a }), bd.gis, bd.theta + Math.PI / 2, 'center', TH * 0.9);
+    // Cotations de branche : largeurs le / ls entre rives, rayons Re / Rs, nom et gisement.
+    for (const sd of [bd.entry, bd.exit]) {
+      const xs = G.clamp(sd.fil.Tl.x + 2, x0 + 2, Math.max(x0 + 2, xT - 2));
+      const pIsl = add(sd.H, mul(sd.dI, (xs - sd.H.x) / sd.dI.x));
+      const mOut = sd.s > 0 ? rot90(sd.dI) : neg(rot90(sd.dI));
+      const [p1, p2] = sd.s > 0 ? [pIsl, add(pIsl, mul(mOut, sd.w))] : [add(pIsl, mul(mOut, sd.w)), pIsl];
+      dims.aligned(W(p1), W(p2), 0, `${sd.s > 0 ? 'le' : 'ls'} = ${fmt(sd.w, 2)}`, { side: -1 });
+      const mid = G.segAt(sd.fil.arc, 0.5);
+      dims.radius(W(mid), norm(sub(sd.C, W(mid))), `${sd.s > 0 ? 'Re' : 'Rs'} = ${fmt(sd.R, 2)}`);
+    }
+    const lab = add(bd.farAxis, mul(bd.farDir, 4 + 2 * TH));
+    text('COTATION', lab, bd.name, ang(bd.farDir) + Math.PI / 2, 'center', TH * 1.6);
+    text('COTATION', add(bd.farAxis, mul(bd.farDir, 4)), bd.gis, ang(bd.farDir) + Math.PI / 2, 'center', TH * 0.9);
     if (isl.type !== 'aucun' && !bd.th) {
-      text('COTATION', W({ x: x0 + bd.h * 0.55, y: a }), `îlot ${fmt(isl.b, 2)} × ${fmt(bd.h, 2)}`, bd.theta, 'center', TH * 0.75);
+      text('COTATION', W({ x: x0 + bd.h * 0.6, y: ai }), `îlot ${fmt(isl.b, 2)} × ${fmt(bd.h, 2)}`, bd.theta, 'center', TH * 0.6);
     } else if (bd.th) {
       text('COTATION', W({ x: xT + 8, y: a }), `TPC ${fmt(bd.th * 2, 2)}`, bd.theta, 'center', TH * 0.75);
     }
   });
 
-  // Cotation des rayons de l'anneau dans le plus grand secteur libre.
+  // Cotations de l'anneau dans le plus grand secteur libre : rayons Rg, Ri (rives) et chaîne radiale
+  // îlot central → bande franchissable → BDG → anneau → BDD → abords.
   let phi = Math.PI / 4;
   if (bds.length) {
     let best = -1;
@@ -285,15 +368,19 @@ function buildRoundabout(prj, ext = {}) {
       if (span > best) { best = span; phi = bd.theta + span / 2; }
     });
   }
-  const dimR = (r, ph, label) => {
-    const e = polar(O, r, ph);
-    P({ k: 'path', L: 'COTATION', segs: [L(O, e)], arrow: true });
-    text('COTATION', polar(O, r * 0.55, ph + (0.9 * TH) / (r * 0.55)), `${label} = ${fmt(r, 2)}`, ph);
-  };
-  dimR(Rg, phi, 'Rg');
-  dimR(Ri, phi - 0.35, 'Ri');
-  if (bf > 0 && Rb > 0) text('COTATION', polar(O, (Ri + Rb) / 2, phi + 0.5), `bf = ${fmt(bf, 2)}`, phi + 0.5 + Math.PI / 2, 'center', TH * 0.75);
-  text('COTATION', polar(O, (Rg + Ri) / 2, phi + 0.35), `la = ${fmt(la, 2)}`, phi + 0.35 + Math.PI / 2);
+  dims.radial(O, Rg, phi + 0.18, `Rg = ${fmt(Rg, 2)}`);
+  dims.radial(O, Ri, phi - 0.18, `Ri = ${fmt(Ri, 2)}`);
+  const radii = [], labels = [];
+  const push = (r, lab) => { radii.push(r); if (lab) labels.push(lab); };
+  push(bf > 0 ? Rb : Rpi);
+  if (bf > 0) push(Rpi, `bf ${fmt(bf, 2)}`);
+  if (sec.bdgRing > 0) push(Ri, `BDG ${fmt(sec.bdgRing, 2)}`);
+  push(Rg, `la ${fmt(la, 2)}`);
+  if (sec.bdd > 0) push(Rpo, `BDD ${fmt(sec.bdd, 2)}`);
+  let rr = Rpo;
+  for (const [nm, w] of bands) { rr += w; push(rr, `${nm} ${fmt(w, 2)}`); }
+  const e = G.unit(phi);
+  dims.chain(radii.map((r) => add(O, mul(e, r))), -2.2 * TH, labels);
   P({ k: 'cross', L: 'AXE', p: O, size: 1.5 });
 
   // ================= Points d'implantation =================
@@ -301,22 +388,22 @@ function buildRoundabout(prj, ext = {}) {
   pt('Centre du giratoire', O, null, 'centre');
   for (const bd of bds) {
     const nm = bd.name;
-    pt(`${nm} · axe au bord de l'anneau`, bd.W({ x: bd.x0, y: bd.a }), bd.idx, 'axe');
-    pt(`${nm} · axe fin de projet`, bd.W({ x: bd.xEnd, y: bd.a }), bd.idx, 'axe');
+    pt(`${nm} · axe à la rive de l'anneau`, bd.W({ x: bd.x0, y: bd.a }), bd.idx, 'axe');
+    pt(`${nm} · axe fin d'alignement droit`, bd.W({ x: bd.xEnd, y: bd.a }), bd.idx, 'axe');
+    if (bd.cont) pt(`${nm} · axe fin de projet`, bd.farAxis, bd.idx, 'axe');
     for (const [sd, lab, R] of [[bd.entry, 'entrée', 'Re'], [bd.exit, 'sortie', 'Rs']]) {
-      pt(`${nm} · ${lab} : tangence anneau (${R})`, sd.Tc, bd.idx, 'bordure');
-      pt(`${nm} · ${lab} : tangence bordure (${R})`, sd.Tl, bd.idx, 'bordure');
+      pt(`${nm} · ${lab} : tangence rive de l'anneau (${R})`, sd.Tc, bd.idx, 'rive');
+      pt(`${nm} · ${lab} : tangence rive (${R})`, sd.Tl, bd.idx, 'rive');
       pt(`${nm} · ${lab} : centre ${R} = ${fmt(sd.R, 2)}`, sd.C, bd.idx, 'centre');
-      sd.ctrl.slice(1).forEach((q, k) => pt(`${nm} · ${lab} : sommet évasement ${k + 1}`, bd.W(q), bd.idx, 'bordure'));
-      pt(`${nm} · ${lab} : bordure fin de projet`, sd.F, bd.idx, 'bordure');
+      sd.ctrl.slice(1).forEach((q, k) => pt(`${nm} · ${lab} : sommet évasement ${k + 1} (rive)`, bd.W(q), bd.idx, 'rive'));
+      pt(`${nm} · ${lab} : bord de chaussée fin de projet`, sd.F, bd.idx, 'bordure');
     }
-    if (bd.island) {
+    if (bd.island?.outline) {
       pt(`${nm} · îlot : tête côté entrée`, bd.island.headIn, bd.idx, 'ilot');
       pt(`${nm} · îlot : tête côté sortie`, bd.island.headOut, bd.idx, 'ilot');
       if (bd.island.tip) pt(`${nm} · îlot : pointe`, bd.island.tip, bd.idx, 'ilot');
     }
   }
-
   for (const r of D.bypasses) {
     const nm = `TAD ${r.from} → ${r.to}`;
     pt(`${nm} : début de courbe (axe)`, r.T1, null, 'bypass');

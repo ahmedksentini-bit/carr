@@ -58,6 +58,21 @@ export function pathPointAt(path, d) {
   return path.length ? segEnd(path[path.length - 1]) : null;
 }
 
+// Début d'un chemin, jusqu'à l'abscisse curviligne d.
+export function pathHead(path, d) {
+  const out = [];
+  for (const s of path) {
+    const l = segLen(s);
+    if (d >= l) { out.push(s); d -= l; continue; }
+    if (d > 1e-9) {
+      const p = segAt(s, d / l);
+      out.push(s.t === 'L' ? L(s.a, p) : A(s.c, s.r, s.sa, ang(sub(p, s.c)), s.ccw));
+    }
+    break;
+  }
+  return out;
+}
+
 // --- Intersections ---------------------------------------------------------------
 // Droites (p + t·d) et (q + u·e). Retourne t et le point, ou null si parallèles.
 export function lineLine(p, d, q, e) {
@@ -154,16 +169,18 @@ export function polyArea(poly) {
   return a / 2;
 }
 
-// Hachures parallèles (angle, espacement) limitées à un polygone fermé (règle pair-impair).
+// Hachures parallèles (angle, espacement) limitées à un polygone fermé, ou à plusieurs (trous compris),
+// selon la règle pair-impair.
 export function hatchPolygon(poly, angle, spacing) {
+  const polys = Array.isArray(poly[0]) ? poly : [poly];
   const d = unit(angle), nr = rot90(d);
   let mn = Infinity, mx = -Infinity;
-  for (const p of poly) { const v = dot(p, nr); if (v < mn) mn = v; if (v > mx) mx = v; }
+  for (const pl of polys) for (const p of pl) { const v = dot(p, nr); if (v < mn) mn = v; if (v > mx) mx = v; }
   const out = [];
   for (let c = Math.ceil(mn / spacing) * spacing; c <= mx; c += spacing) {
     const ts = [];
-    for (let i = 0; i < poly.length; i++) {
-      const p = poly[i], q = poly[(i + 1) % poly.length];
+    for (const pl of polys) for (let i = 0; i < pl.length; i++) {
+      const p = pl[i], q = pl[(i + 1) % pl.length];
       const vp = dot(p, nr) - c, vq = dot(q, nr) - c;
       if ((vp > 0) !== (vq > 0)) ts.push(dot(lerp(p, q, vp / (vp - vq)), d));
     }

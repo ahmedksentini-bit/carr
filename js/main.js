@@ -6,7 +6,8 @@ import { parseDXF, buildDxfGeometry } from './dxf-parse.js';
 import { DxfWriter } from './dxf-write.js';
 import { Viewer, THEMES, drawDesign, drawDxf, buildDxfCache, snapDxf, drawGrid, drawHud, niceStep } from './viewer.js';
 import { buildDesign, fmt, fmtGis } from './roundabout.js';
-import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan } from './norms.js';
+import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan, SECTION, sectionParams, TAD } from './norms.js';
+import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
 import { analyse, SITES } from './capacity.js';
 
@@ -58,6 +59,7 @@ function newProject(context = 'interurbain') {
     center: { auto: true, x: null, y: null },
     ring: { Rg: R.Rg, la: R.la, bf: R.bf, zC: 100, devers: R.devers, pente: 0, gisPente: 0, mode: 'aci' },
     plan: defaultPlan(context),
+    section: {}, // profil en travers : valeurs vides = valeurs par défaut du contexte (norms.SECTION)
     traffic: { period: 'HPM', site: context === 'urbain' ? 'urbain' : 'rase', uvpPL: 2, od: {}, pl: {}, qp: {}, tad: {} },
     branches: [],
     opts: { angleUnit: 'gon', textH: 0.8, theme: 'dark', vis: {}, dxfOpacity: 0.9 },
@@ -71,6 +73,7 @@ function migrate(p) {
     ring: { ...base.ring, ...p.ring }, opts: { ...base.opts, ...p.opts, vis: { ...(p.opts?.vis || {}) } },
     center: { ...base.center, ...p.center }, crs: { ...base.crs, ...p.crs }, bg: { ...base.bg, ...p.bg },
     plan: { ...base.plan, ...p.plan, tag: { ...base.plan.tag, ...p.plan?.tag } },
+    section: { ...p.section },
     traffic: { ...base.traffic, ...p.traffic, od: { ...p.traffic?.od }, pl: { ...p.traffic?.pl }, qp: { ...p.traffic?.qp }, tad: { ...p.traffic?.tad } },
   };
   delete out.view;
@@ -637,6 +640,7 @@ function buildStaticPanels() {
 
 function syncCtxUI() {
   const plan = isPlan(S.prj);
+  buildSectionFields();
   $$('#ctxSeg [data-ctx]').forEach((b) => b.classList.toggle('on', b.dataset.ctx === S.prj.context));
   $$('#kindSeg [data-kind]').forEach((b) => b.classList.toggle('on', b.dataset.kind === (S.prj.kind || 'giratoire')));
   $('#ctxNote').textContent = S.prj.context === 'interurbain'
@@ -674,7 +678,8 @@ function syncInputs() {
     const src = el.dataset.k ? S.prj : br;
     if (!src) continue;
     const v = getPath(src, el.dataset.k || el.dataset.bk);
-    if (el.type === 'checkbox') el.checked = !!v;
+    // Cases du profil en travers non renseignées : valeur par défaut du contexte.
+    if (el.type === 'checkbox') el.checked = !!(v ?? (el.dataset.k?.startsWith('section.') ? sectionParams(S.prj)[el.dataset.k.slice(8)] : v));
     else if (el.tagName === 'SELECT') el.value = v ?? '';
     else el.value = el.dataset.type === 'text' ? v ?? '' : showNum(typeof v === 'number' ? +v.toFixed(4) : v);
   }
@@ -741,6 +746,7 @@ function refreshPanels() {
   refreshChecks();
   refreshPoints();
   refreshCapacity();
+  refreshProfile();
   setPrompt();
 }
 
@@ -816,6 +822,10 @@ function renderBranchForm() {
       <h4>Terre-plein central (TPC)</h4>
       <label class="chk"><input type="checkbox" data-bk="tpc.on"> Branche à chaussées séparées (TPC)</label>
       ${fld('tpc.width', 'Largeur du TPC', 'm', { branch: true })}
+      <h4>Voie directe de tourne-à-droite (vers la branche suivante)</h4>
+      <label class="chk"><input type="checkbox" data-tadb="${b.id}" ${S.prj.traffic.tad?.[b.id] ? 'checked' : ''}> Dessiner une voie directe de tourne-à-droite</label>
+      ${fld('tadR', 'Rayon en axe de la chaussée', 'm', { branch: true, ph: showNum(TAD[S.prj.context].R) })}
+      ${fld('tadW', 'Largeur de la chaussée', 'm', { branch: true, ph: showNum(TAD[S.prj.context].w) })}
       ${profile('l\'anneau')}`;
   }
   syncInputs();
@@ -956,6 +966,38 @@ function refreshPoints() {
     : '<tbody><tr><td class="note">Aucun point : dessinez les branches.</td></tr></tbody>';
 }
 
+// --------------------------------------------------------- Profil en travers
+function buildSectionFields() {
+  const d = SECTION[S.prj.context], urb = S.prj.context === 'urbain';
+  const f = (k, label, unit) => fld('section.' + k, label, unit, { ph: showNum(d[k]) });
+  $('#sectionFields').innerHTML =
+    '<h3>Rives et bandes dérasées</h3>' +
+    '<label class="chk"><input type="checkbox" data-k="section.rive"> Rives peintes (marquage de rive)</label>' +
+    f('bdd', 'BDD — bord extérieur (anneau et branches)', 'm') +
+    f('bdgRing', 'BDG de l\'anneau — côté îlot central', 'm') +
+    f('bdgBr', 'BDG des branches — côté îlots séparateurs', 'm') +
+    (urb
+      ? '<h3>Abords urbains (largeurs en plan)</h3>' + f('caniveau', 'Caniveau', 'm') + f('bordure', 'Bordure', 'm') +
+        f('trottoir', 'Trottoir', 'm') + f('cBordure', 'Contre-bordure de fin de trottoir', 'm') +
+        f('bordureVue', 'Vue de la bordure de trottoir', 'm') + f('trottoirPente', 'Pente du trottoir vers la chaussée', '%')
+      : '<h3>Accotement</h3>' + f('berme', 'Berme (au-delà de la BDD)', 'm') + f('bermePente', 'Pente de la berme', '%')) +
+    '<h3>Îlot central et bande franchissable</h3>' + f('bfPente', 'Pente de la bande franchissable', '%') +
+    f('bfVue', 'Vue de la bordure de la bande franchissable', 'm') + f('ilotVue', 'Vue de la bordure de l\'îlot central', 'm') +
+    '<h3>Axes des branches</h3>' + f('axeR', 'Rayon de raccordement à l\'axe saisi', 'm');
+}
+
+function refreshProfile() {
+  const host = $('#profileSvg');
+  if (isPlan(S.prj) || !S.D?.ok) { host.innerHTML = '<p class="note">Profil type disponible pour les giratoires.</p>'; return; }
+  host.innerHTML = profileSVG(ringProfile(S.prj, S.D));
+}
+
+function exportProfileDXF() {
+  if (isPlan(S.prj) || !S.D?.ok) { toast('Profil type disponible pour les giratoires.', 'warn'); return; }
+  const txt = profileDXF(ringProfile(S.prj, S.D), `Profil en travers type de l'anneau — ${S.prj.name}`);
+  download(fname('dxf').replace(/\.dxf$/, '_profil_type.dxf'), txt, 'application/dxf');
+}
+
 // --------------------------------------------------------- Capacité
 // Entrées du giratoire dans le sens de giration, avec la géométrie utile au calcul de capacité.
 function capEntries() {
@@ -996,8 +1038,10 @@ function refreshCapacity() {
         `<td><input type="checkbox" data-tad="${o}" ${T.tad?.[o] ? 'checked' : ''}></td></tr>`).join('') +
       '</tbody>';
   }
-  const ring = { R: S.D.Rb, bf: S.D.bf, la: S.D.la };
+  // Girabase : R = îlot infranchissable, LA = largeur roulable de l'anneau (rives + BDG + BDD).
+  const ring = { R: S.D.Rb, bf: S.D.bf, la: S.D.la + S.D.sec.bdgRing + S.D.sec.bdd };
   const { res, consts } = analyse(T, ring, entries);
+  for (const c of $$('[data-tad]')) c.checked = !!T.tad?.[c.dataset.tad];
   const n0 = (v) => (Number.isFinite(v) ? v.toFixed(0) : '—');
   const rows = entries.map((e) => {
     const r = res.get(e.id);
@@ -1051,13 +1095,16 @@ function bindUI() {
       else T.tad = { ...T.tad, [t.dataset.tad]: t.checked };
       if (t.dataset.tad) update({ commit: false }); // la voie directe modifie aussi le dessin
       else { refreshCapacity(); autosave(); }
+    } else if (t.dataset.tadb) {
+      S.prj.traffic.tad = { ...S.prj.traffic.tad, [t.dataset.tadb]: t.checked };
+      update({ commit: false });
     } else if (t.dataset.vis) {
       S.prj.opts.vis[t.dataset.vis] = t.checked; viewer.invalidate(); autosave();
     }
   });
   panel.addEventListener('change', (e) => {
     if (e.target.dataset.k || e.target.dataset.bk) { commitHistory(); syncInputs(); }
-    if (e.target.dataset.od || e.target.dataset.pl || e.target.dataset.qp || e.target.dataset.tad) commitHistory();
+    if (e.target.dataset.od || e.target.dataset.pl || e.target.dataset.qp || e.target.dataset.tad || e.target.dataset.tadb) commitHistory();
   });
   panel.addEventListener('click', (e) => {
     const li = e.target.closest('#branchList li[data-bi]');
@@ -1093,6 +1140,8 @@ function bindUI() {
   $('#prjName').addEventListener('change', (e) => { S.prj.name = e.target.value.trim() || 'Giratoire'; commitHistory(); autosave(); });
   $('#btnRingDefaults').addEventListener('click', applyGuideValues);
   $('#btnAddBranch').addEventListener('click', () => setTool('axis'));
+  $('#btnPlaceCenter').addEventListener('click', () => setTool('center'));
+  $('#btnProfilDxf').addEventListener('click', exportProfileDXF);
   $('#btnApplyAll').addEventListener('click', applyToAll);
 
   $('#geoGo').addEventListener('click', () => geoSearch($('#geoQ').value));
@@ -1144,6 +1193,7 @@ function setContext(c) {
     const P = PRESETS[c];
     Object.assign(S.prj.ring, { Rg: P.ring.Rg, la: P.ring.la, bf: P.ring.bf, devers: P.ring.devers });
     S.prj.plan = { ...defaultPlan(c), main: S.prj.plan?.main || ['', ''] };
+    S.prj.section = {}; // profil en travers : valeurs par défaut du nouveau contexte
     S.prj.traffic.site = c === 'urbain' ? 'urbain' : 'rase';
     resetBranchDefaults();
   }
