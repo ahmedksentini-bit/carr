@@ -12,6 +12,7 @@ import { buildApproach, crossLine } from './approach.js';
 import { buildPlan } from './plan.js';
 import { buildBypass } from './bypass.js';
 import { makeDims } from './dims.js';
+import { crossing, crossingPrims, cutAtX, polyOf, closedSegs } from './crossing.js';
 
 const { add, sub, mul, dot, norm, rot90, neg, ang, polar, L, A } = G;
 const num = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
@@ -102,6 +103,14 @@ function buildRoundabout(prj, ext = {}) {
     // Rives (peinture) et bords de chaussée, de l'extrémité de la branche jusqu'à la tangence sur l'anneau.
     en.edge = G.offsetPath(en.curb, -sec.bdd);
     ex.edge = G.offsetPath(ex.curb, sec.bdd);
+    // Passage piéton à ppRecul de la ligne de cédez-le-passage, îlot séparateur coupé en refuge.
+    let cross = null;
+    if (sec.pp) {
+      const xc = x0 + sec.ppRecul + sec.ppW / 2, hi = cutAtX(en.edge, xc), lo = cutAtX(ex.edge, xc), I = ap.island;
+      if (hi && lo && xc + sec.ppW / 2 < xEnd) {
+        cross = crossing(xc, sec.ppW, lo, hi, { islands: I?.outline && I.closed ? [polyOf(I.outline)] : [], painted: I?.hatch || [] });
+      } else issues.push({ lvl: 'info', bi: idx, msg: `${name} : passage piéton non dessiné (branche trop courte).` });
+    }
     const full = (contPath, local) => [...G.revPath(contPath), ...Wp(local)];
     const side = (sd, s, wa) => {
       const paintW = full(off(s * (th + wa)), sd.curb), edgeW = full(off(s * (th + wa + sec.bdd)), sd.edge);
@@ -117,6 +126,7 @@ function buildRoundabout(prj, ext = {}) {
       island = {
         outline: I.outline && Wp(I.outline), curb: I.curb && Wp(I.curb), closed: I.closed, paint: I.paint.map(Wp),
         hatch: I.hatch && I.hatch.map((poly) => poly.map(W)), tip: I.tip && W(I.tip), headIn: W(I.headIn), headOut: W(I.headOut),
+        pieces: cross?.pieces[0] ? cross.pieces[0].map((poly) => Wp(closedSegs(poly))) : null,
       };
       // TPC : îlot en saillie et rives prolongés le long de l'axe courbe.
       if (th > 0 && cont && island.curb) {
@@ -131,7 +141,7 @@ function buildRoundabout(prj, ext = {}) {
     const bd = {
       idx, id: b.id, name, role: 'branche', theta, u, n, a, ai, x0, xT, xEnd, h, b: isl.b, hb, th, isl, W, Ws, Wp, cont,
       entry: side(en, 1, wIn), exit: side(ex, -1, wOut),
-      island, yieldStart: yl?.a, yieldEnd: yl?.b, exitStart: xl?.a, exitEnd: xl?.b, gis: fmtGis(theta, unit),
+      island, cross, yieldStart: yl?.a, yieldEnd: yl?.b, exitStart: xl?.a, exitEnd: xl?.b, gis: fmtGis(theta, unit),
       farAxis: cont ? G.segEnd(cont[cont.length - 1]) : W({ x: xEnd, y: a }),
       farDir: cont ? norm(sub(G.segEnd(cont[cont.length - 1]), G.segAt(cont[cont.length - 1], 0.98))) : u,
     };
@@ -233,7 +243,7 @@ function buildRoundabout(prj, ext = {}) {
   bds.forEach((bd, i) => outer.push(L(bd.exit.F, bd.entry.F), ...sectors[i]));
   const rings = bds.length ? [outer] : [[{ t: 'C', c: O, r: Rpo }]];
   rings.push([{ t: 'C', c: O, r: Rpi }]);
-  bds.forEach((bd) => { if (bd.island?.outline) rings.push(bd.island.outline); });
+  bds.forEach((bd) => { if (bd.island?.outline) rings.push(...(bd.island.pieces || [bd.island.outline])); });
   for (const r of bpFrom.values()) rings.push(r.island);
   P({ k: 'fill', L: 'CHAUSSEE', rings, role: 'chaussee' });
   if (bf > 0 && Rb > 0) P({ k: 'fill', L: 'ILOT_CENTRAL', rings: [[{ t: 'C', c: O, r: Rpi }], [{ t: 'C', c: O, r: Rb }]], role: 'franchissable' });
@@ -269,12 +279,15 @@ function buildRoundabout(prj, ext = {}) {
     const I = bd.island;
     if (I) {
       if (I.outline) {
-        P({ k: 'fill', L: 'ILOT_SEP', rings: [I.outline], role: 'ilot' });
-        P({ k: 'path', L: 'ILOT_SEP', segs: I.curb, closed: I.closed });
-        if (prj.context === 'urbain' && sec.bordure > 0 && I.closed) {
-          const inward = G.polyArea(G.samplePath(I.outline, 1)) > 0 ? sec.bordure : -sec.bordure;
-          const o = G.offsetPath(I.outline, inward);
-          if (o.length) P({ k: 'path', L: 'TROTTOIR', segs: o, closed: true });
+        // Îlot entier, ou ses deux parties de part et d'autre du refuge du passage piéton.
+        for (const part of I.pieces || [I.outline]) {
+          P({ k: 'fill', L: 'ILOT_SEP', rings: [part], role: 'ilot' });
+          P({ k: 'path', L: 'ILOT_SEP', segs: I.pieces ? part : I.curb, closed: I.closed });
+          if (prj.context === 'urbain' && sec.bordure > 0 && I.closed) {
+            const inward = G.polyArea(G.samplePath(part, 1)) > 0 ? sec.bordure : -sec.bordure;
+            const o = G.offsetPath(part, inward);
+            if (o.length) P({ k: 'path', L: 'TROTTOIR', segs: o, closed: true });
+          }
         }
       }
       if (sec.rive || isl.type === 'peint') {
@@ -282,6 +295,7 @@ function buildRoundabout(prj, ext = {}) {
         if (I.hatch) P({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(I.hatch, bd.theta + Math.PI / 4, 1.0), wm: 0.12 });
       }
     }
+    if (bd.cross) crossingPrims(bd.cross, W, sec, sec.pmr).forEach(P);
     // Triangle de construction
     if (isl.type !== 'aucun' && !bd.th) {
       const t1 = W({ x: x0, y: ai + isl.b / 2 }), t2 = W({ x: xT, y: ai }), t3 = W({ x: x0, y: ai - isl.b / 2 });
@@ -322,7 +336,8 @@ function buildRoundabout(prj, ext = {}) {
     }
     // Cotations de branche : largeurs le / ls entre rives, rayons Re / Rs, nom et gisement.
     for (const sd of [bd.entry, bd.exit]) {
-      const xs = G.clamp(sd.fil.Tl.x + 2, x0 + 2, Math.max(x0 + 2, xT - 2));
+      // Au-delà du passage piéton s'il y en a un.
+      const xs = Math.max(G.clamp(sd.fil.Tl.x + 2, x0 + 2, Math.max(x0 + 2, xT - 2)), bd.cross ? bd.cross.x2 + 1.5 : -Infinity);
       const pIsl = add(sd.H, mul(sd.dI, (xs - sd.H.x) / sd.dI.x));
       const mOut = sd.s > 0 ? rot90(sd.dI) : neg(rot90(sd.dI));
       const [p1, p2] = sd.s > 0 ? [pIsl, add(pIsl, mul(mOut, sd.w))] : [add(pIsl, mul(mOut, sd.w)), pIsl];

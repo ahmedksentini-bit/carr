@@ -31,7 +31,12 @@ ou sur un fond topographique DXF.
   séparateur : enveloppe peinte = triangle de construction, îlot en saillie en retrait de la BDG, zébra en pointe.
 - **Abords** : caniveau, bordure, trottoir et contre-bordure en urbain, berme en interurbain, cotés sur le plan ;
   **profil en travers type** de l'anneau généré automatiquement (onglet Profil, export DXF), avec les vues de
-  bordures (3 cm bande franchissable, 6 cm îlot central) et les pentes.
+  bordures (3 cm bande franchissable, 6 cm îlot central) et les pentes. Trottoirs colorés ; abords aussi le long des
+  carrefours en T et en X.
+- **Passages piétons et PMR (urbain)** : sur chaque branche, à 5 m en retrait du cédez-le-passage (ou du bord de la
+  principale), largeur 2,50 m (IISR : bandes de 0,50 m) ; îlot séparateur coupé en refuge ; sur la route principale
+  des T et X, de part et d'autre du débouché, îlot central coupé. Abaissés de trottoir (plan incliné à 8 %, ressaut de
+  2 cm) et bandes d'éveil de vigilance de 0,42 m à 0,50 m du nez de bordure (calque `GIRA_PMR`). Réglages : onglet Profil.
 - **Branches** : alignement droit dirigé vers le centre près de l'anneau, puis raccordement à l'axe saisi, qu'elles
   suivent jusqu'au bout (polylignes à plusieurs segments). Le centre se place sur la carte (outil C) ou se déplace
   à la souris ; les branches se réorientent vers lui. Rayon de raccordement de l'axe réglable par branche ; poignées
@@ -72,12 +77,14 @@ js/capacity.js      trafic HPM et capacité des entrées (modèle de type Giraba
 js/capacity-plan.js capacité des carrefours plans à priorité (T, X)
 js/bypass.js        voie directe de tourne-à-droite (by-pass)
 js/dims.js          cotations de type DAO
+js/crossing.js      passages piétons, abaissés de trottoir et bandes d'éveil de vigilance
 js/profile.js       profil en travers type de l'anneau (SVG, DXF)
 js/viewer.js        rendu canvas (projet, DXF, HUD)
 js/geom.js          géométrie (droites, arcs, raccordements, décalages)
 js/dxf-parse.js     lecture DXF        js/dxf-write.js   écriture DXF R12
 js/crs.js           systèmes de coordonnées   js/tiles.js   fonds en tuiles
 serve.ps1           serveur local de test (Windows, sans Node ni Python)
+tools/version.sh    estampille les URL des JS / CSS dans index.html (à lancer avant chaque commit)
 ```
 
 ## Tester en local
@@ -93,7 +100,14 @@ puis ouvrir http://localhost:8765/.
 ## Mise en ligne
 
 Site public : **https://carr.ksr-infra.org/** — Cloudflare Pages, projet `carr` relié à ce dépôt : chaque poussée
-sur `main` est déployée automatiquement (adresse technique : carr-7z1.pages.dev). Pour un autre hébergement :
+sur `main` est déployée automatiquement (adresse technique : carr-7z1.pages.dev).
+
+Le domaine ksr-infra.org applique un cache navigateur de 4 h aux fichiers `.js` et `.css` (réglage Cloudflare
+« Browser Cache TTL »). Pour que chaque mise en ligne soit prise tout de suite, `index.html` (non mis en cache) charge
+les modules par une *import map* avec une empreinte `?v=` : lancer `bash tools/version.sh` avant chaque commit qui
+modifie `js/` ou `css/`. On peut aussi régler « Browser Cache TTL » sur « Respect Existing Headers ».
+
+Pour un autre hébergement :
 
 1. Copier tout le dossier (sauf `serve.ps1` et `.claude/`) à la racine du sous-domaine, en HTTPS.
 2. Le serveur doit servir les `.js` avec le type `text/javascript` (cas par défaut d'Apache / Nginx / hébergements mutualisés).

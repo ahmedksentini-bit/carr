@@ -1065,6 +1065,10 @@ function buildSectionFields() {
         f('trottoir', 'Trottoir', 'm') + f('cBordure', 'Contre-bordure de fin de trottoir', 'm') +
         f('bordureVue', 'Vue de la bordure de trottoir', 'm') + f('trottoirPente', 'Pente du trottoir vers la chaussée', '%')
       : '<h3>Accotement</h3>' + f('berme', 'Berme (au-delà de la BDD)', 'm') + f('bermePente', 'Pente de la berme', '%')) +
+    '<h3>Passages piétons et PMR</h3>' +
+    '<label class="chk"><input type="checkbox" data-k="section.pp"> Passages piétons sur les branches</label>' +
+    f('ppW', 'Largeur du passage (IISR : 2,50 m mini)', 'm') + f('ppRecul', 'Recul depuis le cédez-le-passage / le bord de la principale', 'm') +
+    '<label class="chk"><input type="checkbox" data-k="section.pmr"> Abaissés de trottoir et bandes d\'éveil de vigilance (PMR)</label>' +
     '<h3>Îlot central et bande franchissable</h3>' + f('bfPente', 'Pente de la bande franchissable', '%') +
     f('bfVue', 'Vue de la bordure de la bande franchissable', 'm') + f('ilotVue', 'Vue de la bordure de l\'îlot central', 'm') +
     '<h3>Axes des branches</h3>' + f('axeR', 'Rayon de raccordement à l\'axe saisi', 'm');

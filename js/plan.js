@@ -4,11 +4,12 @@
 // tourne-à-gauche (TAG) et l'îlot central. Les branches secondaires sont construites comme les branches d'un
 // giratoire (approach.js), la cible étant le bord de la chaussée principale.
 import * as G from './geom.js';
-import { islandDims, planParams, secondaryAuto, sideBands } from './norms.js';
+import { islandDims, planParams, secondaryAuto, sectionParams, sideBands } from './norms.js';
 import { addDeversPlan } from './devers.js';
 import { fmt, fmtGis, upright, autoCenter, branchDirection, frame, sideBandPrims } from './common.js';
 import { buildApproach, crossLine, targetX0 } from './approach.js';
 import { makeDims } from './dims.js';
+import { crossing, crossingPrims, cutAtX, polyOf, closedSegs } from './crossing.js';
 
 const { add, sub, mul, dot, norm, rot90, neg, ang, L } = G;
 const pick = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
@@ -52,7 +53,7 @@ function orient(ring, hole) {
 const closedPath = (pts) => pts.map((p, i) => L(p, pts[(i + 1) % pts.length]));
 
 export function buildPlan(prj) {
-  const kind = prj.kind, P = planParams(prj);
+  const kind = prj.kind, P = planParams(prj), sec = sectionParams(prj);
   const unit = prj.opts?.angleUnit || 'gon';
   const TH = +prj.opts?.textH || 0.8;
   const issues = [], prims = [], points = [], bds = [];
@@ -146,10 +147,18 @@ export function buildPlan(prj) {
     if (!ap) continue;
     const { W, Wp } = fr;
     const { en, ex } = ap;
+    // Passage piéton à ppRecul du bord de la principale, îlot coupé en refuge.
+    let cross = null;
+    if (sec.pp) {
+      const xc = x0 + sec.ppRecul + sec.ppW / 2, hi = cutAtX(en.curb, xc), lo = cutAtX(ex.curb, xc), I = ap.island;
+      if (hi && lo && xc + sec.ppW / 2 < xEnd) cross = crossing(xc, sec.ppW, lo, hi, { islands: I?.outline ? [polyOf(I.outline)] : [], painted: I?.hatch || [] });
+      else issues.push({ lvl: 'info', bi: idx, msg: `${name} : passage piéton non dessiné (branche trop courte).` });
+    }
     const island = ap.island && {
       outline: ap.island.outline && Wp(ap.island.outline), curb: ap.island.curb && Wp(ap.island.curb), closed: ap.island.closed,
       paint: ap.island.paint.map(Wp), hatch: ap.island.hatch && ap.island.hatch.map((poly) => poly.map(W)),
       tip: ap.island.tip && W(ap.island.tip), headIn: W(ap.island.headIn), headOut: W(ap.island.headOut),
+      pieces: cross?.pieces[0] ? cross.pieces[0].map((poly) => Wp(closedSegs(poly))) : null,
     };
     const stop = crossLine(en, target, 0.25), stopX = crossLine(ex, target, 0.25);
     const bd = {
@@ -157,7 +166,7 @@ export function buildPlan(prj) {
       W, Ws: fr.Ws, Wp, target,
       entry: { ...en, curbW: Wp(en.curb), Tc: W(en.fil.Tc), Tl: W(en.fil.Tl), C: W(en.fil.C), F: W(en.F) },
       exit: { ...ex, curbW: Wp(ex.curb), Tc: W(ex.fil.Tc), Tl: W(ex.fil.Tl), C: W(ex.fil.C), F: W(ex.F) },
-      island, stop: stop && { a: W(stop.a), b: W(stop.b) }, stopX: stopX && { a: W(stopX.a), b: W(stopX.b) },
+      island, cross, stop: stop && { a: W(stop.a), b: W(stop.b) }, stopX: stopX && { a: W(stopX.a), b: W(stopX.b) },
       gis: fmtGis(fr.theta, unit), angle: Math.acos(G.clamp(Math.abs(dot(s.u, uM)), 0, 1)),
     };
     const xs = [toM(bd.entry.Tc).x, toM(bd.exit.Tc).x];
@@ -207,8 +216,9 @@ export function buildPlan(prj) {
     const M = G.lerp(pts[pts.length - 1], pts[0], 0.5), q = [M, ...pts, M];
     return G.roundPolyline(q, q.map((_, i) => (i > 0 && i < q.length - 1 ? r : 0)));
   };
-  const centralIsland = (env, raisedPart) => {
-    const w = env.map((p) => toW(p.x, p.y));
+  // Îlots centraux : enveloppe peinte tracée tout de suite ; partie en saillie et zébra après les passages piétons.
+  const centrals = [];
+  const centralIsland = (env, raisedPart, side) => {
     MK([...env, env[0]]);
     let raised = null;
     if (P.tag.raised && raisedPart) {
@@ -216,26 +226,21 @@ export function buildPlan(prj) {
       if (!inner) issues.push({ lvl: 'warn', msg: 'Îlot central trop étroit pour être en saillie : seule l\'enveloppe peinte est dessinée.' });
       else raised = roundedClosed(inner, 0.75);
     }
-    // Zébra sur la partie peinte seulement (nez du biseau, bandes autour de l'îlot en saillie).
-    const rings = raised ? [w, G.samplePath(raised, 0.3)] : w;
-    Pp({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(rings, ang(uM) + Math.PI / 4, 1.0), wm: 0.12 });
-    if (!raised) return;
-    Pp({ k: 'fill', L: 'ILOT_SEP', rings: [raised], role: 'ilot' });
-    Pp({ k: 'path', L: 'ILOT_SEP', segs: raised, closed: true });
-    holes.push(raised);
+    centrals.push({ env, raised, side });
   };
   const sideMarks = (hasTag, len, f) => {
+    const side = f(-1, 0).x < 0 ? -1 : 1;
     const Xal = -len, Xpre = Xal - Ldep - Lpre;
     // L'îlot en saillie suit l'enveloppe peinte dans le biseau jusqu'à ce qu'il ne reste qu'1 m de large.
     const Xcut = Math.min(Xal, Xpre + ((1 + 0.6) / c) * (Xal - Xpre)), hc = ((c / 2) * (Xcut - Xpre)) / (Xal - Xpre);
     if (hasTag) {
       const Xd = -Lm, Xc = Xd - Ls, Xs = Xc - Lsif;
       const env = [f(Xpre, 0), f(Xal, c / 2), f(Xd, c / 2), f(Xd, c / 2 - a), f(Xc, c / 2 - a), f(Xs, -c / 2), f(Xal, -c / 2)];
-      centralIsland(env, a >= 1.2 ? [f(Xcut, hc), ...env.slice(1), f(Xcut, -hc)] : null);
+      centralIsland(env, a >= 1.2 ? [f(Xcut, hc), ...env.slice(1), f(Xcut, -hc)] : null, side);
       MK([f(Xs, -c / 2), f(Xd, -c / 2)], T3); // séparation voie directe / TAG
     } else {
       const env = [f(-Lm, c / 2), f(Xal, c / 2), f(Xpre, 0), f(Xal, -c / 2), f(-Lm, -c / 2)];
-      centralIsland(env, [f(-Lm, c / 2), f(Xal, c / 2), f(Xcut, hc), f(Xcut, -hc), f(Xal, -c / 2), f(-Lm, -c / 2)]);
+      centralIsland(env, [f(-Lm, c / 2), f(Xal, c / 2), f(Xcut, hc), f(Xcut, -hc), f(Xal, -c / 2), f(-Lm, -c / 2)], side);
     }
     return Xpre;
   };
@@ -250,6 +255,40 @@ export function buildPlan(prj) {
     MK([{ x: Lm + 30, y: 0 }, { x: LB, y: 0 }], T1);
   }
 
+  // Passages piétons de la route principale, de part et d'autre du débouché (repère principal) ; l'îlot central
+  // en saillie est coupé en refuge et le zébra s'interrompt au droit du passage.
+  const mainCross = [];
+  const asPath = (pts) => pts.slice(1).map((p, i) => L(pts[i], p));
+  if (sec.pp) {
+    for (const side of [-1, 1]) {
+      const Xc = side * (Lm + sec.ppRecul + sec.ppW / 2);
+      if (Math.abs(Xc) + sec.ppW / 2 > (side < 0 ? LA : LB) - 2) continue;
+      const hi = cutAtX(asPath(edges[1]), Xc), lo = cutAtX(asPath(edges[-1]), Xc);
+      if (!hi || !lo) continue;
+      const mine = centrals.filter((ci) => ci.side === side), withRaised = mine.filter((ci) => ci.raised);
+      const cr = crossing(Xc, sec.ppW, lo, hi, { islands: withRaised.map((ci) => polyOf(ci.raised).map(toM)), painted: mine.map((ci) => ci.env) });
+      withRaised.forEach((ci, k) => { if (cr.pieces[k]) ci.pieces = cr.pieces[k]; });
+      mine.forEach((ci, k) => {
+        const r = cr.painted[k];
+        if (r) ci.strip = [{ x: cr.x1, y: r[0] }, { x: cr.x2, y: r[0] }, { x: cr.x2, y: r[1] }, { x: cr.x1, y: r[1] }];
+      });
+      mainCross.push(cr);
+    }
+  }
+  // Îlots centraux : zébra sur la partie peinte seulement, îlot en saillie (entier ou de part et d'autre du refuge).
+  const toWp = (p) => toW(p.x, p.y);
+  for (const ci of centrals) {
+    const parts = ci.pieces ? ci.pieces.map((poly) => closedSegs(poly.map(toWp))) : ci.raised ? [ci.raised] : [];
+    const rings = [ci.env.map(toWp), ...parts.map((s) => G.samplePath(s, 0.3)), ...(ci.strip ? [ci.strip.map(toWp)] : [])];
+    Pp({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(rings, ang(uM) + Math.PI / 4, 1.0), wm: 0.12 });
+    for (const s of parts) {
+      Pp({ k: 'fill', L: 'ILOT_SEP', rings: [s], role: 'ilot' });
+      Pp({ k: 'path', L: 'ILOT_SEP', segs: s, closed: true });
+      holes.push(s);
+    }
+  }
+  for (const cr of mainCross) crossingPrims(cr, toWp, sec, sec.pmr).forEach(Pp);
+
   // Remplissage chaussée (union à règle non nulle ; îlots en trous)
   const rnd = (pts) => { const w = pts.map((p) => toW(p.x, p.y)); return G.roundPolyline(w, w.map((_, i) => (i > 0 && i < w.length - 1 ? RT : 0))); };
   const low = rnd(edges[-1]), up = G.revPath(rnd(edges[1]));
@@ -258,7 +297,7 @@ export function buildPlan(prj) {
   for (const bd of bds) {
     if (bd.role !== 'secondaire') continue;
     rings.push(orient([...G.revPath(bd.exit.curbW), L(bd.exit.F, bd.entry.F), ...bd.entry.curbW, L(bd.entry.Tc, bd.exit.Tc)], false));
-    if (bd.island?.outline) rings.push(orient(bd.island.outline, true));
+    if (bd.island?.outline) for (const part of bd.island.pieces || [bd.island.outline]) rings.push(orient(part, true));
   }
   Pp({ k: 'fill', L: 'CHAUSSEE', rings, role: 'chaussee', rule: 'nonzero' });
 
@@ -295,20 +334,24 @@ export function buildPlan(prj) {
     if (bd.island) {
       // Enveloppe peinte (triangle de construction), zébra, îlot en saillie en retrait de la BDG.
       if (bd.island.outline) {
-        Pp({ k: 'fill', L: 'ILOT_SEP', rings: [bd.island.outline], role: 'ilot' });
-        Pp({ k: 'path', L: 'ILOT_SEP', segs: bd.island.curb, closed: true });
+        for (const part of bd.island.pieces || [bd.island.outline]) {
+          Pp({ k: 'fill', L: 'ILOT_SEP', rings: [part], role: 'ilot' });
+          Pp({ k: 'path', L: 'ILOT_SEP', segs: bd.island.pieces ? part : bd.island.curb, closed: true });
+        }
       }
       for (const p of bd.island.paint) if (p.length) Pp({ k: 'path', L: 'MARQUAGE', segs: p, wm: 0.15 });
       if (bd.island.hatch) Pp({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(bd.island.hatch, bd.theta + Math.PI / 4, 1.0), wm: 0.12 });
       const t1 = W({ x: x0, y: isl.b / 2 }), t2 = W({ x: xT, y: 0 }), t3 = W({ x: x0, y: -isl.b / 2 });
       Pp({ k: 'path', L: 'CONSTRUCTION', segs: [L(t1, t2), L(t2, t3), L(t3, t1)] });
     }
+    if (bd.cross) crossingPrims(bd.cross, W, sec, sec.pmr).forEach(Pp);
     // Cotations de la branche, comme au giratoire : largeurs le / ls perpendiculaires aux voies, en amont du
     // raccordement, et rayons Re / Rs par flèche sur l'arc.
     for (const sd of [bd.entry, bd.exit]) {
       Pp({ k: 'cross', L: 'CONSTRUCTION', p: sd.C, size: 0.8 });
       Pp({ k: 'path', L: 'CONSTRUCTION', segs: [L(sd.C, sd.Tc), L(sd.C, sd.Tl)] });
-      const xs = G.clamp(sd.fil.Tl.x + 2, x0 + 2, Math.max(x0 + 2, xT - 2));
+      // Au-delà du passage piéton s'il y en a un.
+      const xs = Math.max(G.clamp(sd.fil.Tl.x + 2, x0 + 2, Math.max(x0 + 2, xT - 2)), bd.cross ? bd.cross.x2 + 1.5 : -Infinity);
       const pIsl = add(sd.H, mul(sd.dI, (xs - sd.H.x) / sd.dI.x));
       const mOut = sd.s > 0 ? rot90(sd.dI) : neg(rot90(sd.dI));
       const [p1, p2] = sd.s > 0 ? [pIsl, add(pIsl, mul(mOut, sd.w))] : [add(pIsl, mul(mOut, sd.w)), pIsl];

@@ -9,6 +9,7 @@ export const LAYERS = {
   ILOT_CENTRAL: { label: 'Îlot central', dxf: 'GIRA_ILOT_CENTRAL', aci: 3 },
   ILOT_SEP: { label: 'Îlots séparateurs / TPC', dxf: 'GIRA_ILOT_SEPARATEUR', aci: 3 },
   MARQUAGE: { label: 'Marquage', dxf: 'GIRA_MARQUAGE', aci: 7 },
+  PMR: { label: "Abaissés de trottoir, bandes d'éveil (PMR)", dxf: 'GIRA_PMR', aci: 2 },
   CONSTRUCTION: { label: 'Construction', dxf: 'GIRA_CONSTRUCTION', aci: 8, ltype: 'CONSTRUCTION' },
   LIMITE: { label: 'Limites de projet', dxf: 'GIRA_LIMITE', aci: 8, ltype: 'TIRETS' },
   COTATION: { label: 'Cotations', dxf: 'GIRA_COTATION', aci: 4 },
