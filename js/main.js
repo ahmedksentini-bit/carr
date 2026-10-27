@@ -10,6 +10,7 @@ import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, 
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
 import { analyse, SITES } from './capacity.js';
+import { analysePlan, gapParams, GAPS } from './capacity-plan.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -631,8 +632,15 @@ function buildStaticPanels() {
     '<div data-for="giratoire">' +
     sel('ring.mode', 'Calage de l\'anneau', [['aci', 'Dévers constant, rive ext. dans la pente (ACI)'], ['cone', 'Cône posé sur le plan incliné']], { branch: false }) + '</div>';
   $('[data-k="ring.devers"]').disabled = true; // 1,5 % imposé
-  $('#capFields').innerHTML = sel('traffic.site', 'Milieu', Object.entries(SITES).map(([k, s]) => [k, s.label]), { branch: false }) +
-    fld('traffic.uvpPL', 'Équivalence d\'un poids lourd', 'uvp');
+  $('#capFields').innerHTML = '<div data-for="giratoire">' +
+    sel('traffic.site', 'Milieu', Object.entries(SITES).map(([k, s]) => [k, s.label]), { branch: false }) + '</div>' +
+    fld('traffic.uvpPL', 'Équivalence d\'un poids lourd', 'uvp') +
+    '<div data-for="plan"><h3>Créneaux critiques tg et temps de suivi tf</h3>' +
+    '<p class="note">Valeurs de base de l\'HCM (vides = automatiques, selon le nombre de voies et le type T / X).</p>' +
+    '<table class="pts gaps"><thead><tr><th>Mouvement</th><th>tg (s)</th><th>tf (s)</th></tr></thead><tbody>' +
+    Object.entries(GAPS).map(([k, g]) => `<tr><td>${esc(g.label)}</td>` +
+      ['tg', 'tf'].map((t) => `<td><input class="odc" data-k="traffic.gaps.${k}.${t}" type="text" inputmode="decimal" autocomplete="off"></td>`).join('') + '</tr>').join('') +
+    '</tbody></table></div>';
   $('#visLayers').innerHTML = Object.entries(LAYERS).map(([k, l]) =>
     `<label class="chk"><input type="checkbox" data-vis="${k}"> ${esc(l.label)}</label>`).join('');
   syncCtxUI(); syncCrsUI(); syncInputs();
@@ -650,7 +658,7 @@ function syncCtxUI() {
   $('#tabRingBtn').textContent = plan ? 'Carrefour' : 'Anneau';
   $('#ringPane').hidden = plan;
   $('#planPane').hidden = !plan;
-  $$('#deversFields [data-for]').forEach((el) => (el.hidden = (el.dataset.for === 'plan') !== plan));
+  $$('#deversFields [data-for], #capFields [data-for]').forEach((el) => (el.hidden = (el.dataset.for === 'plan') !== plan));
   $('#dvHead').textContent = plan ? 'Route principale' : 'Anneau';
   $('#dvChartHead').textContent = plan ? 'Profil en long de la route principale' : 'Profil en long des bords de l\'anneau';
 }
@@ -1015,34 +1023,64 @@ function capEntries() {
   });
 }
 
-function refreshCapacity() {
-  const entries = capEntries(), T = S.prj.traffic;
-  const giratoire = !isPlan(S.prj);
-  $('#capIntro').textContent = giratoire
-    ? 'Débits de l\'heure de pointe du matin. Capacité calculée avec le modèle de Girabase 4 (Cerema) : trafic gênant, largeur d\'entrée, îlot, anneau, piétons.'
-    : 'Le calcul de capacité porte sur les giratoires ; les carrefours plans (T, X) seront traités ensuite.';
-  $('#capFields').hidden = !giratoire;
-  if (!giratoire || entries.length < 2) { $('#odTable').innerHTML = ''; $('#capTable').innerHTML = ''; $('#capNotes').innerHTML = ''; return; }
-  // Matrice OD : reconstruite seulement si la liste des branches change (on ne perd pas la saisie en cours).
-  const sig = entries.map((e) => e.id + ':' + e.name).join(',');
-  const tbl = $('#odTable');
+// Matrice OD : construite quand la liste des branches change ; sinon, seules les cases qui n'ont pas le focus
+// reprennent les valeurs du projet (annuler, ouvrir), sans remplacer le tableau pendant la saisie.
+function refreshOdTable(entries, giratoire) {
+  const T = S.prj.traffic, tbl = $('#odTable');
+  const sig = (giratoire ? 'G|' : 'P|') + entries.map((e) => e.id + ':' + e.name).join(',');
   if (tbl.dataset.sig !== sig) {
     tbl.dataset.sig = sig;
-    const v = (o, d) => showNum(T.od?.[o]?.[d] ?? '');
     tbl.innerHTML = '<thead><tr><th>de \\ vers</th>' + entries.map((e) => `<th>${esc(e.name)}</th>`).join('') +
-      '<th title="Part de poids lourds">% PL</th><th title="Piétons traversant l\'entrée (10/h par défaut)">Piét./h</th><th title="Voie directe de tourne-à-droite">TAD</th></tr></thead><tbody>' +
+      '<th title="Part de poids lourds">% PL</th>' +
+      (giratoire ? '<th title="Piétons traversant l\'entrée (10/h par défaut)">Piét./h</th><th title="Voie directe de tourne-à-droite">TAD</th>' : '') +
+      '</tr></thead><tbody>' +
       entries.map(({ id: o, name }) => `<tr><th>${esc(name)}</th>` +
-        entries.map(({ id: d }) => `<td><input class="odc${o === d ? ' diag' : ''}" data-od="${o}|${d}" inputmode="numeric" value="${v(o, d)}" placeholder="0"></td>`).join('') +
-        `<td><input class="odc" data-pl="${o}" inputmode="decimal" value="${showNum(T.pl?.[o] ?? '')}" placeholder="0"></td>` +
-        `<td><input class="odc" data-qp="${o}" inputmode="numeric" value="${showNum(T.qp?.[o] ?? '')}" placeholder="10"></td>` +
-        `<td><input type="checkbox" data-tad="${o}" ${T.tad?.[o] ? 'checked' : ''}></td></tr>`).join('') +
+        entries.map(({ id: d }) => `<td><input class="odc${o === d ? ' diag' : ''}" data-od="${o}|${d}" inputmode="numeric" placeholder="0"></td>`).join('') +
+        `<td><input class="odc" data-pl="${o}" inputmode="decimal" placeholder="0"></td>` +
+        (giratoire ? `<td><input class="odc" data-qp="${o}" inputmode="numeric" placeholder="10"></td><td><input type="checkbox" data-tad="${o}"></td>` : '') +
+        '</tr>').join('') +
       '</tbody>';
   }
+  for (const el of tbl.querySelectorAll('input')) {
+    if (el === document.activeElement) continue;
+    const { od, pl, qp, tad } = el.dataset;
+    if (tad) { el.checked = !!T.tad?.[tad]; continue; }
+    const [o, d] = (od || '').split('|');
+    const v = od ? T.od?.[o]?.[d] : pl ? T.pl?.[pl] : T.qp?.[qp];
+    el.value = showNum(v ?? '');
+  }
+}
+
+// Branches d'un carrefour plan, dans l'ordre du dessin.
+const planEntries = () => (S.D?.ok && S.D.kind !== 'giratoire' && S.D.main ? S.D.branches.map((b) => ({ id: b.id, name: b.name })) : []);
+
+function refreshCapacity() {
+  const T = S.prj.traffic, giratoire = !isPlan(S.prj);
+  const entries = giratoire ? capEntries() : planEntries();
+  $('#capIntro').textContent = giratoire
+    ? 'Débits de l\'heure de pointe du matin. Capacité calculée avec le modèle de Girabase 4 (Cerema) : trafic gênant, largeur d\'entrée, îlot, anneau, piétons.'
+    : 'Débits de l\'heure de pointe du matin. Carrefour à priorité : capacité des mouvements non prioritaires par acceptation de créneaux (méthode de Brilon / HBS dans la structure de l\'HCM), l\'ACI et le CERTU ne publiant pas de formule (OCTAVE, abaque).';
+  $('#capHead').textContent = giratoire ? 'Résultats par entrée' : 'Résultats par voie';
+  $('#capMovesWrap').hidden = giratoire;
+  if (entries.length < 2) {
+    const tbl = $('#odTable');
+    tbl.innerHTML = ''; tbl.dataset.sig = '';
+    $('#capTable').innerHTML = ''; $('#capMoves').innerHTML = ''; $('#capNotes').innerHTML = '';
+    return;
+  }
+  refreshOdTable(entries, giratoire);
+  if (giratoire) refreshCapRound(entries, T);
+  else refreshCapPlan(T);
+}
+
+const capIcon = { err: '✕', warn: '!', info: 'i', ok: '✓' };
+const capLi = (lvl, grp, t) => `<li class="${lvl}"><span class="ic">${capIcon[lvl]}</span><span class="grp">${esc(grp)}</span><span>${esc(t)}</span></li>`;
+const n0 = (v) => (Number.isFinite(v) ? v.toFixed(0) : '—');
+
+function refreshCapRound(entries, T) {
   // Girabase : R = îlot infranchissable, LA = largeur roulable de l'anneau (rives + BDG + BDD).
   const ring = { R: S.D.Rb, bf: S.D.bf, la: S.D.la + S.D.sec.bdgRing + S.D.sec.bdd };
   const { res, consts } = analyse(T, ring, entries);
-  for (const c of $$('[data-tad]')) c.checked = !!T.tad?.[c.dataset.tad];
-  const n0 = (v) => (Number.isFinite(v) ? v.toFixed(0) : '—');
   const rows = entries.map((e) => {
     const r = res.get(e.id);
     return `<tr><td>${esc(e.name)}</td><td class="mono">${n0(r.Qe)}</td><td class="mono">${n0(r.Qc)}</td><td class="mono">${n0(r.Qs)}</td>` +
@@ -1050,10 +1088,9 @@ function refreshCapacity() {
       `<td class="mono ${r.lvl}">${n0(r.RCp * 100)} %</td><td class="mono">${n0(r.TMA)}</td><td class="mono">${fmt(r.LK, 1)} / ${fmt(r.LKM, 1)}</td></tr>`;
   });
   $('#capTable').innerHTML = '<thead><tr><th>Entrée</th><th>Qe</th><th>Qc</th><th>Qs</th><th>Qg</th><th>C</th><th>Réserve</th><th>%</th><th>Att. (s)</th><th>File moy./max</th></tr></thead><tbody>' + rows.join('') + '</tbody>';
-  const icon = { err: '✕', warn: '!', info: 'i', ok: '✓' };
-  const li = (lvl, grp, t) => `<li class="${lvl}"><span class="ic">${icon[lvl]}</span><span class="grp">${esc(grp)}</span><span>${esc(t)}</span></li>`;
-  const notes = entries.flatMap((e) => res.get(e.id).notes.map((t) => li(res.get(e.id).lvl, e.name, t)));
-  if (consts.oversized) notes.push(li('info', 'Giratoire', 'Réserve > 80 % sur toutes les entrées : giratoire probablement injustifié.'));
+  $('#capMoves').innerHTML = '';
+  const notes = entries.flatMap((e) => res.get(e.id).notes.map((t) => capLi(res.get(e.id).lvl, e.name, t)));
+  if (consts.oversized) notes.push(capLi('info', 'Giratoire', 'Réserve > 80 % sur toutes les entrées : giratoire probablement injustifié.'));
   const bypass = entries.filter((e) => res.get(e.id).Qbp > 0).map((e) => `${e.name} (${n0(res.get(e.id).Qbp)} uvp/h)`);
   $('#capNotes').innerHTML =
     (notes.length ? '<ul class="checks">' + notes.join('') + '</ul>' : '<p class="note">Aucune remarque : réserves comprises entre 25 et 50 %.</p>') +
@@ -1061,6 +1098,43 @@ function refreshCapacity() {
     `<p class="note">${esc(consts.site.label)}${consts.mini ? ' (mini-giratoire)' : ''} : Tg ${fmt(consts.site.Tg)} s, Tf ${fmt(consts.site.Tf)} s · anneau utile ${fmt(consts.LAU)} m (KE ${fmt(consts.KE)}, KI ${fmt(consts.KI)}) · largeur d'entrée utile max ${fmt(consts.LEU)} m. ` +
     'Débits en uvp/h ; Qc : débit sur l\'anneau devant l\'entrée ; Qg : trafic gênant ; réserve en % de la capacité ; files en véhicules par voie. ' +
     'Seuils du manuel Girabase : 25–80 % bon fonctionnement, 5–25 % files aux hyper-pointes, < 5 % saturation.</p>';
+}
+
+function refreshCapPlan(T) {
+  const P = S.D.plan;
+  const gp = gapParams(T, S.prj.kind, P.nLanes);
+  for (const [k, g] of Object.entries(gp)) {
+    const a = $(`[data-k="traffic.gaps.${k}.tg"]`), b = $(`[data-k="traffic.gaps.${k}.tf"]`);
+    if (a) a.placeholder = showNum(+g.tg0.toFixed(2));
+    if (b) b.placeholder = showNum(g.tf0);
+  }
+  const r = analysePlan(T, S.D, (bd) => Math.max(1, +S.prj.branches[bd.idx]?.nIn || 1));
+  if (r.error) {
+    $('#capTable').innerHTML = ''; $('#capMoves').innerHTML = '';
+    $('#capNotes').innerHTML = `<ul class="checks">${capLi('err', 'Carrefour', r.error)}</ul>`;
+    return;
+  }
+  const pc = (v) => (Number.isFinite(v) ? `${Math.round(v * 100)} %` : '—');
+  $('#capTable').innerHTML = '<thead><tr><th>Voie</th><th>Mouvements</th><th>q</th><th>C</th><th>Réserve</th><th>%</th>' +
+    '<th title="Attente moyenne HBS (T = 1 h)">Att. (s)</th><th title="Niveau de qualité HBS (A à F)">Niv.</th>' +
+    '<th title="Attente CERTU T = 3600 / (C − S)">T CERTU</th><th title="File à 95 % (HCM), en véhicules">File 95 %</th></tr></thead><tbody>' +
+    r.lanes.map((l) => `<tr><td>${esc(l.label)}</td><td>${esc(l.type)}</td><td class="mono">${n0(l.q)}</td><td class="mono">${n0(l.C)}</td>` +
+      `<td class="mono ${l.lvl}">${n0(l.R)}</td><td class="mono ${l.lvl}">${pc(l.Rp)}</td><td class="mono">${n0(l.w)}</td>` +
+      `<td class="mono ${l.lvl}">${l.qsv}</td><td class="mono">${n0(l.Tc)}</td><td class="mono">${fmt(l.q95, 1)}</td></tr>`).join('') + '</tbody>';
+  $('#capMoves').innerHTML = '<thead><tr><th>Mouvement</th><th>Type</th><th>Rang</th><th>q</th><th title="Trafic conflictuel">qp</th><th>tg</th><th>tf</th><th>C</th></tr></thead><tbody>' +
+    r.moves.map((m) => `<tr><td>${esc(m.o.name)} → ${esc(m.d.name)}</td><td>${esc(m.type)}</td><td class="mono">${m.rank}</td><td class="mono">${n0(m.q)}</td>` +
+      `<td class="mono">${n0(m.qp)}</td><td class="mono">${fmt(m.tg, 1)}</td><td class="mono">${fmt(m.tf, 1)}</td><td class="mono">${n0(m.C)}</td></tr>`).join('') + '</tbody>';
+  const notes = [
+    ...r.notes.map((n) => capLi(n.lvl, n.grp, n.msg)),
+    ...r.lanes.flatMap((l) => l.notes.map((t) => capLi(l.lvl === 'ok' ? 'warn' : l.lvl, l.label, t))),
+  ];
+  if (S.prj.context === 'urbain' && r.total > 1200) notes.push(capLi('warn', 'Carrefour', `trafic total ${n0(r.total)} uvp/h, au-delà de la limite indicative du CERTU (≈ 1200 uvp/h) pour un carrefour à cédez-le-passage`));
+  $('#capNotes').innerHTML =
+    (notes.length ? '<ul class="checks">' + notes.join('') + '</ul>' : '<p class="note">Aucune remarque : attentes inférieures à 30 s.</p>') +
+    `<p class="note">Débits en uvp/h. Route principale à ${P.nLanes} voie(s) par sens, ${P.tagA || P.tagB ? 'avec' : 'sans'} voie de TAG ; secondaires au ${P.regime === 'stop' ? 'STOP' : 'cédez-le-passage'}. ` +
+    'Mouvements prioritaires (TD et TAD de la principale) non limités. Capacité de base de Siegloch C = 3600/tf · exp(−qp/3600 · (tg − tf/2)), réduite par les probabilités d\'absence de file des rangs supérieurs. ' +
+    'Niveaux HBS : A ≤ 10 s, B ≤ 20, C ≤ 30, D ≤ 45, E > 45, F si saturé. CERTU : T = 3600/(C − S) acceptable sous 30 s, à apprécier jusqu\'à 1 min, feux au-delà. ' +
+    'Stockage de TAG selon l\'ACI : (7 + 10p)·N, N pris égal à la file à 95 %.</p>';
 }
 
 function showTab(name) {

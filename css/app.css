@@ -158,13 +158,15 @@ table.pts tbody tr:hover { background: var(--panel2); cursor: pointer; }
 #branchDevTable table.pts th { position: static; }
 .tablewrap.od { max-height: none; }
 #odTable th, #odTable td { text-align: center; padding: 3px; }
-#odTable input.odc { width: 58px; text-align: right; font-family: var(--mono); font-size: 12px; }
+#odTable input.odc, table.gaps input.odc { width: 58px; text-align: right; font-family: var(--mono); font-size: 12px; }
+table.gaps { margin: 4px 0 8px; }
+table.gaps td, table.gaps th { padding: 3px 4px; }
 #odTable input.odc.diag { background: rgba(255,255,255,0.04); color: var(--muted); }
 #capTable td.ok { color: #86efac; }
 #capTable td.warn { color: var(--warn); }
 #capTable td.err { color: var(--err); }
 #capTable td.info { color: var(--info); }
-#capTable th, #capTable td { padding: 4px 4px; white-space: nowrap; }
+#capTable th, #capTable td, #capMoves th, #capMoves td { padding: 4px 4px; white-space: nowrap; }
 
 /* ---------- Barre d'état */
 footer.status { display: flex; align-items: center; gap: 14px; padding: 0 10px; background: var(--panel); border-top: 1px solid var(--line); font-size: 12px; min-width: 0; }

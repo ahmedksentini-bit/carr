@@ -193,9 +193,13 @@
         <h3>Matrice origine – destination à l'HPM (véh/h)</h3>
         <p class="note">Lignes : branche d'origine (entrée) ; colonnes : branche de destination (sortie). La diagonale correspond aux demi-tours.</p>
         <div class="tablewrap od"><table id="odTable" class="pts"></table></div>
-        <h3>Résultats par entrée</h3>
+        <h3 id="capHead">Résultats par entrée</h3>
         <div class="tablewrap"><table id="capTable" class="pts"></table></div>
         <div id="capNotes"></div>
+        <div id="capMovesWrap" hidden>
+          <h3>Détail des mouvements non prioritaires</h3>
+          <div class="tablewrap"><table id="capMoves" class="pts"></table></div>
+        </div>
       </div>
 
       <div class="tab" id="tab-implantation" hidden>

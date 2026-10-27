@@ -16,7 +16,7 @@ export const PRESETS = {
   urbain: {
     label: 'Urbain — CERTU',
     ring: { Rg: 15, la: 7, bf: 1.5, devers: RING_DEVERS },
-    branch: { le: 3.5, ls: 4, Re: 12, Rs: 15, wLane: 3.25, camber: 2.0, tpcWidth: 2 },
+    branch: { le: 3.5, ls: 4, Re: 12, Rs: 15, wLane: 3.25, camber: 2.5, tpcWidth: 2 },
     island: { gap: 0.5 },
   },
 };
@@ -79,10 +79,10 @@ export const PLAN = {
   },
   urbain: {
     main: {
-      wLane: 3, nLanes: 1, camber: 2, pente: '', regime: 'cedez', v85: 50, tVis: '', dObs: '',
+      wLane: 3, nLanes: 1, camber: 2.5, pente: '', regime: 'cedez', v85: 50, tVis: '', dObs: '',
       tag: { on: false, width: 3, island: 1, raised: false, storage: 15, sifflet: 15, align: 5, deport: '', presig: 20 },
     },
-    sec: { wLane: 3, camber: 2, R: 8 },
+    sec: { wLane: 3, camber: 2.5, R: 8 },
     island: { base: 1.5, length: 12, gap: 1, rHead: 0.75, rTip: 0.5 },
   },
 };
@@ -277,7 +277,7 @@ export function hintFor(key, prj, br) {
       const d = islandDims(prj, br).autoShift;
       return H(C === 'interurbain' ? `auto : ACI (0,5 + Rg/50)/2 = ${f(d)} m${Rg <= 15 ? ' (0 si Rg ≤ 15 m)' : ''}` : 'auto : 0 en urbain', '');
     }
-    case 'camber': return H(C === 'interurbain' ? '2,5 % en toit (≈ ARP)' : 'valeur courante ≈ 2 %', '');
+    case 'camber': return H(C === 'interurbain' ? '2,5 % en toit (≈ ARP)' : '2,5 % par défaut', '');
     default: return null;
   }
 }
@@ -307,7 +307,7 @@ function planHint(key, prj, br) {
       case 'island.length': return H(inter ? `auto : 4l = ${f(a.h)} m (triangle de construction)` : `auto : ${f(a.h)} m`);
       case 'island.gap': return H('ACI : nez en retrait de 1 m du bord de la principale');
       case 'pente': return auto ? H('auto : pente du site') : Math.abs(v) > 2 ? H('ACI : ≤ 2 % sur les 10 à 20 m avant le carrefour', 'warn') : H('ACI : ≤ 2 % près du carrefour', 'ok');
-      case 'camber': return H(inter ? '2,5 % en toit (≈ ARP)' : 'valeur courante ≈ 2 %');
+      case 'camber': return H(inter ? '2,5 % en toit (≈ ARP)' : '2,5 % par défaut');
       default: return undefined;
     }
   }
@@ -323,7 +323,7 @@ function planHint(key, prj, br) {
     case 'plan.tVis': return H(`auto : ${P.regime === 'stop' ? 'STOP 8 s' : 'cédez 10 s'}${P.tag.on ? ' + 1 s (TAG)' : ''} ; +1 s si la branche monte de plus de 2 %`);
     case 'plan.dObs': return H(`auto : ${P.regime === 'stop' ? '4 m (STOP)' : '15 m (cédez, 15 à 20 m)'} en arrière de la ligne`);
     case 'plan.v85': return H('V85 réelle, non plafonnée à la vitesse limite');
-    case 'plan.camber': return H(inter ? '2,5 % en toit (≈ ARP)' : 'valeur courante ≈ 2 %');
+    case 'plan.camber': return H(inter ? '2,5 % en toit (≈ ARP)' : '2,5 % par défaut');
     default: return undefined;
   }
 }
