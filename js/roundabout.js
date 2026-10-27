@@ -74,14 +74,15 @@ function buildRoundabout(prj, ext = {}) {
     const flare = Math.max(0, hb + Math.max(le, ls) + shiftEst - th - Math.min(wIn, wOut));
     const Lmin = Math.max(Rg + h + Math.max(10, 15 * flare) + 20, ext[idx] || 0);
     let u, a = 0, cont = null;
+    const axeR = +b.axeR > 0 ? +b.axeR : sec.axeR;
     if (b.radial !== false) {
       let pa = polylineAfter(pl, O, Lmin + 15);
       if (pa) {
         const defl = Math.acos(G.clamp(dot(norm(sub(pa.J, O)), pa.dir), -1, 1));
-        pa = polylineAfter(pl, O, Lmin + sec.axeR * Math.tan(defl / 2) + 2) || pa;
+        pa = polylineAfter(pl, O, Lmin + axeR * Math.tan(defl / 2) + 2) || pa;
         u = norm(sub(pa.J, O));
         const pts = [add(O, mul(u, Lmin)), pa.J, ...pa.rest.filter((p) => G.dist(p, pa.J) > 0.5)];
-        cont = G.roundPolyline(pts, pts.map((_, i) => (i > 0 && i < pts.length - 1 ? sec.axeR : 0)));
+        cont = G.roundPolyline(pts, pts.map((_, i) => (i > 0 && i < pts.length - 1 ? axeR : 0)));
       } else u = norm(sub(far, O));
     } else {
       const { Q, segDir } = branchDirection(b, O, Rg + h + 10);

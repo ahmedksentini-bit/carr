@@ -3,7 +3,7 @@
 
 export const PROVIDERS = {
   esri: {
-    label: 'Satellite (Esri World Imagery)', max: 19,
+    label: 'Satellite (Esri World Imagery)', max: 21,
     url: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
     attr: 'Imagerie © Esri, Maxar, Earthstar Geographics',
   },
@@ -27,6 +27,7 @@ const t2lat = (y, n) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n))) * 180
 export class TileLayer {
   constructor(onLoad) {
     this.cache = new Map();
+    this.blank = new Set(); // tuiles sans imagerie à leur niveau (clés)
     this.onLoad = onLoad;
     this.provider = 'esri';
     this.opacity = 1;
@@ -38,15 +39,36 @@ export class TileLayer {
     let e = this.cache.get(key);
     if (e) { this.cache.delete(key); this.cache.set(key, e); return e; }
     if (!create) return null;
+    // Au-delà d'une tuile vide, ses descendantes le sont aussi : pas de requête.
+    for (let k = 0; k <= z; k++) if (this.blank.has(`${this.provider}/${z - k}/${x >> k}/${y >> k}`)) return { ok: false, blank: true };
     const img = new Image();
     if (this.cors) img.crossOrigin = 'anonymous';
-    e = { img, ok: false, err: false };
-    img.onload = () => { e.ok = true; this.onLoad(); };
-    img.onerror = () => { e.err = true; };
+    e = { img, ok: false, err: false, blank: false };
+    img.onload = () => {
+      e.ok = true;
+      if (this._isBlank(img)) { e.blank = true; this.blank.add(key); }
+      this.onLoad();
+    };
+    img.onerror = () => { e.err = true; this.onLoad(); };
     img.src = PROVIDERS[this.provider].url(z, x, y);
     this.cache.set(key, e);
     if (this.cache.size > 700) this.cache.delete(this.cache.keys().next().value);
     return e;
+  }
+
+  // Tuile « Map data not yet available » d'Esri : gris uniforme (204, 204, 204) avec un texte blanc.
+  _isBlank(img) {
+    if (!this.cors) return false;
+    try {
+      const c = (this._probe ||= Object.assign(document.createElement('canvas'), { width: 16, height: 16 }));
+      const g = c.getContext('2d', { willReadFrequently: true });
+      g.clearRect(0, 0, 16, 16);
+      g.drawImage(img, 0, 0, 16, 16);
+      const d = g.getImageData(0, 0, 16, 16).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - 204) <= 2 && Math.abs(d[i + 1] - 204) <= 2 && Math.abs(d[i + 2] - 204) <= 2) n++;
+      return n > 0.7 * 256;
+    } catch { return false; }
   }
 
   // view : { s2w(px,py) → [x,y], w2s(x,y) → [px,py], W, H, s } ; crs : { toLL, fromLL }
@@ -83,11 +105,14 @@ export class TileLayer {
           (dpr * (sSW[0] - sNW[0])) / 256, (dpr * (sSW[1] - sNW[1])) / 256,
           dpr * sNW[0], dpr * sNW[1]);
         const e = this._get(z, wx, ty);
-        if (e.ok) { ctx.drawImage(e.img, 0, 0, 256, 256, -0.4, -0.4, 256.8, 256.8); continue; }
-        // En attendant : tuile parente agrandie si elle est déjà en cache.
-        for (let k = 1; k <= 4 && z - k >= 0; k++) {
-          const p = this._get(z - k, wx >> k, ty >> k, false);
-          if (p && p.ok) {
+        if (e.ok && !e.blank) { ctx.drawImage(e.img, 0, 0, 256, 256, -0.4, -0.4, 256.8, 256.8); continue; }
+        // En attendant, ou si l'imagerie n'existe pas à ce niveau : tuile parente agrandie. Quand la tuile est vide
+        // ou en erreur, la parente est demandée au serveur ; sinon, seules les tuiles déjà en cache servent.
+        let ask = e.blank || e.err;
+        for (let k = 1; k <= 8 && z - k >= 0; k++) {
+          const p = this._get(z - k, wx >> k, ty >> k, ask);
+          if (p && !p.ok && !p.blank && !p.err) ask = false; // parente en cours de chargement
+          if (p && p.ok && !p.blank) {
             const sz = 256 / 2 ** k;
             ctx.drawImage(p.img, (wx - ((wx >> k) << k)) * sz, (ty - ((ty >> k) << k)) * sz, sz, sz, -0.4, -0.4, 256.8, 256.8);
             break;

@@ -278,6 +278,7 @@ export function hintFor(key, prj, br) {
       return H(C === 'interurbain' ? `auto : ACI (0,5 + Rg/50)/2 = ${f(d)} m${Rg <= 15 ? ' (0 si Rg ≤ 15 m)' : ''}` : 'auto : 0 en urbain', '');
     }
     case 'camber': return H(C === 'interurbain' ? '2,5 % en toit (≈ ARP)' : '2,5 % par défaut', '');
+    case 'axeR': return H(`auto : ${f(sectionParams(prj).axeR)} m (onglet Profil) ; raccorde l'alignement radial à l'axe dessiné et ses sommets`, '');
     default: return null;
   }
 }

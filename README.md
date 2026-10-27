@@ -11,7 +11,9 @@ ou sur un fond topographique DXF.
 - **Systèmes de coordonnées** : UTM WGS84 (fuseau automatique), Nord / Sud Tunisie (Carthage), Nord Maroc,
   Lambert-93, ou toute définition proj4. Les coordonnées du projet sont celles du système choisi : un DXF topo
   dans le même système se superpose à l'imagerie. Changer de système reprojette les axes.
-- **Fonds** : Esri World Imagery, OpenStreetMap, Esri Topo ; recherche de lieu (Nominatim) ou saisie « lat, lon ».
+- **Fonds** : Esri World Imagery (jusqu'au niveau 21 ; là où l'imagerie manque, la tuile du niveau inférieur est
+  agrandie au lieu de « Map data not yet available »), OpenStreetMap, Esri Topo ; recherche de lieu (Nominatim)
+  ou saisie « lat, lon ».
 - **Import DXF ASCII** : LINE, LWPOLYLINE / POLYLINE (arcs), ARC, CIRCLE, ELLIPSE, SPLINE, TEXT, MTEXT, POINT,
   INSERT (blocs, attributs), DIMENSION ; calques avec couleurs, unités m / cm / mm.
 - **Giratoire** : axes de branches saisis par l'utilisateur, centre calculé à l'intersection des axes (ou placé),
@@ -32,7 +34,9 @@ ou sur un fond topographique DXF.
   bordures (3 cm bande franchissable, 6 cm îlot central) et les pentes.
 - **Branches** : alignement droit dirigé vers le centre près de l'anneau, puis raccordement à l'axe saisi, qu'elles
   suivent jusqu'au bout (polylignes à plusieurs segments). Le centre se place sur la carte (outil C) ou se déplace
-  à la souris ; les branches se réorientent vers lui.
+  à la souris ; les branches se réorientent vers lui. Rayon de raccordement de l'axe réglable par branche ; poignées
+  de sommet et de milieu de segment (le segment se déplace, les raccordements suivent) ; un « + » au bout extérieur
+  de chaque axe en prolonge la saisie.
 - **Dévers** : anneau à dévers imposé de 1,5 % vers l'extérieur, constant sur site en pente (ou cône sur plan incliné),
   profil en long des rives, variation des dévers de chaque branche, flèches de dévers sur le plan.
 - **Contrôles** : comparaison des valeurs aux recommandations du guide, excentrement des axes, déflexion,

@@ -236,7 +236,42 @@ function drawAxes(ctx, v, T, exp) {
       ctx.fillStyle = sel ? T.sel : T.hover;
       for (const p of b.axis) { const [x, y] = v.w2s(p.x, p.y); ctx.fillRect(x - 3.5, y - 3.5, 7, 7); }
     }
+    if (sel) {
+      // Poignées de milieu de segment : déplacent le segment (sommets voisins compris).
+      ctx.strokeStyle = T.sel; ctx.lineWidth = 1.5;
+      for (let k = 0; k + 1 < b.axis.length; k++) {
+        const [x, y] = v.w2s((b.axis[k].x + b.axis[k + 1].x) / 2, (b.axis[k].y + b.axis[k + 1].y) / 2);
+        ctx.beginPath(); ctx.moveTo(x, y - 5); ctx.lineTo(x + 5, y); ctx.lineTo(x, y + 5); ctx.lineTo(x - 5, y); ctx.closePath(); ctx.stroke();
+      }
+    }
   });
+  // « + » au bout extérieur de chaque axe : prolonge la saisie.
+  if (exp || S.tool !== 'select') return;
+  ctx.lineWidth = 1.6;
+  S.prj.branches.forEach((b, i) => {
+    const e = outerEnd(i);
+    if (!e) return;
+    const [x, y] = plusPos(e);
+    ctx.fillStyle = i === S.sel ? T.sel : T.L.AXE_SAISI.stroke;
+    ctx.beginPath(); ctx.arc(x, y, 8, 0, 2 * Math.PI); ctx.fill();
+    ctx.strokeStyle = '#111';
+    ctx.beginPath(); ctx.moveTo(x - 4.5, y); ctx.lineTo(x + 4.5, y); ctx.moveTo(x, y - 4.5); ctx.lineTo(x, y + 4.5); ctx.stroke();
+  });
+}
+
+// Extrémité extérieure d'un axe (la plus éloignée du centre ; le 1er point saisi à défaut de centre).
+function outerEnd(i) {
+  const ax = S.prj.branches[i]?.axis;
+  if (!ax || ax.length < 2) return null;
+  const n = ax.length - 1, O = S.D?.O;
+  const atStart = !O || G.dist(ax[0], O) >= G.dist(ax[n], O);
+  return atStart ? { bi: i, atStart, p: ax[0], prev: ax[1] } : { bi: i, atStart, p: ax[n], prev: ax[n - 1] };
+}
+// Position écran du « + » : 18 px au-delà de l'extrémité, dans le prolongement de l'axe.
+function plusPos(e) {
+  const [x, y] = viewer.w2s(e.p.x, e.p.y), [xp, yp] = viewer.w2s(e.prev.x, e.prev.y);
+  const d = Math.hypot(x - xp, y - yp) || 1;
+  return [x + ((x - xp) / d) * 18, y + ((y - yp) / d) * 18];
 }
 
 function drawOverlay(ctx, v, T) {
@@ -267,13 +302,14 @@ const PROMPTS = {
   pan: 'Panoramique : glissez pour déplacer la vue.',
   axis0: 'Axe : cliquez le 1er point, côté extérieur (ou saisissez X,Y).',
   axis1: 'Axe : point suivant vers le carrefour — Entrée / clic droit pour terminer, Retour arrière pour annuler.',
+  extend: 'Prolonger l\'axe : cliquez les points suivants vers l\'extérieur — Entrée / clic droit pour terminer, Échap pour annuler.',
   center: 'Centre : cliquez la position du centre de l\'anneau.',
   measure: 'Mesure : cliquez deux points.',
 };
 
 function setTool(t) {
   if (S.tool === 'axis' && t !== 'axis' && S.draft.length >= 2) finishAxis();
-  S.tool = t; S.draft = []; S.meas = []; S.drag = null;
+  S.tool = t; S.draft = []; S.meas = []; S.drag = null; S.extend = null;
   $$('.tools [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
   updateCursor(); setPrompt(); viewer.invalidate();
 }
@@ -281,11 +317,12 @@ function updateCursor() {
   $('#cv').style.cursor = S.space || S.tool === 'pan' ? 'grab' : S.tool === 'select' ? 'default' : 'crosshair';
 }
 function setPrompt() {
-  const k = S.tool === 'axis' ? (S.draft.length ? 'axis1' : 'axis0') : S.tool;
+  const k = S.tool === 'axis' ? (S.extend ? 'extend' : S.draft.length ? 'axis1' : 'axis0') : S.tool;
   $('#stPrompt').textContent = PROMPTS[k] || '';
   $('#empty').hidden = !!S.prj.branches.length || S.tool === 'axis';
 }
 function cancelTool() {
+  if (S.extend) { S.draft = []; setTool('select'); return; }
   if (S.tool === 'axis' && S.draft.length) { S.draft = []; setPrompt(); viewer.invalidate(); return; }
   setTool('select');
 }
@@ -301,9 +338,25 @@ function dedupe(pts) {
   return out;
 }
 
+// Prolongement d'un axe depuis son « + » : outil axe amorcé sur l'extrémité extérieure.
+function startExtend(e) {
+  setTool('axis');
+  S.extend = { bi: e.bi, atStart: e.atStart };
+  S.draft = [e.p];
+  S.sel = e.bi;
+  renderBranchForm(); setPrompt(); viewer.invalidate();
+}
+
 function finishAxis() {
   const pts = dedupe(S.draft);
   S.draft = [];
+  if (S.extend) {
+    const { bi, atStart } = S.extend, b = S.prj.branches[bi], add = pts.slice(1);
+    S.extend = null;
+    if (b && add.length) { b.axis = atStart ? [...add.reverse(), ...b.axis] : [...b.axis, ...add]; update(); }
+    setTool('select');
+    return;
+  }
   if (pts.length >= 2) {
     S.prj.branches.push(newBranch(S.prj, pts));
     S.sel = S.prj.branches.length - 1;
@@ -334,7 +387,8 @@ function pickPoint(px, py) {
   if (S.tog.snap && S.tool !== 'pan') {
     let best = null, bd = 10 / viewer.s;
     const consider = (p, kind) => { const d = Math.hypot(p.x - x, p.y - y); if (d < bd) { bd = d; best = { x: p.x, y: p.y, kind }; } };
-    S.prj.branches.forEach((b, i) => b.axis.forEach((p, k) => { if (!(S.drag?.kind === 'vertex' && S.drag.bi === i && S.drag.vi === k)) consider(p, 'sommet'); }));
+    const dragged = (i, k) => S.drag?.bi === i && (S.drag.kind === 'vertex' ? S.drag.vi === k : S.drag.kind === 'seg' && (k === S.drag.vi || k === S.drag.vi + 1));
+    S.prj.branches.forEach((b, i) => b.axis.forEach((p, k) => { if (!dragged(i, k)) consider(p, 'sommet'); }));
     S.draft.forEach((p) => consider(p, 'sommet'));
     if (S.D && S.drag?.kind !== 'center') { S.D.points.forEach((q) => consider(q.p, 'point')); if (S.D.O) consider(S.D.O, 'centre'); }
     const d = snapDxf(S.dxfCache, x, y, bd);
@@ -355,7 +409,21 @@ function hitHandle(px, py) {
     }
     return null;
   };
-  if (S.sel >= 0) { const h = vtx(S.sel); if (h) return h; }
+  if (S.sel >= 0) {
+    const h = vtx(S.sel);
+    if (h) return h;
+    const ax = S.prj.branches[S.sel].axis;
+    for (let k = 0; k + 1 < ax.length; k++) {
+      const [x, y] = viewer.w2s((ax[k].x + ax[k + 1].x) / 2, (ax[k].y + ax[k + 1].y) / 2);
+      if (Math.hypot(px - x, py - y) < 7) return { kind: 'seg', bi: S.sel, vi: k, orig: [ax[k], ax[k + 1]] };
+    }
+  }
+  for (let i = 0; i < S.prj.branches.length; i++) {
+    const e = outerEnd(i);
+    if (!e) continue;
+    const [x, y] = plusPos(e);
+    if (Math.hypot(px - x, py - y) < 9) return { kind: 'plus', e };
+  }
   if (S.D?.O) { const [x, y] = viewer.w2s(S.D.O.x, S.D.O.y); if (Math.hypot(px - x, py - y) < 9) return { kind: 'center' }; }
   if (S.hover >= 0) { const h = vtx(S.hover); if (h) return h; }
   return null;
@@ -413,7 +481,8 @@ function bindCanvas() {
     else if (S.tool === 'measure') { S.meas.push(w); if (S.meas.length > 2) S.meas = [w]; showMeasure(); }
     else if (S.tool === 'select') {
       const h = hitHandle(px, py);
-      if (h) { S.drag = { ...h, moved: false }; if (h.bi != null) selectBranch(h.bi); return; }
+      if (h?.kind === 'plus') { startExtend(h.e); return; }
+      if (h) { S.drag = { ...h, start: w, moved: false }; if (h.bi != null) selectBranch(h.bi); return; }
       const bi = hitAxis(px, py);
       if (bi >= 0) selectBranch(bi);
       S.drag = { kind: 'pan', px, py, moved: false, deselect: bi < 0 };
@@ -427,7 +496,7 @@ function bindCanvas() {
     const d = S.drag;
     S.drag = null; updateCursor();
     if (!d) return;
-    if ((d.kind === 'vertex' || d.kind === 'center') && d.moved) { syncInputs(); update(); }
+    if ((d.kind === 'vertex' || d.kind === 'seg' || d.kind === 'center') && d.moved) { syncInputs(); update(); }
     else if (d.kind === 'pan') { if (!d.moved && d.deselect && S.sel >= 0) selectBranch(-1); autosave(); }
   });
   cv.addEventListener('dblclick', () => { if (S.tool === 'axis') finishAxis(); });
@@ -445,12 +514,17 @@ function onMove(px, py) {
   const w = d?.kind === 'pan' ? { x: viewer.s2w(px, py)[0], y: viewer.s2w(px, py)[1] } : pickPoint(px, py);
   S.cursorW = w;
   if (d?.kind === 'vertex') { S.prj.branches[d.bi].axis[d.vi] = w; d.moved = true; update({ commit: false, panels: false }); }
+  else if (d?.kind === 'seg') {
+    const ax = S.prj.branches[d.bi].axis, dv = G.sub(w, d.start);
+    ax[d.vi] = G.add(d.orig[0], dv); ax[d.vi + 1] = G.add(d.orig[1], dv);
+    d.moved = true; update({ commit: false, panels: false });
+  }
   else if (d?.kind === 'center') { S.prj.center = { auto: false, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
   else if (!d && S.tool === 'select') {
     const h = hitAxis(px, py);
     if (h !== S.hover) S.hover = h;
     const hh = hitHandle(px, py);
-    $('#cv').style.cursor = hh ? 'move' : h >= 0 ? 'pointer' : 'default';
+    $('#cv').style.cursor = hh ? (hh.kind === 'plus' ? 'copy' : 'move') : h >= 0 ? 'pointer' : 'default';
   }
   // Barre d'état
   $('#stXY').textContent = `X ${w.x.toFixed(3)}   Y ${w.y.toFixed(3)}`;
@@ -814,6 +888,8 @@ function renderBranchForm() {
     host.innerHTML = `${head}
       <h4>Axe</h4>
       <label class="chk"><input type="checkbox" data-bk="radial"> Axe radial (passe par le centre de l'anneau)</label>
+      ${fld('axeR', 'Rayon de raccordement de l\'axe', 'm', { branch: true, ph: 'auto' })}
+      <p class="note">Sur le plan, glissez les sommets de l'axe ou le milieu d'un segment ; le « + » au bout de l'axe le prolonge.</p>
       ${lanes}
       <h4>Entrée</h4>
       ${fld('le', 'Largeur d\'entrée le', 'm', { branch: true, title: 'Mesurée du bord de l\'îlot au bord extérieur, au droit de l\'anneau' })}
