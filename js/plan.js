@@ -104,12 +104,26 @@ export function buildPlan(prj) {
     const sinp = Math.max(0.3, Math.abs(dot(s.u, Ym))), cotp = Math.sqrt(1 - sinp * sinp) / sinp;
     Lm = Math.max(Lm, (islandDims(prj, s.b).b / 2 + Math.max(s.le, s.ls) + 1) / sinp + Math.max(s.Re, s.Rs) * (1 + cotp) + 2);
   }
+  // Fin des îlots centraux : au droit du prolongement des bords des chaussées secondaires sur l'axe de la principale,
+  // à 1 m en retrait (côté A : le bord le plus proche de A ; côté B : le plus proche de B).
+  let XdA = Infinity, XdB = -Infinity;
+  for (const s of secs) {
+    const isl = islandDims(prj, s.b), hb0 = isl.type === 'aucun' ? 0 : isl.b / 2, wl = +s.b.wLane;
+    const n = rot90(s.u), dX = dot(s.u, uM), dY = dot(s.u, Ym);
+    if (Math.abs(dY) < 1e-6) continue;
+    for (const yE of [hb0 + Math.max(1, +s.b.nIn || 1) * wl, -(hb0 + Math.max(1, +s.b.nOut || 1) * wl)]) {
+      const qx = dot(n, uM) * yE, qy = dot(n, Ym) * yE, X = qx - (qy * dX) / dY;
+      XdA = Math.min(XdA, X); XdB = Math.max(XdB, X);
+    }
+  }
+  const LdA = Math.max(1, Number.isFinite(XdA) ? 1 - XdA : Lm), LdB = Math.max(1, Number.isFinite(XdB) ? XdB + 1 : Lm);
   const tagA = P.tag.on && secs.some((s) => s.sY > 0); // sens A→B : tourne à gauche vers +Y, voie côté A
   const tagB = P.tag.on && secs.some((s) => s.sY < 0); // sens B→A : tourne à gauche vers −Y, voie côté B
   const widened = tagA || tagB;
   const { storage: Ls, sifflet: Lsif, align: Lal, deport: Ldep, presig: Lpre } = P.tag;
-  const fullLen = (hasTag) => (!widened ? 0 : hasTag ? Lm + Ls + Lsif + Lal : Lm + Lal);
-  const lenA = fullLen(tagA), lenB = fullLen(tagB);
+  // La zone élargie couvre au moins le débouché (Lm) ; sans TAG de ce côté, l'îlot va de la fin d'îlot à l'alignement.
+  const fullLen = (hasTag, Ld) => (!widened ? 0 : hasTag ? Ld + Ls + Lsif + Lal : Math.max(Ld + Lal, Lm));
+  const lenA = fullLen(tagA, LdA), lenB = fullLen(tagB, LdB);
   const hw = widened ? half + c / 2 : half;
   const lenEnd = (q, len) => {
     const reach = widened ? len + Ldep + Lpre + 15 : Lm + 30;
@@ -120,7 +134,7 @@ export function buildPlan(prj) {
   const edgePts = (sg) => (widened
     ? [{ x: -LA, y: sg * half }, { x: -(lenA + Ldep), y: sg * half }, { x: -lenA, y: sg * hw }, { x: lenB, y: sg * hw }, { x: lenB + Ldep, y: sg * half }, { x: LB, y: sg * half }]
     : [{ x: -LA, y: sg * half }, { x: LB, y: sg * half }]);
-  D.plan = { ...P, half, hw, c, Lm, lenA, lenB, LA, LB, tagA, tagB, widened };
+  D.plan = { ...P, half, hw, c, Lm, LdA, LdB, lenA, lenB, LA, LB, tagA, tagB, widened };
 
   // --- Branches secondaires
   const gaps = { 1: [], [-1]: [] };
@@ -228,25 +242,25 @@ export function buildPlan(prj) {
     }
     centrals.push({ env, raised, side });
   };
-  const sideMarks = (hasTag, len, f) => {
+  const sideMarks = (hasTag, len, f, Ld) => {
     const side = f(-1, 0).x < 0 ? -1 : 1;
     const Xal = -len, Xpre = Xal - Ldep - Lpre;
     // L'îlot en saillie suit l'enveloppe peinte dans le biseau jusqu'à ce qu'il ne reste qu'1 m de large.
     const Xcut = Math.min(Xal, Xpre + ((1 + 0.6) / c) * (Xal - Xpre)), hc = ((c / 2) * (Xcut - Xpre)) / (Xal - Xpre);
     if (hasTag) {
-      const Xd = -Lm, Xc = Xd - Ls, Xs = Xc - Lsif;
+      const Xd = -Ld, Xc = Xd - Ls, Xs = Xc - Lsif;
       const env = [f(Xpre, 0), f(Xal, c / 2), f(Xd, c / 2), f(Xd, c / 2 - a), f(Xc, c / 2 - a), f(Xs, -c / 2), f(Xal, -c / 2)];
       centralIsland(env, a >= 1.2 ? [f(Xcut, hc), ...env.slice(1), f(Xcut, -hc)] : null, side);
       MK([f(Xs, -c / 2), f(Xd, -c / 2)], T3); // séparation voie directe / TAG
     } else {
-      const env = [f(-Lm, c / 2), f(Xal, c / 2), f(Xpre, 0), f(Xal, -c / 2), f(-Lm, -c / 2)];
-      centralIsland(env, [f(-Lm, c / 2), f(Xal, c / 2), f(Xcut, hc), f(Xcut, -hc), f(Xal, -c / 2), f(-Lm, -c / 2)], side);
+      const env = [f(-Ld, c / 2), f(Xal, c / 2), f(Xpre, 0), f(Xal, -c / 2), f(-Ld, -c / 2)];
+      centralIsland(env, [f(-Ld, c / 2), f(Xal, c / 2), f(Xcut, hc), f(Xcut, -hc), f(Xal, -c / 2), f(-Ld, -c / 2)], side);
     }
     return Xpre;
   };
   if (widened) {
-    const xa = sideMarks(tagA, lenA, (X, Y) => ({ x: X, y: Y }));
-    const xb = -sideMarks(tagB, lenB, (X, Y) => ({ x: -X, y: -Y }));
+    const xa = sideMarks(tagA, lenA, (X, Y) => ({ x: X, y: Y }), LdA);
+    const xb = -sideMarks(tagB, lenB, (X, Y) => ({ x: -X, y: -Y }), LdB);
     MK([{ x: -LA, y: 0 }, { x: xa, y: 0 }], T1);
     MK([{ x: xb, y: 0 }, { x: LB, y: 0 }], T1);
   } else {
@@ -404,7 +418,7 @@ export function buildPlan(prj) {
   // Route principale : profil en travers coté (voies, TAG, îlot) et, le long du bord, longueurs de la zone de TAG.
   // Côté A en repère principal ; côté B par symétrie centrale.
   const voie = (w) => `${P.nLanes > 1 ? 'voies' : 'voie'} ${fmt(w, 2)}`;
-  const mainDims = (has, len, sg) => {
+  const mainDims = (has, len, sg, Ld) => {
     const f = (X, Y) => toW(sg * X, sg * Y);
     if (!widened) {
       if (sg < 0) return;
@@ -415,18 +429,18 @@ export function buildPlan(prj) {
     const Xal = -len, Xdep = Xal - Ldep, Xpre = Xdep - Lpre;
     const off = -2.2 * TH, lab = (s, v) => `${s} ${fmt(v, 1)}`;
     if (has) {
-      const Xd = -Lm, Xc = Xd - Ls, Xs = Xc - Lsif, Xm = (Xd + Xc) / 2;
+      const Xd = -Ld, Xc = Xd - Ls, Xs = Xc - Lsif, Xm = (Xd + Xc) / 2;
       dims.chain([f(Xm, -hw), f(Xm, -c / 2), f(Xm, c / 2 - a), f(Xm, c / 2), f(Xm, hw)], 0, [voie(half), `TAG ${fmt(P.tag.width, 2)}`, `îlot ${fmt(a, 2)}`, voie(half)]);
       dims.chain([f(Xpre, -hw), f(Xdep, -hw), f(Xal, -hw), f(Xs, -hw), f(Xc, -hw), f(Xd, -hw)], off,
         [lab('présignalisation', Lpre), lab('déport', Ldep), lab('alignement', Lal), lab('sifflet', Lsif), lab('stockage', Ls)]);
     } else {
-      const Xm = (Xal - Lm) / 2;
+      const Xm = (Xal - Ld) / 2;
       dims.chain([f(Xm, -hw), f(Xm, -c / 2), f(Xm, c / 2), f(Xm, hw)], 0, [voie(half), `îlot ${fmt(c, 2)}`, voie(half)]);
       dims.chain([f(Xpre, -hw), f(Xdep, -hw), f(Xal, -hw)], off, [lab('présignalisation', Lpre), lab('déport', Ldep)]);
     }
   };
-  mainDims(tagA, lenA, 1);
-  mainDims(tagB, lenB, -1);
+  mainDims(tagA, lenA, 1, LdA);
+  mainDims(tagB, lenB, -1, LdB);
 
   // ================= Points d'implantation =================
   const pt = (name, p, bi = null, k = '') => points.push({ n: points.length + 1, name, p, bi, kind: k });
@@ -435,16 +449,16 @@ export function buildPlan(prj) {
     const side = sg > 0 ? 'gauche' : 'droit';
     edges[sg].forEach((q, k) => pt(`Principale · bord ${side} · sommet ${k + 1}`, toW(q.x, q.y), null, 'principale'));
   }
-  const zonePts = (has, len, sg, nm) => {
+  const zonePts = (has, len, sg, nm, Ld) => {
     if (!widened) return;
     const X = (v) => sg * v;
     const list_ = has
-      ? [['début présignalisation', len + Ldep + Lpre], ['début déport', len + Ldep], ['fin déport', len], ['début sifflet', Lm + Ls + Lsif], ['début stockage', Lm + Ls], ['fin de stockage', Lm]]
+      ? [['début présignalisation', len + Ldep + Lpre], ['début déport', len + Ldep], ['fin déport', len], ['début sifflet', Ld + Ls + Lsif], ['début stockage', Ld + Ls], ['fin de stockage', Ld]]
       : [['début présignalisation', len + Ldep + Lpre], ['début déport', len + Ldep], ['fin déport', len]];
     list_.forEach(([lab, v]) => pt(`Principale · axe · ${lab} (côté ${nm})`, toW(X(v), 0), null, 'principale'));
   };
-  zonePts(tagA, lenA, -1, A0.b.name);
-  zonePts(tagB, lenB, 1, B0.b.name);
+  zonePts(tagA, lenA, -1, A0.b.name, LdA);
+  zonePts(tagB, lenB, 1, B0.b.name, LdB);
   for (const bd of bds) {
     if (bd.role !== 'secondaire') continue;
     const nm = bd.name;
