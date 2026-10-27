@@ -8,6 +8,7 @@ import { addDevers } from './devers.js';
 import { fmt, fmtGis, upright, autoCenter, branchDirection, frame } from './common.js';
 import { buildApproach, crossLine } from './approach.js';
 import { buildPlan } from './plan.js';
+import { buildBypass } from './bypass.js';
 
 const { add, sub, mul, dot, norm, rot90, neg, ang, polar, L, A } = G;
 
@@ -18,7 +19,8 @@ export function buildDesign(prj) {
   return prj.kind === 'T' || prj.kind === 'X' ? buildPlan(prj) : buildRoundabout(prj);
 }
 
-function buildRoundabout(prj) {
+// ext : longueurs minimales des branches (abscisse locale), imposées par les voies directes de tourne-à-droite.
+function buildRoundabout(prj, ext = {}) {
   const ring = prj.ring;
   const Rg = +ring.Rg, la = +ring.la, bf = +ring.bf || 0;
   const Ri = Rg - la, Rb = Ri - bf;
@@ -66,7 +68,7 @@ function buildRoundabout(prj) {
     const flare = Math.max(0, hb + Math.max(le, ls) + Math.abs(ai - a) - th - Math.min(wIn, wOut));
     // Longueur dessinée par défaut : jusqu'à l'extrémité de l'axe saisi, bornée à 40–80 m au-delà de l'îlot.
     let xEnd = b.length ? x0 + +b.length : Math.min(Math.max(dot(sub(far, O), u), xT + 40), xT + 80);
-    xEnd = Math.max(xEnd, xT + Math.max(10, 15 * flare) + 20);
+    xEnd = Math.max(xEnd, xT + Math.max(10, 15 * flare) + 20, ext[idx] || 0);
 
     const ap = buildApproach({ name, idx, target, a, ai, x0, xT, xEnd, hb, th, hasIsland, isl, le, ls, wIn, wOut, Re, Rs }, issues);
     if (!ap) return;
@@ -140,24 +142,64 @@ function buildRoundabout(prj) {
   P({ k: 'circle', L: 'ILOT_CENTRAL', c: O, r: Ri });
   if (bf > 0 && Rb > 0) P({ k: 'circle', L: 'ILOT_CENTRAL', c: O, r: Rb });
 
+  // Voies directes de tourne-à-droite (cases « TAD » de l'onglet Capacité) : de la branche i à la suivante.
+  const bpFrom = new Map(), bpTo = new Set();
+  let need = null;
+  bds.forEach((bd, i) => {
+    if (!prj.traffic?.tad?.[bd.id] || bds.length < 2) return;
+    const nx = bds[(i + 1) % bds.length];
+    const r = buildBypass(D, bd, nx, ringArcs[i]);
+    if (r.error) { issues.push({ lvl: 'err', bi: bd.idx, msg: `${bd.name} → ${nx.name} : voie directe de tourne-à-droite non dessinée (${r.error}).` }); return; }
+    if (r.needK > bd.xEnd || r.needJ > nx.xEnd) {
+      need = need || { ...ext };
+      need[bd.idx] = Math.max(need[bd.idx] || 0, r.needK + 1);
+      need[nx.idx] = Math.max(need[nx.idx] || 0, r.needJ + 1);
+      return;
+    }
+    r.to = nx;
+    bpFrom.set(i, r);
+    bpTo.add((i + 1) % bds.length);
+  });
+  // Branches trop courtes pour la décélération ou l'insertion : on les allonge et on reconstruit (une fois).
+  if (need && !ext.again) return buildRoundabout(prj, { ...need, again: true });
+  D.bypasses = [...bpFrom.entries()].map(([i, r]) => ({ ...r, from: bds[i].name, to: r.to.name }));
+
   // Remplissage chaussée (règle pair-impair : trous = îlots).
   const outer = [];
   bds.forEach((bd, i) => {
-    outer.push(...G.revPath(bd.exit.curbW), L(bd.exit.F, bd.entry.F), ...bd.entry.curbW);
-    if (ringArcs[i]) outer.push(ringArcs[i]);
+    if (!bpTo.has(i)) outer.push(...G.revPath(bd.exit.curbW));
+    outer.push(L(bd.exit.F, bd.entry.F));
+    if (bpFrom.has(i)) outer.push(...bpFrom.get(i).right);
+    else { outer.push(...bd.entry.curbW); if (ringArcs[i]) outer.push(ringArcs[i]); }
   });
   const rings = bds.length ? [outer] : [[{ t: 'C', c: O, r: Rg }]];
   rings.push([{ t: 'C', c: O, r: Ri }]);
   bds.forEach((bd) => { if (bd.island && bd.isl.type !== 'peint') rings.push(bd.island.outline); });
+  for (const r of bpFrom.values()) rings.push(r.island);
   P({ k: 'fill', L: 'CHAUSSEE', rings, role: 'chaussee' });
   if (bf > 0 && Rb > 0) P({ k: 'fill', L: 'ILOT_CENTRAL', rings: [[{ t: 'C', c: O, r: Ri }], [{ t: 'C', c: O, r: Rb }]], role: 'franchissable' });
   P({ k: 'fill', L: 'ILOT_CENTRAL', rings: [[{ t: 'C', c: O, r: Math.max(0, Rb) }]], role: 'ilot' });
 
-  for (const bd of bds) {
+  // Voies directes : bords, îlot de séparation, marquage.
+  for (const r of bpFrom.values()) {
+    P({ k: 'fill', L: 'ILOT_SEP', rings: [r.island], role: 'ilot' });
+    P({ k: 'path', L: 'BORDURE', segs: r.right });
+    P({ k: 'path', L: 'ILOT_SEP', segs: [L(r.noseJ, G.segEnd(r.left[r.left.length - 1])), ...G.revPath(r.left), L(G.segStart(r.left[0]), r.noseK)] });
+    for (const rv of r.rive) P({ k: 'path', L: 'MARQUAGE', segs: rv, wm: 0.15 });
+    for (const ds of r.dashes) P({ k: 'path', L: 'MARQUAGE', segs: ds, wm: 0.15, dash: [3, 1.33], lt: 'T3' });
+    P({ k: 'path', L: 'AXE', segs: r.axis });
+    P({ k: 'cross', L: 'CONSTRUCTION', p: r.C, size: 1 });
+    P({ k: 'path', L: 'CONSTRUCTION', segs: [L(r.C, r.T1), L(r.C, r.T2)] });
+    const toC = norm(sub(r.C, r.labelAt));
+    text('COTATION', add(r.labelAt, mul(toC, 3 + TH)), `TAD direct · R int. ${fmt(r.rin, 0)} m · voie 4,00`, ang(rot90(toC)), 'center', TH * 0.8);
+  }
+
+  bds.forEach((bd, i) => {
     const { W, a, ai, x0, xT, xEnd, isl } = bd;
-    // Bordures d'entrée / sortie
-    P({ k: 'path', L: 'BORDURE', segs: bd.entry.curbW });
-    P({ k: 'path', L: 'BORDURE', segs: bd.exit.curbW });
+    // Bordures d'entrée / sortie (raccourcies au nez de l'îlot de séparation d'une voie directe)
+    const prev = (i - 1 + bds.length) % bds.length;
+    P({ k: 'path', L: 'BORDURE', segs: bpFrom.has(i) ? bpFrom.get(i).entryCut : bd.entry.curbW });
+    P({ k: 'path', L: 'BORDURE', segs: bpTo.has(i) ? bpFrom.get(prev).exitCut : bd.exit.curbW });
     P({ k: 'path', L: 'LIMITE', segs: [L(bd.exit.F, bd.entry.F)] });
     // Îlot
     if (bd.island) {
@@ -231,7 +273,7 @@ function buildRoundabout(prj) {
     } else if (bd.th) {
       text('COTATION', W({ x: xT + 8, y: a }), `TPC ${fmt(bd.th * 2, 2)}`, bd.theta, 'center', TH * 0.75);
     }
-  }
+  });
 
   // Cotation des rayons de l'anneau dans le plus grand secteur libre.
   let phi = Math.PI / 4;
@@ -273,6 +315,15 @@ function buildRoundabout(prj) {
       pt(`${nm} · îlot : tête côté sortie`, bd.island.headOut, bd.idx, 'ilot');
       if (bd.island.tip) pt(`${nm} · îlot : pointe`, bd.island.tip, bd.idx, 'ilot');
     }
+  }
+
+  for (const r of D.bypasses) {
+    const nm = `TAD ${r.from} → ${r.to}`;
+    pt(`${nm} : début de courbe (axe)`, r.T1, null, 'bypass');
+    pt(`${nm} : fin de courbe (axe)`, r.T2, null, 'bypass');
+    pt(`${nm} : centre R = ${fmt(r.Rc, 2)} (axe)`, r.C, null, 'centre');
+    pt(`${nm} : nez de l'îlot côté ${r.from}`, r.noseK, null, 'ilot');
+    pt(`${nm} : nez de l'îlot côté ${r.to}`, r.noseJ, null, 'ilot');
   }
 
   addDevers(prj, D);

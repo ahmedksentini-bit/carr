@@ -1049,7 +1049,8 @@ function bindUI() {
       else if (t.dataset.pl) T.pl[t.dataset.pl] = v;
       else if (t.dataset.qp) T.qp = { ...T.qp, [t.dataset.qp]: v };
       else T.tad = { ...T.tad, [t.dataset.tad]: t.checked };
-      refreshCapacity(); autosave();
+      if (t.dataset.tad) update({ commit: false }); // la voie directe modifie aussi le dessin
+      else { refreshCapacity(); autosave(); }
     } else if (t.dataset.vis) {
       S.prj.opts.vis[t.dataset.vis] = t.checked; viewer.invalidate(); autosave();
     }

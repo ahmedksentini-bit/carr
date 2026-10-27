@@ -32,6 +32,10 @@ ou sur un fond topographique DXF.
   conversion en uvp (PL = 2 uvp), débits Qe / Qc / Qs, trafic gênant Qg, capacité, réserve (uvp/h et %),
   temps moyen d'attente, files moyenne et maximale, remarques (saturation, surdimensionnement) et recommandation
   de voie directe de tourne-à-droite ; une case « TAD » retire ce mouvement du giratoire.
+- **Voie directe de tourne-à-droite (by-pass)** : dessinée dès que la case « TAD » d'une branche est cochée, vers la
+  branche suivante (ACI : voie de 4 m, bandes dérasées 2,00 m à droite et 0,50 m à gauche, rive intérieure de rayon
+  40 m, îlot de séparation de 2 m minimum le long des bordures du giratoire, biseau de décélération de 80 m,
+  voie d'insertion de 70 m et biseau de 70 m) ; les branches concernées sont allongées automatiquement.
 - **Exports** : DXF R12 par calques `GIRA_*` (AutoCAD, Covadis, BricsCAD…), PNG, points d'implantation X, Y, Z en CSV,
   projet `.gira.json` (et sauvegarde automatique dans le navigateur).
 
@@ -48,6 +52,7 @@ js/common.js        outils partagés (centre automatique, repères, formats)
 js/norms.js         valeurs par défaut et contrôles SETRA / CERTU
 js/devers.js        modèle altimétrique et dévers
 js/capacity.js      trafic HPM et capacité des entrées (modèle de type Girabase)
+js/bypass.js        voie directe de tourne-à-droite (by-pass)
 js/viewer.js        rendu canvas (projet, DXF, HUD)
 js/geom.js          géométrie (droites, arcs, raccordements, décalages)
 js/dxf-parse.js     lecture DXF        js/dxf-write.js   écriture DXF R12
@@ -111,8 +116,8 @@ du code. Elle n'est pas homologuée : comparer les résultats avec Girabase avan
   à 4 m et 15 m, largeur d'îlot séparateur, largeur de sortie, nombre de voies d'entrée.
 - Non repris : deux-roues (0,5 uvp), option « saturer la branche », calcul des carrefours plans.
 
-## Prochaines étapes prévues
+## Limites connues
 
-1. Dessin des voies directes de tourne-à-droite (by-pass) recommandées par le calcul de capacité
-   (ACI : à éviter en règle générale ; biseau de décélération ≥ 80 m, rayon intérieur ≥ 40 m, de préférence < 75 m,
-   voie de 4 m, bandes dérasées 2,00 m à droite et 0,50 m à gauche, insertion de 70 m + biseau de 70 m).
+- Voie directe de tourne-à-droite : rayon, largeur d'îlot et longueurs sont fixés aux valeurs ACI (module `bypass.js`) ;
+  la clothoïde d'entrée et la variante « réinsertion avec cédez-le-passage » ne sont pas dessinées.
+- Capacité : giratoires seulement ; les carrefours plans (T, X) ne sont pas encore calculés.
