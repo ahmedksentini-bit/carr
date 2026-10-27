@@ -63,6 +63,7 @@
         <button data-tab="branches">Branches</button>
         <button data-tab="devers">Dévers</button>
         <button data-tab="controles">Contrôles <span id="chkBadge" class="badge"></span></button>
+        <button data-tab="capacite">Capacité</button>
         <button data-tab="implantation">Implantation</button>
       </div>
 
@@ -170,6 +171,17 @@
       <div class="tab" id="tab-controles" hidden>
         <p class="note">Contrôles automatiques des valeurs saisies par rapport aux recommandations du guide retenu. Ils ne remplacent pas le jugement du projeteur.</p>
         <ul id="checks" class="checks"></ul>
+      </div>
+
+      <div class="tab" id="tab-capacite" hidden>
+        <p class="note" id="capIntro"></p>
+        <div id="capFields"></div>
+        <h3>Matrice origine – destination à l'HPM (véh/h)</h3>
+        <p class="note">Lignes : branche d'origine (entrée) ; colonnes : branche de destination (sortie). La diagonale correspond aux demi-tours.</p>
+        <div class="tablewrap od"><table id="odTable" class="pts"></table></div>
+        <h3>Résultats par entrée</h3>
+        <div class="tablewrap"><table id="capTable" class="pts"></table></div>
+        <div id="capNotes"></div>
       </div>
 
       <div class="tab" id="tab-implantation" hidden>

@@ -8,6 +8,7 @@ import { Viewer, THEMES, drawDesign, drawDxf, buildDxfCache, snapDxf, drawGrid, 
 import { buildDesign, fmt, fmtGis } from './roundabout.js';
 import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan } from './norms.js';
 import { LAYERS } from './layers.js';
+import { analyse, SITES } from './capacity.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -57,6 +58,7 @@ function newProject(context = 'interurbain') {
     center: { auto: true, x: null, y: null },
     ring: { Rg: R.Rg, la: R.la, bf: R.bf, zC: 100, devers: R.devers, pente: 0, gisPente: 0, mode: 'aci' },
     plan: defaultPlan(context),
+    traffic: { period: 'HPM', site: context === 'urbain' ? 'urbain' : 'rase', uvpPL: 2, od: {}, pl: {}, qp: {}, tad: {} },
     branches: [],
     opts: { angleUnit: 'gon', textH: 0.8, theme: 'dark', vis: {}, dxfOpacity: 0.9 },
   };
@@ -69,6 +71,7 @@ function migrate(p) {
     ring: { ...base.ring, ...p.ring }, opts: { ...base.opts, ...p.opts, vis: { ...(p.opts?.vis || {}) } },
     center: { ...base.center, ...p.center }, crs: { ...base.crs, ...p.crs }, bg: { ...base.bg, ...p.bg },
     plan: { ...base.plan, ...p.plan, tag: { ...base.plan.tag, ...p.plan?.tag } },
+    traffic: { ...base.traffic, ...p.traffic, od: { ...p.traffic?.od }, pl: { ...p.traffic?.pl }, qp: { ...p.traffic?.qp }, tad: { ...p.traffic?.tad } },
   };
   delete out.view;
   out.kind = ['T', 'X'].includes(p.kind) ? p.kind : 'giratoire';
@@ -625,6 +628,8 @@ function buildStaticPanels() {
     '<div data-for="giratoire">' +
     sel('ring.mode', 'Calage de l\'anneau', [['aci', 'Dévers constant, rive ext. dans la pente (ACI)'], ['cone', 'Cône posé sur le plan incliné']], { branch: false }) + '</div>';
   $('[data-k="ring.devers"]').disabled = true; // 1,5 % imposé
+  $('#capFields').innerHTML = sel('traffic.site', 'Milieu', Object.entries(SITES).map(([k, s]) => [k, s.label]), { branch: false }) +
+    fld('traffic.uvpPL', 'Équivalence d\'un poids lourd', 'uvp');
   $('#visLayers').innerHTML = Object.entries(LAYERS).map(([k, l]) =>
     `<label class="chk"><input type="checkbox" data-vis="${k}"> ${esc(l.label)}</label>`).join('');
   syncCtxUI(); syncCrsUI(); syncInputs();
@@ -735,6 +740,7 @@ function refreshPanels() {
   refreshDevers();
   refreshChecks();
   refreshPoints();
+  refreshCapacity();
   setPrompt();
 }
 
@@ -950,6 +956,69 @@ function refreshPoints() {
     : '<tbody><tr><td class="note">Aucun point : dessinez les branches.</td></tr></tbody>';
 }
 
+// --------------------------------------------------------- Capacité
+// Entrées du giratoire dans le sens de giration, avec la géométrie utile au calcul de capacité.
+function capEntries() {
+  if (S.D?.kind !== 'giratoire' || !S.D.ok) return [];
+  const T = S.prj.traffic;
+  return S.D.branches.map((bd) => {
+    const b = S.prj.branches[bd.idx], dv = S.D.devers?.branches.find((q) => q.idx === bd.idx);
+    return {
+      id: bd.id, name: bd.name, theta: bd.theta,
+      le4: bd.entry.w, le15: bd.h >= 15 ? bd.entry.w : bd.entry.wa, // largeur à 4 m et à 15 m en amont
+      li: bd.isl.type === 'aucun' ? 2 * bd.th : Math.max(bd.b, 2 * bd.th), ls: bd.exit.w,
+      lanes: Math.max(1, +b.nIn || 1), rampe: dv ? -dv.grade > 0.03 : false, // entrée en rampe > 3 %
+      qp: T.qp?.[bd.id] === '' || T.qp?.[bd.id] == null ? 10 : +T.qp[bd.id],
+    };
+  });
+}
+
+function refreshCapacity() {
+  const entries = capEntries(), T = S.prj.traffic;
+  const giratoire = !isPlan(S.prj);
+  $('#capIntro').textContent = giratoire
+    ? 'Débits de l\'heure de pointe du matin. Capacité calculée avec le modèle de Girabase 4 (Cerema) : trafic gênant, largeur d\'entrée, îlot, anneau, piétons.'
+    : 'Le calcul de capacité porte sur les giratoires ; les carrefours plans (T, X) seront traités ensuite.';
+  $('#capFields').hidden = !giratoire;
+  if (!giratoire || entries.length < 2) { $('#odTable').innerHTML = ''; $('#capTable').innerHTML = ''; $('#capNotes').innerHTML = ''; return; }
+  // Matrice OD : reconstruite seulement si la liste des branches change (on ne perd pas la saisie en cours).
+  const sig = entries.map((e) => e.id + ':' + e.name).join(',');
+  const tbl = $('#odTable');
+  if (tbl.dataset.sig !== sig) {
+    tbl.dataset.sig = sig;
+    const v = (o, d) => showNum(T.od?.[o]?.[d] ?? '');
+    tbl.innerHTML = '<thead><tr><th>de \\ vers</th>' + entries.map((e) => `<th>${esc(e.name)}</th>`).join('') +
+      '<th title="Part de poids lourds">% PL</th><th title="Piétons traversant l\'entrée (10/h par défaut)">Piét./h</th><th title="Voie directe de tourne-à-droite">TAD</th></tr></thead><tbody>' +
+      entries.map(({ id: o, name }) => `<tr><th>${esc(name)}</th>` +
+        entries.map(({ id: d }) => `<td><input class="odc${o === d ? ' diag' : ''}" data-od="${o}|${d}" inputmode="numeric" value="${v(o, d)}" placeholder="0"></td>`).join('') +
+        `<td><input class="odc" data-pl="${o}" inputmode="decimal" value="${showNum(T.pl?.[o] ?? '')}" placeholder="0"></td>` +
+        `<td><input class="odc" data-qp="${o}" inputmode="numeric" value="${showNum(T.qp?.[o] ?? '')}" placeholder="10"></td>` +
+        `<td><input type="checkbox" data-tad="${o}" ${T.tad?.[o] ? 'checked' : ''}></td></tr>`).join('') +
+      '</tbody>';
+  }
+  const ring = { R: S.D.Rb, bf: S.D.bf, la: S.D.la };
+  const { res, consts } = analyse(T, ring, entries);
+  const n0 = (v) => (Number.isFinite(v) ? v.toFixed(0) : '—');
+  const rows = entries.map((e) => {
+    const r = res.get(e.id);
+    return `<tr><td>${esc(e.name)}</td><td class="mono">${n0(r.Qe)}</td><td class="mono">${n0(r.Qc)}</td><td class="mono">${n0(r.Qs)}</td>` +
+      `<td class="mono">${n0(r.Qg)}</td><td class="mono">${n0(r.C)}</td><td class="mono ${r.lvl}">${n0(r.RC)}</td>` +
+      `<td class="mono ${r.lvl}">${n0(r.RCp * 100)} %</td><td class="mono">${n0(r.TMA)}</td><td class="mono">${fmt(r.LK, 1)} / ${fmt(r.LKM, 1)}</td></tr>`;
+  });
+  $('#capTable').innerHTML = '<thead><tr><th>Entrée</th><th>Qe</th><th>Qc</th><th>Qs</th><th>Qg</th><th>C</th><th>Réserve</th><th>%</th><th>Att. (s)</th><th>File moy./max</th></tr></thead><tbody>' + rows.join('') + '</tbody>';
+  const icon = { err: '✕', warn: '!', info: 'i', ok: '✓' };
+  const li = (lvl, grp, t) => `<li class="${lvl}"><span class="ic">${icon[lvl]}</span><span class="grp">${esc(grp)}</span><span>${esc(t)}</span></li>`;
+  const notes = entries.flatMap((e) => res.get(e.id).notes.map((t) => li(res.get(e.id).lvl, e.name, t)));
+  if (consts.oversized) notes.push(li('info', 'Giratoire', 'Réserve > 80 % sur toutes les entrées : giratoire probablement injustifié.'));
+  const bypass = entries.filter((e) => res.get(e.id).Qbp > 0).map((e) => `${e.name} (${n0(res.get(e.id).Qbp)} uvp/h)`);
+  $('#capNotes').innerHTML =
+    (notes.length ? '<ul class="checks">' + notes.join('') + '</ul>' : '<p class="note">Aucune remarque : réserves comprises entre 25 et 50 %.</p>') +
+    (bypass.length ? `<p class="note">Voies directes de tourne-à-droite (retirées du giratoire) : ${esc(bypass.join(', '))}.</p>` : '') +
+    `<p class="note">${esc(consts.site.label)}${consts.mini ? ' (mini-giratoire)' : ''} : Tg ${fmt(consts.site.Tg)} s, Tf ${fmt(consts.site.Tf)} s · anneau utile ${fmt(consts.LAU)} m (KE ${fmt(consts.KE)}, KI ${fmt(consts.KI)}) · largeur d'entrée utile max ${fmt(consts.LEU)} m. ` +
+    'Débits en uvp/h ; Qc : débit sur l\'anneau devant l\'entrée ; Qg : trafic gênant ; réserve en % de la capacité ; files en véhicules par voie. ' +
+    'Seuils du manuel Girabase : 25–80 % bon fonctionnement, 5–25 % files aux hyper-pointes, < 5 % saturation.</p>';
+}
+
 function showTab(name) {
   $$('.tabs [data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
   $$('.tab').forEach((t) => (t.hidden = t.id !== 'tab-' + name));
@@ -974,11 +1043,21 @@ function bindUI() {
     } else if (t.dataset.bk && S.sel >= 0) {
       setPath(S.prj.branches[S.sel], t.dataset.bk, readInput(t));
       update({ commit: false });
+    } else if (t.dataset.od || t.dataset.pl || t.dataset.qp || t.dataset.tad) {
+      const T = S.prj.traffic, v = parseNum(t.value);
+      if (t.dataset.od) { const [o, d] = t.dataset.od.split('|'); T.od[o] = { ...T.od[o], [d]: v }; }
+      else if (t.dataset.pl) T.pl[t.dataset.pl] = v;
+      else if (t.dataset.qp) T.qp = { ...T.qp, [t.dataset.qp]: v };
+      else T.tad = { ...T.tad, [t.dataset.tad]: t.checked };
+      refreshCapacity(); autosave();
     } else if (t.dataset.vis) {
       S.prj.opts.vis[t.dataset.vis] = t.checked; viewer.invalidate(); autosave();
     }
   });
-  panel.addEventListener('change', (e) => { if (e.target.dataset.k || e.target.dataset.bk) { commitHistory(); syncInputs(); } });
+  panel.addEventListener('change', (e) => {
+    if (e.target.dataset.k || e.target.dataset.bk) { commitHistory(); syncInputs(); }
+    if (e.target.dataset.od || e.target.dataset.pl || e.target.dataset.qp || e.target.dataset.tad) commitHistory();
+  });
   panel.addEventListener('click', (e) => {
     const li = e.target.closest('#branchList li[data-bi]');
     if (li) { selectBranch(+li.dataset.bi); return; }
@@ -1064,6 +1143,7 @@ function setContext(c) {
     const P = PRESETS[c];
     Object.assign(S.prj.ring, { Rg: P.ring.Rg, la: P.ring.la, bf: P.ring.bf, devers: P.ring.devers });
     S.prj.plan = { ...defaultPlan(c), main: S.prj.plan?.main || ['', ''] };
+    S.prj.traffic.site = c === 'urbain' ? 'urbain' : 'rase';
     resetBranchDefaults();
   }
   syncCtxUI(); renderBranchForm(); update();

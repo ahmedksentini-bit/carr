@@ -28,6 +28,10 @@ ou sur un fond topographique DXF.
   profil en long des rives, variation des dévers de chaque branche, flèches de dévers sur le plan.
 - **Contrôles** : comparaison des valeurs aux recommandations du guide, excentrement des axes, déflexion,
   chevauchement des raccordements, pentes transversales.
+- **Capacité des giratoires (type Girabase)** : matrice origine-destination à l'HPM (véh/h, % PL, piétons),
+  conversion en uvp (PL = 2 uvp), débits Qe / Qc / Qs, trafic gênant Qg, capacité, réserve (uvp/h et %),
+  temps moyen d'attente, files moyenne et maximale, remarques (saturation, surdimensionnement) et recommandation
+  de voie directe de tourne-à-droite ; une case « TAD » retire ce mouvement du giratoire.
 - **Exports** : DXF R12 par calques `GIRA_*` (AutoCAD, Covadis, BricsCAD…), PNG, points d'implantation X, Y, Z en CSV,
   projet `.gira.json` (et sauvegarde automatique dans le navigateur).
 
@@ -43,6 +47,7 @@ js/approach.js      construction d'une branche (bords, raccordements, îlot), co
 js/common.js        outils partagés (centre automatique, repères, formats)
 js/norms.js         valeurs par défaut et contrôles SETRA / CERTU
 js/devers.js        modèle altimétrique et dévers
+js/capacity.js      trafic HPM et capacité des entrées (modèle de type Girabase)
 js/viewer.js        rendu canvas (projet, DXF, HUD)
 js/geom.js          géométrie (droites, arcs, raccordements, décalages)
 js/dxf-parse.js     lecture DXF        js/dxf-write.js   écriture DXF R12
@@ -90,8 +95,24 @@ Pour les carrefours plans :
 
 L'altimétrie est un modèle de principe (avant-projet) : elle ne remplace pas un calcul de profils sur MNT.
 
+### Capacité
+
+Le calcul reprend les formules du logiciel **Girabase 4** (Cerema), d'après son manuel
+(publications.cerema.fr, « Girabase 4 ») et son code source publié sous GPL-3.0
+(github.com/CEREMA/territoires-ville.Girabase). C'est une réimplémentation indépendante des formules, pas une copie
+du code. Elle n'est pas homologuée : comparer les résultats avec Girabase avant tout usage réglementaire.
+
+- Capacité : C = (3600/Tf)·exp(−Qg/3600·(Tg − Tf/2)) · (LEG/3,5)^Te · (1 − Cp), avec Tg / Tf / Te selon le milieu
+  (rase campagne 4,75 / 2,25 / 0,70 ; périurbain 4,55 / 2,05 / 0,80 ; urbain 4,40 / 1,80 / 0,85) et Tf × 1,35 si l'entrée
+  monte de plus de 3 %.
+- Trafic gênant : Qg = KE·QTE + KI·QTI + KS·Qs·(1 − Qs/(Qc + Qs)), le trafic de l'anneau étant réparti entre extérieur et
+  intérieur selon l'angle de sortie des flux.
+- Géométrie prise sur le plan : rayon de l'îlot infranchissable, bande franchissable, largeur d'anneau, largeur d'entrée
+  à 4 m et 15 m, largeur d'îlot séparateur, largeur de sortie, nombre de voies d'entrée.
+- Non repris : deux-roues (0,5 uvp), option « saturer la branche », calcul des carrefours plans.
+
 ## Prochaines étapes prévues
 
-1. Calcul de capacité type Girabase à l'heure de pointe du matin (matrice origine-destination saisie par l'utilisateur).
-2. Aide à la décision pour les tourne-à-droite directs (by-pass) et dessin de ces voies
-   (ACI : biseau de décélération ≥ 80 m, rayon intérieur ≥ 40 m, voie de 4 m).
+1. Dessin des voies directes de tourne-à-droite (by-pass) recommandées par le calcul de capacité
+   (ACI : à éviter en règle générale ; biseau de décélération ≥ 80 m, rayon intérieur ≥ 40 m, de préférence < 75 m,
+   voie de 4 m, bandes dérasées 2,00 m à droite et 0,50 m à gauche, insertion de 70 m + biseau de 70 m).
