@@ -91,7 +91,7 @@ main.app { display: grid; grid-template-columns: 46px minmax(0, 1fr) 392px; min-
 .fld .lb { flex: 1; color: #c9d1db; }
 .fld input[type=text] { width: 96px; text-align: right; font-family: var(--mono); font-size: 12.5px; }
 .fld input[data-type=text] { text-align: left; font-family: inherit; width: 150px; }
-.fld .un { width: 18px; color: var(--muted); font-size: 12px; }
+.fld .un { min-width: 18px; color: var(--muted); font-size: 12px; }
 .fld select { max-width: 220px; }
 .fld.wide { margin: 6px 0; }
 .fld.wide select, .fld.wide input { flex: 1.4; }

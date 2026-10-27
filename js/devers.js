@@ -69,53 +69,110 @@ export function addDevers(prj, D) {
 
   // Branches
   for (const bd of D.branches) {
-    const b = prj.branches[bd.idx];
-    const grade = b.pente !== '' && b.pente != null && isFinite(+b.pente) ? +b.pente / 100 : -p * dot(bd.u, g);
-    const z0 = zRing(bd.W({ x: bd.x0, y: bd.a }));
-    const camber = -(+b.camber || 2.5) / 100;
-    const Ltr = b.transition !== '' && b.transition != null && +b.transition > 0 ? +b.transition : Math.max(bd.h, 10);
-    const d0 = { 1: -p * dot(bd.n, g), [-1]: p * dot(bd.n, g) };
-    const dev = (s, x) => {
-      const t = G.clamp((x - bd.x0) / Ltr, 0, 1);
-      return d0[s] + (camber - d0[s]) * t;
-    };
-    const zAxis = (x) => z0 + grade * (x - bd.x0);
-    const zAt = (Pw) => {
-      const q = sub(Pw, O), x = dot(q, bd.u), y = dot(q, bd.n);
-      if (x <= bd.x0 + 1e-6 && G.dist(Pw, O) <= D.Rg + 0.05) return zRing(Pw);
-      const s = y - bd.a >= 0 ? 1 : -1;
-      return zAxis(x) + dev(s, x) * Math.abs(y - bd.a);
-    };
-    const stations = [];
-    const xs = [0, Ltr / 4, Ltr / 2, (3 * Ltr) / 4, Ltr, Ltr + 10];
-    for (const dx of xs) {
-      const x = bd.x0 + dx;
-      if (x > bd.xEnd) break;
-      stations.push({ dx, zAxe: zAxis(x), dIn: dev(1, x), dOut: dev(-1, x) });
-    }
-    D.devers.branches.push({ idx: bd.idx, name: bd.name, grade, Ltr, camber, d0In: d0[1], d0Out: d0[-1], stations, zAt });
-    bd.zAt = zAt;
+    branchDevers(prj, D, bd, {
+      z0: zRing(bd.W({ x: bd.x0, y: bd.a })),
+      d0In: -p * dot(bd.n, g), d0Out: p * dot(bd.n, g),
+      defGrade: -p * dot(bd.u, g),
+      base: (Pw, x) => (x <= bd.x0 + 1e-6 && G.dist(Pw, O) <= D.Rg + 0.05 ? zRing(Pw) : null),
+      arrow, TH,
+    });
+  }
+  pointHeights(D, zRing);
+}
 
-    // Flèches sur la branche : début, milieu et fin de transition, section courante.
-    for (const dx of [2, Ltr / 2, Ltr, Ltr + 12]) {
-      const x = bd.x0 + dx;
-      if (x > bd.xEnd - 2) continue;
-      for (const sd of [bd.entry, bd.exit]) {
-        const s = sd.s, v = dev(s, x);
-        const isl = dx < bd.h ? bd.hb + (bd.th - bd.hb) * (dx / bd.h) : bd.th;
-        const wl = dx < bd.h ? sd.w : sd.wa;
-        const yc = bd.a + s * (isl + wl / 2);
-        const away = mul(bd.n, s);
-        const dir = v <= 0 ? away : G.neg(away);
-        arrow(add(bd.W({ x, y: yc }), mul(dir, -1)), dir, 2, pct(Math.abs(v)), TH * 0.7);
-      }
+// Profil et dévers d'une branche : profil en long rectiligne depuis x0, dévers de chaque voie variant
+// linéairement de la valeur imposée au raccordement (d0) au dévers courant sur la longueur de transition.
+function branchDevers(prj, D, bd, { z0, d0In, d0Out, defGrade, base, arrow, TH }) {
+  const b = prj.branches[bd.idx], O = D.O;
+  const grade = b.pente !== '' && b.pente != null && isFinite(+b.pente) ? +b.pente / 100 : defGrade;
+  const camber = -(+b.camber || 2.5) / 100;
+  const Ltr = b.transition !== '' && b.transition != null && +b.transition > 0 ? +b.transition : Math.max(bd.h, 10);
+  const d0 = { 1: d0In, [-1]: d0Out };
+  const dev = (s, x) => {
+    const t = G.clamp((x - bd.x0) / Ltr, 0, 1);
+    return d0[s] + (camber - d0[s]) * t;
+  };
+  const zAxis = (x) => z0 + grade * (x - bd.x0);
+  const zAt = (Pw) => {
+    const q = sub(Pw, O), x = dot(q, bd.u), y = dot(q, bd.n);
+    const zb = base(Pw, x);
+    if (zb != null) return zb;
+    const s = y - bd.a >= 0 ? 1 : -1;
+    return zAxis(x) + dev(s, x) * Math.abs(y - bd.a);
+  };
+  const stations = [];
+  for (const dx of [0, Ltr / 4, Ltr / 2, (3 * Ltr) / 4, Ltr, Ltr + 10]) {
+    const x = bd.x0 + dx;
+    if (x > bd.xEnd) break;
+    stations.push({ dx, zAxe: zAxis(x), dIn: dev(1, x), dOut: dev(-1, x) });
+  }
+  D.devers.branches.push({ idx: bd.idx, name: bd.name, grade, Ltr, camber, d0In, d0Out, stations, zAt });
+  bd.zAt = zAt;
+
+  // Flèches sur la branche : début, milieu et fin de transition, section courante.
+  for (const dx of [2, Ltr / 2, Ltr, Ltr + 12]) {
+    const x = bd.x0 + dx;
+    if (x > bd.xEnd - 2) continue;
+    for (const sd of [bd.entry, bd.exit]) {
+      const s = sd.s, v = dev(s, x);
+      const isl = dx < bd.h ? bd.hb + (bd.th - bd.hb) * (dx / bd.h) : bd.th;
+      const wl = dx < bd.h ? sd.w : sd.wa;
+      const yc = bd.a + s * (isl + wl / 2);
+      const away = mul(bd.n, s);
+      const dir = v <= 0 ? away : G.neg(away);
+      arrow(add(bd.W({ x, y: yc }), mul(dir, -1)), dir, 2, pct(Math.abs(v)), TH * 0.7);
     }
   }
+}
 
-  // Altitudes des points d'implantation
+// Altitudes des points d'implantation (centres de raccordement : pas de cote).
+function pointHeights(D, zBase) {
   for (const q of D.points) {
     const bd = q.bi != null ? D.branches.find((x) => x.idx === q.bi) : null;
-    q.z = bd && bd.zAt && q.kind !== 'centre' ? bd.zAt(q.p) : zRing(q.p);
-    if (q.kind === 'centre' && q.bi != null) q.z = null; // centres de raccordement : pas de cote
+    q.z = bd && bd.zAt && q.kind !== 'centre' ? bd.zAt(q.p) : zBase(q.p);
+    if (q.kind === 'centre' && q.bi != null) q.z = null;
   }
+}
+
+// Carrefour plan : la route principale garde son profil (toit de dévers c, pente en long i) ; chaque branche
+// secondaire se raccorde au bord de la chaussée principale, dont elle reprend la pente, puis retrouve son profil.
+export function addDeversPlan(prj, D) {
+  const r = prj.ring, P = D.plan, O = D.O, uM = D.main.u, Ym = D.main.Y;
+  const p = (+r.pente || 0) / 100, g = gisVec(+r.gisPente || 0), zC = +r.zC || 0;
+  const gradeM = P.pente !== '' && P.pente != null && isFinite(+P.pente) ? +P.pente / 100 : -p * dot(uM, g);
+  const c = (+P.camber || 2.5) / 100;
+  const TH = +prj.opts?.textH || 0.8;
+  const zMain = (Pw) => { const q = sub(Pw, O); return zC + gradeM * dot(q, uM) - c * Math.abs(dot(q, Ym)); };
+  D.zMain = zMain;
+  D.devers = { mode: 'plan', p, d: c, g, zC, gradeM, minRadial: c, maxRadial: c, maxTransverse: c, branches: [] };
+  D.mainProfile = [];
+  for (let k = 0; k <= 60; k++) {
+    const X = -P.LA + ((P.LA + P.LB) * k) / 60;
+    D.mainProfile.push({ x: X, zAxe: zC + gradeM * X, zBord: zC + gradeM * X - c * P.half });
+  }
+  const Pp = (o) => D.prims.push(o);
+  const arrow = (pt, dir, len, label, h = TH * 0.8) => Pp({ k: 'arrow', L: 'DEVERS', p: pt, dir, len, text: label, h, rot: upright(G.ang(dir)) });
+
+  // Flèches de dévers sur la route principale (toit), hors débouché.
+  for (const X of [-(P.LA - 8), -(P.Lm + 8), P.Lm + 8, P.LB - 8]) {
+    for (const sg of [1, -1]) {
+      const dir = mul(Ym, sg);
+      arrow(add(D.main.toW(X, sg * P.half / 2), mul(dir, -1)), dir, 2, pct(c), TH * 0.7);
+    }
+  }
+  if (gradeM) arrow(D.main.toW(-(P.Lm + 20), -(P.hw + 1.5 * TH)), mul(uM, gradeM < 0 ? 1 : -1), 6, `pente ${pct(Math.abs(gradeM))}`, TH * 0.8);
+
+  for (const bd of D.branches) {
+    if (bd.role !== 'secondaire') continue;
+    // Pente de la chaussée principale au droit du débouché, suivant la direction transversale de la branche.
+    const grad = sub(mul(uM, gradeM), mul(Ym, c * bd.sY));
+    branchDevers(prj, D, bd, {
+      z0: zMain(bd.W({ x: bd.x0, y: 0 })),
+      d0In: dot(grad, bd.n), d0Out: -dot(grad, bd.n),
+      defGrade: -p * dot(bd.u, g),
+      base: (Pw, x) => (x <= bd.x0 + 1e-6 ? zMain(Pw) : null),
+      arrow, TH,
+    });
+  }
+  pointHeights(D, zMain);
 }

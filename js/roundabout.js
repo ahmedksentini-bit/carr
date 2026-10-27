@@ -5,65 +5,27 @@
 import * as G from './geom.js';
 import { islandDims } from './norms.js';
 import { addDevers } from './devers.js';
+import { fmt, fmtGis, upright, autoCenter, branchDirection, frame } from './common.js';
+import { buildApproach, crossLine } from './approach.js';
+import { buildPlan } from './plan.js';
 
-const { add, sub, mul, dot, norm, rot90, neg, dist, ang, polar, L, A } = G;
-const O0 = { x: 0, y: 0 };
+const { add, sub, mul, dot, norm, rot90, neg, ang, polar, L, A } = G;
 
-export const fmt = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d).replace('.', ',') : '—');
-export const toGon = (rad) => G.normAng(Math.PI / 2 - rad) * 200 / Math.PI; // gisement depuis le Nord, sens horaire
-export const toDegGis = (rad) => G.normAng(Math.PI / 2 - rad) * 180 / Math.PI;
-export const fmtGis = (rad, unit) => (unit === 'deg' ? fmt(toDegGis(rad), 2) + '°' : fmt(toGon(rad), 3) + ' gr');
-const upright = (r) => { r = G.normAng(r); return r > Math.PI / 2 && r <= 1.5 * Math.PI ? r - Math.PI : r; };
+export { fmt, fmtGis, autoCenter };
 
-// Oriente une polyligne de l'extrémité la plus proche de O vers la plus éloignée.
-function nearFar(axis, O) {
-  return G.dist(axis[0], O) <= G.dist(axis[axis.length - 1], O) ? axis : axis.slice().reverse();
-}
-
-// Centre automatique : point le plus proche, au sens des moindres carrés, des axes saisis
-// (droite portée par le segment de chaque axe le plus proche du centre).
-export function autoCenter(branches) {
-  const ax = branches.filter((b) => b.axis && b.axis.length >= 2);
-  if (!ax.length) return null;
-  if (ax.length === 1) return { ...ax[0].axis[ax[0].axis.length - 1] };
-  let O = { x: 0, y: 0 }, k = 0;
-  for (const b of ax) for (const p of [b.axis[0], b.axis[b.axis.length - 1]]) { O.x += p.x; O.y += p.y; k++; }
-  O = { x: O.x / k, y: O.y / k };
-  for (let it = 0; it < 6; it++) {
-    let a11 = 0, a12 = 0, a22 = 0, b1 = 0, b2 = 0;
-    const ends = [];
-    for (const b of ax) {
-      const pl = nearFar(b.axis, O), p = pl[0], d = norm(sub(pl[1], pl[0]));
-      ends.push(p);
-      const m11 = 1 - d.x * d.x, m12 = -d.x * d.y, m22 = 1 - d.y * d.y;
-      a11 += m11; a12 += m12; a22 += m22; b1 += m11 * p.x + m12 * p.y; b2 += m12 * p.x + m22 * p.y;
-    }
-    const det = a11 * a22 - a12 * a12;
-    if (Math.abs(det) < 1e-6 * ax.length) { // axes parallèles : milieu des extrémités proches
-      O = ends.reduce((s, p) => ({ x: s.x + p.x / ends.length, y: s.y + p.y / ends.length }), { x: 0, y: 0 });
-      break;
-    }
-    O = { x: (a22 * b1 - a12 * b2) / det, y: (a11 * b2 - a12 * b1) / det };
-  }
-  return O;
-}
-
-function circleCircle(c1, r1, c2, r2) {
-  const d = G.dist(c1, c2);
-  if (d < 1e-9 || d > r1 + r2 || d < Math.abs(r1 - r2)) return [];
-  const a = (r1 * r1 - r2 * r2 + d * d) / (2 * d), h = Math.sqrt(Math.max(0, r1 * r1 - a * a));
-  const e = norm(sub(c2, c1)), m = add(c1, mul(e, a)), p = rot90(e);
-  return [add(m, mul(p, h)), sub(m, mul(p, h))];
-}
-
+// Point d'entrée : giratoire ou carrefour plan (T, X) selon le type du projet.
 export function buildDesign(prj) {
+  return prj.kind === 'T' || prj.kind === 'X' ? buildPlan(prj) : buildRoundabout(prj);
+}
+
+function buildRoundabout(prj) {
   const ring = prj.ring;
   const Rg = +ring.Rg, la = +ring.la, bf = +ring.bf || 0;
   const Ri = Rg - la, Rb = Ri - bf;
   const unit = prj.opts?.angleUnit || 'gon';
   const TH = +prj.opts?.textH || 0.8;
   const issues = [], prims = [], points = [], bds = [];
-  const D = { ok: false, O: null, Rg, la, bf, Ri, Rb, branches: bds, prims, points, issues };
+  const D = { kind: 'giratoire', ok: false, O: null, Rg, la, bf, Ri, Rb, branches: bds, prims, points, issues };
 
   let O = prj.center.auto ? autoCenter(prj.branches) : null;
   if (!O && prj.center.x != null) O = { x: +prj.center.x, y: +prj.center.y };
@@ -71,6 +33,7 @@ export function buildDesign(prj) {
   D.O = O;
   if (!(Rg > 0) || !(Ri > 0)) { issues.push({ lvl: 'err', msg: 'Rayons incohérents : il faut Rg > la (Ri = Rg − la > 0).' }); return D; }
   if (Rb <= 0) issues.push({ lvl: 'err', msg: 'Bande franchissable plus large que l\'îlot central.' });
+  const target = { kind: 'circle', R: Rg };
 
   prj.branches.forEach((b, idx) => {
     const name = b.name || `B${idx + 1}`;
@@ -86,21 +49,8 @@ export function buildDesign(prj) {
     const le = +b.le, ls = +b.ls, Re = +b.Re, Rs = +b.Rs;
 
     // --- Axe de calcul de la branche
-    const pl = nearFar(b.axis, O);
-    const far = pl[pl.length - 1];
+    const { far, Q, segDir } = branchDirection(b, O, Rg + h + 10);
     if (G.dist(far, O) < Rg + 5) { issues.push({ lvl: 'err', bi: idx, msg: `${name} : l'axe saisi doit sortir de l'anneau (> Rg + 5 m).` }); return; }
-    const Rd = Rg + h + 10;
-    let Q = far, segDir = norm(sub(pl[pl.length - 1], pl[pl.length - 2]));
-    if (G.dist(pl[0], O) >= Rd) { Q = pl[0]; segDir = norm(sub(pl[1], pl[0])); }
-    else {
-      for (let i = 0; i < pl.length - 1; i++) {
-        const p = pl[i], q = pl[i + 1];
-        if (G.dist(q, O) < Rd) continue;
-        const d = norm(sub(q, p)), ts = G.lineCircle(p, d, O, Rd);
-        if (ts.length) { Q = add(p, mul(d, ts[1])); segDir = d; }
-        break;
-      }
-    }
     let u, a;
     if (b.radial !== false) { u = norm(sub(Q, O)); a = 0; }
     else {
@@ -108,10 +58,7 @@ export function buildDesign(prj) {
       a = dot(sub(Q, O), rot90(u));
       if (Math.abs(a) > Rg * 0.6) { issues.push({ lvl: 'err', bi: idx, msg: `${name} : axe trop excentré (${fmt(a)} m) — axe radial utilisé.` }); u = norm(sub(Q, O)); a = 0; }
     }
-    const theta = ang(u), n = rot90(u);
-    const W = (p) => ({ x: O.x + u.x * p.x + n.x * p.y, y: O.y + u.y * p.x + n.y * p.y });
-    const Ws = (s) => (s.t === 'L' ? L(W(s.a), W(s.b)) : A(W(s.c), s.r, s.sa + theta, s.ea + theta, s.ccw));
-    const Wp = (p) => p.map(Ws);
+    const { theta, n, W, Ws, Wp } = frame(O, u);
 
     const x0 = Math.sqrt(Rg * Rg - a * a), xT = x0 + h;
     // Axe du triangle de construction (décalé vers la gauche de l'usager entrant, ACI).
@@ -121,108 +68,22 @@ export function buildDesign(prj) {
     let xEnd = b.length ? x0 + +b.length : Math.min(Math.max(dot(sub(far, O), u), xT + 40), xT + 80);
     xEnd = Math.max(xEnd, xT + Math.max(10, 15 * flare) + 20);
 
-    // --- Bord extérieur d'une voie (entrée s=+1 / sortie s=−1) et raccordement à l'anneau
-    const side = (s, w, wa, R, label) => {
-      const H = { x: x0, y: ai + s * hb }, T = { x: xT, y: ai + s * th };
-      const dI = norm(sub(T, H));
-      const mOut = s > 0 ? rot90(dI) : neg(rot90(dI));
-      const E1p = add(H, mul(mOut, w));
-      const yE2 = a + s * (th + wa);
-      const E1T = add(E1p, mul(dI, (xT - E1p.x) / dI.x));
-      const delta = s * (E1T.y - yE2);
-      const F = { x: xEnd, y: yE2 };
-      const ctrl = [F];
-      let lp, ld, lm;
-      if (delta > 0.05) {
-        ctrl.push({ x: xT + Math.max(10, 15 * delta), y: yE2 }, E1T);
-        lp = E1T; ld = neg(dI); lm = mOut;
-      } else {
-        const hit = G.lineLine(E1p, dI, { x: 0, y: yE2 }, { x: 1, y: 0 });
-        if (hit && hit.p.x > x0 + 0.5 && hit.p.x <= xT + 1e-6) { ctrl.push(hit.p); lp = hit.p; ld = neg(dI); lm = mOut; }
-        else { lp = F; ld = { x: -1, y: 0 }; lm = { x: 0, y: s }; }
-      }
-      let fil = G.filletLineCircle(lp, ld, lm, O0, Rg, R);
-      let reduced = false;
-      while (fil && fil.t < 0 && ctrl.length >= 2) {
-        const last = ctrl.pop(), prev = ctrl[ctrl.length - 1];
-        lp = prev; ld = norm(sub(last, prev)); lm = rot90(ld); if (lm.y * s < 0) lm = neg(lm);
-        fil = G.filletLineCircle(lp, ld, lm, O0, Rg, R);
-        reduced = true;
-      }
-      if (!fil) { issues.push({ lvl: 'err', bi: idx, msg: `${name} : raccordement ${label} impossible (rayon ou largeur incompatibles).` }); return null; }
-      if (reduced) issues.push({ lvl: 'warn', bi: idx, msg: `${name} : le rayon ${label} (${fmt(R, 1)} m) absorbe l'évasement ; la largeur ${label === 'd\'entrée' ? 'le' : 'ls'} réelle est supérieure à la valeur saisie.` });
-      const pts = [...ctrl, fil.Tl];
-      const curb = [...G.roundPolyline(pts, pts.map((_, i) => (i > 0 && i < pts.length - 1 ? isl.Rr : 0))), fil.arc];
-      // Largeur réelle au droit de la rive de l'anneau (x = x0), perpendiculairement à l'axe :
-      // supérieure à w, car le raccordement R commence en amont de l'anneau.
-      let wRing = null;
-      const sp = G.samplePath(curb, 0.2);
-      for (let i = 0; i + 1 < sp.length; i++) {
-        const p = sp[i], q = sp[i + 1];
-        if ((p.x - x0) * (q.x - x0) <= 0 && p.x !== q.x) { const y = p.y + ((x0 - p.x) / (q.x - p.x)) * (q.y - p.y); wRing = s * (y - H.y); break; }
-      }
-      return { s, w, wa, R, H, T, dI, F, ctrl, fil, curb, wRing };
+    const ap = buildApproach({ name, idx, target, a, ai, x0, xT, xEnd, hb, th, hasIsland, isl, le, ls, wIn, wOut, Re, Rs }, issues);
+    if (!ap) return;
+    const { en, ex } = ap;
+    const island = ap.island && {
+      outline: Wp(ap.island.outline), curb: Wp(ap.island.curb), closed: ap.island.closed, rive: ap.island.rive.map(Wp),
+      tip: ap.island.tip && W(ap.island.tip), headIn: W(ap.island.headIn), headOut: W(ap.island.headOut),
     };
-
-    const en = side(+1, le, wIn, Re, 'd\'entrée');
-    const ex = side(-1, ls, wOut, Rs, 'de sortie');
-    if (!en || !ex) return;
-
-    // --- Îlot séparateur (ou tête de TPC)
-    let island = null;
-    if (hasIsland) {
-      const Rh = Rg + isl.gap;
-      const Hi = { x: x0, y: ai + hb }, Ti = { x: xT, y: ai + th }, Ho = { x: x0, y: ai - hb }, To = { x: xT, y: ai - th };
-      const di = norm(sub(Hi, Ti)), dO = norm(sub(Ho, To));
-      let mi = rot90(di); if (mi.y > 0) mi = neg(mi);
-      let mo = rot90(dO); if (mo.y < 0) mo = neg(mo);
-      const fi = G.filletLineCircle(Ti, di, mi, O0, Rh, isl.rHead);
-      const fo = G.filletLineCircle(To, dO, mo, O0, Rh, isl.rHead);
-      if (fi && fo && fi.t > 0 && fo.t > 0) {
-        let outline, curb;
-        if (th <= 0) {
-          const tip = G.filletCorner(fo.Tl, Ti, fi.Tl, isl.rTip, 0.45, 0.45);
-          const headArc = A(O0, Rh, ang(fi.Tc), ang(fo.Tc), false);
-          outline = tip
-            ? [L(fo.Tl, tip.T1), tip.arc, L(tip.T2, fi.Tl), fi.arc, headArc, G.revSeg(fo.arc)]
-            : [L(fo.Tl, Ti), L(Ti, fi.Tl), fi.arc, headArc, G.revSeg(fo.arc)];
-          curb = outline;
-          // Marquage de rive à 0,50 m des bordures (côtés et pointe ; parcours trigonométrique → vers la droite).
-          const rive = [G.offsetPath(outline.slice(0, tip ? 3 : 2), -0.5)];
-          island = { outline: Wp(outline), curb: Wp(curb), closed: true, tip: W(tip ? G.segAt(tip.arc, 0.5) : Ti), rive: rive.map(Wp) };
-        } else {
-          const Fo = { x: xEnd, y: a - th }, Fi = { x: xEnd, y: a + th };
-          const headArc = A(O0, Rh, ang(fo.Tc), ang(fi.Tc), true);
-          const eOut = G.roundPolyline([Fo, To, fo.Tl], [0, 20, 0]), eIn = G.roundPolyline([fi.Tl, Ti, Fi], [0, 20, 0]);
-          curb = [...eOut, fo.arc, headArc, G.revSeg(fi.arc), ...eIn];
-          outline = [...curb, L(Fi, Fo)];
-          island = { outline: Wp(outline), curb: Wp(curb), closed: false, rive: [G.offsetPath(eOut, 0.5), G.offsetPath(eIn, 0.5)].map(Wp) };
-        }
-        island.headIn = W(fi.Tc); island.headOut = W(fo.Tc);
-      } else issues.push({ lvl: 'warn', bi: idx, msg: `${name} : îlot séparateur trop petit pour être dessiné (vérifier base / longueur).` });
-    }
 
     // --- Ligne de cédez-le-passage (bande de 0,50 m le long de l'anneau)
-    const ry = Rg + 0.25;
-    const startOnEdge = (sd) => {
-      const ts = G.lineCircle(sd.H, neg(sd.dI), O0, ry);
-      if (!ts.length) return null;
-      const t = Math.abs(ts[0]) < Math.abs(ts[1]) ? ts[0] : ts[1];
-      return add(sd.H, mul(neg(sd.dI), t));
-    };
-    // Fin de la bande : intersection du cercle Rg + 0,25 avec l'arc de raccordement lui-même
-    // (celle qui est du côté de l'axe ; l'autre est sur le prolongement du cercle, au-delà de Tc).
-    const onArc = (sd, R) => circleCircle(O0, ry, sd.fil.C, R).reduce((b, p) => (!b || Math.abs(ang(p)) < Math.abs(ang(b)) ? p : b), null);
-    const yieldStart = startOnEdge(en);
-    const yieldEnd = onArc(en, Re);
-    const exitStart = startOnEdge(ex);
-    const exitEnd = onArc(ex, Rs);
+    const yl = crossLine(en, target, 0.25), xl = crossLine(ex, target, 0.25);
 
     const bd = {
-      idx, id: b.id, name, theta, u, n, a, ai, x0, xT, xEnd, h, b: isl.b, hb, th, isl, W, Ws, Wp,
+      idx, id: b.id, name, role: 'branche', theta, u, n, a, ai, x0, xT, xEnd, h, b: isl.b, hb, th, isl, W, Ws, Wp,
       entry: { ...en, curbW: Wp(en.curb), Tc: W(en.fil.Tc), Tl: W(en.fil.Tl), C: W(en.fil.C), F: W(en.F) },
       exit: { ...ex, curbW: Wp(ex.curb), Tc: W(ex.fil.Tc), Tl: W(ex.fil.Tl), C: W(ex.fil.C), F: W(ex.F) },
-      island, yieldStart, yieldEnd, exitStart, exitEnd, gis: fmtGis(theta, unit),
+      island, yieldStart: yl?.a, yieldEnd: yl?.b, exitStart: xl?.a, exitEnd: xl?.b, gis: fmtGis(theta, unit),
     };
     bd.entry.phiTc = ang(sub(bd.entry.Tc, O));
     bd.exit.phiTc = ang(sub(bd.exit.Tc, O));
@@ -231,6 +92,7 @@ export function buildDesign(prj) {
 
   bds.sort((p, q) => G.normAng(p.theta) - G.normAng(q.theta));
   D.ok = true;
+  D.zoomR = Rg + Math.max(Rg, ...bds.map((bd) => bd.h)) + 15;
   D.mini = prj.context === 'urbain' && Rg < 12;
 
   // Déflexion (méthode des trois points) : trajectoire passant, au droit de la rive de l'anneau, à 2 m de la

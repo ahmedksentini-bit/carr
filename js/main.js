@@ -6,7 +6,7 @@ import { parseDXF, buildDxfGeometry } from './dxf-parse.js';
 import { DxfWriter } from './dxf-write.js';
 import { Viewer, THEMES, drawDesign, drawDxf, buildDxfCache, snapDxf, drawGrid, drawHud, niceStep } from './viewer.js';
 import { buildDesign, fmt, fmtGis } from './roundabout.js';
-import { PRESETS, RING_DEVERS, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath } from './norms.js';
+import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan } from './norms.js';
 import { LAYERS } from './layers.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -32,25 +32,31 @@ function nextName(prj) {
 
 function newBranch(prj, axis) {
   const P = PRESETS[prj.context].branch;
+  const base = {
+    id: uid(), name: nextName(prj), axis, radial: true, nIn: 1, nOut: 1,
+    island: { type: 'physique', base: '', length: '', gap: '', shift: '' },
+    tpc: { on: false, width: P.tpcWidth }, length: '', pente: '', transition: '',
+  };
+  if (isPlan(prj)) {
+    const s = PLAN[prj.context].sec; // largeurs et rayons automatiques (fonction de l, ACI tab. 8)
+    return { ...base, wLane: s.wLane, le: '', ls: '', Re: '', Rs: '', camber: s.camber };
+  }
   const row = prj.context === 'interurbain' ? aciRow(+prj.ring.Rg) : null;
   return {
-    id: uid(), name: nextName(prj), axis, radial: true,
-    nIn: 1, nOut: 1, wLane: P.wLane,
+    ...base, wLane: P.wLane, camber: P.camber,
     le: P.le, ls: row ? row.ls : P.ls, Re: row ? Math.min(row.Re, +prj.ring.Rg) : P.Re, Rs: row ? row.Rs : P.Rs,
-    island: { type: 'physique', base: '', length: '', gap: '', shift: '' },
-    tpc: { on: false, width: P.tpcWidth },
-    length: '', pente: '', camber: P.camber, transition: '',
   };
 }
 
 function newProject(context = 'interurbain') {
   const R = PRESETS[context].ring;
   return {
-    app: 'GIRA', version: 1, name: 'Giratoire sans titre', context,
+    app: 'GIRA', version: 1, name: 'Giratoire sans titre', context, kind: 'giratoire',
     crs: { id: 'utm', zone: 32, south: false, def: '' },
     bg: { provider: 'esri', opacity: 1 },
     center: { auto: true, x: null, y: null },
     ring: { Rg: R.Rg, la: R.la, bf: R.bf, zC: 100, devers: R.devers, pente: 0, gisPente: 0, mode: 'aci' },
+    plan: defaultPlan(context),
     branches: [],
     opts: { angleUnit: 'gon', textH: 0.8, theme: 'dark', vis: {}, dxfOpacity: 0.9 },
   };
@@ -62,8 +68,11 @@ function migrate(p) {
     ...base, ...p,
     ring: { ...base.ring, ...p.ring }, opts: { ...base.opts, ...p.opts, vis: { ...(p.opts?.vis || {}) } },
     center: { ...base.center, ...p.center }, crs: { ...base.crs, ...p.crs }, bg: { ...base.bg, ...p.bg },
+    plan: { ...base.plan, ...p.plan, tag: { ...base.plan.tag, ...p.plan?.tag } },
   };
   delete out.view;
+  out.kind = ['T', 'X'].includes(p.kind) ? p.kind : 'giratoire';
+  if (!Array.isArray(out.plan.main)) out.plan.main = ['', ''];
   out.ring.devers = RING_DEVERS; // valeur imposée
   out.branches = [];
   for (const b of p.branches || []) {
@@ -552,8 +561,8 @@ function designBBox() {
   return pts.length ? G.bboxOf(pts) : null;
 }
 function zoomGira() {
-  if (S.D?.O) {
-    const O = S.D.O, r = S.D.Rg + Math.max(S.D.Rg, ...S.D.branches.map((bd) => bd.h)) + 15;
+  if (S.D?.O && S.D.zoomR) {
+    const O = S.D.O, r = S.D.zoomR;
     viewer.fit({ x0: O.x - r, y0: O.y - r, x1: O.x + r, y1: O.y + r }, 0.02); autosave(); return;
   }
   zoomAll();
@@ -585,12 +594,36 @@ function buildStaticPanels() {
     fld('ring.Rg', 'Rayon extérieur Rg', 'm', { title: 'Rayon du marquage de rive extérieure de l\'anneau' }) +
     fld('ring.la', 'Largeur de l\'anneau la', 'm') +
     fld('ring.bf', 'Bande franchissable bf', 'm');
+  $('#planFields').innerHTML =
+    `<div class="row">${sel('plan.nLanes', 'Voies par sens', [['1', '1'], ['2', '2']], { branch: false })}` +
+    `${sel('plan.regime', 'Régime des secondaires', [['stop', 'STOP'], ['cedez', 'Cédez-le-passage']], { branch: false })}</div>` +
+    fld('plan.wLane', 'Largeur de voie de la principale', 'm') +
+    '<h3>Tourne-à-gauche (TAG)</h3>' +
+    '<label class="chk"><input type="checkbox" data-k="plan.tag.on"> Voie de tourne-à-gauche sur la route principale</label>' +
+    fld('plan.tag.width', 'Largeur de la voie de TAG', 'm') +
+    fld('plan.tag.island', 'Largeur de l\'îlot central a', 'm') +
+    '<label class="chk"><input type="checkbox" data-k="plan.tag.raised"> Îlot central en saillie (sinon en marquage)</label>' +
+    fld('plan.tag.storage', 'Longueur de stockage', 'm') +
+    fld('plan.tag.sifflet', 'Sifflet d\'ouverture de la TAG', 'm') +
+    fld('plan.tag.align', 'Alignement droit avant le sifflet', 'm') +
+    fld('plan.tag.deport', 'Longueur de déport des bords', 'm', { ph: 'auto' }) +
+    fld('plan.tag.presig', 'Présignalisation (nez peint)', 'm') +
+    '<h3>Visibilité depuis les branches secondaires</h3>' +
+    fld('plan.v85', 'Vitesse V85 de la route principale', 'km/h') +
+    fld('plan.tVis', 'Temps de visibilité', 's', { ph: 'auto' }) +
+    fld('plan.dObs', 'Recul de l\'œil derrière la ligne', 'm', { ph: 'auto' });
   $('#deversFields').innerHTML =
+    '<div data-for="giratoire">' +
     fld('ring.zC', 'Cote projet au centre zC', 'm') +
-    fld('ring.devers', 'Dévers de l\'anneau d (vers l\'extérieur, imposé)', '%') +
+    fld('ring.devers', 'Dévers de l\'anneau d (vers l\'extérieur, imposé)', '%') + '</div>' +
+    '<div data-for="plan">' +
+    fld('ring.zC', 'Cote de l\'axe principal au centre', 'm') +
+    fld('plan.camber', 'Dévers en toit de la route principale', '%') +
+    fld('plan.pente', 'Pente en long de la principale (+ vers B)', '%', { ph: 'auto' }) + '</div>' +
     fld('ring.pente', 'Déclivité générale du site p', '%') +
     fld('ring.gisPente', 'Gisement de la ligne de plus grande pente (descente)', 'gr') +
-    sel('ring.mode', 'Calage de l\'anneau', [['aci', 'Dévers constant, rive ext. dans la pente (ACI)'], ['cone', 'Cône posé sur le plan incliné']], { branch: false });
+    '<div data-for="giratoire">' +
+    sel('ring.mode', 'Calage de l\'anneau', [['aci', 'Dévers constant, rive ext. dans la pente (ACI)'], ['cone', 'Cône posé sur le plan incliné']], { branch: false }) + '</div>';
   $('[data-k="ring.devers"]').disabled = true; // 1,5 % imposé
   $('#visLayers').innerHTML = Object.entries(LAYERS).map(([k, l]) =>
     `<label class="chk"><input type="checkbox" data-vis="${k}"> ${esc(l.label)}</label>`).join('');
@@ -598,11 +631,19 @@ function buildStaticPanels() {
 }
 
 function syncCtxUI() {
+  const plan = isPlan(S.prj);
   $$('#ctxSeg [data-ctx]').forEach((b) => b.classList.toggle('on', b.dataset.ctx === S.prj.context));
+  $$('#kindSeg [data-kind]').forEach((b) => b.classList.toggle('on', b.dataset.kind === (S.prj.kind || 'giratoire')));
   $('#ctxNote').textContent = S.prj.context === 'interurbain'
     ? 'Valeurs par défaut et contrôles : SETRA, Aménagement des carrefours interurbains (ACI, 1998).'
     : 'Valeurs par défaut et contrôles : CERTU, Guide des carrefours urbains (1999) / fiche Giratoires urbains ; mini-giratoires (1997).';
-  $('#ringGuide').innerHTML = '<h4>Rappels du guide</h4><ul>' + GUIDE_NOTES[S.prj.context].map((t) => `<li>${esc(t)}</li>`).join('') + '</ul>';
+  $('#ringGuide').innerHTML = '<h4>Rappels du guide</h4><ul>' + GUIDE_NOTES[plan ? 'plan_' + S.prj.context : S.prj.context].map((t) => `<li>${esc(t)}</li>`).join('') + '</ul>';
+  $('#tabRingBtn').textContent = plan ? 'Carrefour' : 'Anneau';
+  $('#ringPane').hidden = plan;
+  $('#planPane').hidden = !plan;
+  $$('#deversFields [data-for]').forEach((el) => (el.hidden = (el.dataset.for === 'plan') !== plan));
+  $('#dvHead').textContent = plan ? 'Route principale' : 'Anneau';
+  $('#dvChartHead').textContent = plan ? 'Profil en long de la route principale' : 'Profil en long des bords de l\'anneau';
 }
 
 function syncCrsUI() {
@@ -649,18 +690,33 @@ function syncInputs() {
 }
 
 function refreshPanels() {
+  refreshMainSelects();
   syncInputs();
-  const D = S.D, br = S.prj.branches;
-  // Anneau : grandeurs calculées
-  const leMax = Math.max(0, ...br.map((b) => +b.le || 0));
-  $('#ringOut').innerHTML = D?.O ? kv([
-    ['Rayon intérieur Ri = Rg − la', fmt(D.Ri) + ' m'],
-    ['Îlot central infranchissable', fmt(D.Rb) + ' m'],
-    ['Diamètre extérieur 2·Rg', fmt(2 * D.Rg) + ' m'],
-    ['1,2 × entrée la plus large', leMax ? fmt(1.2 * leMax) + ' m' : '—'],
-    ['Branches', String(D.branches.length)],
-    ['Centre', `${D.O.x.toFixed(3)} ; ${D.O.y.toFixed(3)}`],
-  ]) : '<p class="note">Le centre sera calculé dès qu\'un axe sera dessiné.</p>';
+  const D = S.D, br = S.prj.branches, plan = isPlan(S.prj);
+  if (!plan) {
+    // Anneau : grandeurs calculées
+    const leMax = Math.max(0, ...br.map((b) => +b.le || 0));
+    $('#ringOut').innerHTML = D?.O ? kv([
+      ['Rayon intérieur Ri = Rg − la', fmt(D.Ri) + ' m'],
+      ['Îlot central infranchissable', fmt(D.Rb) + ' m'],
+      ['Diamètre extérieur 2·Rg', fmt(2 * D.Rg) + ' m'],
+      ['1,2 × entrée la plus large', leMax ? fmt(1.2 * leMax) + ' m' : '—'],
+      ['Branches', String(D.branches.length)],
+      ['Centre', `${D.O.x.toFixed(3)} ; ${D.O.y.toFixed(3)}`],
+    ]) : '<p class="note">Le centre sera calculé dès qu\'un axe sera dessiné.</p>';
+  } else {
+    const P = D?.plan;
+    $('#planOut').innerHTML = D?.ok && D.main ? kv([
+      ['Type', S.prj.kind === 'T' ? 'Carrefour en T' : 'Carrefour en X (croix)'],
+      ['Route principale (A – B)', `${br[D.main.a]?.name} – ${br[D.main.b]?.name}`],
+      ['Largeur de chaussée', P.widened ? `${fmt(2 * P.half)} m, élargie à ${fmt(2 * P.hw)} m` : `${fmt(2 * P.half)} m`],
+      ['Largeur centrale (TAG + îlot)', P.widened ? `${fmt(P.c)} m` : '—'],
+      ['Déport des bords', P.widened ? `${fmt(P.tag.deport, 1)} m (1/${fmt(P.tag.deport / (P.c / 2), 0)})` : '—'],
+      ['Demi-longueur du débouché', fmt(P.Lm, 1) + ' m'],
+      ['Visibilité requise', `${fmt((P.v85 / 3.6) * P.tVis, 0)} m (${fmt(P.tVis, 0)} s)`],
+      ['Centre', `${D.O.x.toFixed(3)} ; ${D.O.y.toFixed(3)}`],
+    ]) : '<p class="note">Dessinez les axes : la route principale est, par défaut, la paire de branches la plus alignée.</p>';
+  }
   // Liste des branches
   const lvlOf = (name) => {
     const ls = S.checks.filter((c) => c.group === name).map((c) => c.lvl);
@@ -668,9 +724,13 @@ function refreshPanels() {
   };
   $('#branchList').innerHTML = br.length ? br.map((b, i) => {
     const bd = D?.branches.find((q) => q.idx === i);
+    const info = bd?.role === 'principale' ? 'route principale'
+      : bd?.role === 'secondaire' ? `le ${fmt(bd.entry.w)} · ls ${fmt(bd.exit.w)}`
+        : `le ${fmt(+b.le)} · ls ${fmt(+b.ls)}${b.tpc?.on ? ' · TPC' : ''}`;
     return `<li data-bi="${i}" class="${i === S.sel ? 'on' : ''}"><span class="dot ${lvlOf(b.name)}"></span><b>${esc(b.name)}</b>` +
-      `<span class="mono dim">${bd ? bd.gis : '—'}</span><span class="dim">le ${fmt(+b.le)} · ls ${fmt(+b.ls)}${b.tpc?.on ? ' · TPC' : ''}</span></li>`;
+      `<span class="mono dim">${bd ? bd.gis : '—'}</span><span class="dim">${info}</span></li>`;
   }).join('') : '<li class="empty-li">Aucune branche. Utilisez « Dessiner une branche » ou la touche A.</li>';
+  if (branchRole() !== S.formRole) renderBranchForm();
   refreshBranchOut();
   refreshDevers();
   refreshChecks();
@@ -678,42 +738,80 @@ function refreshPanels() {
   setPrompt();
 }
 
+// Liste des branches proposées pour la route principale.
+function refreshMainSelects() {
+  if (!isPlan(S.prj)) return;
+  const opts = '<option value="">automatique</option>' + S.prj.branches.map((b) => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+  for (const s of $$('.mainSel')) if (s !== document.activeElement && s.dataset.sig !== opts) { s.innerHTML = opts; s.dataset.sig = opts; }
+}
+
 function kv(rows) {
   return '<dl>' + rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('') + '</dl>';
+}
+
+// Rôle de la branche sélectionnée : branche de giratoire, route principale ou branche secondaire (T, X).
+function branchRole() {
+  if (S.sel < 0) return null;
+  if (!isPlan(S.prj)) return 'branche';
+  return S.D?.branches.find((q) => q.idx === S.sel)?.role || 'secondaire';
 }
 
 function renderBranchForm() {
   const host = $('#branchForm');
   const b = S.sel >= 0 ? S.prj.branches[S.sel] : null;
+  const role = branchRole();
+  S.formRole = role;
   if (!b) { host.innerHTML = '<p class="note">Sélectionnez une branche dans la liste ou cliquez son axe sur le plan.</p>'; return; }
-  host.innerHTML = `
-    <div class="bhead">${fld('name', 'Nom', '', { branch: true, text: true })}<button id="btnDelBranch" class="danger" title="Supprimer (Suppr)">Supprimer</button></div>
-    <div id="branchOut" class="kv"></div>
-    <h4>Axe</h4>
-    <label class="chk"><input type="checkbox" data-bk="radial"> Axe radial (passe par le centre de l'anneau)</label>
-    <h4>Voies de la branche</h4>
+  const head = `<div class="bhead">${fld('name', 'Nom', '', { branch: true, text: true })}<button id="btnDelBranch" class="danger" title="Supprimer (Suppr)">Supprimer</button></div>
+    <div id="branchOut" class="kv"></div>`;
+  const lanes = `<h4>Voies de la branche</h4>
     <div class="row">${sel('nIn', 'Voies entrantes', [['1', '1'], ['2', '2']])}${sel('nOut', 'Voies sortantes', [['1', '1'], ['2', '2']])}</div>
-    ${fld('wLane', 'Largeur de voie courante', 'm', { branch: true })}
-    <h4>Entrée</h4>
-    ${fld('le', 'Largeur d\'entrée le', 'm', { branch: true, title: 'Mesurée du bord de l\'îlot au bord extérieur, au droit de l\'anneau' })}
-    ${fld('Re', 'Rayon d\'entrée Re', 'm', { branch: true })}
-    <h4>Sortie</h4>
-    ${fld('ls', 'Largeur de sortie ls', 'm', { branch: true })}
-    ${fld('Rs', 'Rayon de sortie Rs', 'm', { branch: true })}
-    <h4>Îlot séparateur</h4>
-    ${sel('island.type', 'Type', [['physique', 'En saillie (bordures)'], ['peint', 'Peint (franchissable)'], ['aucun', 'Aucun']])}
-    ${fld('island.base', 'Base du triangle', 'm', { branch: true, ph: 'auto' })}
-    ${fld('island.length', 'Hauteur du triangle', 'm', { branch: true, ph: 'auto' })}
-    ${fld('island.shift', 'Décalage vers la gauche', 'm', { branch: true, ph: 'auto' })}
-    ${fld('island.gap', 'Retrait de la tête / anneau', 'm', { branch: true, ph: 'auto' })}
-    <h4>Terre-plein central (TPC)</h4>
-    <label class="chk"><input type="checkbox" data-bk="tpc.on"> Branche à chaussées séparées (TPC)</label>
-    ${fld('tpc.width', 'Largeur du TPC', 'm', { branch: true })}
-    <h4>Profil et dévers</h4>
-    ${fld('length', 'Longueur dessinée depuis l\'anneau', 'm', { branch: true, ph: 'auto' })}
+    ${fld('wLane', 'Largeur de voie courante', 'm', { branch: true })}`;
+  const profile = (from) => `<h4>Profil et dévers</h4>
+    ${fld('length', `Longueur dessinée depuis ${from}`, 'm', { branch: true, ph: 'auto' })}
     ${fld('pente', 'Pente en long (+ en montée)', '%', { branch: true, ph: 'auto' })}
     ${fld('camber', 'Dévers courant (toit)', '%', { branch: true })}
     ${fld('transition', 'Longueur de variation du dévers', 'm', { branch: true, ph: 'auto' })}`;
+  const islandType = sel('island.type', 'Type', [['physique', 'En saillie (bordures)'], ['peint', 'Peint (franchissable)'], ['aucun', 'Aucun']]);
+  if (role === 'principale') {
+    host.innerHTML = `${head}<p class="note">Branche de la route principale : largeurs, tourne-à-gauche et dévers se règlent dans l'onglet Carrefour.</p>
+      ${fld('length', 'Longueur dessinée au-delà du débouché', 'm', { branch: true, ph: 'auto' })}`;
+  } else if (role === 'secondaire') {
+    host.innerHTML = `${head}${lanes}
+      <h4>Voie d'entrée (vers la route principale)</h4>
+      ${fld('le', 'Largeur à la ligne de cédez / STOP', 'm', { branch: true, ph: 'auto', title: 'Mesurée du bord de l\'îlot au bord extérieur' })}
+      ${fld('Re', 'Rayon de bordure côté entrée Re', 'm', { branch: true, ph: 'auto' })}
+      <h4>Voie de sortie (depuis la route principale)</h4>
+      ${fld('ls', 'Largeur de sortie ls', 'm', { branch: true, ph: 'auto' })}
+      ${fld('Rs', 'Rayon de bordure côté sortie Rs', 'm', { branch: true, ph: 'auto' })}
+      <h4>Îlot séparateur de la branche</h4>
+      ${islandType}
+      ${fld('island.base', 'Largeur de l\'îlot (tête)', 'm', { branch: true, ph: 'auto' })}
+      ${fld('island.length', 'Longueur de l\'îlot', 'm', { branch: true, ph: 'auto' })}
+      ${fld('island.gap', 'Retrait de la tête / bord principal', 'm', { branch: true, ph: 'auto' })}
+      ${profile('le bord de la chaussée principale')}`;
+  } else {
+    host.innerHTML = `${head}
+      <h4>Axe</h4>
+      <label class="chk"><input type="checkbox" data-bk="radial"> Axe radial (passe par le centre de l'anneau)</label>
+      ${lanes}
+      <h4>Entrée</h4>
+      ${fld('le', 'Largeur d\'entrée le', 'm', { branch: true, title: 'Mesurée du bord de l\'îlot au bord extérieur, au droit de l\'anneau' })}
+      ${fld('Re', 'Rayon d\'entrée Re', 'm', { branch: true })}
+      <h4>Sortie</h4>
+      ${fld('ls', 'Largeur de sortie ls', 'm', { branch: true })}
+      ${fld('Rs', 'Rayon de sortie Rs', 'm', { branch: true })}
+      <h4>Îlot séparateur</h4>
+      ${islandType}
+      ${fld('island.base', 'Base du triangle', 'm', { branch: true, ph: 'auto' })}
+      ${fld('island.length', 'Hauteur du triangle', 'm', { branch: true, ph: 'auto' })}
+      ${fld('island.shift', 'Décalage vers la gauche', 'm', { branch: true, ph: 'auto' })}
+      ${fld('island.gap', 'Retrait de la tête / anneau', 'm', { branch: true, ph: 'auto' })}
+      <h4>Terre-plein central (TPC)</h4>
+      <label class="chk"><input type="checkbox" data-bk="tpc.on"> Branche à chaussées séparées (TPC)</label>
+      ${fld('tpc.width', 'Largeur du TPC', 'm', { branch: true })}
+      ${profile('l\'anneau')}`;
+  }
   syncInputs();
   refreshBranchOut();
 }
@@ -723,11 +821,25 @@ function refreshBranchOut() {
   if (!host) return;
   const bd = S.D?.branches.find((q) => q.idx === S.sel);
   if (!bd) { host.innerHTML = '<p class="note">Branche non construite : voir l\'onglet Contrôles.</p>'; return; }
+  if (bd.role === 'principale') { host.innerHTML = kv([['Gisement de l\'axe', bd.gis], ['Rôle', 'route principale']]); return; }
+  const islTxt = bd.isl.type === 'aucun' && !bd.th ? '—' : `${fmt(bd.b)} × ${fmt(bd.h)} m`;
+  if (bd.role === 'secondaire') {
+    host.innerHTML = kv([
+      ['Gisement de l\'axe', bd.gis],
+      ['Angle avec la route principale', `${fmt((bd.angle * 200) / Math.PI, 1)} gr`],
+      ['Chaussée de la branche l', `${fmt(bd.l)} m`],
+      ['le / ls retenues', `${fmt(bd.entry.w)} / ${fmt(bd.exit.w)} m`],
+      ['Re / Rs retenus', `${fmt(bd.entry.R)} / ${fmt(bd.exit.R)} m`],
+      ['Îlot (largeur × longueur)', islTxt],
+      ['Visibilité requise', bd.vis ? `${fmt(bd.vis.D, 0)} m de part et d'autre` : '—'],
+    ]);
+    return;
+  }
   const off = bd.a > 0.005 ? `${fmt(bd.a)} m à droite ⚠` : bd.a < -0.005 ? `${fmt(-bd.a)} m à gauche` : 'radial';
   host.innerHTML = kv([
     ['Gisement de l\'axe', bd.gis],
     ['Excentrement', off],
-    ['Îlot (base × hauteur)', bd.isl.type === 'aucun' && !bd.th ? '—' : `${fmt(bd.b)} × ${fmt(bd.h)} m`],
+    ['Îlot (base × hauteur)', islTxt],
     ['Décalage du triangle', fmt(bd.isl.shift) + ' m'],
     ['Largeur au droit de l\'anneau (entrée / sortie)', `${fmt(bd.entry.wRing)} / ${fmt(bd.exit.wRing)} m`],
     ['Déflexion', bd.defl ? `R ≈ ${fmt(bd.defl.R, 0)} m vers ${bd.defl.to}` : '—'],
@@ -765,24 +877,40 @@ function refreshDevers() {
   const D = S.D;
   if (!D?.devers) { $('#deversOut').innerHTML = ''; $('#ringChart').innerHTML = ''; $('#branchChart').innerHTML = ''; $('#branchDevTable').innerHTML = ''; return; }
   const dv = D.devers, pc = (v) => fmt(v * 100, 2) + ' %';
-  const zs = D.ringProfile.map((q) => q.zExt), zi = D.ringProfile.map((q) => q.zInt);
-  $('#deversOut').innerHTML = kv([
-    ['Dévers radial de l\'anneau', dv.mode === 'cone' ? `${pc(dv.minRadial)} à ${pc(dv.maxRadial)}` : pc(dv.d) + ' constant'],
-    ['Pente transversale maximale', pc(dv.maxTransverse)],
-    ['Rive extérieure : cotes', `${fmt(Math.min(...zs), 3)} à ${fmt(Math.max(...zs), 3)} m`],
-    ['Rive intérieure : cotes', `${fmt(Math.min(...zi), 3)} à ${fmt(Math.max(...zi), 3)} m`],
-  ]);
-  const ymin = Math.min(...zs, ...zi), ymax = Math.max(...zs, ...zi);
-  $('#ringChart').innerHTML = lineChart({
-    series: [
-      { name: 'Rive extérieure (Rg)', color: 'var(--c1)', pts: D.ringProfile.map((q) => [q.gon, q.zExt]) },
-      { name: 'Rive intérieure (Ri)', color: 'var(--c2)', pts: D.ringProfile.map((q) => [q.gon, q.zInt]) },
-    ],
-    xMin: 0, xMax: 400, xTicks: [0, 100, 200, 300, 400], yMin: ymin - 0.05, yMax: ymax + 0.05,
-    xLabel: 'Gisement depuis le centre (gr)', yLabel: 'Cote (m)', yFmt: (v) => fmt(v, 2),
-  });
-  const bi = S.sel >= 0 ? S.sel : D.branches[0]?.idx;
-  const db = dv.branches.find((q) => q.idx === bi);
+  if (dv.mode === 'plan') {
+    const pr = D.mainProfile, za = pr.map((q) => q.zAxe), zb = pr.map((q) => q.zBord);
+    $('#deversOut').innerHTML = kv([
+      ['Dévers en toit de la principale', pc(dv.d)],
+      ['Pente en long de la principale (A → B)', pc(dv.gradeM)],
+      ['Axe : cotes aux extrémités', `${fmt(za[0], 3)} / ${fmt(za[za.length - 1], 3)} m`],
+    ]);
+    $('#ringChart').innerHTML = lineChart({
+      series: [
+        { name: 'Axe', color: 'var(--c1)', pts: pr.map((q) => [q.x, q.zAxe]) },
+        { name: 'Bords de chaussée', color: 'var(--c2)', pts: pr.map((q) => [q.x, q.zBord]), dash: true },
+      ],
+      xMin: pr[0].x, xMax: pr[pr.length - 1].x, yMin: Math.min(...za, ...zb) - 0.05, yMax: Math.max(...za, ...zb) + 0.05,
+      xLabel: 'Abscisse depuis le centre, de A vers B (m)', yLabel: 'Cote (m)', yFmt: (v) => fmt(v, 2),
+    });
+  } else {
+    const zs = D.ringProfile.map((q) => q.zExt), zi = D.ringProfile.map((q) => q.zInt);
+    $('#deversOut').innerHTML = kv([
+      ['Dévers radial de l\'anneau', dv.mode === 'cone' ? `${pc(dv.minRadial)} à ${pc(dv.maxRadial)}` : pc(dv.d) + ' constant'],
+      ['Pente transversale maximale', pc(dv.maxTransverse)],
+      ['Rive extérieure : cotes', `${fmt(Math.min(...zs), 3)} à ${fmt(Math.max(...zs), 3)} m`],
+      ['Rive intérieure : cotes', `${fmt(Math.min(...zi), 3)} à ${fmt(Math.max(...zi), 3)} m`],
+    ]);
+    const ymin = Math.min(...zs, ...zi), ymax = Math.max(...zs, ...zi);
+    $('#ringChart').innerHTML = lineChart({
+      series: [
+        { name: 'Rive extérieure (Rg)', color: 'var(--c1)', pts: D.ringProfile.map((q) => [q.gon, q.zExt]) },
+        { name: 'Rive intérieure (Ri)', color: 'var(--c2)', pts: D.ringProfile.map((q) => [q.gon, q.zInt]) },
+      ],
+      xMin: 0, xMax: 400, xTicks: [0, 100, 200, 300, 400], yMin: ymin - 0.05, yMax: ymax + 0.05,
+      xLabel: 'Gisement depuis le centre (gr)', yLabel: 'Cote (m)', yFmt: (v) => fmt(v, 2),
+    });
+  }
+  const db = dv.branches.find((q) => q.idx === S.sel) || dv.branches[0];
   $('#dvBranchName').textContent = db ? db.name : 'branche';
   if (!db) { $('#branchChart').innerHTML = '<p class="note">Aucune branche construite.</p>'; $('#branchDevTable').innerHTML = ''; return; }
   const L = db.Ltr + 10;
@@ -794,7 +922,7 @@ function refreshDevers() {
       { name: 'Voie sortante', color: 'var(--c2)', pts: pts(-1), dash: true },
     ],
     xMin: 0, xMax: L, yMin: Math.min(...all) - 0.5, yMax: Math.max(...all) + 0.5,
-    xLabel: 'Distance depuis le bord de l\'anneau (m)', yLabel: 'Dévers (%)', yFmt: (v) => fmt(v, 1) + ' %',
+    xLabel: `Distance depuis le bord ${dv.mode === 'plan' ? 'de la chaussée principale' : 'de l\'anneau'} (m)`, yLabel: 'Dévers (%)', yFmt: (v) => fmt(v, 1) + ' %',
   });
   $('#branchDevTable').innerHTML = `<p class="note">Dévers négatif : la voie descend vers l'extérieur (bord de chaussée). Pente en long ${fmt(db.grade * 100, 2)} %, transition sur ${fmt(db.Ltr, 1)} m.</p>` +
     '<table class="pts"><thead><tr><th>Dist. (m)</th><th>Z axe</th><th>Dévers entrée</th><th>Dévers sortie</th></tr></thead><tbody>' +
@@ -867,6 +995,7 @@ function bindUI() {
   $$('.tog').forEach((b) => { b.classList.toggle('on', !!S.tog[b.dataset.tog]); b.addEventListener('click', () => toggle(b.dataset.tog)); });
 
   $$('#ctxSeg [data-ctx]').forEach((b) => b.addEventListener('click', () => setContext(b.dataset.ctx)));
+  $$('#kindSeg [data-kind]').forEach((b) => b.addEventListener('click', () => setKind(b.dataset.kind)));
   $('#crsSel').addEventListener('change', (e) => {
     const id = e.target.value, c = { ...S.prj.crs, id };
     if (id === 'utm' && S.crs.geo) { const ll = S.crs.toLL(viewer.cx, viewer.cy); c.zone = utmZoneOf(ll.lon); c.south = ll.lat < 0; }
@@ -909,7 +1038,7 @@ function bindUI() {
 
   $('#btnNew').addEventListener('click', () => {
     if (S.prj.branches.length && !confirm('Créer un nouveau projet ? Le projet en cours non enregistré sera perdu.')) return;
-    const keep = { crs: S.prj.crs, bg: S.prj.bg, opts: S.prj.opts };
+    const keep = { crs: S.prj.crs, bg: S.prj.bg, opts: S.prj.opts, kind: S.prj.kind };
     S.prj = { ...newProject(S.prj.context), ...keep };
     S.sel = -1; S.hist = []; S.fut = [];
     syncCtxUI(); syncCrsUI(); renderBranchForm(); update();
@@ -934,13 +1063,29 @@ function setContext(c) {
   if (apply) {
     const P = PRESETS[c];
     Object.assign(S.prj.ring, { Rg: P.ring.Rg, la: P.ring.la, bf: P.ring.bf, devers: P.ring.devers });
-    S.prj.branches.forEach((b) => {
-      const t = newBranch(S.prj, b.axis);
-      Object.assign(b, { wLane: t.wLane, le: t.le, ls: t.ls, Re: t.Re, Rs: t.Rs, camber: t.camber });
-      b.island.shift = ''; b.island.gap = '';
-    });
+    S.prj.plan = { ...defaultPlan(c), main: S.prj.plan?.main || ['', ''] };
+    resetBranchDefaults();
   }
   syncCtxUI(); renderBranchForm(); update();
+}
+
+// Valeurs par défaut des branches pour le type et le contexte courants (axes et noms conservés).
+function resetBranchDefaults() {
+  S.prj.branches.forEach((b) => {
+    const t = newBranch(S.prj, b.axis);
+    Object.assign(b, { wLane: t.wLane, le: t.le, ls: t.ls, Re: t.Re, Rs: t.Rs, camber: t.camber });
+    b.island.shift = ''; b.island.gap = ''; b.island.base = ''; b.island.length = '';
+  });
+}
+
+function setKind(k) {
+  if (k === (S.prj.kind || 'giratoire')) return;
+  const changesFamily = isPlan({ kind: k }) !== isPlan(S.prj);
+  S.prj.kind = k;
+  if (changesFamily && S.prj.branches.length && confirm('Appliquer aux branches les valeurs par défaut de ce type de carrefour ?')) resetBranchDefaults();
+  S.formRole = undefined;
+  syncCtxUI(); update();
+  zoomGira();
 }
 
 // Valeurs du guide pour le Rg courant (anneau + branches).
@@ -1093,7 +1238,9 @@ function buildDxfText() {
   const bb = designBBox(), x = bb.x0, y = bb.y0 - 4 * TH, l = lay('COTATION');
   const lines = [
     S.prj.name,
-    `Carrefour giratoire ${S.prj.context === 'interurbain' ? 'interurbain (SETRA ACI)' : 'urbain (CERTU)'} — Rg ${fmt(D.Rg)} m, la ${fmt(D.la)} m, Ri ${fmt(D.Ri)} m, ${D.branches.length} branches`,
+    isPlan(S.prj)
+      ? `Carrefour en ${S.prj.kind} ${S.prj.context === 'interurbain' ? 'interurbain (SETRA ACI)' : 'urbain (CERTU)'} — chaussée principale ${fmt(2 * D.plan.half)} m${D.plan.widened ? `, tourne-à-gauche ${fmt(D.plan.tag.width)} m` : ''}, régime ${D.plan.regime === 'stop' ? 'STOP' : 'cédez-le-passage'}`
+      : `Carrefour giratoire ${S.prj.context === 'interurbain' ? 'interurbain (SETRA ACI)' : 'urbain (CERTU)'} — Rg ${fmt(D.Rg)} m, la ${fmt(D.la)} m, Ri ${fmt(D.Ri)} m, ${D.branches.length} branches`,
     `Coordonnées : ${S.crs.geo ? S.crs.label : 'locales'} · Altimétrie de principe (avant-projet)`,
     `Établi le ${new Date().toLocaleDateString('fr-FR')} avec GIRA`,
   ];

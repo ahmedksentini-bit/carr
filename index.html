@@ -51,7 +51,7 @@
         <h2>Dessinez les axes des branches</h2>
         <p>Choisissez le fond (satellite ou DXF topo) dans l'onglet <b>Projet</b>, puis l'outil <b>Axe</b> <kbd>A</kbd> :
           cliquez depuis l'extérieur vers le centre du carrefour, terminez par <kbd>Entrée</kbd> ou clic droit.
-          Le centre est calculé à l'intersection des axes.</p>
+          Le centre est calculé à l'intersection des axes. Giratoire, carrefour en T ou en X : choix dans l'onglet <b>Projet</b>.</p>
       </div>
       <div id="toast" class="toast" hidden></div>
     </section>
@@ -59,7 +59,7 @@
     <aside class="panel">
       <div class="tabs" role="tablist">
         <button data-tab="projet" class="on">Projet</button>
-        <button data-tab="anneau">Anneau</button>
+        <button data-tab="anneau" id="tabRingBtn">Anneau</button>
         <button data-tab="branches">Branches</button>
         <button data-tab="devers">Dévers</button>
         <button data-tab="controles">Contrôles <span id="chkBadge" class="badge"></span></button>
@@ -67,6 +67,12 @@
       </div>
 
       <div class="tab" id="tab-projet">
+        <h3>Type de carrefour</h3>
+        <div class="seg" id="kindSeg">
+          <button data-kind="giratoire">Giratoire <small>anneau</small></button>
+          <button data-kind="T">En T <small>3 branches</small></button>
+          <button data-kind="X">En X <small>4 branches</small></button>
+        </div>
         <h3>Contexte</h3>
         <div class="seg" id="ctxSeg">
           <button data-ctx="interurbain">Interurbain <small>SETRA – ACI</small></button>
@@ -123,10 +129,21 @@
           <label class="fld"><span class="lb">X</span><input data-k="center.x" type="text" inputmode="decimal"></label>
           <label class="fld"><span class="lb">Y</span><input data-k="center.y" type="text" inputmode="decimal"></label>
         </div>
-        <h3>Anneau</h3>
-        <div id="ringFields"></div>
-        <div id="ringOut" class="kv"></div>
-        <button id="btnRingDefaults">Appliquer les valeurs du guide</button>
+        <div id="ringPane">
+          <h3>Anneau</h3>
+          <div id="ringFields"></div>
+          <div id="ringOut" class="kv"></div>
+          <button id="btnRingDefaults">Appliquer les valeurs du guide</button>
+        </div>
+        <div id="planPane" hidden>
+          <h3>Route principale</h3>
+          <div class="row">
+            <label class="fld"><span class="lb">Branche A</span><select data-k="plan.main.0" class="mainSel"></select></label>
+            <label class="fld"><span class="lb">Branche B</span><select data-k="plan.main.1" class="mainSel"></select></label>
+          </div>
+          <div id="planFields"></div>
+          <div id="planOut" class="kv"></div>
+        </div>
         <div id="ringGuide" class="guide"></div>
       </div>
 
@@ -140,10 +157,10 @@
       </div>
 
       <div class="tab" id="tab-devers" hidden>
-        <h3>Anneau</h3>
+        <h3 id="dvHead">Anneau</h3>
         <div id="deversFields"></div>
         <div id="deversOut" class="kv"></div>
-        <h4>Profil en long des bords de l'anneau</h4>
+        <h4 id="dvChartHead">Profil en long des bords de l'anneau</h4>
         <div id="ringChart" class="chart"></div>
         <h4>Variation des dévers — <span id="dvBranchName">branche</span></h4>
         <div id="branchChart" class="chart"></div>
@@ -185,7 +202,8 @@
       <ol>
         <li><b>Projet</b> : choisissez le contexte (interurbain / urbain), le système de coordonnées et le fond (satellite, ou DXF topo dans le même système).</li>
         <li><b>Axe</b> <kbd>A</kbd> : dessinez l'axe de chaque branche en cliquant de l'extérieur vers le carrefour. <kbd>Entrée</kbd> / clic droit / double-clic pour terminer, <kbd>Retour arrière</kbd> pour retirer le dernier point, <kbd>Échap</kbd> pour quitter.</li>
-        <li><b>Anneau</b> : saisissez Rg, la, bande franchissable. Le centre est calculé à l'intersection des axes, ou placé avec l'outil <kbd>C</kbd>.</li>
+        <li><b>Anneau</b> (giratoire) : saisissez Rg, la, bande franchissable. Le centre est calculé à l'intersection des axes, ou placé avec l'outil <kbd>C</kbd>.</li>
+        <li><b>Carrefour</b> (en T ou en X) : route principale (choisie automatiquement : les deux branches les plus alignées), voie de tourne-à-gauche, régime STOP ou cédez-le-passage, visibilité. Les branches secondaires reçoivent un îlot en goutte d'eau et des rayons de bordure.</li>
         <li><b>Branches</b> : largeurs d'entrée / sortie, rayons Re / Rs, îlot séparateur, TPC (terre-plein central) avec sa largeur.</li>
         <li><b>Dévers</b> : cote du centre, dévers de l'anneau, plan incliné ; diagrammes de variation par branche.</li>
         <li><b>Exporter DXF</b> : plan coté par calques (GIRA_*) dans les coordonnées du projet. <b>Implantation</b> : points X, Y, Z en CSV.</li>

@@ -1,7 +1,8 @@
-# GIRA — conception de carrefours giratoires
+# GIRA — conception de carrefours giratoires et de carrefours plans (T, X)
 
-Application web statique (HTML + JavaScript, sans serveur applicatif) pour dessiner à l'échelle un carrefour giratoire
-selon le SETRA (ACI, interurbain) ou le CERTU (urbain), sur fond satellite ou sur un fond topographique DXF.
+Application web statique (HTML + JavaScript, sans serveur applicatif) pour dessiner à l'échelle un carrefour giratoire,
+un carrefour en T ou un carrefour en X (croix) selon le SETRA (ACI, interurbain) ou le CERTU (urbain), sur fond satellite
+ou sur un fond topographique DXF.
 
 ## Fonctions (version 1)
 
@@ -16,6 +17,11 @@ selon le SETRA (ACI, interurbain) ou le CERTU (urbain), sur fond satellite ou su
 - **Giratoire** : axes de branches saisis par l'utilisateur, centre calculé à l'intersection des axes (ou placé),
   Rg, la, bande franchissable ; par branche : voies, le / Re, ls / Rs, îlot séparateur (triangle de construction
   ACI Rg × Rg/4, décalage à gauche, bordures Rg/50), îlot peint ou absent, **TPC** avec sa largeur.
+- **Carrefours en T et en X** (ACI, chapitre « Carrefours plans ») : route principale = paire de branches la plus
+  alignée (ou choisie), profil conservé ; voie de tourne-à-gauche avec présignalisation, déport des bords au 1/15,
+  alignement droit, sifflet, stockage et îlot central en saillie ; branches secondaires avec rayons Re = 2l et Rs = 4l,
+  voies sup(l/2 ; 3) et l/2 + 0,50, îlot séparateur de longueur 4l à nez de 1 m en retrait de 1 m ; régime
+  cédez-le-passage (T'2) ou STOP ; triangles de visibilité D = V85 × t (8 à 11 s selon régime et TAG).
 - **Dessin** : bordures, raccordements tangents, îlots, chaussée, ligne de cédez-le-passage, marquages,
   cotations, triangles de construction, trajectoire de déflexion.
 - **Dévers** : anneau à dévers imposé de 1,5 % vers l'extérieur, constant sur site en pente (ou cône sur plan incliné),
@@ -32,6 +38,9 @@ index.html          page de l'application
 css/app.css         styles
 js/main.js          état, outils, panneaux, imports / exports
 js/roundabout.js    construction géométrique du giratoire
+js/plan.js          carrefours plans en T et en X
+js/approach.js      construction d'une branche (bords, raccordements, îlot), commune aux deux
+js/common.js        outils partagés (centre automatique, repères, formats)
 js/norms.js         valeurs par défaut et contrôles SETRA / CERTU
 js/devers.js        modèle altimétrique et dévers
 js/viewer.js        rendu canvas (projet, DXF, HUD)
@@ -71,10 +80,18 @@ IDRRIM (2015) et des supports de cours qui reprennent les tableaux SETRA. À vé
 - le dévers courant urbain (2 %) et le recul de la tête d'îlot (0,50 m) sont des valeurs usuelles, non tirées du guide ;
 - la **déflexion** est estimée par la méthode des trois points (cercle passant à 2 m des bordures et à 1,50 m de l'îlot central) : c'est une approximation de l'épure.
 
+Pour les carrefours plans :
+
+- l'îlot de la branche secondaire est simplifié (triangle de hauteur 4l, tête arrondie) : la répartition 0,55l / 1,45l
+  de la base et les rayons Rre = 8l, Rrs = 16l de la figure ACI ne sont pas reproduits fidèlement ;
+- l'îlot central en saillie est dessiné à 0,30 m (5u) en retrait de l'enveloppe peinte, et seulement si a ≥ 1,20 m ;
+- en urbain, le guide CERTU renvoie à l'épure de giration pour les rayons : la valeur par défaut de 8 m est à vérifier ;
+- le raccordement du dévers de la secondaire sur le bord de la principale n'est pas décrit par l'ACI (modèle de principe).
+
 L'altimétrie est un modèle de principe (avant-projet) : elle ne remplace pas un calcul de profils sur MNT.
 
-## Prochaine étape prévue
+## Prochaines étapes prévues
 
-Calcul de capacité type Girabase à l'heure de pointe du matin (matrice origine-destination saisie par l'utilisateur),
-aide à la décision pour les tourne-à-droite directs (by-pass) et dessin de ces voies
-(ACI : biseau de décélération ≥ 80 m, rayon intérieur ≥ 40 m, voie de 4 m).
+1. Calcul de capacité type Girabase à l'heure de pointe du matin (matrice origine-destination saisie par l'utilisateur).
+2. Aide à la décision pour les tourne-à-droite directs (by-pass) et dessin de ces voies
+   (ACI : biseau de décélération ≥ 80 m, rayon intérieur ≥ 40 m, voie de 4 m).

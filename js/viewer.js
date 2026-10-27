@@ -155,7 +155,7 @@ export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
         ctx.beginPath();
         for (const ring of pr.rings) { tracePath(ctx, v, ring, true); ctx.closePath(); }
         ctx.fillStyle = opts.onImagery && layer === 'CHAUSSEE' ? 'rgba(52,55,62,0.78)' : col;
-        ctx.fill('evenodd');
+        ctx.fill(pr.rule || 'evenodd');
       } else if (pr.k === 'path') {
         setStroke(ctx, v, st, pr);
         ctx.beginPath(); tracePath(ctx, v, pr.segs); if (pr.closed) ctx.closePath(); ctx.stroke();
