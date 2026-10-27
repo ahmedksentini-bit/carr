@@ -115,9 +115,11 @@ IDRRIM (2015) et des supports de cours qui reprennent les tableaux SETRA. À vé
 
 Pour les carrefours plans :
 
-- l'îlot de la branche secondaire est simplifié (triangle de hauteur 4l, tête arrondie) : la répartition 0,55l / 1,45l
+- l'îlot de la branche secondaire est une goutte d'eau symétrique (triangle de hauteur 4l, tête de 1 m de rayon, rive
+  peinte à la BDG autour) : la répartition 0,55l / 1,45l
   de la base et les rayons Rre = 8l, Rrs = 16l de la figure ACI ne sont pas reproduits fidèlement ;
-- l'îlot central en saillie est dessiné à 0,30 m (5u) en retrait de l'enveloppe peinte, et seulement si a ≥ 1,20 m ;
+- l'îlot central en saillie est dessiné à 0,30 m (5u) en retrait de l'enveloppe peinte, biseau compris (nez arrondi là
+  où il ne reste qu'1 m de large), et seulement si a ≥ 1,20 m ;
 - en urbain, le guide CERTU renvoie à l'épure de giration pour les rayons : la valeur par défaut de 8 m est à vérifier ;
 - le raccordement du dévers de la secondaire sur le bord de la principale n'est pas décrit par l'ACI (modèle de principe).
 
@@ -158,7 +160,8 @@ structure de l'HCM, d'après Troutbeck & Brilon, *Traffic Flow Theory*, chap. 8 
 
 - Les largeurs par défaut de BDD (1,00 m), BDG (0,50 m) et berme (1,50 m) en interurbain sont des valeurs de départ
   à ajuster dans l'onglet Profil ; elles ne sont pas tirées du guide.
-- Rives peintes, BDD / BDG, abords et branches courbes ne sont pas encore appliqués aux carrefours en T et en X.
-- Voie directe de tourne-à-droite : rayon, largeur d'îlot et longueurs sont fixés aux valeurs ACI (module `bypass.js`) ;
+- Carrefours en T et en X : abords (trottoirs, berme) et îlots dessinés ; la BDD et les branches courbes ne sont pas
+  encore appliquées.
+- Voie directe de tourne-à-droite : rayon et largeur réglables ; largeur d'îlot et longueurs fixées (ACI, réduites en urbain) ;
   la clothoïde d'entrée et la variante « réinsertion avec cédez-le-passage » ne sont pas dessinées.
 - Capacité des carrefours plans : piétons, traversée en deux temps et pente des secondaires non pris en compte.

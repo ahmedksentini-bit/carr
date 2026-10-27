@@ -9,6 +9,29 @@ export const toDegGis = (rad) => G.normAng(Math.PI / 2 - rad) * 180 / Math.PI;
 export const fmtGis = (rad, unit) => (unit === 'deg' ? fmt(toDegGis(rad), 2) + '°' : fmt(toGon(rad), 3) + ' gr');
 export const upright = (r) => { r = G.normAng(r); return r > Math.PI / 2 && r <= 1.5 * Math.PI ? r - Math.PI : r; };
 
+// Abords d'un bord de chaussée S parcouru terre à droite : surface du trottoir, limites des bandes
+// (caniveau, bordure, trottoir, contre-bordure / berme) et fermetures aux extrémités.
+export function sideBandPrims(S, bands, layer) {
+  const out = [];
+  let d = 0;
+  for (const [nm, w] of bands) {
+    if (nm === 'trottoir') {
+      const a = G.offsetPath(S, -d), b = G.offsetPath(S, -(d + w));
+      if (a.length && b.length) {
+        out.push({ k: 'fill', L: 'TROTTOIR', role: 'trottoir', rings: [[...a, G.L(G.segEnd(a[a.length - 1]), G.segEnd(b[b.length - 1])), ...G.revPath(b), G.L(G.segStart(b[0]), G.segStart(a[0]))]] });
+      }
+    }
+    d += w;
+    const o = G.offsetPath(S, -d);
+    if (o.length) out.push({ k: 'path', L: layer, segs: o });
+  }
+  if (d > 0) {
+    const o = G.offsetPath(S, -d);
+    if (o.length) out.push({ k: 'path', L: 'LIMITE', segs: [G.L(G.segStart(S[0]), G.segStart(o[0])), G.L(G.segEnd(S[S.length - 1]), G.segEnd(o[o.length - 1]))] });
+  }
+  return out;
+}
+
 // Oriente une polyligne de l'extrémité la plus proche de O vers la plus éloignée.
 export function nearFar(axis, O) {
   return G.dist(axis[0], O) <= G.dist(axis[axis.length - 1], O) ? axis : axis.slice().reverse();

@@ -5,9 +5,9 @@
 // Rg, Ri, le, ls et le triangle de l'îlot sont mesurés aux rives peintes ; les bords de chaussée sont à la BDD
 // (extérieur) ou à la BDG (côté îlot central et îlots séparateurs) de ces rives.
 import * as G from './geom.js';
-import { islandDims, sectionParams, TAD } from './norms.js';
+import { islandDims, sectionParams, sideBands, TAD } from './norms.js';
 import { addDevers } from './devers.js';
-import { fmt, fmtGis, upright, autoCenter, branchDirection, frame, nearFar, polylineAfter } from './common.js';
+import { fmt, fmtGis, upright, autoCenter, branchDirection, frame, nearFar, polylineAfter, sideBandPrims } from './common.js';
 import { buildApproach, crossLine } from './approach.js';
 import { buildPlan } from './plan.js';
 import { buildBypass } from './bypass.js';
@@ -21,15 +21,6 @@ export { fmt, fmtGis, autoCenter };
 // Point d'entrée : giratoire ou carrefour plan (T, X) selon le type du projet.
 export function buildDesign(prj) {
   return prj.kind === 'T' || prj.kind === 'X' ? buildPlan(prj) : buildRoundabout(prj);
-}
-
-// Largeurs des abords au-delà du bord de chaussée : [libellé, largeur] (urbain : caniveau, bordure, trottoir,
-// contre-bordure ; interurbain : berme).
-export function sideBands(prj, sec = sectionParams(prj)) {
-  const list = prj.context === 'urbain'
-    ? [['caniveau', sec.caniveau], ['bordure', sec.bordure], ['trottoir', sec.trottoir], ['contre-bordure', sec.cBordure]]
-    : [['berme', sec.berme]];
-  return list.filter(([, w]) => w > 0);
 }
 
 // ext : longueurs minimales des alignements droits (abscisse locale), imposées par les voies directes de tourne-à-droite.
@@ -253,23 +244,7 @@ function buildRoundabout(prj, ext = {}) {
   sectors.forEach((S) => {
     if (!S.length) return;
     P({ k: 'path', L: 'BORDURE', segs: S });
-    let d = 0;
-    for (const [nm, w] of bands) {
-      if (nm === 'trottoir') {
-        // Surface du trottoir, entre la bordure et la contre-bordure.
-        const a = G.offsetPath(S, -d), b = G.offsetPath(S, -(d + w));
-        if (a.length && b.length) {
-          P({ k: 'fill', L: 'TROTTOIR', role: 'trottoir', rings: [[...a, L(G.segEnd(a[a.length - 1]), G.segEnd(b[b.length - 1])), ...G.revPath(b), L(G.segStart(b[0]), G.segStart(a[0]))]] });
-        }
-      }
-      d += w;
-      const o = G.offsetPath(S, -d);
-      if (o.length) P({ k: 'path', L: bandLayer, segs: o });
-    }
-    if (d > 0) {
-      const o = G.offsetPath(S, -d);
-      if (o.length) P({ k: 'path', L: 'LIMITE', segs: [L(G.segStart(S[0]), G.segStart(o[0])), L(G.segEnd(S[S.length - 1]), G.segEnd(o[o.length - 1]))] });
-    }
+    sideBandPrims(S, bands, bandLayer).forEach(P);
   });
 
   // Voies directes : îlot de séparation, bords côté îlot, rives, axe.

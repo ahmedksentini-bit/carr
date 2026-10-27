@@ -61,6 +61,15 @@ export function sectionParams(prj) {
   return out;
 }
 
+// Largeurs des abords au-delà du bord de chaussée : [libellé, largeur] (urbain : caniveau, bordure, trottoir,
+// contre-bordure ; interurbain : berme).
+export function sideBands(prj, sec = sectionParams(prj)) {
+  const list = prj.context === 'urbain'
+    ? [['caniveau', sec.caniveau], ['bordure', sec.bordure], ['trottoir', sec.trottoir], ['contre-bordure', sec.cBordure]]
+    : [['berme', sec.berme]];
+  return list.filter(([, w]) => w > 0);
+}
+
 // Voie directe de tourne-à-droite : rayon en axe de la chaussée et largeur de chaussée (hors bandes dérasées).
 export const TAD = { interurbain: { R: 42, w: 4 }, urbain: { R: 20, w: 3.5 } };
 

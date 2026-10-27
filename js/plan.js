@@ -4,9 +4,9 @@
 // tourne-à-gauche (TAG) et l'îlot central. Les branches secondaires sont construites comme les branches d'un
 // giratoire (approach.js), la cible étant le bord de la chaussée principale.
 import * as G from './geom.js';
-import { islandDims, planParams, secondaryAuto } from './norms.js';
+import { islandDims, planParams, secondaryAuto, sideBands } from './norms.js';
 import { addDeversPlan } from './devers.js';
-import { fmt, fmtGis, upright, autoCenter, branchDirection, frame } from './common.js';
+import { fmt, fmtGis, upright, autoCenter, branchDirection, frame, sideBandPrims } from './common.js';
 import { buildApproach, crossLine, targetX0 } from './approach.js';
 import { makeDims } from './dims.js';
 
@@ -261,6 +261,25 @@ export function buildPlan(prj) {
     if (bd.island?.outline) rings.push(orient(bd.island.outline, true));
   }
   Pp({ k: 'fill', L: 'CHAUSSEE', rings, role: 'chaussee', rule: 'nonzero' });
+
+  // Abords (caniveau, bordure, trottoir, contre-bordure / berme) le long des bords de chaussée : morceaux de bord
+  // de la principale et bordures des secondaires orientés terre à droite, puis mis bout à bout par quadrant.
+  const bands = sideBands(prj);
+  if (bands.length) {
+    const rest = [];
+    for (const sg of [1, -1]) for (const piece of cutPolyline(edges[sg], gaps[sg])) rest.push(sg > 0 ? G.revPath(rnd(piece)) : rnd(piece));
+    for (const bd of bds) if (bd.role === 'secondaire') rest.push(bd.entry.curbW, G.revPath(bd.exit.curbW));
+    const head = (p) => G.segStart(p[0]), tail = (p) => G.segEnd(p[p.length - 1]);
+    while (rest.length) {
+      let ch = rest.shift();
+      for (let grown = true; grown;) {
+        grown = false;
+        const i = rest.findIndex((q) => G.dist(tail(ch), head(q)) < 0.05 || G.dist(tail(q), head(ch)) < 0.05);
+        if (i >= 0) { const q = rest.splice(i, 1)[0]; ch = G.dist(tail(ch), head(q)) < 0.05 ? [...ch, ...q] : [...q, ...ch]; grown = true; }
+      }
+      if (ch.length) sideBandPrims(ch, bands, prj.context === 'urbain' ? 'TROTTOIR' : 'ACCOTEMENT').forEach(Pp);
+    }
+  }
 
   // Axe de la route principale
   Pp({ k: 'path', L: 'AXE', segs: [L(toW(-LA - 3, 0), toW(LB + 3, 0))] });

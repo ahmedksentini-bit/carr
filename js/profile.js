@@ -2,8 +2,7 @@
 // des paramètres du projet : îlot central, bande franchissable, BDG, anneau (dévers vers l'extérieur), BDD et abords.
 // Cotes en altitude relative : 0 à la rive extérieure (Rg).
 import { fmt } from './common.js';
-import { sectionParams } from './norms.js';
-import { sideBands } from './roundabout.js';
+import { sectionParams, sideBands } from './norms.js';
 import { DxfWriter } from './dxf-write.js';
 
 const pc = (v) => fmt(v * 100, 1).replace(/,0$/, '') + ' %';
