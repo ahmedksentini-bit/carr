@@ -44,6 +44,9 @@ ou sur un fond topographique DXF.
   de chaque axe en prolonge la saisie.
 - **Dévers** : anneau à dévers imposé de 1,5 % vers l'extérieur, constant sur site en pente (ou cône sur plan incliné),
   profil en long des rives, variation des dévers de chaque branche, flèches de dévers sur le plan.
+- **Visibilité** (onglet dédié, calque `GIRA_VISIBILITE`) : giratoire, quart d'anneau à gauche vu depuis un observateur à
+  15 m en amont du cédez-le-passage (recul réglable), au milieu de la voie d'entrée ; carrefours en T et en X,
+  triangles œil – point de conflit – cible à D = V85 × t de part et d'autre, cotés ; tableau par branche.
 - **Contrôles** : comparaison des valeurs aux recommandations du guide, excentrement des axes, déflexion,
   chevauchement des raccordements, pentes transversales.
 - **Capacité des giratoires (type Girabase)** : matrice origine-destination à l'HPM (véh/h, % PL, piétons),

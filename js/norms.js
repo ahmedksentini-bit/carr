@@ -49,13 +49,13 @@ export const SECTION = {
     rive: true, bdd: 1, bdgRing: 0.5, bdgBr: 0.5,
     caniveau: 0, bordure: 0, trottoir: 0, cBordure: 0, bordureVue: 0.14, trottoirPente: 2,
     berme: 1.5, bermePente: 8, bfPente: 4, bfVue: 0.03, ilotVue: 0.06, axeR: 80,
-    pp: false, pmr: false, ppW: 2.5, ppRecul: 5,
+    pp: false, pmr: false, ppW: 2.5, ppRecul: 5, visOn: true, visObs: 15,
   },
   urbain: {
     rive: false, bdd: 0, bdgRing: 0, bdgBr: 0,
     caniveau: 0.25, bordure: 0.15, trottoir: 2.5, cBordure: 0.1, bordureVue: 0.14, trottoirPente: 2,
     berme: 0, bermePente: 8, bfPente: 4, bfVue: 0.03, ilotVue: 0.06, axeR: 40,
-    pp: true, pmr: true, ppW: 2.5, ppRecul: 5,
+    pp: true, pmr: true, ppW: 2.5, ppRecul: 5, visOn: true, visObs: 15,
   },
 };
 export function sectionParams(prj) {

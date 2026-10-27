@@ -57,7 +57,7 @@ export function buildPlan(prj) {
   const unit = prj.opts?.angleUnit || 'gon';
   const TH = +prj.opts?.textH || 0.8;
   const issues = [], prims = [], points = [], bds = [];
-  const D = { kind, ok: false, O: null, branches: bds, prims, points, issues, plan: P };
+  const D = { kind, ok: false, O: null, branches: bds, prims, points, issues, plan: P, vis: [] };
 
   let O = prj.center.auto ? autoCenter(prj.branches) : null;
   if (!O && prj.center.x != null) O = { x: +prj.center.x, y: +prj.center.y };
@@ -377,11 +377,19 @@ export function buildPlan(prj) {
     const om = toM(obs), sY = bd.sY;
     const tNear = toW(om.x + sY * Dv, sY * P.wLane / 2), tFar = toW(om.x - sY * Dv, -sY * P.wLane / 2);
     bd.vis = { obs, tNear, tFar, D: Dv };
-    for (const t of [tNear, tFar]) {
-      Pp({ k: 'path', L: 'CONSTRUCTION', segs: [L(obs, t)], dash: [2, 2] });
-      Pp({ k: 'cross', L: 'CONSTRUCTION', p: t, size: 1.2 });
+    if (sec.visOn) {
+      // Triangle œil – point de conflit sur la voie (même abscisse) – cible à D, de chaque côté.
+      const pN = toW(om.x, (sY * P.wLane) / 2), pF = toW(om.x, (-sY * P.wLane) / 2);
+      for (const [t, p] of [[tNear, pN], [tFar, pF]]) {
+        Pp({ k: 'fill', L: 'VISIBILITE', role: 'vis', rings: [closedSegs([obs, p, t])] });
+        Pp({ k: 'path', L: 'VISIBILITE', segs: [L(obs, t), L(t, p)] });
+        Pp({ k: 'cross', L: 'VISIBILITE', p: t, size: 1.2 });
+        dims.aligned(p, t, 0, `D = ${fmt(Dv, 0)} m`);
+      }
+      Pp({ k: 'cross', L: 'VISIBILITE', p: obs, size: 0.8 });
+      text('VISIBILITE', add(G.lerp(obs, tNear, 0.55), mul(bd.u, TH)), `visibilité ${bd.name} : ${fmt(P.tVis, 0)} s à ${fmt(P.v85, 0)} km/h`, ang(sub(tNear, obs)), 'center', TH * 0.75);
+      D.vis.push({ name: bd.name, obs: P.dObs, v85: P.v85, t: P.tVis, D: Dv });
     }
-    text('CONSTRUCTION', add(G.lerp(obs, tNear, 0.55), mul(bd.u, TH)), `visibilité ${fmt(Dv, 0)} m (${fmt(P.tVis, 0)} s à ${fmt(P.v85, 0)} km/h)`, ang(sub(tNear, obs)), 'center', TH * 0.75);
     // Étiquettes
     text('COTATION', W({ x: xEnd + 4 + 2 * TH, y: 0 }), bd.name, bd.theta + Math.PI / 2, 'center', TH * 1.6);
     text('COTATION', W({ x: xEnd + 4, y: 0 }), `${bd.gis} · ${fmt((bd.angle * 200) / Math.PI, 1)} gr / principale`, bd.theta + Math.PI / 2, 'center', TH * 0.9);

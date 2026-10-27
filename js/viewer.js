@@ -16,6 +16,7 @@ export const THEMES = {
       ILOT_SEP: { stroke: '#f5f5f5', w: 1.6, fill: { ilot: 'rgba(74,140,82,0.62)' } },
       MARQUAGE: { stroke: '#ffffff', w: 1 },
       PMR: { stroke: '#facc15', w: 1 },
+      VISIBILITE: { stroke: '#fbbf24', w: 1, dash: [5, 4], fill: { vis: 'rgba(250,204,21,0.13)' } },
       CONSTRUCTION: { stroke: '#7d9bbd', w: 0.8, dash: [3, 3] },
       LIMITE: { stroke: '#94a3b8', w: 1, dash: [6, 4] },
       COTATION: { stroke: '#38bdf8', w: 0.9, text: '#7dd3fc' },
@@ -37,6 +38,7 @@ export const THEMES = {
       ILOT_SEP: { stroke: '#111827', w: 1.6, fill: { ilot: 'rgba(134,190,120,0.7)' } },
       MARQUAGE: { stroke: '#4b5563', w: 1 },
       PMR: { stroke: '#b45309', w: 1 },
+      VISIBILITE: { stroke: '#d97706', w: 1, dash: [5, 4], fill: { vis: 'rgba(245,158,11,0.15)' } },
       CONSTRUCTION: { stroke: '#64748b', w: 0.8, dash: [3, 3] },
       LIMITE: { stroke: '#64748b', w: 1, dash: [6, 4] },
       COTATION: { stroke: '#0369a1', w: 0.9, text: '#0c4a6e' },
@@ -148,7 +150,7 @@ function arrowHead(ctx, x0, y0, x1, y1, size) {
 export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
   if (!D) return;
   const T = THEMES[theme];
-  const order = ['CHAUSSEE', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'PMR', 'AXE', 'DEVERS', 'COTATION'];
+  const order = ['CHAUSSEE', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'PMR', 'VISIBILITE', 'AXE', 'DEVERS', 'COTATION'];
   ctx.lineCap = 'butt'; ctx.lineJoin = 'round';
   for (const layer of order) {
     if (vis[layer] === false) continue;

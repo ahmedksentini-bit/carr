@@ -689,10 +689,15 @@ function buildStaticPanels() {
     fld('plan.tag.align', 'Alignement droit avant le sifflet', 'm') +
     fld('plan.tag.deport', 'Longueur de déport des bords', 'm', { ph: 'auto' }) +
     fld('plan.tag.presig', 'Présignalisation (nez peint)', 'm') +
-    '<h3>Visibilité depuis les branches secondaires</h3>' +
+    '<p class="note">Visibilité depuis les branches secondaires : onglet Visibilité.</p>';
+  $('#visFields').innerHTML =
+    '<label class="chk"><input type="checkbox" data-k="section.visOn"> Dessiner les zones de visibilité sur le plan</label>' +
+    '<div data-for="giratoire">' +
+    fld('section.visObs', 'Recul de l\'observateur derrière le cédez-le-passage', 'm', { ph: '15' }) + '</div>' +
+    '<div data-for="plan">' +
     fld('plan.v85', 'Vitesse V85 de la route principale', 'km/h') +
     fld('plan.tVis', 'Temps de visibilité', 's', { ph: 'auto' }) +
-    fld('plan.dObs', 'Recul de l\'œil derrière la ligne', 'm', { ph: 'auto' });
+    fld('plan.dObs', 'Recul de l\'œil derrière la ligne', 'm', { ph: 'auto' }) + '</div>';
   $('#deversFields').innerHTML =
     '<div data-for="giratoire">' +
     fld('ring.zC', 'Cote projet au centre zC', 'm') +
@@ -732,7 +737,7 @@ function syncCtxUI() {
   $('#tabRingBtn').textContent = plan ? 'Carrefour' : 'Anneau';
   $('#ringPane').hidden = plan;
   $('#planPane').hidden = !plan;
-  $$('#deversFields [data-for], #capFields [data-for]').forEach((el) => (el.hidden = (el.dataset.for === 'plan') !== plan));
+  $$('#deversFields [data-for], #capFields [data-for], #visFields [data-for]').forEach((el) => (el.hidden = (el.dataset.for === 'plan') !== plan));
   $('#dvHead').textContent = plan ? 'Route principale' : 'Anneau';
   $('#dvChartHead').textContent = plan ? 'Profil en long de la route principale' : 'Profil en long des bords de l\'anneau';
 }
@@ -828,6 +833,7 @@ function refreshPanels() {
   refreshChecks();
   refreshPoints();
   refreshCapacity();
+  refreshVisibility();
   refreshProfile();
   setPrompt();
 }
@@ -1072,6 +1078,20 @@ function buildSectionFields() {
     '<h3>Îlot central et bande franchissable</h3>' + f('bfPente', 'Pente de la bande franchissable', '%') +
     f('bfVue', 'Vue de la bordure de la bande franchissable', 'm') + f('ilotVue', 'Vue de la bordure de l\'îlot central', 'm') +
     '<h3>Axes des branches</h3>' + f('axeR', 'Rayon de raccordement à l\'axe saisi', 'm');
+}
+
+// --------------------------------------------------------- Visibilité
+function refreshVisibility() {
+  const plan = isPlan(S.prj), V = S.D?.vis || [];
+  $('#visIntro').textContent = plan
+    ? 'Carrefour plan (ACI) : depuis l\'œil du conducteur arrêté sur la branche secondaire, triangles de visibilité sur la route principale jusqu\'à D = V85 × t de part et d\'autre (t = 8 s au STOP, 10 s au cédez-le-passage, + 1 s avec TAG).'
+    : 'Giratoire : depuis un observateur placé en amont du cédez-le-passage, au milieu de la voie d\'entrée, le conducteur doit voir le quart de l\'anneau situé à sa gauche. La zone doit rester libre d\'obstacles (plantations et mobilier bas sur l\'îlot central).';
+  $('#visTable').innerHTML = !V.length ? '' : plan
+    ? '<thead><tr><th>Branche</th><th>Œil</th><th>V85</th><th>t</th><th>D requise</th></tr></thead><tbody>' +
+      V.map((v) => `<tr><td>${esc(v.name)}</td><td class="mono">${fmt(v.obs, 1)} m</td><td class="mono">${fmt(v.v85, 0)} km/h</td><td class="mono">${fmt(v.t, 0)} s</td><td class="mono">${fmt(v.D, 0)} m</td></tr>`).join('') + '</tbody>'
+    : '<thead><tr><th>Branche</th><th>Recul</th><th>Rayon visé</th><th>Quart d\'anneau</th><th>Visée la plus longue</th></tr></thead><tbody>' +
+      V.map((v) => `<tr><td>${esc(v.name)}</td><td class="mono">${fmt(v.obs, 1)} m</td><td class="mono">${fmt(v.R, 2)} m</td><td class="mono">${fmt(v.arc, 1)} m</td><td class="mono">${fmt(v.sight, 1)} m</td></tr>`).join('') + '</tbody>';
+  $('#visNote').textContent = V.length ? 'Zones tracées sur le calque GIRA_VISIBILITE. Les obstacles ne sont pas contrôlés automatiquement : vérifier sur le fond topographique.' : 'Aucune zone : tracez les branches, ou cochez l\'affichage.';
 }
 
 function refreshProfile() {

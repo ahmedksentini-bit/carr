@@ -355,6 +355,28 @@ function buildRoundabout(prj, ext = {}) {
     }
   });
 
+  // Visibilité à gauche : depuis un observateur à visObs en amont du cédez-le-passage, au milieu de la voie d'entrée,
+  // le conducteur voit le quart de l'anneau situé à sa gauche (axe de la chaussée annulaire), en amont du point d'entrée.
+  D.vis = [];
+  if (sec.visOn) {
+    const Rm = Rg - la / 2;
+    for (const bd of bds) {
+      const { W, x0, xT, ai, hb, th } = bd, xo = x0 + sec.visObs;
+      const out = cutAtX(bd.entry.curb, xo);
+      if (!out || xo > bd.xEnd) continue;
+      const yIn = xo >= xT ? ai + th : ai + hb + ((th - hb) * (xo - x0)) / (xT - x0);
+      const yMid = (yIn + out.y) / 2, E = W({ x: xo, y: yMid }), Y0 = W({ x: x0, y: yMid });
+      const phi0 = ang(sub(Y0, O)), arc = A(O, Rm, phi0 - Math.PI / 2, phi0, true);
+      const pts = G.samplePath([arc], 1);
+      P({ k: 'fill', L: 'VISIBILITE', role: 'vis', rings: [closedSegs([E, ...pts])] });
+      P({ k: 'path', L: 'VISIBILITE', segs: [L(E, pts[0]), arc, L(pts[pts.length - 1], E)] });
+      P({ k: 'cross', L: 'VISIBILITE', p: E, size: 0.8 });
+      dims.aligned(Y0, E, 0, `${fmt(sec.visObs, 1)} m`, { side: -1 });
+      text('VISIBILITE', G.polar(O, Rm + 1.2 * TH, phi0 - Math.PI / 4), `visibilité ${bd.name} : 1/4 d'anneau`, phi0 - Math.PI / 4 + Math.PI / 2, 'center', TH * 0.7);
+      D.vis.push({ name: bd.name, obs: sec.visObs, R: Rm, arc: (Rm * Math.PI) / 2, sight: Math.max(...pts.map((p) => G.dist(E, p))) });
+    }
+  }
+
   // Cotations de l'anneau dans le plus grand secteur libre : rayons Rg, Ri (rives) et chaîne radiale
   // îlot central → bande franchissable → BDG → anneau → BDD → abords.
   let phi = Math.PI / 4;
