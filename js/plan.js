@@ -200,28 +200,40 @@ export function buildPlan(prj) {
   const holes = [];
   const MK = (pts, opt = {}) => Pp({ k: 'path', L: 'MARQUAGE', segs: pathM(pts), wm: 0.15, ...opt });
   const T3 = { dash: [3, 1.33], lt: 'T3' }, T1 = { dash: [3, 10], lt: 'T1' };
+  // Contour fermé à angles arrondis (rayon borné par la longueur des côtés).
+  const roundedClosed = (pts, r) => {
+    const M = G.lerp(pts[pts.length - 1], pts[0], 0.5), q = [M, ...pts, M];
+    return G.roundPolyline(q, q.map((_, i) => (i > 0 && i < q.length - 1 ? r : 0)));
+  };
   const centralIsland = (env, raisedPart) => {
     const w = env.map((p) => toW(p.x, p.y));
     MK([...env, env[0]]);
-    Pp({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(w, ang(uM) + Math.PI / 4, 1.0), wm: 0.12 });
-    if (!P.tag.raised || !raisedPart) return;
-    const inner = insetPolygon(raisedPart.map((p) => toW(p.x, p.y)), 0.3);
-    if (!inner) { issues.push({ lvl: 'warn', msg: 'Îlot central trop étroit pour être en saillie : seule l\'enveloppe peinte est dessinée.' }); return; }
-    const segs = closedPath(inner);
-    Pp({ k: 'fill', L: 'ILOT_SEP', rings: [segs], role: 'ilot' });
-    Pp({ k: 'path', L: 'ILOT_SEP', segs, closed: true });
-    holes.push(segs);
+    let raised = null;
+    if (P.tag.raised && raisedPart) {
+      const inner = insetPolygon(raisedPart.map((p) => toW(p.x, p.y)), 0.3);
+      if (!inner) issues.push({ lvl: 'warn', msg: 'Îlot central trop étroit pour être en saillie : seule l\'enveloppe peinte est dessinée.' });
+      else raised = roundedClosed(inner, 0.75);
+    }
+    // Zébra sur la partie peinte seulement (nez du biseau, bandes autour de l'îlot en saillie).
+    const rings = raised ? [w, G.samplePath(raised, 0.3)] : w;
+    Pp({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(rings, ang(uM) + Math.PI / 4, 1.0), wm: 0.12 });
+    if (!raised) return;
+    Pp({ k: 'fill', L: 'ILOT_SEP', rings: [raised], role: 'ilot' });
+    Pp({ k: 'path', L: 'ILOT_SEP', segs: raised, closed: true });
+    holes.push(raised);
   };
   const sideMarks = (hasTag, len, f) => {
     const Xal = -len, Xpre = Xal - Ldep - Lpre;
+    // L'îlot en saillie suit l'enveloppe peinte dans le biseau jusqu'à ce qu'il ne reste qu'1 m de large.
+    const Xcut = Math.min(Xal, Xpre + ((1 + 0.6) / c) * (Xal - Xpre)), hc = ((c / 2) * (Xcut - Xpre)) / (Xal - Xpre);
     if (hasTag) {
       const Xd = -Lm, Xc = Xd - Ls, Xs = Xc - Lsif;
       const env = [f(Xpre, 0), f(Xal, c / 2), f(Xd, c / 2), f(Xd, c / 2 - a), f(Xc, c / 2 - a), f(Xs, -c / 2), f(Xal, -c / 2)];
-      centralIsland(env, a >= 1.2 ? env.slice(1) : null);
+      centralIsland(env, a >= 1.2 ? [f(Xcut, hc), ...env.slice(1), f(Xcut, -hc)] : null);
       MK([f(Xs, -c / 2), f(Xd, -c / 2)], T3); // séparation voie directe / TAG
     } else {
       const env = [f(-Lm, c / 2), f(Xal, c / 2), f(Xpre, 0), f(Xal, -c / 2), f(-Lm, -c / 2)];
-      centralIsland(env, [f(-Lm, c / 2), f(Xal, c / 2), f(Xal, -c / 2), f(-Lm, -c / 2)]);
+      centralIsland(env, [f(-Lm, c / 2), f(Xal, c / 2), f(Xcut, hc), f(Xcut, -hc), f(Xal, -c / 2), f(-Lm, -c / 2)]);
     }
     return Xpre;
   };

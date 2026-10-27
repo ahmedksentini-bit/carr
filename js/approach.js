@@ -108,7 +108,8 @@ export function buildApproach(cfg, issues) {
   // --- Îlot séparateur (ou tête de TPC). Enveloppe peinte = triangle de construction (rives gauches des voies
   // d'entrée et de sortie) ; îlot en saillie en retrait de la BDG de cette enveloppe ; zébra entre les deux.
   let island = null;
-  if (cfg.hasIsland) {
+  if (cfg.hasIsland && target.kind === 'line' && th <= 0) island = dropIsland(cfg, issues);
+  else if (cfg.hasIsland) {
     const head = offsetTarget(target, isl.gap);
     const g = Math.max(0, isl.bdg || 0);
     const Hi0 = { x: x0, y: ai + hb }, Ti0 = { x: xT, y: ai + th }, Ho0 = { x: x0, y: ai - hb }, To0 = { x: xT, y: ai - th };
@@ -178,4 +179,35 @@ export function buildApproach(cfg, issues) {
     }
   }
   return { en, ex, island };
+}
+
+// Îlot de branche secondaire d'un carrefour plan (ACI) : goutte d'eau définie par ses bordures — triangle de base b
+// au bord de la principale et de hauteur h, tête arrondie (rHead) en retrait de `gap`, pointe arrondie (rTip).
+// La peinture suit la même forme : rive à la BDG autour de l'îlot en saillie, ou contour de l'îlot peint et zébra.
+function dropIsland(cfg, issues) {
+  const { name, idx, target, ai, x0, xT, hb, isl } = cfg;
+  const head = offsetTarget(target, isl.gap);
+  const Hi = { x: x0, y: ai + hb }, Ho = { x: x0, y: ai - hb }, Tp = { x: xT, y: ai };
+  const di = norm(sub(Hi, Tp)), dO = norm(sub(Ho, Tp));
+  let mi = rot90(di); if (mi.y > 0) mi = neg(mi);
+  let mo = rot90(dO); if (mo.y < 0) mo = neg(mo);
+  const vi = G.lineLine(Tp, di, head.p, head.d), vo = G.lineLine(Tp, dO, head.p, head.d);
+  const maxT = vi && vo ? Math.max(0.05, G.dist(vi.p, vo.p) / 2) : 1e4;
+  const fi = filletToTarget(Tp, di, mi, head, isl.rHead, maxT), fo = filletToTarget(Tp, dO, mo, head, isl.rHead, maxT);
+  if (!(fi && fo && fi.t > 0 && fo.t > 0)) {
+    issues.push({ lvl: 'warn', bi: idx, msg: `${name} : îlot séparateur trop petit pour être dessiné (vérifier base et longueur).` });
+    return null;
+  }
+  // Pointe très effilée (b ≪ h) : rayon réduit pour que l'arrondi n'occupe pas plus de 1,5 m de chaque côté.
+  const half = Math.acos(G.clamp(dot(di, dO), -1, 1)) / 2;
+  const tip = G.filletCorner(fo.Tl, Tp, fi.Tl, Math.min(isl.rTip, 1.5 * Math.tan(half)), 0.45, 0.45);
+  const hs = G.dist(fi.Tc, fo.Tc) > 1e-6 ? [L(fi.Tc, fo.Tc)] : [];
+  const outline = [...(tip ? [L(fo.Tl, tip.T1), tip.arc, L(tip.T2, fi.Tl)] : [L(fo.Tl, Tp), L(Tp, fi.Tl)]), fi.arc, ...hs, G.revSeg(fo.arc)];
+  const tipP = tip ? G.segAt(tip.arc, 0.5) : Tp;
+  const ccw = G.polyArea(G.samplePath(outline, 0.5)) > 0; // à gauche du contour = intérieur si sens trigonométrique
+  const base = { closed: true, tip: tipP, headIn: fi.Tc, headOut: fo.Tc };
+  if (isl.type === 'peint') return { ...base, outline: null, curb: null, paint: [outline], hatch: [G.samplePath(outline, 0.3)] };
+  const g = Math.max(0, isl.bdg || 0);
+  const paint = g > 0 ? [G.offsetPath(outline, ccw ? -g : g)].filter((p) => p.length) : [];
+  return { ...base, outline, curb: outline, paint, hatch: null };
 }
