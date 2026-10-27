@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GIRA — Conception de carrefours giratoires</title>
+  <meta name="description" content="Dessin à l'échelle de carrefours giratoires (SETRA ACI / CERTU) : plan d'implantation, dévers, export DXF.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%2338bdf8' stroke-width='4'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%234ade80'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/app.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script>
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="#38bdf8" stroke-width="4"/><circle cx="16" cy="16" r="4.5" fill="#4ade80"/><path d="M16 0v6M16 26v6M0 16h6M26 16h6" stroke="#38bdf8" stroke-width="2"/></svg>
+      <b>GIRA</b><span class="sub">Conception de giratoires · SETRA / CERTU</span>
+    </div>
+    <input id="prjName" class="prj-name" spellcheck="false" aria-label="Nom du projet">
+    <div class="actions">
+      <button id="btnNew" title="Nouveau projet">Nouveau</button>
+      <button id="btnOpen" title="Ouvrir un projet .gira.json">Ouvrir</button>
+      <button id="btnSave" title="Enregistrer le projet (.gira.json)">Enregistrer</button>
+      <span class="sep"></span>
+      <button id="btnUndo" title="Annuler (Ctrl+Z)">↶</button>
+      <button id="btnRedo" title="Rétablir (Ctrl+Y)">↷</button>
+      <span class="sep"></span>
+      <button id="btnDxf" class="primary" title="Exporter le plan au format DXF (AutoCAD, Covadis…)">Exporter DXF</button>
+      <button id="btnPng" title="Exporter la vue en image PNG haute définition">PNG</button>
+      <button id="btnHelp" title="Aide et raccourcis">Aide</button>
+    </div>
+  </header>
+
+  <main class="app">
+    <nav class="tools" aria-label="Outils">
+      <button data-tool="select" title="Sélection / modification (S)"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.5L10 19z"/></svg></button>
+      <button data-tool="pan" title="Panoramique (H ou barre d'espace)"><svg viewBox="0 0 24 24"><path d="M12 2v20M2 12h20M12 2l-3 3M12 2l3 3M12 22l-3-3M12 22l3-3M2 12l3-3M2 12l3 3M22 12l-3-3M22 12l-3 3"/></svg></button>
+      <span class="tsep"></span>
+      <button data-tool="axis" title="Dessiner l'axe d'une branche (A)"><svg viewBox="0 0 24 24"><path d="M3 20L10 12 14 13 21 4"/><circle cx="3" cy="20" r="1.8"/><circle cx="10" cy="12" r="1.8"/><circle cx="14" cy="13" r="1.8"/><circle cx="21" cy="4" r="1.8"/></svg></button>
+      <button data-tool="center" title="Placer le centre du giratoire (C)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7v10M7 12h10"/></svg></button>
+      <button data-tool="measure" title="Mesurer une distance (M)"><svg viewBox="0 0 24 24"><path d="M3 17L17 3l4 4L7 21z"/><path d="M7 13l2 2M10 10l2 2M13 7l2 2"/></svg></button>
+      <span class="tsep"></span>
+      <button data-act="zoomGira" title="Zoom sur le giratoire (G)"><svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="M15 15l6 6"/><circle cx="10" cy="10" r="2"/></svg></button>
+      <button data-act="zoomAll" title="Zoom étendu (E)"><svg viewBox="0 0 24 24"><path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"/></svg></button>
+    </nav>
+
+    <section class="stage">
+      <canvas id="cv"></canvas>
+      <div id="tip" class="tip" hidden></div>
+      <div id="empty" class="empty" hidden>
+        <h2>Dessinez les axes des branches</h2>
+        <p>Choisissez le fond (satellite ou DXF topo) dans l'onglet <b>Projet</b>, puis l'outil <b>Axe</b> <kbd>A</kbd> :
+          cliquez depuis l'extérieur vers le centre du carrefour, terminez par <kbd>Entrée</kbd> ou clic droit.
+          Le centre est calculé à l'intersection des axes.</p>
+      </div>
+      <div id="toast" class="toast" hidden></div>
+    </section>
+
+    <aside class="panel">
+      <div class="tabs" role="tablist">
+        <button data-tab="projet" class="on">Projet</button>
+        <button data-tab="anneau">Anneau</button>
+        <button data-tab="branches">Branches</button>
+        <button data-tab="devers">Dévers</button>
+        <button data-tab="controles">Contrôles <span id="chkBadge" class="badge"></span></button>
+        <button data-tab="implantation">Implantation</button>
+      </div>
+
+      <div class="tab" id="tab-projet">
+        <h3>Contexte</h3>
+        <div class="seg" id="ctxSeg">
+          <button data-ctx="interurbain">Interurbain <small>SETRA – ACI</small></button>
+          <button data-ctx="urbain">Urbain <small>CERTU</small></button>
+        </div>
+        <p class="note" id="ctxNote"></p>
+
+        <h3>Système de coordonnées</h3>
+        <label class="fld wide"><span class="lb">Système</span><select id="crsSel"></select></label>
+        <div id="crsUtm" class="row">
+          <label class="fld"><span class="lb">Fuseau</span><input id="crsZone" type="text" inputmode="numeric"></label>
+          <label class="chk"><input id="crsSouth" type="checkbox"> Hémisphère sud</label>
+        </div>
+        <label class="fld wide" id="crsCustomRow" hidden><span class="lb">proj4</span><input id="crsDef" type="text" spellcheck="false" placeholder="+proj=… +units=m"></label>
+        <p class="note" id="crsNote"></p>
+
+        <h3>Fond de plan</h3>
+        <label class="fld wide"><span class="lb">Imagerie</span><select id="bgSel">
+          <option value="esri">Satellite (Esri World Imagery)</option>
+          <option value="osm">Plan (OpenStreetMap)</option>
+          <option value="esriTopo">Topographique (Esri)</option>
+          <option value="none">Aucun</option>
+        </select></label>
+        <label class="fld wide"><span class="lb">Opacité</span><input id="bgOpacity" type="range" min="0.1" max="1" step="0.05"></label>
+        <div class="search">
+          <input id="geoQ" type="search" placeholder="Rechercher un lieu (ville, route…) ou lat, lon">
+          <button id="geoGo">Aller</button>
+        </div>
+        <ul id="geoRes" class="results"></ul>
+
+        <h3>Fond topographique DXF</h3>
+        <div class="row">
+          <button id="btnImportDxf" class="primary">Importer un DXF…</button>
+          <label class="fld"><span class="lb">Unité</span><select id="dxfUnit">
+            <option value="auto">auto</option><option value="1">m</option><option value="0.01">cm</option><option value="0.001">mm</option>
+          </select></label>
+        </div>
+        <div id="dxfInfo" class="note"></div>
+        <div id="dxfLayers" class="layers"></div>
+
+        <h3>Affichage</h3>
+        <div class="row">
+          <label class="fld"><span class="lb">Thème</span><select id="themeSel"><option value="dark">Sombre</option><option value="light">Clair</option></select></label>
+          <label class="fld"><span class="lb">Angles</span><select id="angSel"><option value="gon">grades</option><option value="deg">degrés</option></select></label>
+          <label class="fld"><span class="lb">Texte</span><input data-k="opts.textH" type="text" inputmode="decimal"><span class="un">m</span></label>
+        </div>
+        <div id="visLayers" class="layers"></div>
+      </div>
+
+      <div class="tab" id="tab-anneau" hidden>
+        <h3>Centre</h3>
+        <label class="chk"><input id="centerAuto" type="checkbox"> Centre calculé à l'intersection des axes</label>
+        <div class="row">
+          <label class="fld"><span class="lb">X</span><input data-k="center.x" type="text" inputmode="decimal"></label>
+          <label class="fld"><span class="lb">Y</span><input data-k="center.y" type="text" inputmode="decimal"></label>
+        </div>
+        <h3>Anneau</h3>
+        <div id="ringFields"></div>
+        <div id="ringOut" class="kv"></div>
+        <button id="btnRingDefaults">Appliquer les valeurs du guide</button>
+        <div id="ringGuide" class="guide"></div>
+      </div>
+
+      <div class="tab" id="tab-branches" hidden>
+        <div class="row">
+          <button id="btnAddBranch" class="primary">+ Dessiner une branche</button>
+          <button id="btnApplyAll" title="Copier les paramètres de la branche sélectionnée sur toutes les branches">Appliquer à toutes</button>
+        </div>
+        <ul id="branchList" class="blist"></ul>
+        <div id="branchForm"></div>
+      </div>
+
+      <div class="tab" id="tab-devers" hidden>
+        <h3>Anneau</h3>
+        <div id="deversFields"></div>
+        <div id="deversOut" class="kv"></div>
+        <h4>Profil en long des bords de l'anneau</h4>
+        <div id="ringChart" class="chart"></div>
+        <h4>Variation des dévers — <span id="dvBranchName">branche</span></h4>
+        <div id="branchChart" class="chart"></div>
+        <div id="branchDevTable"></div>
+      </div>
+
+      <div class="tab" id="tab-controles" hidden>
+        <p class="note">Contrôles automatiques des valeurs saisies par rapport aux recommandations du guide retenu. Ils ne remplacent pas le jugement du projeteur.</p>
+        <ul id="checks" class="checks"></ul>
+      </div>
+
+      <div class="tab" id="tab-implantation" hidden>
+        <div class="row">
+          <button id="btnCsv" class="primary">Exporter CSV</button>
+          <span class="note" id="ptsInfo"></span>
+        </div>
+        <div class="tablewrap"><table id="ptsTable" class="pts"></table></div>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="status">
+    <span id="stXY" class="mono"></span>
+    <span id="stLL" class="mono dim"></span>
+    <label class="cmd"><span>Commande</span><input id="cmd" spellcheck="false" autocomplete="off" placeholder="x,y · @dx,dy · @d&lt;angle · distance"></label>
+    <span id="stPrompt" class="prompt"></span>
+    <span class="grow"></span>
+    <button class="tog" data-tog="snap" title="Accrochage aux sommets (F3)">ACCROCHAGE</button>
+    <button class="tog" data-tog="ortho" title="Mode orthogonal (F8)">ORTHO</button>
+    <button class="tog" data-tog="grid" title="Grille (F7)">GRILLE</button>
+  </footer>
+
+  <input type="file" id="fileDxf" accept=".dxf,.DXF" hidden>
+  <input type="file" id="fileOpen" accept=".json,.gira" hidden>
+
+  <dialog id="dlgHelp">
+    <form method="dialog">
+      <h2>GIRA — aide</h2>
+      <ol>
+        <li><b>Projet</b> : choisissez le contexte (interurbain / urbain), le système de coordonnées et le fond (satellite, ou DXF topo dans le même système).</li>
+        <li><b>Axe</b> <kbd>A</kbd> : dessinez l'axe de chaque branche en cliquant de l'extérieur vers le carrefour. <kbd>Entrée</kbd> / clic droit / double-clic pour terminer, <kbd>Retour arrière</kbd> pour retirer le dernier point, <kbd>Échap</kbd> pour quitter.</li>
+        <li><b>Anneau</b> : saisissez Rg, la, bande franchissable. Le centre est calculé à l'intersection des axes, ou placé avec l'outil <kbd>C</kbd>.</li>
+        <li><b>Branches</b> : largeurs d'entrée / sortie, rayons Re / Rs, îlot séparateur, TPC (terre-plein central) avec sa largeur.</li>
+        <li><b>Dévers</b> : cote du centre, dévers de l'anneau, plan incliné ; diagrammes de variation par branche.</li>
+        <li><b>Exporter DXF</b> : plan coté par calques (GIRA_*) dans les coordonnées du projet. <b>Implantation</b> : points X, Y, Z en CSV.</li>
+      </ol>
+      <h3>Saisie au clavier (ligne de commande)</h3>
+      <table class="keys">
+        <tr><td><code>612345.20,3845678.10</code></td><td>point absolu X,Y (point décimal ; ou <code>X;Y</code> avec virgules décimales)</td></tr>
+        <tr><td><code>@25,0</code></td><td>point relatif au précédent</td></tr>
+        <tr><td><code>@40&lt;30</code></td><td>polaire : 40 m, angle 30° (sens trigonométrique depuis l'Est, comme AutoCAD)</td></tr>
+        <tr><td><code>35</code></td><td>distance directe dans la direction du curseur</td></tr>
+      </table>
+      <h3>Raccourcis</h3>
+      <p><kbd>S</kbd> sélection · <kbd>H</kbd>/<kbd>Espace</kbd> panoramique · <kbd>G</kbd> zoom giratoire · <kbd>E</kbd> zoom étendu · <kbd>F3</kbd> accrochage · <kbd>F7</kbd> grille · <kbd>F8</kbd> ortho · <kbd>Suppr</kbd> supprimer la branche · <kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd>. Molette : zoom au curseur ; bouton du milieu : panoramique. En sélection, faites glisser les sommets des axes ou le centre.</p>
+      <p class="note">Valeurs et contrôles issus des guides SETRA « Aménagement des carrefours interurbains » (1998) et CERTU « Guide des carrefours urbains » (1999). Altimétrie : modèle simplifié de niveau avant-projet.</p>
+      <div class="right"><button value="ok" class="primary">Fermer</button></div>
+    </form>
+  </dialog>
+</body>
+</html>
