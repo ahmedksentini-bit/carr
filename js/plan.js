@@ -7,7 +7,7 @@ import * as G from './geom.js';
 import { islandDims, planParams, secondaryAuto, sectionParams, sideBands } from './norms.js';
 import { addDeversPlan } from './devers.js';
 import { fmt, fmtGis, upright, autoCenter, branchDirection, frame, sideBandPrims } from './common.js';
-import { buildApproach, aciBranch, aciCircles, crossLine, targetX0 } from './approach.js';
+import { buildApproach, aciBranch, aciCircles, crossLine, targetX0, widthAlong } from './approach.js';
 import { makeDims } from './dims.js';
 import { crossing, crossingPrims, cutAtX, polyOf, closedSegs } from './crossing.js';
 import { sweep, conflicts, polyPath, SEMI } from './swept.js';
@@ -476,15 +476,22 @@ export function buildPlan(prj, opt = {}) {
       Pp({ k: 'cross', L: 'CONSTRUCTION', p: sd.C, size: 0.8 });
       Pp({ k: 'path', L: 'CONSTRUCTION', segs: [L(sd.C, sd.Tc), L(sd.C, sd.Tl)] });
       // Au-delà du passage piéton s'il y en a un.
-      let p1, p2;
-      if (sd.dim) [p1, p2] = sd.dim; // îlot ACI : au plus large de l'îlot, entre son bord et la bordure parallèle
+      // La cote donne la largeur réellement construite, et la valeur demandée si elle diffère.
+      let p1, p2, wr = sd.dimW ?? sd.w;
+      if (sd.dim) [p1, p2] = sd.dim; // îlot ACI : au plus étroit de la voie, entre le flanc de l'îlot et la bordure
       else {
         const xs = Math.max(G.clamp(sd.fil.Tl.x + 2, x0 + 2, Math.max(x0 + 2, xT - 2)), bd.cross ? bd.cross.x2 + 1.5 : -Infinity);
         const pIsl = add(sd.H, mul(sd.dI, (xs - sd.H.x) / sd.dI.x));
         const mOut = sd.s > 0 ? rot90(sd.dI) : neg(rot90(sd.dI));
-        [p1, p2] = sd.s > 0 ? [pIsl, add(pIsl, mul(mOut, sd.w))] : [add(pIsl, mul(mOut, sd.w)), pIsl];
+        wr = widthAlong(pIsl, mOut, sd.curb) ?? sd.w;
+        [p1, p2] = sd.s > 0 ? [pIsl, add(pIsl, mul(mOut, wr))] : [add(pIsl, mul(mOut, wr)), pIsl];
       }
-      dims.aligned(W(p1), W(p2), 0, `${sd.s > 0 ? 'le' : 'ls'} = ${fmt(sd.w, 2)}`, { side: -1 });
+      const asked = Math.abs(wr - sd.w) > 0.05 ? ` (${fmt(sd.w, 2)} demandé)` : '';
+      dims.aligned(W(p1), W(p2), 0, `${sd.s > 0 ? 'le' : 'ls'} = ${fmt(wr, 2)}${asked}`, { side: -1 });
+      if (Math.abs(wr - sd.w) > 0.5) {
+        const k = sd.s > 0 ? ['le', 'Re'] : ['ls', 'Rs'];
+        issues.push({ lvl: 'warn', bi: bd.idx, msg: `${bd.name} : voie ${sd.s > 0 ? 'd\'entrée' : 'de sortie'} large de ${fmt(wr, 2)} m au plus étroit pour ${k[0]} = ${fmt(sd.w, 2)} m demandé — ${wr > sd.w ? `la bordure ne longe pas l'îlot (${k[1]} = ${fmt(sd.R, 1)} m trop grand pour la place disponible : réduire ${k[1]}, ou allonger l'îlot avec H, Ris / Rie)` : 'la bordure se rapproche de l\'îlot'}.` });
+      }
       const mid = G.segAt(sd.fil.arc, 0.5);
       dims.radius(W(mid), norm(sub(sd.C, W(mid))), `${sd.s > 0 ? 'Re' : 'Rs'} = ${fmt(sd.R, 2)}`);
     }
@@ -510,16 +517,18 @@ export function buildPlan(prj, opt = {}) {
     const tNear = toW(om.x + sY * Dv, sY * P.wLane / 2), tFar = toW(om.x - sY * Dv, -sY * P.wLane / 2);
     bd.vis = { obs, tNear, tFar, D: Dv };
     if (sec.visOn) {
-      // Triangle œil – point de conflit sur la voie (même abscisse) – cible à D, de chaque côté.
-      const pN = toW(om.x, (sY * P.wLane) / 2), pF = toW(om.x, (-sY * P.wLane) / 2);
-      for (const [t, p] of [[tNear, pN], [tFar, pF]]) {
+      // Triangle œil – point de conflit sur la voie (même abscisse) – cible à D, de chaque côté (branche choisie seulement).
+      const pN = toW(om.x, (sY * P.wLane) / 2), pF = toW(om.x, (-sY * P.wLane) / 2), pick = prj.section?.visBranch;
+      for (const [t, p] of !pick || String(bd.id) === String(pick) ? [[tNear, pN], [tFar, pF]] : []) {
         Pp({ k: 'fill', L: 'VISIBILITE', role: 'vis', rings: [closedSegs([obs, p, t])] });
         Pp({ k: 'path', L: 'VISIBILITE', segs: [L(obs, t), L(t, p)] });
         Pp({ k: 'cross', L: 'VISIBILITE', p: t, size: 1.2 });
         dims.aligned(p, t, 0, `D = ${fmt(Dv, 0)} m`);
       }
-      Pp({ k: 'cross', L: 'VISIBILITE', p: obs, size: 0.8 });
-      text('VISIBILITE', add(G.lerp(obs, tNear, 0.55), mul(bd.u, TH)), `visibilité ${bd.name} : ${fmt(P.tVis, 0)} s à ${fmt(P.v85, 0)} km/h`, ang(sub(tNear, obs)), 'center', TH * 0.75);
+      if (!pick || String(bd.id) === String(pick)) {
+        Pp({ k: 'cross', L: 'VISIBILITE', p: obs, size: 0.8 });
+        text('VISIBILITE', add(G.lerp(obs, tNear, 0.55), mul(bd.u, TH)), `visibilité ${bd.name} : ${fmt(P.tVis, 0)} s à ${fmt(P.v85, 0)} km/h`, ang(sub(tNear, obs)), 'center', TH * 0.75);
+      }
       D.vis.push({ name: bd.name, obs: P.dObs, v85: P.v85, t: P.tVis, D: Dv });
     }
     // Étiquettes

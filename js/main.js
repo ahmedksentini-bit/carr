@@ -695,6 +695,7 @@ function buildStaticPanels() {
     '<p class="note">Surface balayée tracée sur le calque GIRA_EPURE ; les empiètements sur les bordures et îlots sont signalés dans Contrôles. Visibilité depuis les branches secondaires : onglet Visibilité.</p>';
   $('#visFields').innerHTML =
     '<label class="chk"><input type="checkbox" data-k="section.visOn"> Dessiner les zones de visibilité sur le plan</label>' +
+    '<div id="visPick"></div>' +
     '<div data-for="giratoire">' +
     fld('section.visObs', 'Recul de l\'observateur derrière le cédez-le-passage', 'm', { ph: '15' }) + '</div>' +
     '<div data-for="plan">' +
@@ -1178,14 +1179,23 @@ function buildSectionFields() {
 // --------------------------------------------------------- Visibilité
 function refreshVisibility() {
   const plan = isPlan(S.prj), V = S.D?.vis || [];
+  // Branche dont la zone est dessinée : toutes, ou une seule pour la lisibilité (le tableau les donne toutes).
+  const opts = [['', 'Toutes les branches'], ...(S.D?.branches || []).filter((bd) => !plan || bd.role === 'secondaire').map((bd) => [String(bd.id), bd.name])];
+  const pick = $('#visPick'), sig = JSON.stringify(opts);
+  if (pick.dataset.sig !== sig) {
+    pick.dataset.sig = sig;
+    pick.innerHTML = '<label class="fld"><span class="lb">Zone dessinée</span><select data-k="section.visBranch">' +
+      opts.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('') + '</select></label>';
+  }
+  pick.querySelector('select').value = String(S.prj.section?.visBranch ?? '');
   $('#visIntro').textContent = plan
     ? 'Carrefour plan (ACI) : depuis l\'œil du conducteur arrêté sur la branche secondaire, triangles de visibilité sur la route principale jusqu\'à D = V85 × t de part et d\'autre (t = 8 s au STOP, 10 s au cédez-le-passage, + 1 s avec TAG).'
-    : 'Giratoire : depuis un observateur placé en amont du cédez-le-passage, au milieu de la voie d\'entrée, le conducteur doit voir le quart de l\'anneau situé à sa gauche. La zone doit rester libre d\'obstacles (plantations et mobilier bas sur l\'îlot central).';
+    : 'Giratoire (SETRA) : depuis un observateur placé en amont du cédez-le-passage, au milieu de la voie d\'entrée, le conducteur doit voir en entier le quart gauche de l\'anneau, c\'est-à-dire la chaussée annulaire entre l\'axe de la branche et un quart de tour en amont. Le cône de visibilité doit rester dégagé ; sur l\'îlot central, pas de plantation haute à moins de 2 m de la bordure.';
   $('#visTable').innerHTML = !V.length ? '' : plan
     ? '<thead><tr><th>Branche</th><th>Œil</th><th>V85</th><th>t</th><th>D requise</th></tr></thead><tbody>' +
       V.map((v) => `<tr><td>${esc(v.name)}</td><td class="mono">${fmt(v.obs, 1)} m</td><td class="mono">${fmt(v.v85, 0)} km/h</td><td class="mono">${fmt(v.t, 0)} s</td><td class="mono">${fmt(v.D, 0)} m</td></tr>`).join('') + '</tbody>'
-    : '<thead><tr><th>Branche</th><th>Recul</th><th>Rayon visé</th><th>Quart d\'anneau</th><th>Visée la plus longue</th></tr></thead><tbody>' +
-      V.map((v) => `<tr><td>${esc(v.name)}</td><td class="mono">${fmt(v.obs, 1)} m</td><td class="mono">${fmt(v.R, 2)} m</td><td class="mono">${fmt(v.arc, 1)} m</td><td class="mono">${fmt(v.sight, 1)} m</td></tr>`).join('') + '</tbody>';
+    : '<thead><tr><th>Branche</th><th>Recul</th><th>Quart d\'anneau visé</th><th>Visée la plus longue</th><th>Cône dans l\'îlot central</th></tr></thead><tbody>' +
+      V.map((v) => `<tr><td>${esc(v.name)}</td><td class="mono">${fmt(v.obs, 1)} m</td><td class="mono">R ${fmt(v.Ri, 2)} à ${fmt(v.Rg, 2)} m</td><td class="mono">${fmt(v.sight, 1)} m</td><td class="mono${v.depth > 2 ? ' warn' : ''}">${fmt(v.depth, 1)} m</td></tr>`).join('') + '</tbody>';
   $('#visNote').textContent = V.length ? 'Zones tracées sur le calque GIRA_VISIBILITE. Les obstacles ne sont pas contrôlés automatiquement : vérifier sur le fond topographique.' : 'Aucune zone : tracez les branches, ou cochez l\'affichage.';
 }
 

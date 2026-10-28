@@ -99,7 +99,7 @@ main.app { display: grid; grid-template-columns: 46px minmax(0, 1fr) 452px; min-
 .hint { font-size: 11.5px; color: var(--muted); margin: 1px 0 0; padding-left: 2px; min-height: 0; }
 .hint:empty { display: none; }
 .hint.ok { color: #86efac; }
-.hint.warn { color: var(--warn); }
+.hint.warn, td.warn { color: var(--warn); }
 .hint.err { color: var(--err); }
 .chk { display: flex; align-items: center; gap: 7px; margin: 5px 0; cursor: pointer; }
 .seg { display: flex; gap: 6px; }

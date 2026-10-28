@@ -57,9 +57,15 @@ ou sur un fond topographique DXF.
   Bouton « Calculer les corrections » (Contrôles) : pour chaque empiètement, plus petite valeur de Rs / Re (bordure),
   Ris / Rie (îlot séparateur) ou du recul des têtes d'îlots centraux qui le supprime (carrefour reconstruit à chaque
   essai), ou l'aménagement équivalent (surlargeur revêtue, partie franchissable) ; bouton « Appliquer ».
-- **Visibilité** (onglet dédié, calque `GIRA_VISIBILITE`) : giratoire, quart d'anneau à gauche vu depuis un observateur à
-  15 m en amont du cédez-le-passage (recul réglable), au milieu de la voie d'entrée ; carrefours en T et en X,
-  triangles œil – point de conflit – cible à D = V85 × t de part et d'autre, cotés ; tableau par branche.
+- **Visibilité** (onglet dédié, calque `GIRA_VISIBILITE`) : giratoire (SETRA), « quart gauche de l'anneau » = secteur
+  de la chaussée annulaire, de la rive intérieure au bord extérieur, entre l'axe de la branche et un quart de tour en
+  amont ; il doit être vu en entier depuis un observateur à 15 m en amont du cédez-le-passage (recul réglable), au
+  milieu de la voie d'entrée. Le cône de toutes les visées est tracé, et sa profondeur dans l'îlot central est comparée
+  à la bande de 2 m sans plantation haute. Carrefours en T et en X : triangles œil – point de conflit – cible à
+  D = V85 × t de part et d'autre, cotés. Tableau par branche ; zone dessinée pour toutes les branches ou une seule.
+- **Cotes le / ls** : largeur réellement construite entre l'îlot et la bordure (au plus étroit le long de l'îlot pour
+  les carrefours en T et en X), suivie de la valeur demandée si elle diffère ; écart de plus de 0,50 m signalé dans
+  Contrôles (rayon Re / Rs trop grand pour que la bordure longe l'îlot).
 - **Contrôles** : comparaison des valeurs aux recommandations du guide, excentrement des axes, déflexion,
   chevauchement des raccordements, pentes transversales.
 - **Capacité des giratoires (type Girabase)** : matrice origine-destination à l'HPM (véh/h, % PL, piétons),

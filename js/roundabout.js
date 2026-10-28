@@ -8,7 +8,7 @@ import * as G from './geom.js';
 import { islandDims, sectionParams, sideBands, TAD } from './norms.js';
 import { addDevers } from './devers.js';
 import { fmt, fmtGis, upright, autoCenter, branchDirection, frame, nearFar, polylineAfter, sideBandPrims } from './common.js';
-import { buildApproach, crossLine } from './approach.js';
+import { buildApproach, crossLine, widthAlong } from './approach.js';
 import { buildPlan } from './plan.js';
 import { buildBypass } from './bypass.js';
 import { makeDims } from './dims.js';
@@ -359,8 +359,10 @@ function buildRoundabout(prj, ext = {}) {
       const xs = Math.max(G.clamp(sd.fil.Tl.x + 2, x0 + 2, Math.max(x0 + 2, xT - 2)), bd.cross ? bd.cross.x2 + 1.5 : -Infinity);
       const pIsl = add(sd.H, mul(sd.dI, (xs - sd.H.x) / sd.dI.x));
       const mOut = sd.s > 0 ? rot90(sd.dI) : neg(rot90(sd.dI));
-      const [p1, p2] = sd.s > 0 ? [pIsl, add(pIsl, mul(mOut, sd.w))] : [add(pIsl, mul(mOut, sd.w)), pIsl];
-      dims.aligned(W(p1), W(p2), 0, `${sd.s > 0 ? 'le' : 'ls'} = ${fmt(sd.w, 2)}`, { side: -1 });
+      // Largeur réellement construite à cet endroit (et valeur demandée si elle diffère).
+      const wr = widthAlong(pIsl, mOut, sd.curb) ?? sd.w, asked = Math.abs(wr - sd.w) > 0.05 ? ` (${fmt(sd.w, 2)} demandé)` : '';
+      const [p1, p2] = sd.s > 0 ? [pIsl, add(pIsl, mul(mOut, wr))] : [add(pIsl, mul(mOut, wr)), pIsl];
+      dims.aligned(W(p1), W(p2), 0, `${sd.s > 0 ? 'le' : 'ls'} = ${fmt(wr, 2)}${asked}`, { side: -1 });
       const mid = G.segAt(sd.fil.arc, 0.5);
       dims.radius(W(mid), norm(sub(sd.C, W(mid))), `${sd.s > 0 ? 'Re' : 'Rs'} = ${fmt(sd.R, 2)}`);
     }
@@ -374,25 +376,53 @@ function buildRoundabout(prj, ext = {}) {
     }
   });
 
-  // Visibilité à gauche : depuis un observateur à visObs en amont du cédez-le-passage, au milieu de la voie d'entrée,
-  // le conducteur voit le quart de l'anneau situé à sa gauche (axe de la chaussée annulaire), en amont du point d'entrée.
+  // Visibilité à gauche (SETRA, giratoires) : depuis un observateur à visObs en amont du cédez-le-passage, au milieu
+  // de la voie d'entrée, le conducteur doit voir en entier le « quart gauche de l'anneau » : le secteur de la chaussée
+  // annulaire (de la rive intérieure au bord extérieur) compris entre l'axe de la branche et le quart de tour en amont
+  // dans le sens de giration. Le cône de visibilité réunit toutes les visées de l'observateur vers ce secteur ; il mord
+  // sur la périphérie de l'îlot central, qui doit rester sans obstacle haut (SETRA : 2 m depuis la bordure).
   D.vis = [];
   if (sec.visOn) {
-    const Rm = Rg - la / 2;
+    const visPick = prj.section?.visBranch; // branche dont la zone est dessinée (toutes si vide)
+    const inSector = (p, a0, span) => {
+      const r = G.dist(p, O), s = G.ccwSweep(a0, ang(sub(p, O)));
+      return r >= Ri - 1e-6 && r <= Rg + 1e-6 && (s <= span + 1e-6 || s >= G.TAU - 1e-6);
+    };
     for (const bd of bds) {
-      const { W, x0, xT, ai, hb, th } = bd, xo = x0 + sec.visObs;
+      const { W, x0, xT, a, ai, hb, th } = bd, xo = x0 + sec.visObs;
       const out = cutAtX(bd.entry.curb, xo);
       if (!out || xo > bd.xEnd) continue;
       const yIn = xo >= xT ? ai + th : ai + hb + ((th - hb) * (xo - x0)) / (xT - x0);
       const yMid = (yIn + out.y) / 2, E = W({ x: xo, y: yMid }), Y0 = W({ x: x0, y: yMid });
-      const phi0 = ang(sub(Y0, O)), arc = A(O, Rm, phi0 - Math.PI / 2, phi0, true);
-      const pts = G.samplePath([arc], 1);
-      P({ k: 'fill', L: 'VISIBILITE', role: 'vis', rings: [closedSegs([E, ...pts])] });
-      P({ k: 'path', L: 'VISIBILITE', segs: [L(E, pts[0]), arc, L(pts[pts.length - 1], E)] });
-      P({ k: 'cross', L: 'VISIBILITE', p: E, size: 0.8 });
-      dims.aligned(Y0, E, 0, `${fmt(sec.visObs, 1)} m`, { side: -1 });
-      text('VISIBILITE', G.polar(O, Rm + 1.2 * TH, phi0 - Math.PI / 4), `visibilité ${bd.name} : 1/4 d'anneau`, phi0 - Math.PI / 4 + Math.PI / 2, 'center', TH * 0.7);
-      D.vis.push({ name: bd.name, obs: sec.visObs, R: Rm, arc: (Rm * Math.PI) / 2, sight: Math.max(...pts.map((p) => G.dist(E, p))) });
+      // Secteur visé : de l'axe de la branche (phiA) à un quart de tour en amont (phi1).
+      const phiA = ang(sub(W({ x: x0, y: a }), O)), phi1 = phiA - Math.PI / 2;
+      const sector = [...G.samplePath([A(O, Rg, phi1, phiA, true)], 0.5), ...G.samplePath([A(O, Ri, phiA, phi1, false)], 0.5)];
+      // Cône : dans chaque direction issue de l'observateur, jusqu'au point du secteur le plus éloigné.
+      const ref = ang(sub(O, E)), rel = (t) => Math.atan2(Math.sin(t - ref), Math.cos(t - ref));
+      const rels = sector.map((p) => rel(ang(sub(p, E)))), lo = Math.min(...rels), hi = Math.max(...rels);
+      const far = [];
+      for (let k = 0, n = 180; k <= n; k++) {
+        const d = G.unit(ref + lo + ((hi - lo) * k) / n);
+        const ts = [...G.lineCircle(E, d, O, Rg), ...G.lineCircle(E, d, O, Ri)];
+        for (const ph of [phi1, phiA]) { const h = G.lineLine(E, d, O, G.unit(ph)); if (h) ts.push(h.t); }
+        const t = Math.max(-1, ...ts.filter((t) => t > 0 && inSector(add(E, mul(d, t)), phi1, Math.PI / 2)));
+        if (t > 0) far.push(add(E, mul(d, t)));
+      }
+      if (far.length < 2) continue;
+      // Profondeur du cône dans l'îlot central, mesurée depuis sa bordure (Rpi).
+      const depth = Math.max(0, Rpi - Math.min(...far.map((p) => G.distToSeg(O, E, p))));
+      if (!visPick || String(bd.id) === String(visPick)) {
+        P({ k: 'fill', L: 'VISIBILITE', role: 'vis', rings: [closedSegs([E, ...far])] });
+        P({ k: 'fill', L: 'VISIBILITE', role: 'quart', rings: [closedSegs(sector)] });
+        P({ k: 'path', L: 'VISIBILITE', segs: [L(E, far[0]), L(E, far[far.length - 1])] });
+        P({ k: 'path', L: 'VISIBILITE', segs: closedSegs(sector), closed: true });
+        P({ k: 'cross', L: 'VISIBILITE', p: E, size: 0.8 });
+        dims.aligned(Y0, E, 0, `${fmt(sec.visObs, 1)} m`, { side: -1 });
+        const phiM = phiA - Math.PI / 4;
+        text('VISIBILITE', G.polar(O, (Rg + Ri) / 2, phiM), `quart gauche ${bd.name}`, phiM + Math.PI / 2, 'center', TH * 0.7);
+      }
+      D.vis.push({ name: bd.name, obs: sec.visObs, Ri, Rg, arc: (Rg * Math.PI) / 2, sight: Math.max(...far.map((p) => G.dist(E, p))), depth });
+      if (depth > 2 + 1e-6) issues.push({ lvl: 'info', bi: bd.idx, msg: `${bd.name} : le cône de visibilité à gauche entre de ${fmt(depth, 1)} m dans l'îlot central ; aucun obstacle haut sur cette bande (SETRA : 2 m minimum).` });
     }
   }
 

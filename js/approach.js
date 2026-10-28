@@ -28,6 +28,35 @@ export function filletToTarget(lp, ld, lm, tg, R, maxT = 1e4) {
   return f && { C: f.C, Tl: f.T1, Tc: f.T2, t: dot(sub(f.T1, lp), ld), r: f.r, arc: f.arc };
 }
 
+// Largeur réelle d'une voie : distance du point p (bord de l'îlot) à la bordure, le long de la direction unitaire m.
+export function widthAlong(p, m, curb) {
+  const pts = G.samplePath(curb, 0.2);
+  let best = Infinity;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const e = sub(pts[i + 1], pts[i]), h = G.lineLine(p, m, pts[i], e);
+    if (!h || h.t <= 0) continue;
+    const u = dot(sub(h.p, pts[i]), e) / dot(e, e);
+    if (u >= -1e-9 && u <= 1 + 1e-9) best = Math.min(best, h.t);
+  }
+  return Number.isFinite(best) ? best : null;
+}
+
+// Point le plus étroit de la voie entre le flanc de l'îlot et la bordure : { p (îlot), q (bordure), d }.
+// Si la largeur minimale règne sur une longueur (bordure parallèle), on prend le milieu de ce tronçon.
+export function narrowest(flank, curb) {
+  const cs = G.samplePath(curb, 0.2);
+  const ms = G.samplePath(flank, 0.25).map((p) => {
+    let best = { p, q: null, d: Infinity };
+    for (let i = 0; i + 1 < cs.length; i++) {
+      const a = cs[i], ab = sub(cs[i + 1], a), q = add(a, mul(ab, G.clamp(dot(sub(p, a), ab) / (dot(ab, ab) || 1), 0, 1))), d = G.dist(p, q);
+      if (d < best.d) best = { p, q, d };
+    }
+    return best;
+  });
+  const dmin = Math.min(...ms.map((m) => m.d)), ok = ms.filter((m) => m.d <= dmin + 0.01);
+  return ok.length && ok[0].q ? ok[Math.floor(ok.length / 2)] : null;
+}
+
 // Abscisse x0 où l'axe (y = a) rencontre la cible.
 export function targetX0(tg, a) {
   if (tg.kind === 'circle') return Math.sqrt(Math.max(0, tg.R * tg.R - a * a));
@@ -288,7 +317,7 @@ export function aciBranch(cfg, issues) {
   // Bordures : parallèle au bord de l'îlot à la largeur de voie, raccordée à la chaussée courante (Rr) et au bord
   // de la principale (Re / Rs), arcs tangents.
   const Rr = isl.Rr || 8 * (wIn + wOut);
-  const side = (s, w, wa, R, C, Rc, label) => {
+  const side = (s, w, wa, R, C, Rc, label, flank) => {
     const RK = Rc + w, yF = s * wa;
     let F = { x: xEnd, y: yF };
     // Raccordement à la principale : cercle de rayon R tangent au bord de la principale et extérieur au cercle K.
@@ -328,10 +357,12 @@ export function aciBranch(cfg, issues) {
       fil = { C: fl.C, Tl: fl.Tl, Tc: fl.Tc, arc: fl.arc, r: R, t: fl.t };
     }
     const tipDir = norm(rot90(sub(tipLow, C))), dI = tipDir.x > 0 ? tipDir : neg(tipDir);
-    const ext = { x: C.x, y: C.y + s * Rc }, dim = s > 0 ? [ext, add(ext, { x: 0, y: w })] : [add(ext, { x: 0, y: -w }), ext];
-    return { s, w, wa, R, H: tipLow, T: ext, dI, F, ctrl, fil, curb, wRing: null, dim, kArc };
+    // Cote le / ls : largeur réelle au plus étroit, entre le flanc de l'îlot (enveloppe peinte) et la bordure construite.
+    const ext = { x: C.x, y: C.y + s * Rc }, nw = narrowest([flank], curb);
+    const dim = nw ? (s > 0 ? [nw.p, nw.q] : [nw.q, nw.p]) : s > 0 ? [ext, add(ext, { x: 0, y: w })] : [add(ext, { x: 0, y: -w }), ext];
+    return { s, w, wa, R, H: tipLow, T: ext, dI, F, ctrl, fil, curb, wRing: null, dim, dimW: nw ? nw.d : w, kArc };
   };
-  const en = side(1, le, wIn, Re, Ce, Rie, 'côté entrée (Re)');
-  const ex = side(-1, ls, wOut, Rs, Cs, Ris, 'côté sortie (Rs)');
+  const en = side(1, le, wIn, Re, Ce, Rie, 'côté entrée (Re)', envelope[0]);
+  const ex = side(-1, ls, wOut, Rs, Cs, Ris, 'côté sortie (Rs)', envelope[envelope.length - 1]);
   return en && ex ? { en, ex, island } : null;
 }
