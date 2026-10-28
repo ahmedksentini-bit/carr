@@ -70,7 +70,11 @@ ou sur un fond topographique DXF.
   D = V85 × t de part et d'autre, cotés. Tableau par branche ; zone dessinée pour toutes les branches ou une seule.
 - **Cotes le / ls** : largeur réellement construite entre l'îlot et la bordure (au plus étroit le long de l'îlot pour
   les carrefours en T et en X), suivie de la valeur demandée si elle diffère ; écart de plus de 0,50 m signalé dans
-  Contrôles (rayon Re / Rs trop grand pour que la bordure longe l'îlot).
+  Contrôles (rayon Re / Rs trop grand pour que la bordure longe l'îlot). Quand Re / Rs rejoint la voie le long de
+  l'îlot en amont du raccordement Rr, la bordure devient une courbe composée : rayon de transition réduit (au plus bas
+  Re / Rs ÷ 2, 5 m au moins, signalé en information) tangent à l'îlot au même point que Re / Rs, si bien que la voie
+  garde le / ls ; sous ce minimum, la jonction glisse vers la principale et la voie s'élargit progressivement. La
+  bordure varie ainsi continûment avec l'angle de la branche.
 - **Contrôles** : comparaison des valeurs aux recommandations du guide, excentrement des axes, déflexion,
   chevauchement des raccordements, pentes transversales.
 - **Capacité des giratoires (type Girabase)** : matrice origine-destination à l'HPM (véh/h, % PL, piétons),

@@ -330,8 +330,36 @@ export function aciBranch(cfg, issues) {
     let curb, ctrl, fil, kArc = false; // kArc : bordure parallèle à l'îlot (arc K) entre la transition et Re / Rs
     const Q = h2 > 0 ? { x: C.x + Math.sqrt(h2), y: yF + s * Rr } : null, T2 = Q && onCircle(C, RK, Q);
     const P1 = { x: C.x, y: C.y + s * RK }, P0 = { x: C.x + Math.max(10, 15 * s * (P1.y - yF)), y: yF };
-    const flP1 = Q && T2.x <= Tk.x + 0.05 ? filletToTarget(P1, { x: -1, y: 0 }, { x: 0, y: s }, target, R) : null;
-    if (flP1 && flP1.Tl.x < P0.x - 1) {
+    // Re / Rs touche K (en Tk) en amont du point où Rr le rejoindrait : courbe composée r → Re / Rs, r tangent à la
+    // chaussée courante. Le rayon r qui touche K en Tk garde la voie à w ; s'il descend sous rMin, on garde rMin et la
+    // jonction J glisse en aval de Tk (la voie s'élargit). La bordure varie ainsi continûment avec la géométrie : à la
+    // limite, r = Rr et l'arc parallèle à l'îlot est de longueur nulle.
+    let comp = null;
+    if (Q && T2.x <= Tk.x + 0.05 && s * P1.y > wa + 0.05) {
+      const u = norm(sub(Tk, C)), r1 = (yF - Tk.y) / (u.y - s), rMin = Math.min(Rr, Math.max(R / 2, 5));
+      if (u.x > 0 && r1 >= rMin) comp = { Q: add(Tk, mul(u, r1)), r: r1, J: Tk, touch: true };
+      else if (u.x > 0 && Math.abs(R - rMin) > 0.01) {
+        const dy = (yF + s * rMin - Fc.y) / (R - rMin);
+        if (Math.abs(dy) < 1) {
+          const dir = { x: -Math.sqrt(1 - dy * dy), y: dy }, a = sub(Tk, Fc), c = sub(Tc, Fc), sg = G.cross(a, c);
+          if (G.cross(a, dir) * sg > 0 && G.cross(dir, c) * sg > 0) comp = { Q: add(Fc, mul(dir, R - rMin)), r: rMin, J: add(Fc, mul(dir, R)), touch: false };
+        }
+      }
+      if (comp) {
+        const T1 = { x: comp.Q.x, y: yF };
+        comp.T1 = T1;
+        comp.arc = T1.x > comp.J.x + 0.05 ? arcPQ(comp.Q, comp.r, T1, comp.J) : null;
+        if (!comp.arc || G.samplePath([comp.arc], 0.2).some((p) => G.dist(p, C) < RK - 0.02)) comp = null;
+      }
+    }
+    const flP1 = !comp && Q && T2.x <= Tk.x + 0.05 ? filletToTarget(P1, { x: -1, y: 0 }, { x: 0, y: s }, target, R) : null;
+    if (comp) {
+      F = { x: Math.max(xEnd, comp.T1.x + 5), y: yF };
+      curb = [L(F, comp.T1), comp.arc, arcPQ(Fc, R, comp.J, Tc)];
+      ctrl = [F, comp.T1, comp.J]; kArc = comp.touch;
+      fil = { C: Fc, Tl: comp.J, Tc, arc: curb[curb.length - 1], r: R, t: 1 };
+      if (comp.r < Rr - 0.5) issues.push({ lvl: 'info', bi: idx, msg: `${name} : le rayon ${label} (${fmt(R, 1)} m) rejoint la voie le long de l'îlot en amont du raccordement à la chaussée courante, ramené de ${fmt(Rr, 1)} à ${fmt(comp.r, 1)} m.` });
+    } else if (flP1 && flP1.Tl.x < P0.x - 1) {
       // Le rayon Re / Rs englobe tout l'arc parallèle à l'îlot : bordure parallèle à l'axe au droit du point le plus
       // large de l'îlot (à w de son bord), évasement au 1/15 vers la chaussée courante, puis Re / Rs.
       const fl = flP1;
@@ -358,11 +386,11 @@ export function aciBranch(cfg, issues) {
     }
     const tipDir = norm(rot90(sub(tipLow, C))), dI = tipDir.x > 0 ? tipDir : neg(tipDir);
     // Cote le / ls : largeur réelle au plus étroit, entre le flanc de l'îlot (enveloppe peinte) et la bordure construite.
-    const ext = { x: C.x, y: C.y + s * Rc }, nw = narrowest([flank], curb);
+    const ext = { x: C.x, y: C.y + s * Rc }, nw = narrowest(flank, curb);
     const dim = nw ? (s > 0 ? [nw.p, nw.q] : [nw.q, nw.p]) : s > 0 ? [ext, add(ext, { x: 0, y: w })] : [add(ext, { x: 0, y: -w }), ext];
     return { s, w, wa, R, H: tipLow, T: ext, dI, F, ctrl, fil, curb, wRing: null, dim, dimW: nw ? nw.d : w, kArc };
   };
-  const en = side(1, le, wIn, Re, Ce, Rie, 'côté entrée (Re)', envelope[0]);
-  const ex = side(-1, ls, wOut, Rs, Cs, Ris, 'côté sortie (Rs)', envelope[envelope.length - 1]);
+  const en = side(1, le, wIn, Re, Ce, Rie, 'côté entrée (Re)', envelope.slice(0, 1));
+  const ex = side(-1, ls, wOut, Rs, Cs, Ris, 'côté sortie (Rs)', envelope.slice(-1));
   return en && ex ? { en, ex, island } : null;
 }
