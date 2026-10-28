@@ -104,7 +104,8 @@ export function buildPlan(prj, opt = {}) {
   const tagB = P.tag.on && secs.some((s) => s.sY < 0); // sens B→A : tourne à gauche vers −Y, voie côté B
   const widened = tagA || tagB;
   const hw = widened ? half + c / 2 : half;
-  const { storage: Ls, sifflet: Lsif, align: Lal, deport: Ldep, presig: Lpre } = P.tag;
+  const { storage: Ls, sifflet: Lsif, align: Lal, deport: Ldep, presig: Lpre, mark, R: Rz } = P.tag;
+  const nz = Lpre > 0.5 ? Math.min(P.tag.nose, c) : 0; // largeur du nez de l'îlot central en fin de présignalisation
 
   // Géométrie ACI de chaque branche secondaire (Tableau 8, Fig. 25) : repère, bord de la principale (cible) et
   // cercles de giration de l'îlot. Ris = 2l + a est tangent au bord gauche de la voie de TAG d'où viennent les
@@ -151,8 +152,12 @@ export function buildPlan(prj, opt = {}) {
     return G.clamp(dot(sub(q.far, O), q.u), reach, reach + 120);
   };
   const LA = lenEnd(A0, lenA), LB = lenEnd(B0, lenB);
+  // Bords : déportés de nz/2 sur la présignalisation puis de (c − nz)/2 sur le déport, parallèlement à l'enveloppe de
+  // l'îlot central (les voies gardent leur largeur) ; sommets raccordés aux rayons de zones (r).
   const edgePts = (sg) => (widened
-    ? [{ x: -LA, y: sg * half }, { x: -(lenA + Ldep), y: sg * half }, { x: -lenA, y: sg * hw }, { x: lenB, y: sg * hw }, { x: lenB + Ldep, y: sg * half }, { x: LB, y: sg * half }]
+    ? [{ x: -LA, y: sg * half }, { x: -(lenA + Ldep + Lpre), y: sg * half, r: Rz.pre }, { x: -(lenA + Ldep), y: sg * (half + nz / 2), r: Rz.dep },
+      { x: -lenA, y: sg * hw, r: Rz.al }, { x: lenB, y: sg * hw, r: Rz.al }, { x: lenB + Ldep, y: sg * (half + nz / 2), r: Rz.dep },
+      { x: lenB + Ldep + Lpre, y: sg * half, r: Rz.pre }, { x: LB, y: sg * half }].filter((p, i, t) => !i || p.x - t[i - 1].x > 1e-6)
     : [{ x: -LA, y: sg * half }, { x: LB, y: sg * half }]);
   D.plan = { ...P, half, hw, c, Lm, LdA, LdB, lenA, lenB, LA, LB, tagA, tagB, widened };
 
@@ -223,61 +228,70 @@ export function buildPlan(prj, opt = {}) {
   const text = (lay, p, s, rot = 0, align = 'center', hh = TH) => Pp({ k: 'text', L: lay, p, s, rot: upright(rot), align, h: hh });
   const dims = makeDims(Pp, TH);
   const pathM = (pts) => pts.slice(1).map((p, i) => L(toW(pts[i].x, pts[i].y), toW(p.x, p.y)));
-  const RT = 150; // raccordement des changements de largeur de la chaussée principale
+  const toWp = (p) => toW(p.x, p.y);
+  // Polyligne du repère principal → chemin raccordé aux sommets intérieurs de rayon p.r (rayons de zones).
+  const rnd = (pts) => G.roundPolyline(pts.map(toWp), pts.map((p, i) => (i > 0 && i < pts.length - 1 ? p.r || 0 : 0)));
 
   // Bords de la chaussée principale (interrompus au débouché des branches secondaires)
   const edges = {};
   for (const sg of [1, -1]) {
     edges[sg] = edgePts(sg);
-    for (const piece of cutPolyline(edges[sg], gaps[sg])) {
-      const w = piece.map((p) => toW(p.x, p.y));
-      Pp({ k: 'path', L: 'BORDURE', segs: G.roundPolyline(w, w.map((_, i) => (i > 0 && i < w.length - 1 ? RT : 0))) });
-    }
+    for (const piece of cutPolyline(edges[sg], gaps[sg])) Pp({ k: 'path', L: 'BORDURE', segs: rnd(piece) });
   }
   Pp({ k: 'path', L: 'LIMITE', segs: [L(toW(-LA, -half), toW(-LA, half))] });
   Pp({ k: 'path', L: 'LIMITE', segs: [L(toW(LB, -half), toW(LB, half))] });
 
-  // Îlots centraux de la route principale (côté A puis côté B par symétrie centrale) : enveloppe peinte
-  // et, si demandé, îlot en saillie en retrait de 0,30 m (5u) de l'enveloppe.
+  // Îlots centraux de la route principale (côté A puis côté B par symétrie centrale), d'après la voie principale de
+  // Mensura : présignalisation (l'enveloppe s'ouvre jusqu'au nez nz), déport (jusqu'à la largeur totale c), alignement
+  // droit, sifflet et stockage (tête a). Sommets de zones raccordés aux rayons Rz ; îlot en saillie du nez à la tête,
+  // en retrait de la distance de marquage.
   const holes = [];
   const MK = (pts, opt = {}) => Pp({ k: 'path', L: 'MARQUAGE', segs: pathM(pts), wm: 0.15, ...opt });
   const T3 = { dash: [3, 1.33], lt: 'T3' }, T1 = { dash: [3, 10], lt: 'T1' };
-  // Contour fermé à angles arrondis (rayon borné par la longueur des côtés).
+  // Contour fermé à angles arrondis, rayon par sommet (borné par la longueur des côtés).
   const roundedClosed = (pts, r) => {
     const M = G.lerp(pts[pts.length - 1], pts[0], 0.5), q = [M, ...pts, M];
-    return G.roundPolyline(q, q.map((_, i) => (i > 0 && i < q.length - 1 ? r : 0)));
+    return G.roundPolyline(q, [0, ...(Array.isArray(r) ? r : pts.map(() => r)), 0]);
   };
+  // Enveloppe peinte fermée : env[0] est la pointe sur l'axe, raccordée à l'axe (point V en amont) de part et d'autre
+  // par le premier rayon, d'où une queue effilée tangente à l'axe.
+  const envPath = (env, radii, V) => G.roundPolyline([V, ...env, env[0], V].map(toWp), [0, ...radii, radii[0], 0]).slice(1, -1);
   // Îlots centraux : enveloppe peinte tracée tout de suite ; partie en saillie et zébra après les passages piétons.
   const centrals = [];
-  const centralIsland = (env, raisedPart, side) => {
-    MK([...env, env[0]]);
+  const centralIsland = (env, radii, V, raisedPart, raisedRadii, side) => {
+    const segs = envPath(env, radii, V);
+    Pp({ k: 'path', L: 'MARQUAGE', segs, wm: 0.15 });
     let raised = null;
     if (P.tag.raised && raisedPart) {
-      const inner = insetPolygon(raisedPart.map((p) => toW(p.x, p.y)), 0.3);
+      const inner = insetPolygon(raisedPart.map(toWp), mark);
       if (!inner) issues.push({ lvl: 'warn', msg: 'Îlot central trop étroit pour être en saillie : seule l\'enveloppe peinte est dessinée.' });
-      else raised = roundedClosed(inner, 0.75);
+      else raised = roundedClosed(inner, raisedRadii);
     }
-    centrals.push({ env, raised, side });
+    centrals.push({ env, envW: G.samplePath(segs, 0.5), raised, side });
+    return toM(G.segStart(segs[0])).x; // début de la queue sur l'axe
   };
   const sideMarks = (hasTag, len, f, Ld) => {
-    const side = f(-1, 0).x < 0 ? -1 : 1;
-    const Xal = -len, Xpre = Xal - Ldep - Lpre;
-    // L'îlot en saillie suit l'enveloppe peinte dans le biseau jusqu'à ce qu'il ne reste qu'1 m de large.
-    const Xcut = Math.min(Xal, Xpre + ((1 + 0.6) / c) * (Xal - Xpre)), hc = ((c / 2) * (Xcut - Xpre)) / (Xal - Xpre);
+    const side = f(-1, 0).x < 0 ? -1 : 1, h = c / 2, hn = nz / 2;
+    const Xal = -len, Xn = Xal - Ldep, Xpre = Xn - Lpre, V = f(Xpre - 50, 0);
+    // L'îlot en saillie part du nez ; s'il y resterait moins de 0,50 m une fois les retraits déduits, il recule dans le
+    // déport jusqu'à cette largeur. Nez arrondi en demi-cercle.
+    const hc = Math.min(h, Math.max(hn, mark + 0.25)), Xcut = hc <= hn + 1e-9 ? Xn : Xn + ((hc - hn) / (h - hn)) * Ldep, rN = hc - mark;
+    const R = Rz, RH = 0.75; // RH : angles de la tête
     if (hasTag) {
       const Xd = -Ld, Xc = Xd - Ls, Xs = Xc - Lsif;
-      const env = [f(Xpre, 0), f(Xal, c / 2), f(Xd, c / 2), f(Xd, c / 2 - a), f(Xc, c / 2 - a), f(Xs, -c / 2), f(Xal, -c / 2)];
-      centralIsland(env, a >= 1.2 ? [f(Xcut, hc), ...env.slice(1), f(Xcut, -hc)] : null, side);
-      MK([f(Xs, -c / 2), f(Xd, -c / 2)], T3); // séparation voie directe / TAG
-    } else {
-      const env = [f(-Ld, c / 2), f(Xal, c / 2), f(Xpre, 0), f(Xal, -c / 2), f(-Ld, -c / 2)];
-      centralIsland(env, [f(-Ld, c / 2), f(Xal, c / 2), f(Xcut, hc), f(Xcut, -hc), f(Xal, -c / 2), f(-Ld, -c / 2)], side);
+      const env = [f(Xpre, 0), f(Xn, hn), f(Xal, h), f(Xd, h), f(Xd, h - a), f(Xc, h - a), f(Xs, -h), f(Xal, -h), f(Xn, -hn)];
+      const part = Xcut > Xn ? [f(Xcut, hc), ...env.slice(2, 8), f(Xcut, -hc)] : env.slice(1);
+      MK([f(Xs, -h), f(Xd, -h)], T3); // séparation voie directe / TAG
+      return centralIsland(env, [R.pre, R.dep, R.al, 0, 0, R.sto, R.sif, R.al, R.dep], V,
+        a - 2 * mark >= 0.6 ? part : null, [rN, R.al, RH, RH, R.sto, R.sif, R.al, rN], side);
     }
-    return Xpre;
+    const env = [f(Xpre, 0), f(Xn, hn), f(Xal, h), f(-Ld, h), f(-Ld, -h), f(Xal, -h), f(Xn, -hn)];
+    const part = Xcut > Xn ? [f(Xcut, hc), ...env.slice(2, 6), f(Xcut, -hc)] : env.slice(1);
+    return centralIsland(env, [R.pre, R.dep, R.al, 0, 0, R.al, R.dep], V, part, [rN, R.al, RH, RH, R.al, rN], side);
   };
   if (widened) {
     const xa = sideMarks(tagA, lenA, (X, Y) => ({ x: X, y: Y }), LdA);
-    const xb = -sideMarks(tagB, lenB, (X, Y) => ({ x: -X, y: -Y }), LdB);
+    const xb = sideMarks(tagB, lenB, (X, Y) => ({ x: -X, y: -Y }), LdB);
     MK([{ x: -LA, y: 0 }, { x: xa, y: 0 }], T1);
     MK([{ x: xb, y: 0 }, { x: LB, y: 0 }], T1);
   } else {
@@ -307,10 +321,9 @@ export function buildPlan(prj, opt = {}) {
     }
   }
   // Îlots centraux : zébra sur la partie peinte seulement, îlot en saillie (entier ou de part et d'autre du refuge).
-  const toWp = (p) => toW(p.x, p.y);
   for (const ci of centrals) {
     const parts = ci.pieces ? ci.pieces.map((poly) => closedSegs(poly.map(toWp))) : ci.raised ? [ci.raised] : [];
-    const rings = [ci.env.map(toWp), ...parts.map((s) => G.samplePath(s, 0.3)), ...(ci.strip ? [ci.strip.map(toWp)] : [])];
+    const rings = [ci.envW, ...parts.map((s) => G.samplePath(s, 0.3)), ...(ci.strip ? [ci.strip.map(toWp)] : [])];
     Pp({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(rings, ang(uM) + Math.PI / 4, 1.0), wm: 0.12 });
     for (const s of parts) {
       Pp({ k: 'fill', L: 'ILOT_SEP', rings: [s], role: 'ilot' });
@@ -321,7 +334,6 @@ export function buildPlan(prj, opt = {}) {
   for (const cr of mainCross) crossingPrims(cr, toWp, sec, sec.pmr).forEach(Pp);
 
   // Remplissage chaussée (union à règle non nulle ; îlots en trous)
-  const rnd = (pts) => { const w = pts.map((p) => toW(p.x, p.y)); return G.roundPolyline(w, w.map((_, i) => (i > 0 && i < w.length - 1 ? RT : 0))); };
   const low = rnd(edges[-1]), up = G.revPath(rnd(edges[1]));
   const mainRing = [...low, L(G.segEnd(low[low.length - 1]), G.segStart(up[0])), ...up, L(G.segEnd(up[up.length - 1]), G.segStart(low[0]))];
   const rings = [orient(mainRing, false), ...holes.map((h) => orient(h, true))];
@@ -555,6 +567,7 @@ export function buildPlan(prj, opt = {}) {
     }
     const Xal = -len, Xdep = Xal - Ldep, Xpre = Xdep - Lpre;
     const off = -2.2 * TH, lab = (s, v) => `${s} ${fmt(v, 1)}`;
+    if (nz > 0) dims.aligned(f(Xdep, -nz / 2), f(Xdep, nz / 2), 0, `nez ${fmt(nz, 2)}`, { side: -1 });
     if (has) {
       const Xd = -Ld, Xc = Xd - Ls, Xs = Xc - Lsif, Xm = (Xd + Xc) / 2;
       dims.chain([f(Xm, -hw), f(Xm, -c / 2), f(Xm, c / 2 - a), f(Xm, c / 2), f(Xm, hw)], 0, [voie(half), `TAG ${fmt(P.tag.width, 2)}`, `îlot ${fmt(a, 2)}`, voie(half)]);

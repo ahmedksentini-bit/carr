@@ -689,7 +689,15 @@ function buildStaticPanels() {
     fld('plan.tag.align', 'Alignement droit avant le sifflet', 'm') +
     fld('plan.tag.deport', 'Longueur de déport des bords', 'm', { ph: 'auto' }) +
     fld('plan.tag.presig', 'Présignalisation (nez peint)', 'm') +
+    fld('plan.tag.nose', 'Largeur du nez de l\'îlot c (fin de présignalisation)', 'm') +
+    fld('plan.tag.mark', 'Distance de marquage (enveloppe peinte / îlot en saillie)', 'm') +
     fld('plan.tag.headBack', 'Recul des têtes d\'îlots centraux (épure PL)', 'm', { ph: '0' }) +
+    '<h4>Rayons de raccordement des zones</h4>' +
+    fld('plan.tag.rSto', 'Stockage – sifflet', 'm') +
+    fld('plan.tag.rSif', 'Sifflet – alignement droit', 'm') +
+    fld('plan.tag.rAl', 'Alignement droit – déport', 'm') +
+    fld('plan.tag.rDep', 'Déport – présignalisation', 'm') +
+    fld('plan.tag.rPre', 'Présignalisation – ligne continue', 'm') +
     '<h3>Épures de giration</h3>' +
     '<label class="chk"><input type="checkbox" data-k="plan.epure"> Semi-remorque 16,50 m : tourne-à-droite et tourne-à-gauche de chaque branche</label>' +
     '<p class="note">Surface balayée tracée sur le calque GIRA_EPURE ; les empiètements sur les bordures et îlots sont signalés dans Contrôles. Visibilité depuis les branches secondaires : onglet Visibilité.</p>';
@@ -812,7 +820,7 @@ function refreshPanels() {
       ['Route principale (A – B)', `${br[D.main.a]?.name} – ${br[D.main.b]?.name}`],
       ['Largeur de chaussée', P.widened ? `${fmt(2 * P.half)} m, élargie à ${fmt(2 * P.hw)} m` : `${fmt(2 * P.half)} m`],
       ['Largeur centrale (TAG + îlot)', P.widened ? `${fmt(P.c)} m` : '—'],
-      ['Déport des bords', P.widened ? `${fmt(P.tag.deport, 1)} m (1/${fmt(P.tag.deport / (P.c / 2), 0)})` : '—'],
+      ['Déport des bords', P.widened ? `présignalisation ${fmt(P.tag.presig, 1)} m jusqu'au nez ${fmt(Math.min(P.tag.nose, P.c), 2)} m, puis ${fmt(P.tag.deport, 1)} m (1/${fmt(P.tag.deport / Math.max(0.01, (P.c - Math.min(P.tag.nose, P.c)) / 2), 0)})` : '—'],
       ['Demi-longueur du débouché', fmt(P.Lm, 1) + ' m'],
       ['Visibilité requise', `${fmt((P.v85 / 3.6) * P.tVis, 0)} m (${fmt(P.tVis, 0)} s)`],
       ['Centre', `${D.O.x.toFixed(3)} ; ${D.O.y.toFixed(3)}`],

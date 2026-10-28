@@ -84,7 +84,13 @@ export const PLAN = {
       wLane: 3.5, nLanes: 1, camber: 2.5, pente: '', regime: 'cedez', v85: 90, tVis: '', dObs: '', epure: true,
       // TAG : voie de 2,75–3,25 m + îlot a (0,25–2 m), largeur centrale ≤ 5 m ; déport 1/15 ; sifflet 20–30 m ;
       // alignement droit ≥ 10 m ; stockage 20–50 m (40–60 m avec PL) ; présignalisation 58,5 m.
-      tag: { on: true, width: 3, island: 2, raised: true, storage: 30, sifflet: 25, align: 10, deport: '', presig: 58.5 },
+      // Comme la voie principale de Mensura : nez de l'îlot (fin de présignalisation) 1,60 m, distance de marquage
+      // 0,30 m, rayons de raccordement des zones stockage–sifflet 20, sifflet–alignement 20, alignement–déport 100,
+      // déport–présignalisation 200, présignalisation–ligne continue 300 m.
+      tag: {
+        on: true, width: 3, island: 2, raised: true, storage: 30, sifflet: 25, align: 10, deport: '', presig: 58.5,
+        nose: 1.6, mark: 0.3, rSto: 20, rSif: 20, rAl: 100, rDep: 200, rPre: 300,
+      },
     },
     sec: { wLane: 3, camber: 2.5 },
     island: { base: 2, gap: 1, rHead: 1, rTip: 0.5 },
@@ -92,7 +98,10 @@ export const PLAN = {
   urbain: {
     main: {
       wLane: 3, nLanes: 1, camber: 2.5, pente: '', regime: 'cedez', v85: 50, tVis: '', dObs: '', epure: true,
-      tag: { on: false, width: 3, island: 1, raised: false, storage: 15, sifflet: 15, align: 5, deport: '', presig: 20 },
+      tag: {
+        on: false, width: 3, island: 1, raised: false, storage: 15, sifflet: 15, align: 5, deport: '', presig: 20,
+        nose: 1.6, mark: 0.3, rSto: 20, rSif: 20, rAl: 100, rDep: 200, rPre: 300,
+      },
     },
     sec: { wLane: 3, camber: 2.5, R: 8 },
     island: { base: 1.5, length: 12, gap: 1, rHead: 0.75, rTip: 0.5 },
@@ -112,10 +121,13 @@ export function planParams(prj) {
   const tag = {
     on: t.on ?? d.tag.on, width: num(t.width, d.tag.width), island: num(t.island, d.tag.island), raised: t.raised ?? d.tag.raised,
     storage: num(t.storage, d.tag.storage), sifflet: num(t.sifflet, d.tag.sifflet), align: num(t.align, d.tag.align), presig: num(t.presig, d.tag.presig), headBack: num(t.headBack, 0),
+    nose: Math.max(0, num(t.nose, d.tag.nose)), mark: Math.max(0, num(t.mark, d.tag.mark)),
+    R: { sto: num(t.rSto, d.tag.rSto), sif: num(t.rSif, d.tag.rSif), al: num(t.rAl, d.tag.rAl), dep: num(t.rDep, d.tag.rDep), pre: num(t.rPre, d.tag.rPre) },
   };
   const c = tag.width + tag.island;
-  // Déport des bords au 1/15 (1/10 si la chaussée fait 5 m ou moins), symétrique : c/2 de chaque côté.
-  tag.deport = num(t.deport, (2 * nLanes * wLane <= 5 ? 10 : 15) * (c / 2));
+  // Déport des bords au 1/15 (1/10 si la chaussée fait 5 m ou moins), symétrique : de la largeur du nez à c, (c − nez)/2
+  // de chaque côté (le nez est atteint en fin de présignalisation).
+  tag.deport = Math.max(1, num(t.deport, (2 * nLanes * wLane <= 5 ? 10 : 15) * (Math.max(0, c - Math.min(tag.nose, c)) / 2)));
   // Visibilité (ACI) : STOP 8 s, cédez-le-passage 10 s, + 1 s avec TAG ; observateur à 4 m (STOP)
   // ou 15 m (cédez) en arrière de la ligne, à 2 m du bord droit de la branche.
   const tVis = num(p.tVis, (regime === 'stop' ? 8 : 10) + (tag.on ? 1 : 0));
@@ -339,8 +351,14 @@ function planHint(key, prj, br) {
     case 'plan.tag.storage': return v < (2 * P.nLanes * P.wLane > 6 ? 20 : 15) ? H('ACI : 20–50 m (40–60 m avec PL) ; 15 m si chaussée < 6 m', 'warn') : H('ACI : 20–50 m, 40–60 m avec PL ; Lst = (7 + 10p)·N', 'ok');
     case 'plan.tag.sifflet': return rng(v, 15, 30) ? H('ACI : 20–30 m (15 m si chaussée < 6 m)', 'ok') : H('ACI : 20–30 m', 'warn');
     case 'plan.tag.align': return v >= 10 - 1e-9 ? H('ACI : ≥ 10 m', 'ok') : H('ACI : ≥ 10 m', 'warn');
-    case 'plan.tag.deport': return H(`auto : déport au 1/${2 * P.nLanes * P.wLane <= 5 ? 10 : 15} = ${f(P.tag.deport, 1)} m`);
-    case 'plan.tag.presig': return H('ACI : L/2 = 58,5 m pour un déport symétrique (chaussée 5–7 m)');
+    case 'plan.tag.deport': return H(`auto : déport au 1/${2 * P.nLanes * P.wLane <= 5 ? 10 : 15} du nez (${f(Math.min(P.tag.nose, P.c))} m) à la largeur totale (${f(P.c)} m) = ${f(P.tag.deport, 1)} m`);
+    case 'plan.tag.presig': return H('ACI : L/2 = 58,5 m pour un déport symétrique (chaussée 5–7 m) ; l\'enveloppe s\'y ouvre jusqu\'au nez');
+    case 'plan.tag.nose': return v > P.c ? H(`plafonné à la largeur totale ${f(P.c)} m`, 'warn') : H(`Mensura : 1,60 m ; îlot en saillie à partir du nez, soit ${f(Math.max(0, v - 2 * P.tag.mark))} m après retrait du marquage`);
+    case 'plan.tag.mark': return H('Mensura : 0,30 m entre le marquage et la bordure de l\'îlot en saillie');
+    case 'plan.tag.rSto': case 'plan.tag.rSif': return H('Mensura : 20 m');
+    case 'plan.tag.rAl': return H('Mensura : 100 m');
+    case 'plan.tag.rDep': return H('Mensura : 200 m');
+    case 'plan.tag.rPre': return H('Mensura : 300 m ; queue de l\'îlot tangente à l\'axe');
     case 'plan.tVis': return H(`auto : ${P.regime === 'stop' ? 'STOP 8 s' : 'cédez 10 s'}${P.tag.on ? ' + 1 s (TAG)' : ''} ; +1 s si la branche monte de plus de 2 %`);
     case 'plan.dObs': return H(`auto : ${P.regime === 'stop' ? '4 m (STOP)' : '15 m (cédez, 15 à 20 m)'} en arrière de la ligne`);
     case 'plan.v85': return H('V85 réelle, non plafonnée à la vitesse limite');

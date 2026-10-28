@@ -21,7 +21,12 @@ ou sur un fond topographique DXF.
   ACI Rg × Rg/4, décalage à gauche, bordures Rg/50), îlot peint ou absent, **TPC** avec sa largeur.
 - **Carrefours en T et en X** (ACI, chapitre « Carrefours plans ») : route principale = paire de branches la plus
   alignée (ou choisie), profil conservé ; voie de tourne-à-gauche avec présignalisation, déport des bords au 1/15,
-  alignement droit, sifflet, stockage et îlot central en saillie ; branches secondaires construites selon l'ACI (Fig. 24
+  alignement droit, sifflet, stockage et îlot central en saillie. Paramètres de la voie principale repris de Mensura :
+  l'enveloppe de l'îlot central s'ouvre sur la présignalisation jusqu'au nez c (1,60 m), puis jusqu'à la largeur totale
+  sur le déport ; les bords suivent en parallèle (largeur des voies constante) ; rayons de raccordement des zones
+  stockage–sifflet 20, sifflet–alignement 20, alignement–déport 100, déport–présignalisation 200,
+  présignalisation–ligne continue 300 m (queue tangente à l'axe) ; îlot en saillie du nez à la tête, à la distance de
+  marquage (0,30 m) de l'enveloppe, nez arrondi. Branches secondaires construites selon l'ACI (Fig. 24
   et 25, Tableau 8) : triangle de construction H = 4l, b1 = 0,55l, b2 = 1,45l (axe décalé de 0,50 m vers la sortie),
   îlot formé par les cercles de giration Ris = 2l + a et Rie = 2l + b, queue raccordée à l'axe par Rre ≈ 8l et Rrs ≈ 16l,
   îlot en saillie à 1,50 m de la rive avec nez de 1 m ; bordures parallèles à l'îlot à le = sup(l/2 ; 3) et
