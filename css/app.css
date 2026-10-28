@@ -214,3 +214,4 @@ dialog li { margin: 4px 0; }
 .profile .pf-dt { fill: #7dd3fc; font-size: 9.5px; }
 .profile .pf-note { fill: var(--muted); font-size: 9.5px; }
 table.fixes td { vertical-align: top; font-size: 12px; }
+table.axr input.odc { width: 70px; text-align: right; font-family: var(--mono); font-size: 12px; }

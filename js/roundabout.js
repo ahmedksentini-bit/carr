@@ -66,7 +66,7 @@ function buildRoundabout(prj, ext = {}) {
     const shiftEst = hasIsland && !th && isl.type !== 'aucun' ? isl.shift : 0;
     const flare = Math.max(0, hb + Math.max(le, ls) + shiftEst - th - Math.min(wIn, wOut));
     const Lmin = Math.max(Rg + h + Math.max(10, 15 * flare) + 20, ext[idx] || 0);
-    let u, a = 0, cont = null;
+    let u, a = 0, cont = null, axisFillets = [];
     const axeR = +b.axeR > 0 ? +b.axeR : sec.axeR;
     if (b.radial !== false) {
       let pa = polylineAfter(pl, O, Lmin + 15);
@@ -74,8 +74,18 @@ function buildRoundabout(prj, ext = {}) {
         const defl = Math.acos(G.clamp(dot(norm(sub(pa.J, O)), pa.dir), -1, 1));
         pa = polylineAfter(pl, O, Lmin + axeR * Math.tan(defl / 2) + 2) || pa;
         u = norm(sub(pa.J, O));
+        // Rayons : axeR au raccordement avec l'alignement radial (J), rayon propre de chaque sommet saisi (p.r) sinon.
         const pts = [add(O, mul(u, Lmin)), pa.J, ...pa.rest.filter((p) => G.dist(p, pa.J) > 0.5)];
-        cont = G.roundPolyline(pts, pts.map((_, i) => (i > 0 && i < pts.length - 1 ? axeR : 0)));
+        const want = pts.map((p, i) => (i === 0 || i === pts.length - 1 ? 0 : i === 1 ? axeR : +p.r > 0 ? +p.r : axeR));
+        cont = G.roundPolyline(pts, want);
+        // Raccordements obtenus (le rayon est réduit s'il ne tient pas entre les segments) : sommet saisi, rayons.
+        for (const s of cont) {
+          if (s.t !== 'A') continue;
+          const mid = G.segAt(s, 0.5);
+          let k = 1;
+          for (let i = 2; i < pts.length - 1; i++) if (G.dist(pts[i], mid) < G.dist(pts[k], mid)) k = i;
+          axisFillets.push({ arc: s, vi: k === 1 ? -1 : b.axis.indexOf(pts[k]), want: want[k], r: s.r });
+        }
       } else u = norm(sub(far, O));
     } else {
       const { Q, segDir } = branchDirection(b, O, Rg + h + 10);
@@ -140,7 +150,7 @@ function buildRoundabout(prj, ext = {}) {
     }
     const yl = crossLine(en, target, 0.25), xl = crossLine(ex, target, 0.25);
     const bd = {
-      idx, id: b.id, name, role: 'branche', theta, u, n, a, ai, x0, xT, xEnd, h, b: isl.b, hb, th, isl, W, Ws, Wp, cont,
+      idx, id: b.id, name, role: 'branche', theta, u, n, a, ai, x0, xT, xEnd, h, b: isl.b, hb, th, isl, W, Ws, Wp, cont, axisFillets,
       entry: side(en, 1, wIn), exit: side(ex, -1, wOut),
       island, cross, yieldStart: yl?.a, yieldEnd: yl?.b, exitStart: xl?.a, exitEnd: xl?.b, gis: fmtGis(theta, unit),
       farAxis: cont ? G.segEnd(cont[cont.length - 1]) : W({ x: xEnd, y: a }),
@@ -313,6 +323,14 @@ function buildRoundabout(prj, ext = {}) {
     }
     // Axe projet : alignement droit puis raccordement à l'axe saisi.
     P({ k: 'path', L: 'AXE', segs: [L(W({ x: 0, y: a }), W({ x: xEnd, y: a })), ...(bd.cont || [])] });
+    // Raccordements de l'axe : centre et rayon cotés (rayon demandé rappelé s'il a dû être réduit).
+    for (const f of bd.axisFillets) {
+      const mid = G.segAt(f.arc, 0.5), toC = norm(sub(f.arc.c, mid));
+      P({ k: 'cross', L: 'CONSTRUCTION', p: f.arc.c, size: 1 });
+      P({ k: 'path', L: 'CONSTRUCTION', segs: [L(f.arc.c, G.segStart(f.arc)), L(f.arc.c, G.segEnd(f.arc))] });
+      const lab = Math.abs(f.r - f.want) > 0.05 ? `R axe ${fmt(f.r, 1)} (${fmt(f.want, 1)} demandé)` : `R axe ${fmt(f.r, 1)}`;
+      dims.radius(mid, toC, lab, { len: 3 * TH });
+    }
     P({ k: 'path', L: 'LIMITE', segs: [L(bd.exit.F, bd.entry.F)] });
     // Marquage : cédez-le-passage, ligne axiale d'approche, voies multiples
     if (bd.yieldStart && bd.yieldEnd) {

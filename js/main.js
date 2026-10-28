@@ -513,10 +513,10 @@ function onMove(px, py) {
   }
   const w = d?.kind === 'pan' ? { x: viewer.s2w(px, py)[0], y: viewer.s2w(px, py)[1] } : pickPoint(px, py);
   S.cursorW = w;
-  if (d?.kind === 'vertex') { S.prj.branches[d.bi].axis[d.vi] = w; d.moved = true; update({ commit: false, panels: false }); }
+  if (d?.kind === 'vertex') { const ax = S.prj.branches[d.bi].axis; ax[d.vi] = { ...w, r: ax[d.vi].r }; d.moved = true; update({ commit: false, panels: false }); } // le sommet garde son rayon
   else if (d?.kind === 'seg') {
     const ax = S.prj.branches[d.bi].axis, dv = G.sub(w, d.start);
-    ax[d.vi] = G.add(d.orig[0], dv); ax[d.vi + 1] = G.add(d.orig[1], dv);
+    ax[d.vi] = { ...G.add(d.orig[0], dv), r: d.orig[0].r }; ax[d.vi + 1] = { ...G.add(d.orig[1], dv), r: d.orig[1].r };
     d.moved = true; update({ commit: false, panels: false });
   }
   else if (d?.kind === 'center') { S.prj.center = { auto: false, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
@@ -832,6 +832,7 @@ function refreshPanels() {
   }).join('') : '<li class="empty-li">Aucune branche. Utilisez « Dessiner une branche » ou la touche A.</li>';
   if (branchRole() !== S.formRole) renderBranchForm();
   refreshBranchOut();
+  refreshAxisRadii();
   refreshDevers();
   refreshChecks();
   refreshPoints();
@@ -898,8 +899,10 @@ function renderBranchForm() {
     host.innerHTML = `${head}
       <h4>Axe</h4>
       <label class="chk"><input type="checkbox" data-bk="radial"> Axe radial (passe par le centre de l'anneau)</label>
-      ${fld('axeR', 'Rayon de raccordement de l\'axe', 'm', { branch: true, ph: 'auto' })}
-      <p class="note">Sur le plan, glissez les sommets de l'axe ou le milieu d'un segment ; le « + » au bout de l'axe le prolonge.</p>
+      ${fld('axeR', 'Rayon au raccordement avec l\'alignement radial', 'm', { branch: true, ph: 'auto' })}
+      <p class="note">Rayons de raccordement aux sommets de l'axe saisi (vide : rayon ci-dessus) ; ils sont cotés sur le plan.</p>
+      <div id="axisRadii"></div>
+      <p class="note">Sur le plan, les sommets et milieux de segments se déplacent à la souris (les rayons sont conservés) ; le « + » au bout de l'axe le prolonge.</p>
       ${lanes}
       <h4>Entrée</h4>
       ${fld('le', 'Largeur d\'entrée le', 'm', { branch: true, title: 'Mesurée du bord de l\'îlot au bord extérieur, au droit de l\'anneau' })}
@@ -924,6 +927,31 @@ function renderBranchForm() {
   }
   syncInputs();
   refreshBranchOut();
+  refreshAxisRadii();
+}
+
+// Rayons de raccordement aux sommets de l'axe saisi (giratoire) : un champ par sommet raccordé, rayon obtenu rappelé.
+// Le tableau n'est reconstruit que si la liste des sommets change (on ne perd pas la saisie en cours).
+function refreshAxisRadii() {
+  const host = $('#axisRadii');
+  if (!host) return;
+  const b = S.prj.branches[S.sel], bd = S.D?.branches?.find((q) => q.idx === S.sel);
+  const fl = (bd?.axisFillets || []).filter((f) => f.vi >= 0);
+  const sig = `${S.sel}|${fl.map((f) => f.vi).join(',')}`;
+  if (host.dataset.sig !== sig) {
+    host.dataset.sig = sig;
+    host.innerHTML = fl.length
+      ? '<table class="pts axr"><thead><tr><th>Sommet</th><th>Rayon (m)</th><th>Obtenu</th></tr></thead><tbody>' +
+        fl.map((f, k) => `<tr><td>S${k + 1}</td><td><input class="odc" data-bk="axis.${f.vi}.r" inputmode="decimal" autocomplete="off" value="${showNum(b?.axis[f.vi]?.r ?? '')}"></td><td class="mono" data-axr="${f.vi}"></td></tr>`).join('') +
+        '</tbody></table>'
+      : '<p class="note">Aucun sommet raccordé : l\'axe saisi est rectiligne au-delà de l\'alignement radial.</p>';
+  }
+  const def = +b?.axeR > 0 ? +b.axeR : sectionParams(S.prj).axeR;
+  for (const el of host.querySelectorAll('input')) el.placeholder = `auto ${fmt(def, 0)}`;
+  for (const f of fl) {
+    const td = host.querySelector(`[data-axr="${f.vi}"]`);
+    if (td) td.textContent = fmt(f.r, 1) + (Math.abs(f.r - f.want) > 0.05 ? ' (réduit : segments trop courts)' : '');
+  }
 }
 
 function refreshBranchOut() {

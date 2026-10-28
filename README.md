@@ -42,7 +42,8 @@ ou sur un fond topographique DXF.
   2 cm) et bandes d'éveil de vigilance de 0,42 m à 0,50 m du nez de bordure (calque `GIRA_PMR`). Réglages : onglet Profil.
 - **Branches** : alignement droit dirigé vers le centre près de l'anneau, puis raccordement à l'axe saisi, qu'elles
   suivent jusqu'au bout (polylignes à plusieurs segments). Le centre se place sur la carte (outil C) ou se déplace
-  à la souris ; les branches se réorientent vers lui. Rayon de raccordement de l'axe réglable par branche ; poignées
+  à la souris ; les branches se réorientent vers lui. Rayons de raccordement de l'axe saisis par branche (raccordement
+  à l'alignement radial) et par sommet de l'axe saisi, cotés sur le plan (rayon réduit signalé) ; poignées
   de sommet et de milieu de segment (le segment se déplace, les raccordements suivent) ; un « + » au bout extérieur
   de chaque axe en prolonge la saisie.
 - **Dévers** : anneau à dévers imposé de 1,5 % vers l'extérieur, constant sur site en pente (ou cône sur plan incliné),
