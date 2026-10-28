@@ -298,25 +298,38 @@ export function aciBranch(cfg, issues) {
     const Tc = sub(Fc, mul(nT, R)), Tk = onCircle(C, RK, Fc);
     // Raccordement à la chaussée courante (y = s·wa) : arc de rayon Rr extérieur au cercle K.
     const dy = yF + s * Rr - C.y, h2 = (Rr + RK) ** 2 - dy * dy;
-    let curb, ctrl, fil;
-    if (h2 > 0 && s * (C.y + s * RK) > wa + 0.05) {
-      const Q = { x: C.x + Math.sqrt(h2), y: yF + s * Rr }, T1 = { x: Q.x, y: yF }, T2 = onCircle(C, RK, Q);
-      if (T2.x <= Tk.x + 0.05) return fail(`bordure ${label} : rayons trop grands pour la longueur de l'îlot.`);
+    let curb, ctrl, fil, kArc = false; // kArc : bordure parallèle à l'îlot (arc K) entre la transition et Re / Rs
+    const Q = h2 > 0 ? { x: C.x + Math.sqrt(h2), y: yF + s * Rr } : null, T2 = Q && onCircle(C, RK, Q);
+    const P1 = { x: C.x, y: C.y + s * RK }, P0 = { x: C.x + Math.max(10, 15 * s * (P1.y - yF)), y: yF };
+    const flP1 = Q && T2.x <= Tk.x + 0.05 ? filletToTarget(P1, { x: -1, y: 0 }, { x: 0, y: s }, target, R) : null;
+    if (flP1 && flP1.Tl.x < P0.x - 1) {
+      // Le rayon Re / Rs englobe tout l'arc parallèle à l'îlot : bordure parallèle à l'axe au droit du point le plus
+      // large de l'îlot (à w de son bord), évasement au 1/15 vers la chaussée courante, puis Re / Rs.
+      const fl = flP1;
+      F = { x: Math.max(xEnd, P0.x + 5), y: yF };
+      const pts = fl.t > 0.05 ? [F, P0, P1, fl.Tl] : [F, P0, fl.Tl];
+      curb = [...G.roundPolyline(pts, pts.map((_, i) => (i > 0 && i < pts.length - 1 ? Rr : 0))), fl.arc];
+      ctrl = pts.slice(0, -1);
+      fil = { C: fl.C, Tl: fl.Tl, Tc: fl.Tc, arc: fl.arc, r: R, t: fl.t };
+    } else if (Q && s * (C.y + s * RK) > wa + 0.05 && T2.x > Tk.x + 0.05) {
+      const T1 = { x: Q.x, y: yF };
       F = { x: Math.max(xEnd, T1.x + 5), y: yF };
       curb = [L(F, T1), arcPQ(Q, Rr, T1, T2), arcPQ(C, RK, T2, Tk), arcPQ(Fc, R, Tk, Tc)];
-      ctrl = [F, T1, T2];
+      ctrl = [F, T1, T2]; kArc = true;
       fil = { C: Fc, Tl: Tk, Tc, arc: curb[curb.length - 1], r: R, t: 1 };
     } else {
-      // Îlot et voie tiennent dans la chaussée courante : bordure droite, raccordée directement à la principale.
+      // Îlot et voie tiennent dans la chaussée courante, ou rayon très grand : bordure droite, raccordée directement à
+      // la principale (l'extrémité de la branche recule au-delà du point de tangence si nécessaire).
       const fl = filletToTarget(F, { x: -1, y: 0 }, { x: 0, y: s }, target, R);
       if (!fl) return fail(`raccordement ${label} impossible (rayon ${fmt(R, 1)} m).`);
+      if (fl.Tl.x > F.x - 5) F = { x: fl.Tl.x + 5, y: yF };
       curb = [L(F, fl.Tl), fl.arc];
       ctrl = [F];
       fil = { C: fl.C, Tl: fl.Tl, Tc: fl.Tc, arc: fl.arc, r: R, t: fl.t };
     }
     const tipDir = norm(rot90(sub(tipLow, C))), dI = tipDir.x > 0 ? tipDir : neg(tipDir);
     const ext = { x: C.x, y: C.y + s * Rc }, dim = s > 0 ? [ext, add(ext, { x: 0, y: w })] : [add(ext, { x: 0, y: -w }), ext];
-    return { s, w, wa, R, H: tipLow, T: ext, dI, F, ctrl, fil, curb, wRing: null, dim };
+    return { s, w, wa, R, H: tipLow, T: ext, dI, F, ctrl, fil, curb, wRing: null, dim, kArc };
   };
   const en = side(1, le, wIn, Re, Ce, Rie, 'côté entrée (Re)');
   const ex = side(-1, ls, wOut, Rs, Cs, Ris, 'côté sortie (Rs)');

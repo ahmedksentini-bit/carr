@@ -53,6 +53,9 @@ ou sur un fond topographique DXF.
   voie, les tourne-à-gauche sont concentriques à Ris / Rie. Surface balayée, traces et silhouettes du véhicule sur le
   calque `GIRA_EPURE` ; empiètements sur les bordures (tolérance : BDD en interurbain, caniveau en urbain) et sur les
   îlots en saillie signalés dans Contrôles et marqués d'une croix. Case à cocher dans l'onglet Carrefour.
+  Bouton « Calculer les corrections » (Contrôles) : pour chaque empiètement, plus petite valeur de Rs / Re (bordure),
+  Ris / Rie (îlot séparateur) ou du recul des têtes d'îlots centraux qui le supprime (carrefour reconstruit à chaque
+  essai), ou l'aménagement équivalent (surlargeur revêtue, partie franchissable) ; bouton « Appliquer ».
 - **Visibilité** (onglet dédié, calque `GIRA_VISIBILITE`) : giratoire, quart d'anneau à gauche vu depuis un observateur à
   15 m en amont du cédez-le-passage (recul réglable), au milieu de la voie d'entrée ; carrefours en T et en X,
   triangles œil – point de conflit – cible à D = V85 × t de part et d'autre, cotés ; tableau par branche.

@@ -111,7 +111,7 @@ export function planParams(prj) {
   const wLane = num(p.wLane, d.wLane), nLanes = Math.max(1, Math.round(num(p.nLanes, d.nLanes)));
   const tag = {
     on: t.on ?? d.tag.on, width: num(t.width, d.tag.width), island: num(t.island, d.tag.island), raised: t.raised ?? d.tag.raised,
-    storage: num(t.storage, d.tag.storage), sifflet: num(t.sifflet, d.tag.sifflet), align: num(t.align, d.tag.align), presig: num(t.presig, d.tag.presig),
+    storage: num(t.storage, d.tag.storage), sifflet: num(t.sifflet, d.tag.sifflet), align: num(t.align, d.tag.align), presig: num(t.presig, d.tag.presig), headBack: num(t.headBack, 0),
   };
   const c = tag.width + tag.island;
   // Déport des bords au 1/15 (1/10 si la chaussée fait 5 m ou moins), symétrique : c/2 de chaque côté.

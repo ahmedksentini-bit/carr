@@ -689,6 +689,7 @@ function buildStaticPanels() {
     fld('plan.tag.align', 'Alignement droit avant le sifflet', 'm') +
     fld('plan.tag.deport', 'Longueur de déport des bords', 'm', { ph: 'auto' }) +
     fld('plan.tag.presig', 'Présignalisation (nez peint)', 'm') +
+    fld('plan.tag.headBack', 'Recul des têtes d\'îlots centraux (épure PL)', 'm', { ph: '0' }) +
     '<h3>Épures de giration</h3>' +
     '<label class="chk"><input type="checkbox" data-k="plan.epure"> Semi-remorque 16,50 m : tourne-à-droite et tourne-à-gauche de chaque branche</label>' +
     '<p class="note">Surface balayée tracée sur le calque GIRA_EPURE ; les empiètements sur les bordures et îlots sont signalés dans Contrôles. Visibilité depuis les branches secondaires : onglet Visibilité.</p>';
@@ -1052,6 +1053,65 @@ function refreshChecks() {
   const bd = $('#chkBadge');
   bd.textContent = n ? String(n) : w ? String(w) : '';
   bd.className = 'badge' + (n ? ' err' : w ? ' warn' : '');
+  refreshFixPanel();
+}
+
+// --------------------------------------------------------- Corrections des épures de giration
+// Paramètre à faire varier selon ce que balaie le véhicule : bordure → rayon de bordure du mouvement (Re / Rs) ;
+// îlot séparateur → rayon de giration de l'îlot (Ris / Rie) ; tête d'îlot central → recul des têtes.
+// Chaque entrée : [objet ('branche' | 'projet'), champ, nom, valeur actuelle, pas, plafond].
+function fixParams(e, bd) {
+  const P = S.D.plan, out = [];
+  const right = e.label.startsWith('tourne-à-droite'), entering = e.label.endsWith('entrant');
+  if (e.dC > e.tolC && right) out.push(entering ? ['branche', 'Rs', 'Rs', bd.exit.R, 2, 80] : ['branche', 'Re', 'Re', bd.entry.R, 2, 80]);
+  if (e.dS > 0 && !right) out.push(entering ? ['branche', 'island.Ris', 'Ris', bd.K.Ris, 2, 70] : ['branche', 'island.Rie', 'Rie', bd.K.Rie, 2, 70]);
+  if (e.dM > 0) out.push(['projet', 'plan.tag.headBack', 'recul des têtes', P.tag.headBack, 0.5, 30]);
+  return out;
+}
+
+// Pour chaque épure en défaut et chaque paramètre concerné : plus petite valeur qui supprime tout empiètement de ce
+// mouvement (le carrefour est reconstruit pour chaque essai, seule cette épure étant calculée), par pas croissants puis
+// dichotomie, arrondie au demi-mètre supérieur.
+function computeFixes() {
+  const src = JSON.stringify(S.prj), out = [];
+  for (const e of (S.D?.epures || []).filter((x) => !x.ok)) {
+    const bd = S.D.branches.find((q) => q.idx === e.bi);
+    if (!bd) continue;
+    for (const [obj, key, nm, p0, step, cap] of fixParams(e, bd)) {
+      const ok = (v) => {
+        const prj = JSON.parse(src);
+        setPath(obj === 'projet' ? prj : prj.branches[e.bi], key, v);
+        const r = buildDesign(prj, { only: { bi: e.bi, label: e.label } }).epures?.find((x) => x.bi === e.bi && x.label === e.label);
+        return !!r?.ok;
+      };
+      let lo = p0, hi = null;
+      for (let v = p0 + step; v <= cap; v = v * 1.25 + step) { if (ok(v)) { hi = v; break; } lo = v; }
+      if (hi != null) for (let k = 0; k < 8; k++) { const m = (lo + hi) / 2; if (ok(m)) hi = m; else lo = m; }
+      out.push({ e, obj, key, nm, p0, value: hi != null ? Math.ceil(hi * 2) / 2 : null, cap });
+    }
+  }
+  return out;
+}
+
+function refreshFixPanel() {
+  const host = $('#fixPanel'), bad = (S.D?.epures || []).filter((x) => !x.ok);
+  if (!isPlan(S.prj) || !bad.length) { host.innerHTML = ''; return; }
+  const fresh = S.fixes && S.fixes.sig === JSON.stringify(S.prj);
+  let html = '<h3>Corrections des épures de giration</h3><p class="note">Plus petit rayon qui supprime chaque empiètement du semi-remorque (le carrefour est recalculé pour chaque essai), ou l\'aménagement équivalent sans changer le rayon.</p>';
+  if (!fresh) html += `<button id="btnFixes" class="primary">Calculer les corrections (${bad.length} empiètement${bad.length > 1 ? 's' : ''})</button>`;
+  else {
+    // Aménagement équivalent sans changer le paramètre : surlargeur revêtue (bordure) ou partie franchissable (îlot).
+    const alt = ({ e, key }) => (key === 'Re' || key === 'Rs'
+      ? `surlargeur revêtue de ${fmt(Math.ceil((e.dC - e.tolC) * 20) / 20, 2)} m à l'intérieur du virage`
+      : key === 'plan.tag.headBack' ? `nez de l'îlot central franchissable sur ${fmt(Math.ceil(e.dM * 20) / 20, 2)} m`
+        : `îlot séparateur franchissable ou réduit de ${fmt(Math.ceil(e.dS * 20) / 20, 2)} m`);
+    html += '<div class="tablewrap"><table class="pts fixes"><thead><tr><th>Branche</th><th>Mouvement</th><th>Correction</th><th>Ou</th><th></th></tr></thead><tbody>' +
+      S.fixes.list.map((f, i) => `<tr><td>${esc(f.e.name)}</td><td>${esc(f.e.label)}</td>` +
+        `<td class="mono">${esc(f.nm)} ${fmt(f.p0, 1)} → ${f.value != null ? `<b>${fmt(f.value, 1)} m</b>` : `insuffisant jusqu'à ${fmt(f.cap, 0)} m`}</td>` +
+        `<td>${esc(alt(f))}</td><td>${f.value != null ? `<button data-fix="${i}">Appliquer</button>` : ''}</td></tr>`).join('') +
+      '</tbody></table></div><p class="note">« Appliquer » reporte la valeur dans la fiche de la branche (ou, pour le recul des têtes, dans l\'onglet Carrefour) ; relancer ensuite le calcul pour vérifier l\'ensemble.</p>';
+  }
+  host.innerHTML = html;
 }
 
 function refreshPoints() {
@@ -1290,6 +1350,16 @@ function bindUI() {
   panel.addEventListener('click', (e) => {
     const li = e.target.closest('#branchList li[data-bi]');
     if (li) { selectBranch(+li.dataset.bi); return; }
+    if (e.target.id === 'btnFixes') {
+      e.target.disabled = true; e.target.textContent = 'Calcul en cours…';
+      setTimeout(() => { S.fixes = { sig: JSON.stringify(S.prj), list: computeFixes() }; refreshFixPanel(); }, 30);
+      return;
+    }
+    if (e.target.dataset.fix != null) {
+      const f = S.fixes?.list[+e.target.dataset.fix];
+      if (f) { setPath(f.obj === 'projet' ? S.prj : S.prj.branches[f.e.bi], f.key, f.value); syncInputs(); update(); }
+      return;
+    }
     if (e.target.id === 'btnDelBranch') deleteBranch(S.sel);
     const tr = e.target.closest('#ptsTable tr[data-pt]');
     if (tr) {

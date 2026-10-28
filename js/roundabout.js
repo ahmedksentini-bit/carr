@@ -20,8 +20,9 @@ const num = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
 export { fmt, fmtGis, autoCenter };
 
 // Point d'entrée : giratoire ou carrefour plan (T, X) selon le type du projet.
-export function buildDesign(prj) {
-  return prj.kind === 'T' || prj.kind === 'X' ? buildPlan(prj) : buildRoundabout(prj);
+// opt.only : { bi, label } — ne calcule que cette épure de giration (recherche des corrections).
+export function buildDesign(prj, opt = {}) {
+  return prj.kind === 'T' || prj.kind === 'X' ? buildPlan(prj, opt) : buildRoundabout(prj);
 }
 
 // ext : longueurs minimales des alignements droits (abscisse locale), imposées par les voies directes de tourne-à-droite.

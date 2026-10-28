@@ -53,7 +53,7 @@ function orient(ring, hole) {
 
 const closedPath = (pts) => pts.map((p, i) => L(p, pts[(i + 1) % pts.length]));
 
-export function buildPlan(prj) {
+export function buildPlan(prj, opt = {}) {
   const kind = prj.kind, P = planParams(prj), sec = sectionParams(prj);
   const unit = prj.opts?.angleUnit || 'gon';
   const TH = +prj.opts?.textH || 0.8;
@@ -140,7 +140,8 @@ export function buildPlan(prj) {
     const xs = toM(gm.fr.W(gm.K.Cs)).x, xe = toM(gm.fr.W(gm.K.Ce)).x;
     if (s.sY > 0) { XdA = Math.min(XdA, xs); XdB = Math.max(XdB, xe); } else { XdB = Math.max(XdB, xs); XdA = Math.min(XdA, xe); }
   }
-  const LdA = Math.max(1, Number.isFinite(XdA) ? -XdA : Lm), LdB = Math.max(1, Number.isFinite(XdB) ? XdB : Lm);
+  // Recul éventuel des têtes (épure PL : décalage au-delà du bord intérieur de la trajectoire).
+  const LdA = Math.max(1, Number.isFinite(XdA) ? -XdA : Lm) + P.tag.headBack, LdB = Math.max(1, Number.isFinite(XdB) ? XdB : Lm) + P.tag.headBack;
   // La zone élargie couvre au moins le débouché (Lm) ; sans TAG de ce côté, l'îlot va de sa tête à l'alignement.
   const fullLen = (hasTag, Ld) => (!widened ? 0 : hasTag ? Ld + Ls + Lsif + Lal : Math.max(Ld + Lal, Lm));
   const lenA = fullLen(tagA, LdA), lenB = fullLen(tagB, LdB);
@@ -357,32 +358,41 @@ export function buildPlan(prj) {
   // BDD en interurbain, caniveau en urbain) et aux îlots en saillie (aucune tolérance).
   D.epures = [];
   if (P.epure) {
-    const curbs = [], islands = [...holes];
+    const curbs = [], islandsMain = [...holes], islandsSec = [];
     for (const sg of [1, -1]) for (const piece of cutPolyline(edges[sg], gaps[sg])) curbs.push(rnd(piece));
     for (const bd of bds) {
       if (bd.role !== 'secondaire') continue;
       curbs.push(bd.entry.curbW, bd.exit.curbW);
-      if (bd.island?.outline) islands.push(...(bd.island.pieces || [bd.island.outline]));
+      if (bd.island?.outline) islandsSec.push(...(bd.island.pieces || [bd.island.outline]));
     }
+    // Bord de la principale (côté sg) entre les abscisses X0 et X1, dans le sens X0 → X1 : il suit la zone de déport.
+    const edgeRun = (sg, X0, X1) => {
+      const pts = edges[sg], yAt = (X) => {
+        for (let i = 0; i + 1 < pts.length; i++) if (X >= pts[i].x - 1e-9 && X <= pts[i + 1].x + 1e-9) return pts[i].y + ((X - pts[i].x) / (pts[i + 1].x - pts[i].x || 1)) * (pts[i + 1].y - pts[i].y);
+        return pts[X < pts[0].x ? 0 : pts.length - 1].y;
+      };
+      const lo = Math.min(X0, X1), hi = Math.max(X0, X1);
+      const run = [{ x: lo, y: yAt(lo) }, ...pts.filter((p) => p.x > lo + 1e-6 && p.x < hi - 1e-6), { x: hi, y: yAt(hi) }].map((p) => toW(p.x, p.y));
+      return polyPath(X0 <= X1 ? run : run.reverse());
+    };
     const tolC = prj.context === 'urbain' ? sec.caniveau : sec.bdd, tolI = 0.05;
     const hv = SEMI.w / 2, m = 0.3, lead = 40, cw = (u) => ({ x: u.y, y: -u.x }); // cw : rotation de −90°
     const wApp = widened ? P.tag.width : P.wLane; // voie d'où part le tourne-à-gauche entrant
     for (const bd of bds) {
       if (bd.role !== 'secondaire' || !bd.K) continue;
       const { W, sY, u } = bd, dNear = mul(uM, -sY), dFar = mul(uM, sY), le = bd.entry.w, ls = bd.exit.w;
-      const aciCurb = !!bd.island?.aci;
       const moves = [];
       // Tourne-à-droite : décalé de la bordure de (voie − demi-largeur − marge).
       const dR = (w) => Math.max(hv + 0.2, w - hv - m);
-      const TcX = bd.exit.Tc, TcE = bd.entry.Tc;
-      moves.push(['tourne-à-droite entrant', -1, G.offsetPath([L(sub(TcX, mul(dNear, lead)), TcX), ...G.revPath(bd.exit.curbW)], dR(Math.min(P.wLane, ls)))]);
-      moves.push(['tourne-à-droite sortant', -1, G.offsetPath([...bd.entry.curbW, L(TcE, add(TcE, mul(dNear, lead)))], dR(Math.min(P.wLane, le)))]);
+      const xX = toM(bd.exit.Tc).x, xE = toM(bd.entry.Tc).x, sn = dot(dNear, uM); // sens de la voie de rive en X
+      moves.push(['tourne-à-droite entrant', -1, G.offsetPath([...edgeRun(sY, xX - sn * lead, xX), ...G.revPath(bd.exit.curbW)], dR(Math.min(P.wLane, ls)))]);
+      moves.push(['tourne-à-droite sortant', -1, G.offsetPath([...bd.entry.curbW, ...edgeRun(sY, xE, xE + sn * lead)], dR(Math.min(P.wLane, le)))]);
       {
         // Tourne-à-gauche entrant : depuis la voie de TAG, autour du centre de Ris, puis dans la voie de sortie.
         const Ris = bd.K.Ris, C = W(bd.K.Cs);
         const Rg = Math.max(Ris + hv + 0.1, Math.min(Ris + wApp - hv - 0.1, Ris + ls - hv - m)), T1 = add(C, mul(Ym, -sY * Rg));
         let end, tail;
-        if (aciCurb && bd.exit.ctrl.length >= 3) {
+        if (bd.exit.kArc) {
           end = add(C, mul(norm(sub(W(bd.exit.ctrl[2]), C)), Rg));
           tail = G.offsetPath(G.revPath(bd.exit.curbW).slice(-2), Ris + ls - Rg);
         } else { end = add(C, mul(cw(u), Rg)); tail = [L(end, add(end, mul(u, lead)))]; }
@@ -393,30 +403,32 @@ export function buildPlan(prj) {
         const Rie = bd.K.Rie, C = W(bd.K.Ce);
         const Rg = Math.max(Rie + hv + 0.1, Math.min(Rie + le - hv - m, Rie + half - hv - 0.1)), T3 = add(C, mul(cw(dFar), Rg));
         let start, head;
-        if (aciCurb && bd.entry.ctrl.length >= 3) {
+        if (bd.entry.kArc) {
           start = add(C, mul(norm(sub(W(bd.entry.ctrl[2]), C)), Rg));
           head = G.offsetPath(bd.entry.curbW.slice(0, 2), Rie + le - Rg);
         } else { start = add(C, mul(cw(neg(u)), Rg)); head = [L(add(start, mul(u, lead)), start)]; }
         moves.push(['tourne-à-gauche sortant', 1, [...head, G.A(C, Rg, ang(sub(start, C)), ang(sub(T3, C)), true), L(T3, add(T3, mul(dFar, lead)))]]);
       }
       for (const [label, turn, guide] of moves) {
+        if (opt.only && (opt.only.bi !== bd.idx || opt.only.label !== label)) continue;
         const sw = sweep(guide, turn);
         if (!sw) continue;
         Pp({ k: 'fill', L: 'EPURE', role: 'epure', rings: [closedSegs(sw.poly)] });
         Pp({ k: 'path', L: 'EPURE', segs: polyPath(sw.outer) });
         Pp({ k: 'path', L: 'EPURE', segs: polyPath(sw.inner) });
         for (const pose of sw.poses) for (const r of pose) Pp({ k: 'path', L: 'EPURE', segs: closedSegs(r), closed: true });
-        const hitC = conflicts(sw.poly, curbs, tolC), hitI = conflicts(sw.poly, islands, tolI);
+        const hitC = conflicts(sw.poly, curbs, tolC), hitM = conflicts(sw.poly, islandsMain, tolI), hitS = conflicts(sw.poly, islandsSec, tolI);
         const marks = [];
-        for (const h of [...hitC, ...hitI].sort((x, y) => y.depth - x.depth)) if (marks.every((q) => G.dist(h.p, q) > 3)) marks.push(h.p);
+        for (const h of [...hitC, ...hitM, ...hitS].sort((x, y) => y.depth - x.depth)) if (marks.every((q) => G.dist(h.p, q) > 3)) marks.push(h.p);
         for (const p of marks.slice(0, 6)) Pp({ k: 'cross', L: 'EPURE', p, size: 1.5 });
-        const maxD = (hs) => Math.max(...hs.map((h) => h.depth));
+        const maxD = (hs) => (hs.length ? Math.max(...hs.map((h) => h.depth)) : 0);
         const what = [
           hitC.length ? `la bordure de ${fmt(maxD(hitC), 2)} m (tolérance ${fmt(tolC, 2)} m)` : '',
-          hitI.length ? `un îlot en saillie de ${fmt(maxD(hitI), 2)} m` : '',
+          hitM.length ? `la tête de l'îlot central de ${fmt(maxD(hitM), 2)} m` : '',
+          hitS.length ? `l'îlot séparateur de ${fmt(maxD(hitS), 2)} m` : '',
         ].filter(Boolean).join(' et ');
-        if (what) issues.push({ lvl: 'warn', bi: bd.idx, msg: `${bd.name} : épure ${SEMI.label}, ${label} : le véhicule dépasse ${what} (croix sur le plan) ; augmenter le rayon, reculer l'îlot ou prévoir une surlargeur.` });
-        D.epures.push({ name: bd.name, label, ok: !what });
+        if (what) issues.push({ lvl: 'warn', bi: bd.idx, msg: `${bd.name} : épure ${SEMI.label}, ${label} : le véhicule dépasse ${what} (croix sur le plan) ; corrections proposées en bas de l'onglet Contrôles.` });
+        D.epures.push({ name: bd.name, bi: bd.idx, label, ok: !what, dC: maxD(hitC), dM: maxD(hitM), dS: maxD(hitS), tolC, pts: marks.slice(0, 6) });
       }
     }
     if (D.epures.length && D.epures.every((e) => e.ok)) issues.push({ lvl: 'info', msg: `Épures ${SEMI.label} : aucun empiètement sur les bordures ni sur les îlots en saillie.` });
