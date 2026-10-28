@@ -341,6 +341,7 @@ function planHint(key, prj, br) {
       case 'island.gap': return H('ACI : îlot en saillie à 1,50 m de la rive de la principale');
       case 'pente': return auto ? H('auto : pente du site') : Math.abs(v) > 2 ? H('ACI : ≤ 2 % sur les 10 à 20 m avant le carrefour', 'warn') : H('ACI : ≤ 2 % près du carrefour', 'ok');
       case 'camber': return H(inter ? '2,5 % en toit (≈ ARP)' : '2,5 % par défaut');
+      case 'axeR': return H(`auto : ${f(sectionParams(prj).axeR)} m (onglet Profil) ; raccorde l'alignement droit du débouché à l'axe dessiné et ses sommets`);
       default: return undefined;
     }
   }

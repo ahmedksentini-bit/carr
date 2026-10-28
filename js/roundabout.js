@@ -101,6 +101,7 @@ function buildRoundabout(prj, ext = {}) {
     if (cont) {
       xEnd = Lmin;
       if (b.length) cont = G.pathHead(cont, Math.max(0, +b.length - (Lmin - x0)));
+      axisFillets = axisFillets.filter((f) => cont.some((sg) => sg.t === 'A' && G.dist(G.segStart(sg), G.segStart(f.arc)) < 1e-6));
     } else {
       xEnd = b.length ? x0 + +b.length : Math.min(Math.max(dot(sub(far, O), u), xT + 40), xT + 80);
       xEnd = Math.max(xEnd, Lmin);

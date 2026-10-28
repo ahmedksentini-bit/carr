@@ -890,7 +890,14 @@ function renderBranchForm() {
     host.innerHTML = `${head}<p class="note">Branche de la route principale : largeurs, tourne-à-gauche et dévers se règlent dans l'onglet Carrefour.</p>
       ${fld('length', 'Longueur dessinée au-delà du débouché', 'm', { branch: true, ph: 'auto' })}`;
   } else if (role === 'secondaire') {
-    host.innerHTML = `${head}${lanes}
+    host.innerHTML = `${head}
+      <h4>Axe</h4>
+      <p class="note">Alignement droit sur la longueur du débouché (îlot, retour des bordures, 30 m au-delà de l'îlot), puis raccordement à l'axe saisi, qui est suivi au-delà.</p>
+      ${fld('axeR', 'Rayon au raccordement avec l\'alignement droit', 'm', { branch: true, ph: 'auto' })}
+      <p class="note">Rayons de raccordement aux sommets de l'axe saisi (vide : rayon ci-dessus) ; ils sont cotés sur le plan.</p>
+      <div id="axisRadii"></div>
+      <p class="note">Pour une branche courbe, placez des sommets le long du tracé : sur le plan, sommets et milieux de segments se déplacent à la souris ; le « + » au bout de l'axe le prolonge.</p>
+      ${lanes}
       <h4>Voie d'entrée (vers la route principale)</h4>
       ${fld('le', 'Largeur à la ligne de cédez / STOP', 'm', { branch: true, ph: 'auto', title: 'Mesurée du bord de l\'îlot au bord extérieur' })}
       ${fld('Re', 'Rayon de bordure côté entrée Re', 'm', { branch: true, ph: 'auto' })}
@@ -953,7 +960,7 @@ function refreshAxisRadii() {
       ? '<table class="pts axr"><thead><tr><th>Sommet</th><th>Rayon (m)</th><th>Obtenu</th></tr></thead><tbody>' +
         fl.map((f, k) => `<tr><td>S${k + 1}</td><td><input class="odc" data-bk="axis.${f.vi}.r" inputmode="decimal" autocomplete="off" value="${showNum(b?.axis[f.vi]?.r ?? '')}"></td><td class="mono" data-axr="${f.vi}"></td></tr>`).join('') +
         '</tbody></table>'
-      : '<p class="note">Aucun sommet raccordé : l\'axe saisi est rectiligne au-delà de l\'alignement radial.</p>';
+      : `<p class="note">Aucun sommet raccordé : l'axe saisi est rectiligne au-delà de l'alignement ${isPlan(S.prj) ? 'droit du débouché' : 'radial'}.</p>`;
   }
   const def = +b?.axeR > 0 ? +b.axeR : sectionParams(S.prj).axeR;
   for (const el of host.querySelectorAll('input')) el.placeholder = `auto ${fmt(def, 0)}`;

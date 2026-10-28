@@ -32,6 +32,10 @@ ou sur un fond topographique DXF.
   îlot en saillie à 1,50 m de la rive avec nez de 1 m ; bordures parallèles à l'îlot à le = sup(l/2 ; 3) et
   ls = l/2 + 0,50, raccordées par Re = 2l et Rs = 4l ; têtes des îlots centraux aux points de tangence de Ris et Rie ; régime
   cédez-le-passage (T'2) ou STOP ; triangles de visibilité D = V85 × t (8 à 11 s selon régime et TAG).
+  Axe des branches secondaires : alignement droit sur la longueur du débouché (îlot, retour des bordures à la
+  chaussée courante, 30 m au-delà de l'îlot), dirigé vers le point où il rejoint l'axe saisi, puis raccordement de
+  rayon axeR et axe saisi suivi jusqu'au bout, avec un rayon par sommet (onglet Branche, cotés sur le plan) ; les
+  sommets placés dans l'alignement droit sont ignorés. La route principale reste droite.
 - **Dessin** : bordures, raccordements tangents, îlots, chaussée, ligne de cédez-le-passage, marquages,
   cotations, triangles de construction, trajectoire de déflexion.
 - **Rives peintes et bords de chaussée (giratoire)** : Rg, Ri, le, ls et le triangle de l'îlot sont mesurés aux
@@ -209,8 +213,8 @@ structure de l'HCM, d'après Troutbeck & Brilon, *Traffic Flow Theory*, chap. 8 
 
 - Les largeurs par défaut de BDD (1,00 m), BDG (0,50 m) et berme (1,50 m) en interurbain sont des valeurs de départ
   à ajuster dans l'onglet Profil ; elles ne sont pas tirées du guide.
-- Carrefours en T et en X : abords (trottoirs, berme) et îlots dessinés ; la BDD et les branches courbes ne sont pas
-  encore appliquées.
+- Carrefours en T et en X : abords (trottoirs, berme) et îlots dessinés ; la BDD n'est pas encore appliquée. Les
+  branches secondaires suivent un axe courbe ; la route principale reste droite (zones de TAG en alignement).
 - Voie directe de tourne-à-droite : rayon et largeur réglables ; largeur d'îlot et longueurs fixées (ACI, réduites en urbain) ;
   la clothoïde d'entrée et la variante « réinsertion avec cédez-le-passage » ne sont pas dessinées.
 - Capacité des carrefours plans : piétons, traversée en deux temps et pente des secondaires non pris en compte.

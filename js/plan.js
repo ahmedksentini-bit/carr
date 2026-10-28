@@ -6,7 +6,7 @@
 import * as G from './geom.js';
 import { islandDims, planParams, secondaryAuto, sectionParams, sideBands } from './norms.js';
 import { addDeversPlan } from './devers.js';
-import { fmt, fmtGis, upright, autoCenter, branchDirection, frame, sideBandPrims } from './common.js';
+import { fmt, fmtGis, upright, autoCenter, branchDirection, frame, nearFar, polylineAfter, sideBandPrims } from './common.js';
 import { buildApproach, aciBranch, aciCircles, crossLine, targetX0, widthAlong } from './approach.js';
 import { makeDims } from './dims.js';
 import { crossing, crossingPrims, cutAtX, polyOf, closedSegs } from './crossing.js';
@@ -114,18 +114,68 @@ export function buildPlan(prj, opt = {}) {
   const localLine = (fr, Y, sY) => ({
     p: fr.toL(toW(0, Y)), d: { x: dot(uM, fr.u), y: dot(uM, fr.n) }, n: { x: sY * dot(Ym, fr.u), y: sY * dot(Ym, fr.n) },
   });
-  const geo = new Map();
-  for (const s of secs) {
-    const fr = frame(O, s.u), isl = islandDims(prj, s.b), l = s.auto.l, I = s.b.island || {};
-    const target = { kind: 'line', p: fr.toL(toW(0, s.sY * hw)), d: { x: dot(uM, s.u), y: dot(uM, fr.n) } };
+  const setup = (s, u) => {
+    const fr = frame(O, u), isl = islandDims(prj, s.b), l = s.auto.l, I = s.b.island || {};
+    const target = { kind: 'line', p: fr.toL(toW(0, s.sY * hw)), d: { x: dot(uM, u), y: dot(uM, fr.n) } };
     const aci = {
       H: pick(I.length, 4 * l), b1: 0.55 * l, b2: 1.45 * l, off: 0.5,
       Ris: pick(I.Ris, 2 * l + (widened ? a : 0)), Rie: pick(I.Rie, 2 * l + (widened ? c : 0)),
       lineIs: localLine(fr, widened ? s.sY * (c / 2 - a) : 0, s.sY), lineIe: localLine(fr, widened ? (-s.sY * c) / 2 : 0, s.sY),
       Rre: 8 * l, Rrs: 16 * l, rn: 1, nose: pick(I.gap, 1.5), g: isl.bdg,
     };
-    geo.set(s, { fr, isl, target, aci, hasIsland: isl.type !== 'aucun', K: aciCircles(target, aci) });
+    return { fr, isl, target, aci, hasIsland: isl.type !== 'aucun', K: aciCircles(target, aci) };
+  };
+  // Construction locale de la branche (îlot ACI, ou bordures seules) jusqu'à l'abscisse xEnd au moins.
+  const approach = (s, gm, xEnd, iss) => {
+    const b = s.b, { target, aci, isl } = gm, wl = +b.wLane, x0 = targetX0(target, 0);
+    const wIn = Math.max(1, +b.nIn || 1) * wl, wOut = Math.max(1, +b.nOut || 1) * wl, { le, ls, Re, Rs } = s;
+    return gm.hasIsland
+      ? aciBranch({ name: b.name, idx: s.idx, target, xEnd, isl, le, ls, wIn, wOut, Re, Rs, aci }, iss)
+      : buildApproach({
+        name: b.name, idx: s.idx, target, a: 0, ai: 0, x0, xT: x0 + 10, xEnd, hb: 0, th: 0, hasIsland: false, isl, le, ls, wIn, wOut, Re, Rs,
+        labels: { en: 'de bordure côté entrée', ex: 'de bordure côté sortie' }, flareLvl: 'info',
+      }, iss);
+  };
+  // Axe de la branche, comme au giratoire : alignement droit sur la longueur utile (îlot, retour des bordures à la
+  // chaussée courante, 30 m au-delà de l'îlot), puis raccordement de rayon axeR à l'axe saisi, qu'il suit ensuite
+  // avec le rayon propre de chaque sommet. L'alignement est dirigé vers le point de raccordement J.
+  const geo = new Map();
+  for (const s of secs) {
+    let gm = setup(s, s.u), cont = null, axisFillets = [], Lmin = null;
+    const b = s.b, axeR = +b.axeR > 0 ? +b.axeR : sec.axeR, x0 = targetX0(gm.target, 0);
+    const ap0 = x0 > 0 ? approach(s, gm, x0 + (gm.hasIsland ? gm.aci.H : 0) + 30, []) : null;
+    if (ap0) {
+      Lmin = Math.max(ap0.en.F.x, ap0.ex.F.x);
+      const pl = nearFar(b.axis, O);
+      let pa = polylineAfter(pl, O, Lmin + 15);
+      if (pa) {
+        const defl = Math.acos(G.clamp(dot(norm(sub(pa.J, O)), pa.dir), -1, 1));
+        pa = polylineAfter(pl, O, Lmin + axeR * Math.tan(defl / 2) + 2) || pa;
+        const u = norm(sub(pa.J, O));
+        if (Math.sign(dot(u, Ym)) === s.sY) {
+          s.u = u;
+          gm = setup(s, u);
+          const pts = [add(O, mul(u, Lmin)), pa.J, ...pa.rest.filter((p) => G.dist(p, pa.J) > 0.5)];
+          const want = pts.map((p, i) => (i === 0 || i === pts.length - 1 ? 0 : i === 1 ? axeR : +p.r > 0 ? +p.r : axeR));
+          cont = { pts, want, vis: pts.map((p) => b.axis.indexOf(p)) };
+        }
+      }
+    }
+    geo.set(s, { ...gm, cont, Lmin });
   }
+  // Chemin de l'axe à partir de l'abscisse Ls de l'alignement droit, et raccordements obtenus (rayon réduit s'il ne
+  // tient pas entre les segments).
+  const axisPath = (cont, u, Ls) => {
+    const pts = [add(O, mul(u, Ls)), ...cont.pts.slice(1)], path = G.roundPolyline(pts, cont.want), fillets = [];
+    for (const sg of path) {
+      if (sg.t !== 'A') continue;
+      const mid = G.segAt(sg, 0.5);
+      let k = 1;
+      for (let i = 2; i < pts.length - 1; i++) if (G.dist(pts[i], mid) < G.dist(pts[k], mid)) k = i;
+      fillets.push({ arc: sg, vi: k === 1 ? -1 : cont.vis[k], want: cont.want[k], r: sg.r });
+    }
+    return { path, fillets };
+  };
   // Demi-longueur du débouché (estimation majorante : demi-base du triangle, voie, rayon de bordure).
   let Lm = 6;
   for (const s of secs) {
@@ -165,24 +215,38 @@ export function buildPlan(prj, opt = {}) {
   const gaps = { 1: [], [-1]: [] };
   for (const s of secs) {
     const b = s.b, idx = s.idx, name = b.name;
-    const { fr, isl, target, aci, hasIsland, K } = geo.get(s);
+    const gm = geo.get(s), { fr, isl, target, aci, hasIsland, K } = gm;
     const nIn = Math.max(1, +b.nIn || 1), nOut = Math.max(1, +b.nOut || 1), wl = +b.wLane;
-    const wIn = nIn * wl, wOut = nOut * wl, { le, ls, Re, Rs } = s;
+    const wIn = nIn * wl, wOut = nOut * wl;
     const x0 = targetX0(target, 0);
     if (!(x0 > 0)) { issues.push({ lvl: 'err', bi: idx, msg: `${name} : branche parallèle à la route principale.` }); continue; }
     const h = hasIsland ? aci.H : 0, xT = x0 + h;
-    let xEnd = b.length ? x0 + +b.length : Math.min(Math.max(dot(sub(s.far, O), s.u), xT + 40), xT + 80);
-    xEnd = Math.max(xEnd, xT + 30);
-    const ap = hasIsland
-      ? aciBranch({ name, idx, target, xEnd, isl, le, ls, wIn, wOut, Re, Rs, aci }, issues)
-      : buildApproach({
-        name, idx, target, a: 0, ai: 0, x0, xT: x0 + 10, xEnd, hb: 0, th: 0, hasIsland: false, isl, le, ls, wIn, wOut, Re, Rs,
-        labels: { en: 'de bordure côté entrée', ex: 'de bordure côté sortie' }, flareLvl: 'info',
-      }, issues);
+    let xEnd;
+    if (gm.cont) xEnd = gm.Lmin;
+    else {
+      xEnd = b.length ? x0 + +b.length : Math.min(Math.max(dot(sub(s.far, O), s.u), xT + 40), xT + 80);
+      xEnd = Math.max(xEnd, xT + 30);
+    }
+    const ap = approach(s, gm, xEnd, issues);
     if (!ap) continue;
     const { W, Wp } = fr;
     const { en, ex } = ap;
     xEnd = Math.max(xEnd, en.F.x, ex.F.x);
+    // Axe saisi suivi au-delà de l'alignement droit : bords de chaussée parallèles à l'axe.
+    let cont = null, axisFillets = [];
+    if (gm.cont) {
+      ({ path: cont, fillets: axisFillets } = axisPath(gm.cont, s.u, xEnd));
+      if (b.length) cont = G.pathHead(cont, Math.max(0, +b.length - (xEnd - x0)));
+      axisFillets = axisFillets.filter((f) => cont.some((sg) => sg.t === 'A' && G.dist(G.segStart(sg), G.segStart(f.arc)) < 1e-6));
+      if (!cont.length) cont = null;
+    }
+    const off = (d) => (cont ? G.offsetPath(cont, d) : []);
+    // Bordure complète, de l'extrémité de l'axe suivi jusqu'à la chaussée principale (prolongée droite jusqu'à xEnd si
+    // elle rejoint la chaussée courante plus tôt que l'autre côté).
+    const full = (sd, d) => {
+      const ext = cont && sd.F.x < xEnd - 1e-6 ? [L(W({ x: xEnd, y: sd.F.y }), W(sd.F))] : [];
+      return [...G.revPath(off(d)), ...ext, ...Wp(sd.curb)];
+    };
     // Passage piéton à ppRecul du bord de la principale, îlot coupé en refuge.
     let cross = null;
     if (sec.pp) {
@@ -199,12 +263,16 @@ export function buildPlan(prj, opt = {}) {
     const stop = crossLine(en, target, 0.25), stopX = crossLine(ex, target, 0.25);
     const bd = {
       idx, id: b.id, name, role: 'secondaire', sY: s.sY, l: s.auto.l, theta: fr.theta, u: s.u, n: fr.n, a: 0, ai: 0, x0, xT, xEnd, h, b: isl.b, hb: 0, th: 0, isl,
-      W, Ws: fr.Ws, Wp, target,
-      entry: { ...en, curbW: Wp(en.curb), Tc: W(en.fil.Tc), Tl: W(en.fil.Tl), C: W(en.fil.C), F: W(en.F) },
-      exit: { ...ex, curbW: Wp(ex.curb), Tc: W(ex.fil.Tc), Tl: W(ex.fil.Tl), C: W(ex.fil.C), F: W(ex.F) },
+      W, Ws: fr.Ws, Wp, target, cont, axisFillets,
+      // curbW : bordure complète (axe suivi compris) ; curbL : partie locale, de l'alignement droit à la principale.
+      entry: { ...en, curbW: full(en, wIn), curbL: Wp(en.curb), Tc: W(en.fil.Tc), Tl: W(en.fil.Tl), C: W(en.fil.C) },
+      exit: { ...ex, curbW: full(ex, -wOut), curbL: Wp(ex.curb), Tc: W(ex.fil.Tc), Tl: W(ex.fil.Tl), C: W(ex.fil.C) },
       island, cross, K, stop: stop && { a: W(stop.a), b: W(stop.b) }, stopX: stopX && { a: W(stopX.a), b: W(stopX.b) },
       gis: fmtGis(fr.theta, unit), angle: Math.acos(G.clamp(Math.abs(dot(s.u, uM)), 0, 1)),
+      farAxis: cont ? G.segEnd(cont[cont.length - 1]) : W({ x: xEnd, y: 0 }),
+      farDir: cont ? norm(sub(G.segEnd(cont[cont.length - 1]), G.segAt(cont[cont.length - 1], 0.98))) : s.u,
     };
+    for (const sd of [bd.entry, bd.exit]) sd.F = G.segStart(sd.curbW[0]);
     const xs = [toM(bd.entry.Tc).x, toM(bd.exit.Tc).x];
     const g0 = Math.min(...xs), g1 = Math.max(...xs);
     gaps[s.sY].push([g0, g1]);
@@ -397,8 +465,8 @@ export function buildPlan(prj, opt = {}) {
       // Tourne-à-droite : décalé de la bordure de (voie − demi-largeur − marge).
       const dR = (w) => Math.max(hv + 0.2, w - hv - m);
       const xX = toM(bd.exit.Tc).x, xE = toM(bd.entry.Tc).x, sn = dot(dNear, uM); // sens de la voie de rive en X
-      moves.push(['tourne-à-droite entrant', -1, G.offsetPath([...edgeRun(sY, xX - sn * lead, xX), ...G.revPath(bd.exit.curbW)], dR(Math.min(P.wLane, ls)))]);
-      moves.push(['tourne-à-droite sortant', -1, G.offsetPath([...bd.entry.curbW, ...edgeRun(sY, xE, xE + sn * lead)], dR(Math.min(P.wLane, le)))]);
+      moves.push(['tourne-à-droite entrant', -1, G.offsetPath([...edgeRun(sY, xX - sn * lead, xX), ...G.revPath(bd.exit.curbL)], dR(Math.min(P.wLane, ls)))]);
+      moves.push(['tourne-à-droite sortant', -1, G.offsetPath([...bd.entry.curbL, ...edgeRun(sY, xE, xE + sn * lead)], dR(Math.min(P.wLane, le)))]);
       {
         // Tourne-à-gauche entrant : depuis la voie de TAG, autour du centre de Ris, puis dans la voie de sortie.
         const Ris = bd.K.Ris, C = W(bd.K.Cs);
@@ -406,7 +474,7 @@ export function buildPlan(prj, opt = {}) {
         let end, tail;
         if (bd.exit.kArc) {
           end = add(C, mul(norm(sub(W(bd.exit.ctrl[2]), C)), Rg));
-          tail = G.offsetPath(G.revPath(bd.exit.curbW).slice(-2), Ris + ls - Rg);
+          tail = G.offsetPath(G.revPath(bd.exit.curbL).slice(-2), Ris + ls - Rg);
         } else { end = add(C, mul(cw(u), Rg)); tail = [L(end, add(end, mul(u, lead)))]; }
         moves.push(['tourne-à-gauche entrant', 1, [L(sub(T1, mul(dFar, lead)), T1), G.A(C, Rg, ang(sub(T1, C)), ang(sub(end, C)), true), ...tail]]);
       }
@@ -417,7 +485,7 @@ export function buildPlan(prj, opt = {}) {
         let start, head;
         if (bd.entry.kArc) {
           start = add(C, mul(norm(sub(W(bd.entry.ctrl[2]), C)), Rg));
-          head = G.offsetPath(bd.entry.curbW.slice(0, 2), Rie + le - Rg);
+          head = G.offsetPath(bd.entry.curbL.slice(0, 2), Rie + le - Rg);
         } else { start = add(C, mul(cw(neg(u)), Rg)); head = [L(add(start, mul(u, lead)), start)]; }
         moves.push(['tourne-à-gauche sortant', 1, [...head, G.A(C, Rg, ang(sub(start, C)), ang(sub(T3, C)), true), L(T3, add(T3, mul(dFar, lead)))]]);
       }
@@ -507,7 +575,15 @@ export function buildPlan(prj, opt = {}) {
       const mid = G.segAt(sd.fil.arc, 0.5);
       dims.radius(W(mid), norm(sub(sd.C, W(mid))), `${sd.s > 0 ? 'Re' : 'Rs'} = ${fmt(sd.R, 2)}`);
     }
-    Pp({ k: 'path', L: 'AXE', segs: [L(W({ x: x0 - 1, y: 0 }), W({ x: xEnd + 3, y: 0 }))] });
+    // Axe projet : alignement droit puis, s'il y a lieu, raccordement à l'axe saisi et ses sommets (rayons cotés, rayon
+    // demandé rappelé s'il a dû être réduit).
+    Pp({ k: 'path', L: 'AXE', segs: [L(W({ x: x0 - 1, y: 0 }), W({ x: xEnd + (bd.cont ? 0 : 3), y: 0 })), ...(bd.cont || [])] });
+    for (const f of bd.axisFillets) {
+      const mid = G.segAt(f.arc, 0.5), toC = norm(sub(f.arc.c, mid));
+      Pp({ k: 'cross', L: 'CONSTRUCTION', p: f.arc.c, size: 1 });
+      Pp({ k: 'path', L: 'CONSTRUCTION', segs: [L(f.arc.c, G.segStart(f.arc)), L(f.arc.c, G.segEnd(f.arc))] });
+      dims.radius(mid, toC, Math.abs(f.r - f.want) > 0.05 ? `R axe ${fmt(f.r, 1)} (${fmt(f.want, 1)} demandé)` : `R axe ${fmt(f.r, 1)}`, { len: 3 * TH });
+    }
     if (bd.stop) {
       // STOP : ligne continue de 0,50 m ; cédez-le-passage : T'2 de 0,50 m (0,50 / 0,50), en limite de chaussée prioritaire.
       const st = P.regime === 'stop' ? { wm: 0.5 } : { wm: 0.5, dash: [0.5, 0.5], lt: 'CLP' };
@@ -519,7 +595,8 @@ export function buildPlan(prj, opt = {}) {
     const tailX = bd.island?.aci?.te && bd.island.aci.ts ? Math.max(bd.island.aci.te.A0.x, bd.island.aci.ts.A0.x) : xT;
     const xs = bd.island ? tailX : x0, xc = Math.min(xEnd, xs + 30);
     Pp({ k: 'path', L: 'MARQUAGE', segs: [L(W({ x: xs, y: 0 }), W({ x: xc, y: 0 }))], wm: 0.15 });
-    if (xEnd > xc + 1) Pp({ k: 'path', L: 'MARQUAGE', segs: [L(W({ x: xc, y: 0 }), W({ x: xEnd, y: 0 }))], wm: 0.15, dash: [3, 10], lt: 'T1' });
+    const dashed = [...(xEnd > xc + 1 ? [L(W({ x: xc, y: 0 }), W({ x: xEnd, y: 0 }))] : []), ...(bd.cont || [])];
+    if (dashed.length) Pp({ k: 'path', L: 'MARQUAGE', segs: dashed, wm: 0.15, dash: [3, 10], lt: 'T1' });
     // Triangles de visibilité : œil à 2 m du bord droit de la branche, en arrière de la ligne ;
     // cible sur l'axe de la voie prioritaire, à D = V85 × t de part et d'autre.
     const Dv = (P.v85 / 3.6) * P.tVis;
@@ -544,8 +621,9 @@ export function buildPlan(prj, opt = {}) {
       D.vis.push({ name: bd.name, obs: P.dObs, v85: P.v85, t: P.tVis, D: Dv });
     }
     // Étiquettes
-    text('COTATION', W({ x: xEnd + 4 + 2 * TH, y: 0 }), bd.name, bd.theta + Math.PI / 2, 'center', TH * 1.6);
-    text('COTATION', W({ x: xEnd + 4, y: 0 }), `${bd.gis} · ${fmt((bd.angle * 200) / Math.PI, 1)} gr / principale`, bd.theta + Math.PI / 2, 'center', TH * 0.9);
+    const rotL = ang(bd.farDir) + Math.PI / 2;
+    text('COTATION', add(bd.farAxis, mul(bd.farDir, 4 + 2 * TH)), bd.name, rotL, 'center', TH * 1.6);
+    text('COTATION', add(bd.farAxis, mul(bd.farDir, 4)), `${bd.gis} · ${fmt((bd.angle * 200) / Math.PI, 1)} gr / principale`, rotL, 'center', TH * 0.9);
     if (bd.island?.aci) text('COTATION', W({ x: x0 + bd.h + 2 * TH, y: -1.5 * TH }), `îlot ACI : H = ${fmt(bd.h, 2)} · b1 = ${fmt(0.55 * bd.l, 2)} · b2 = ${fmt(1.45 * bd.l, 2)}`, bd.theta, 'left', TH * 0.7);
   }
   for (const bd of bds) {
@@ -603,7 +681,14 @@ export function buildPlan(prj, opt = {}) {
     if (bd.role !== 'secondaire') continue;
     const nm = bd.name;
     pt(`${nm} · axe au bord de la principale`, bd.W({ x: bd.x0, y: 0 }), bd.idx, 'axe');
-    pt(`${nm} · axe fin de projet`, bd.W({ x: bd.xEnd, y: 0 }), bd.idx, 'axe');
+    if (bd.cont) {
+      pt(`${nm} · axe fin de l'alignement droit`, bd.W({ x: bd.xEnd, y: 0 }), bd.idx, 'axe');
+      bd.axisFillets.forEach((f, k) => {
+        pt(`${nm} · axe raccordement ${k + 1} : début (R = ${fmt(f.r, 1)})`, G.segStart(f.arc), bd.idx, 'axe');
+        pt(`${nm} · axe raccordement ${k + 1} : fin`, G.segEnd(f.arc), bd.idx, 'axe');
+      });
+    }
+    pt(`${nm} · axe fin de projet`, bd.farAxis, bd.idx, 'axe');
     for (const [sd, lab, R] of [[bd.entry, 'côté entrée', 'Re'], [bd.exit, 'côté sortie', 'Rs']]) {
       pt(`${nm} · ${lab} : tangence chaussée principale (${R})`, sd.Tc, bd.idx, 'bordure');
       pt(`${nm} · ${lab} : tangence bordure (${R})`, sd.Tl, bd.idx, 'bordure');
