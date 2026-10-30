@@ -17,6 +17,12 @@ export const PROVIDERS = {
     url: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/${z}/${y}/${x}`,
     attr: '© Esri, HERE, Garmin, USGS',
   },
+  // Surcouche transparente : noms des villes et localités, limites administratives (sur l'imagerie satellite).
+  places: {
+    label: 'Noms des lieux (Esri)', max: 23, overlay: true,
+    url: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/${z}/${y}/${x}`,
+    attr: 'noms © Esri, HERE, Garmin, OpenStreetMap',
+  },
 };
 
 const lon2t = (lon, n) => ((lon + 180) / 360) * n;
@@ -106,6 +112,7 @@ export class TileLayer {
           dpr * sNW[0], dpr * sNW[1]);
         const e = this._get(z, wx, ty);
         if (e.ok && !e.blank) { ctx.drawImage(e.img, 0, 0, 256, 256, -0.4, -0.4, 256.8, 256.8); continue; }
+        if (P.overlay) continue; // textes : pas de tuile parente agrandie (écritures démesurées)
         // En attendant, ou si l'imagerie n'existe pas à ce niveau : tuile parente agrandie. Quand la tuile est vide
         // ou en erreur, la parente est demandée au serveur ; sinon, seules les tuiles déjà en cache servent.
         let ask = e.blank || e.err;

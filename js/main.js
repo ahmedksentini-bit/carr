@@ -10,6 +10,7 @@ import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, 
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
 import { analyse, SITES } from './capacity.js';
+import { initLang, getLang, t } from './i18n.js';
 import { analysePlan, gapParams, GAPS } from './capacity-plan.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -56,7 +57,7 @@ function newProject(context = 'interurbain') {
   return {
     app: 'GIRA', version: 1, name: 'Giratoire sans titre', context, kind: 'giratoire',
     crs: { id: 'utm', zone: 32, south: false, def: '' },
-    bg: { provider: 'esri', opacity: 1 },
+    bg: { provider: 'esri', opacity: 1, places: true },
     center: { auto: true, x: null, y: null },
     ring: { Rg: R.Rg, la: R.la, bf: R.bf, zC: 100, devers: R.devers, pente: 0, gisPente: 0, mode: 'aci' },
     plan: defaultPlan(context),
@@ -99,12 +100,14 @@ const S = {
   tog: { snap: true, ortho: false, grid: false }, space: false,
   hist: [], fut: [],
 };
-let viewer, tiles;
+let viewer, tiles, placeTiles;
 
 function init() {
   viewer = new Viewer($('#cv'));
   viewer.onRender = (ctx, v) => renderScene(ctx, v);
   tiles = new TileLayer(() => viewer.invalidate());
+  placeTiles = new TileLayer(() => viewer.invalidate());
+  placeTiles.provider = 'places';
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem('gira.autosave') || 'null'); } catch { saved = null; }
   S.prj = saved && saved.app === 'GIRA' ? migrate(saved) : newProject();
@@ -116,6 +119,7 @@ function init() {
   update({ commit: false });
   S.hist = [JSON.stringify(S.prj)];
   setTool('select');
+  initLang();
   requestAnimationFrame(() => {
     const v = saved?.view;
     if (v && isFinite(v.cx) && isFinite(v.s)) { viewer.cx = v.cx; viewer.cy = v.cy; viewer.s = v.s; viewer.invalidate(); }
@@ -199,9 +203,14 @@ function renderScene(ctx, v, exp = null) {
   ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
   ctx.fillStyle = T.bg; ctx.fillRect(0, 0, v.W, v.H);
   const imagery = S.crs.geo && S.prj.bg.provider !== 'none' && !exp?.noTiles;
+  const places = imagery && S.prj.bg.provider === 'esri' && S.prj.bg.places;
   if (imagery) {
     tiles.provider = S.prj.bg.provider; tiles.opacity = +S.prj.bg.opacity || 1;
     try { tiles.draw(ctx, v, S.crs, v.dpr); } catch (e) { console.warn(e); }
+    ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
+  }
+  if (places) {
+    try { placeTiles.draw(ctx, v, S.crs, v.dpr); } catch (e) { console.warn(e); }
     ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
   }
   if (S.tog.grid) drawGrid(ctx, v, theme);
@@ -209,7 +218,7 @@ function renderScene(ctx, v, exp = null) {
   drawDesign(ctx, v, S.D, theme, S.prj.opts.vis, { onImagery: imagery && S.prj.bg.provider === 'esri' });
   drawAxes(ctx, v, T, !!exp);
   if (!exp) drawOverlay(ctx, v, T);
-  drawHud(ctx, v, theme, northAngle(v), imagery ? PROVIDERS[S.prj.bg.provider].attr : '');
+  drawHud(ctx, v, theme, northAngle(v), imagery ? PROVIDERS[S.prj.bg.provider].attr + (places ? ' · ' + PROVIDERS.places.attr : '') : '');
 }
 
 function northAngle(v) {
@@ -368,7 +377,7 @@ function finishAxis() {
 
 function deleteBranch(i) {
   const b = S.prj.branches[i];
-  if (!b || !confirm(`Supprimer la branche ${b.name} ?`)) return;
+  if (!b || !confirm(t(`Supprimer la branche ${b.name} ?`))) return;
   S.prj.branches.splice(i, 1);
   S.sel = -1; S.hover = -1;
   renderBranchForm(); update();
@@ -766,6 +775,8 @@ function syncCrsUI() {
     : 'Système local : pas d\'imagerie. Les coordonnées sont celles du DXF importé.';
   $('#bgSel').value = S.prj.bg.provider;
   $('#bgOpacity').value = S.prj.bg.opacity;
+  $('#bgPlaces').checked = !!S.prj.bg.places;
+  $('#bgPlaces').disabled = S.prj.bg.provider !== 'esri';
   $('#bgSel').disabled = !S.crs.geo;
 }
 
@@ -1435,7 +1446,8 @@ function bindUI() {
   $('#crsZone').addEventListener('change', (e) => { const z = Math.round(+e.target.value); if (z >= 1 && z <= 60) changeCRS({ ...S.prj.crs, zone: z }); else syncCrsUI(); });
   $('#crsSouth').addEventListener('change', (e) => changeCRS({ ...S.prj.crs, south: e.target.checked }));
   $('#crsDef').addEventListener('change', (e) => changeCRS({ ...S.prj.crs, id: 'custom', def: e.target.value.trim() }));
-  $('#bgSel').addEventListener('change', (e) => { S.prj.bg.provider = e.target.value; viewer.invalidate(); commitHistory(); autosave(); });
+  $('#bgSel').addEventListener('change', (e) => { S.prj.bg.provider = e.target.value; $('#bgPlaces').disabled = e.target.value !== 'esri'; viewer.invalidate(); commitHistory(); autosave(); });
+  $('#bgPlaces').addEventListener('change', (e) => { S.prj.bg.places = e.target.checked; viewer.invalidate(); autosave(); });
   $('#bgOpacity').addEventListener('input', (e) => { S.prj.bg.opacity = +e.target.value; viewer.invalidate(); autosave(); });
   $('#themeSel').addEventListener('change', (e) => { S.prj.opts.theme = e.target.value; viewer.invalidate(); autosave(); });
   $('#angSel').addEventListener('change', (e) => { S.prj.opts.angleUnit = e.target.value; update(); });
@@ -1469,7 +1481,7 @@ function bindUI() {
   });
 
   $('#btnNew').addEventListener('click', () => {
-    if (S.prj.branches.length && !confirm('Créer un nouveau projet ? Le projet en cours non enregistré sera perdu.')) return;
+    if (S.prj.branches.length && !confirm(t('Créer un nouveau projet ? Le projet en cours non enregistré sera perdu.'))) return;
     const keep = { crs: S.prj.crs, bg: S.prj.bg, opts: S.prj.opts, kind: S.prj.kind };
     S.prj = { ...newProject(S.prj.context), ...keep };
     S.sel = -1; S.hist = []; S.fut = [];
@@ -1490,7 +1502,7 @@ function bindUI() {
 
 function setContext(c) {
   if (c === S.prj.context) return;
-  const apply = !S.prj.branches.length || confirm(`Appliquer les valeurs par défaut du guide ${c === 'urbain' ? 'CERTU (urbain)' : 'SETRA ACI (interurbain)'} à l'anneau et à toutes les branches ?`);
+  const apply = !S.prj.branches.length || confirm(t(`Appliquer les valeurs par défaut du guide ${c === 'urbain' ? 'CERTU (urbain)' : 'SETRA ACI (interurbain)'} à l'anneau et à toutes les branches ?`));
   S.prj.context = c;
   if (apply) {
     const P = PRESETS[c];
@@ -1516,7 +1528,7 @@ function setKind(k) {
   if (k === (S.prj.kind || 'giratoire')) return;
   const changesFamily = isPlan({ kind: k }) !== isPlan(S.prj);
   S.prj.kind = k;
-  if (changesFamily && S.prj.branches.length && confirm('Appliquer aux branches les valeurs par défaut de ce type de carrefour ?')) resetBranchDefaults();
+  if (changesFamily && S.prj.branches.length && confirm(t('Appliquer aux branches les valeurs par défaut de ce type de carrefour ?'))) resetBranchDefaults();
   S.formRole = undefined;
   syncCtxUI(); update();
   zoomGira();
@@ -1570,7 +1582,7 @@ async function geoSearch(q) {
   const ul = $('#geoRes');
   ul.innerHTML = '<li class="dim">Recherche…</li>';
   try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=6&accept-language=fr&q=${encodeURIComponent(q)}`);
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=6&accept-language=${getLang() === 'ar' ? 'ar,fr' : 'fr'}&q=${encodeURIComponent(q)}`);
     const js = await r.json();
     ul.innerHTML = js.length
       ? js.map((x) => `<li data-lat="${x.lat}" data-lon="${x.lon}">${esc(x.display_name)}</li>`).join('')

@@ -209,3 +209,27 @@ dialog li { margin: 4px 0; }
 .profile .pf-note { fill: var(--muted); font-size: 9.5px; }
 table.fixes td { vertical-align: top; font-size: 12px; }
 table.axr input.odc { width: 70px; text-align: right; font-family: var(--mono); font-size: 12px; }
+
+/* Arabe : mise en page de droite à gauche. Le plan, les graphiques, les nombres saisis et les coordonnées restent
+   de gauche à droite. */
+#btnLang { font-family: inherit; }
+html[dir=rtl] body { font-family: "Segoe UI", Tahoma, "Noto Sans Arabic", system-ui, sans-serif; }
+html[dir=rtl] .tools { border-right: 0; border-left: 1px solid var(--line); }
+html[dir=rtl] .panel { border-left: 0; border-right: 1px solid var(--line); }
+html[dir=rtl] .toast { border-left-width: 1px; border-right: 4px solid var(--info); }
+html[dir=rtl] .toast.warn { border-right-color: var(--warn); }
+html[dir=rtl] .toast.err { border-right-color: var(--err); }
+html[dir=rtl] .fld input[type=text]:not([data-type=text]), html[dir=rtl] input.odc, html[dir=rtl] .mono,
+html[dir=rtl] .kv dd, html[dir=rtl] kbd, html[dir=rtl] .tip { direction: ltr; unicode-bidi: isolate; }
+html[dir=rtl] .fld input[data-type=text], html[dir=rtl] .seg button, html[dir=rtl] table.pts th { text-align: right; }
+html[dir=rtl] .kv dd { text-align: left; }
+html[dir=rtl] .hint { padding-left: 0; padding-right: 2px; }
+html[dir=rtl] .layers .chk .dim { margin-left: 0; margin-right: auto; }
+html[dir=rtl] .guide ul { padding-left: 0; padding-right: 18px; }
+html[dir=rtl] dialog ol { padding-left: 0; padding-right: 20px; }
+html[dir=rtl] .keys td { padding: 2px 0 2px 10px; }
+html[dir=rtl] .right { text-align: left; }
+html[dir=rtl] .chart svg, html[dir=rtl] svg text { direction: ltr; }
+@media (max-width: 760px) {
+  html[dir=rtl] .panel { border-right: 0; }
+}
