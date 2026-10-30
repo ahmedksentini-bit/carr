@@ -319,7 +319,6 @@ function updateCursor() {
 function setPrompt() {
   const k = S.tool === 'axis' ? (S.extend ? 'extend' : S.draft.length ? 'axis1' : 'axis0') : S.tool;
   $('#stPrompt').textContent = PROMPTS[k] || '';
-  $('#empty').hidden = !!S.prj.branches.length || S.tool === 'axis';
 }
 function cancelTool() {
   if (S.extend) { S.draft = []; setTool('select'); return; }
