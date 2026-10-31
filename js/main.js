@@ -11,6 +11,7 @@ import { GAMMES, CATALOG } from './signs.js';
 import { signSVG, signOutline } from './signicons.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
+import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF } from './pt.js';
 import { plParams, plBuild, plStations, plTerrainLine, plFromTerrain, plChartSVG, plChartPick, plDXF, plChecks, axisLength } from './pl.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
@@ -69,6 +70,7 @@ function newProject(context = 'interurbain') {
     section: {}, // profil en travers : valeurs vides = valeurs par défaut du contexte (norms.SECTION)
     signs: {}, // signalisation verticale : valeurs vides = valeurs par défaut du contexte (norms.SIGNS)
     tn: { source: '', step: '', edges: false, points: false, pts: [], info: null }, // terrain naturel (points x, y, z)
+    pt: {}, // profils en travers : pas, demi-largeur, talus (valeurs vides = défauts de pt.js)
     traffic: { period: 'HPM', site: context === 'urbain' ? 'urbain' : 'rase', uvpPL: 2, od: {}, pl: {}, qp: {}, tad: {} },
     branches: [],
     opts: { angleUnit: 'gon', textH: 0.8, theme: 'dark', vis: {}, dxfOpacity: 0.9 },
@@ -82,7 +84,7 @@ function migrate(p) {
     ring: { ...base.ring, ...p.ring }, opts: { ...base.opts, ...p.opts, vis: { ...(p.opts?.vis || {}) } },
     center: { ...base.center, ...p.center }, crs: { ...base.crs, ...p.crs }, bg: { ...base.bg, ...p.bg },
     plan: { ...base.plan, ...p.plan, tag: { ...base.plan.tag, ...p.plan?.tag } },
-    section: { ...p.section }, signs: { ...p.signs }, tn: { ...base.tn, ...p.tn, pts: Array.isArray(p.tn?.pts) ? p.tn.pts : [] },
+    section: { ...p.section }, signs: { ...p.signs }, tn: { ...base.tn, ...p.tn, pts: Array.isArray(p.tn?.pts) ? p.tn.pts : [] }, pt: { ...p.pt },
     traffic: { ...base.traffic, ...p.traffic, od: { ...p.traffic?.od }, pl: { ...p.traffic?.pl }, qp: { ...p.traffic?.qp }, tad: { ...p.traffic?.tad } },
   };
   delete out.view;
@@ -108,6 +110,7 @@ const S = {
   hist: [], fut: [],
   tn: null, tnSig: '', // MNT construit (tin, prims) et signature des points / options dont il dépend
   plSel: -1, plPi: -1, plDrag: null, // profil en long : branche affichée, PI sélectionné, glissement en cours
+  ptSel: -1, ptSt: 0, // profils en travers : branche et station affichées
 };
 let viewer, tiles, placeTiles;
 
@@ -877,6 +880,7 @@ function refreshPanels() {
   refreshSigns();
   refreshTerrain();
   refreshPL();
+  refreshPT();
   setPrompt();
 }
 
@@ -1488,6 +1492,62 @@ function bindPL() {
   });
 }
 
+// --------------------------------------------------------- Profils en travers
+function ptBranch() {
+  const cands = (S.D?.branches || []).filter((bd) => bd.role !== 'principale' && bd.zAt);
+  if (!cands.length) return null;
+  return cands.find((q) => q.idx === S.ptSel) || cands.find((q) => q.idx === S.sel) || cands[0];
+}
+function ptList() {
+  const bd = ptBranch();
+  return bd ? crossSections(S.prj, bd, S.tn?.tin) : [];
+}
+function refreshPT() {
+  const sel = $('#ptBranch'), cands = (S.D?.branches || []).filter((bd) => bd.role !== 'principale');
+  const sig = JSON.stringify(cands.map((b) => [b.idx, b.name]));
+  if (sel.dataset.sig !== sig) { sel.dataset.sig = sig; sel.innerHTML = cands.map((b) => `<option value="${b.idx}">${esc(b.name)}</option>`).join(''); }
+  const bd = ptBranch();
+  if (!bd) { $('#ptChart').innerHTML = '<p class="note">Dessinez les branches pour afficher leurs profils en travers.</p>'; $('#ptTable').innerHTML = ''; $('#ptStation').innerHTML = ''; return; }
+  sel.value = String(bd.idx);
+  let list;
+  try { list = ptList(); } catch (e) { console.error(e); $('#ptChart').innerHTML = `<p class="note">Profils en travers : ${esc(e.message)}</p>`; return; }
+  if (S.ptSt >= list.length) S.ptSt = list.length - 1;
+  if (S.ptSt < 0) S.ptSt = 0;
+  const st = $('#ptStation'), ssig = JSON.stringify(list.map((c) => c.s));
+  if (st.dataset.sig !== ssig) { st.dataset.sig = ssig; st.innerHTML = list.map((c, i) => `<option value="${i}">s = ${fmt(c.s, 1)} m</option>`).join(''); }
+  st.value = String(S.ptSt);
+  const cs = list[S.ptSt];
+  $('#ptChart').innerHTML = cs ? ptChartSVG(cs, { ve: +($('#ptVe').value || 0) }) : '';
+  const last = list[list.length - 1];
+  $('#ptTable').innerHTML = '<thead><tr><th>s (m)</th><th>z axe</th><th>z TN</th><th>déblai m²</th><th>remblai m²</th><th>V déblai m³</th><th>V remblai m³</th></tr></thead><tbody>' +
+    list.map((c, i) => `<tr class="${i === S.ptSt ? 'on' : ''}" data-pts="${i}"><td class="mono">${fmt(c.s, 1)}</td><td class="mono">${fmt(c.zAxe)}</td><td class="mono">${c.zTN == null ? '—' : fmt(c.zTN)}</td>` +
+      `<td class="mono cut">${fmt(c.cut, 2)}</td><td class="mono fill">${fmt(c.fill, 2)}</td><td class="mono cut">${fmt(c.vCut, 0)}</td><td class="mono fill">${fmt(c.vFill, 0)}</td></tr>`).join('') + '</tbody>';
+  const noTN = list.filter((c) => !c.ok).length, noEnd = list.filter((c) => c.ok && (!c.endL || !c.endR)).length;
+  $('#ptNote').textContent = (S.tn ? '' : 'Aucun MNT : les talus et les cubatures ne peuvent pas être calculés (onglet Terrain). ')
+    + (noTN ? `${noTN} station(s) hors du MNT. ` : '') + (noEnd ? `${noEnd} station(s) : talus sans entrée en terre dans la demi-largeur de coupe (élargir la coupe). ` : '')
+    + (last ? `Total ${bd.name} : déblai ${fmt(last.vCut, 0)} m³, remblai ${fmt(last.vFill, 0)} m³ (aires moyennes, sans décapage ni foisonnement).` : '');
+}
+function bindPT() {
+  $('#ptBranch').addEventListener('change', (e) => { S.ptSel = +e.target.value; S.ptSt = 0; refreshPT(); });
+  $('#ptVe').addEventListener('change', refreshPT);
+  $('#ptStation').addEventListener('change', (e) => { S.ptSt = +e.target.value; refreshPT(); });
+  $('#btnPtPrev').addEventListener('click', () => { S.ptSt = Math.max(0, S.ptSt - 1); refreshPT(); });
+  $('#btnPtNext').addEventListener('click', () => { S.ptSt += 1; refreshPT(); });
+  $('#ptTable').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-pts]'); if (tr) { S.ptSt = +tr.dataset.pts; refreshPT(); } });
+  $('#btnPtDxf').addEventListener('click', () => {
+    const bd = ptBranch(); if (!bd) return;
+    const list = ptList(), ve = +($('#ptVe').value || 0) || 2;
+    download(fname('dxf').replace(/\.dxf$/, `_PT_${bd.name}.dxf`), ptDXF(list, `Profils en travers ${bd.name} — ${S.prj.name}`, ve), 'application/dxf');
+    toast(`${list.length} profils en travers exportés (exagération × ${ve}).`);
+  });
+  $('#btnPtCsv').addEventListener('click', () => {
+    const bd = ptBranch(); if (!bd) return;
+    const c = (v, k = 2) => (v == null ? '' : v.toFixed(k).replace('.', ','));
+    const rows = ['s;X;Y;Z_axe;Z_TN;deblai_m2;remblai_m2;V_deblai_m3;V_remblai_m3', ...ptList().map((q) => `${c(q.s, 1)};${c(q.p.x, 3)};${c(q.p.y, 3)};${c(q.zAxe)};${c(q.zTN)};${c(q.cut)};${c(q.fill)};${c(q.vCut, 1)};${c(q.vFill, 1)}`)];
+    download(fname('csv').replace(/\.csv$/, `_PT_${bd.name}.csv`), '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
+  });
+}
+
 // --------------------------------------------------------- Visibilité
 function refreshVisibility() {
   const plan = isPlan(S.prj), V = S.D?.vis || [];
@@ -1755,6 +1815,7 @@ function bindUI() {
 
   bindTerrain();
   bindPL();
+  bindPT();
   $('#btnImportDxf').addEventListener('click', () => $('#fileDxf').click());
   $('#fileDxf').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) importDXF(f); e.target.value = ''; });
   $('#dxfLayers').addEventListener('input', (e) => {

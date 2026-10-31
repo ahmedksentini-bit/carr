@@ -122,6 +122,12 @@ ou sur un fond topographique DXF.
   La ligne rouge remplace la pente constante de la branche dans le modèle altimétrique (dévers, points d'implantation).
   Contrôles : chevauchement des raccordements, pente maximale et rayons minimaux (ARP catégorie R80 par défaut, valeurs
   urbaines usuelles — à confirmer selon la catégorie), pente ≤ 2 % sur les 20 derniers mètres (ACI), PI hors de l'axe.
+- **Profils en travers** (onglet Profils travers) : coupes perpendiculaires à l'axe projet aux stations régulières
+  (pas réglable) : plateforme issue du modèle (îlot séparateur ou TPC en saillie, voies avec leur dévers, BDD et berme
+  en interurbain, caniveau, bordure, trottoir et contre-bordure en urbain — onglet Profil), talus de remblai (3/2) et
+  de déblai (1/1) réglables, fossé triangulaire optionnel en déblai, terrain naturel du MNT sur la demi-largeur de
+  coupe, surfaces de déblai / remblai par station et volumes cumulés (aires moyennes), graphique par station,
+  export DXF en planches et CSV des cubatures.
 - **Exports** : DXF R12 par calques `GIRA_*` (AutoCAD, Covadis, BricsCAD…), PNG, points d'implantation X, Y, Z en CSV,
   projet `.gira.json` (et sauvegarde automatique dans le navigateur).
 

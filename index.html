@@ -8,41 +8,42 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%2338bdf8' stroke-width='4'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%234ade80'/%3E%3C/svg%3E">
   <!-- data-cfasync : exclut les scripts de Rocket Loader (Cloudflare), qui casse les modules ES. -->
   <!-- version:start (généré par tools/version.sh) -->
-  <link rel="stylesheet" href="css/app.css?v=c35fa00348">
+  <link rel="stylesheet" href="css/app.css?v=772f988b68">
   <script data-cfasync="false" type="importmap">
   { "imports": {
-    "./js/approach.js": "./js/approach.js?v=c35fa00348",
-    "./js/bypass.js": "./js/bypass.js?v=c35fa00348",
-    "./js/capacity-plan.js": "./js/capacity-plan.js?v=c35fa00348",
-    "./js/capacity.js": "./js/capacity.js?v=c35fa00348",
-    "./js/common.js": "./js/common.js?v=c35fa00348",
-    "./js/crossing.js": "./js/crossing.js?v=c35fa00348",
-    "./js/crs.js": "./js/crs.js?v=c35fa00348",
-    "./js/devers.js": "./js/devers.js?v=c35fa00348",
-    "./js/dims.js": "./js/dims.js?v=c35fa00348",
-    "./js/dxf-parse.js": "./js/dxf-parse.js?v=c35fa00348",
-    "./js/dxf-write.js": "./js/dxf-write.js?v=c35fa00348",
-    "./js/geom.js": "./js/geom.js?v=c35fa00348",
-    "./js/i18n-ar.js": "./js/i18n-ar.js?v=c35fa00348",
-    "./js/i18n.js": "./js/i18n.js?v=c35fa00348",
-    "./js/layers.js": "./js/layers.js?v=c35fa00348",
-    "./js/main.js": "./js/main.js?v=c35fa00348",
-    "./js/norms.js": "./js/norms.js?v=c35fa00348",
-    "./js/pl.js": "./js/pl.js?v=c35fa00348",
-    "./js/plan.js": "./js/plan.js?v=c35fa00348",
-    "./js/profile.js": "./js/profile.js?v=c35fa00348",
-    "./js/roundabout.js": "./js/roundabout.js?v=c35fa00348",
-    "./js/signicons.js": "./js/signicons.js?v=c35fa00348",
-    "./js/signs.js": "./js/signs.js?v=c35fa00348",
-    "./js/swept.js": "./js/swept.js?v=c35fa00348",
-    "./js/terrain.js": "./js/terrain.js?v=c35fa00348",
-    "./js/tiles.js": "./js/tiles.js?v=c35fa00348",
-    "./js/tin.js": "./js/tin.js?v=c35fa00348",
-    "./js/viewer.js": "./js/viewer.js?v=c35fa00348"
+    "./js/approach.js": "./js/approach.js?v=772f988b68",
+    "./js/bypass.js": "./js/bypass.js?v=772f988b68",
+    "./js/capacity-plan.js": "./js/capacity-plan.js?v=772f988b68",
+    "./js/capacity.js": "./js/capacity.js?v=772f988b68",
+    "./js/common.js": "./js/common.js?v=772f988b68",
+    "./js/crossing.js": "./js/crossing.js?v=772f988b68",
+    "./js/crs.js": "./js/crs.js?v=772f988b68",
+    "./js/devers.js": "./js/devers.js?v=772f988b68",
+    "./js/dims.js": "./js/dims.js?v=772f988b68",
+    "./js/dxf-parse.js": "./js/dxf-parse.js?v=772f988b68",
+    "./js/dxf-write.js": "./js/dxf-write.js?v=772f988b68",
+    "./js/geom.js": "./js/geom.js?v=772f988b68",
+    "./js/i18n-ar.js": "./js/i18n-ar.js?v=772f988b68",
+    "./js/i18n.js": "./js/i18n.js?v=772f988b68",
+    "./js/layers.js": "./js/layers.js?v=772f988b68",
+    "./js/main.js": "./js/main.js?v=772f988b68",
+    "./js/norms.js": "./js/norms.js?v=772f988b68",
+    "./js/pl.js": "./js/pl.js?v=772f988b68",
+    "./js/plan.js": "./js/plan.js?v=772f988b68",
+    "./js/profile.js": "./js/profile.js?v=772f988b68",
+    "./js/pt.js": "./js/pt.js?v=772f988b68",
+    "./js/roundabout.js": "./js/roundabout.js?v=772f988b68",
+    "./js/signicons.js": "./js/signicons.js?v=772f988b68",
+    "./js/signs.js": "./js/signs.js?v=772f988b68",
+    "./js/swept.js": "./js/swept.js?v=772f988b68",
+    "./js/terrain.js": "./js/terrain.js?v=772f988b68",
+    "./js/tiles.js": "./js/tiles.js?v=772f988b68",
+    "./js/tin.js": "./js/tin.js?v=772f988b68",
+    "./js/viewer.js": "./js/viewer.js?v=772f988b68"
   } }
   </script>
   <script data-cfasync="false" src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script>
-  <script data-cfasync="false" type="module" src="js/main.js?v=c35fa00348"></script>
+  <script data-cfasync="false" type="module" src="js/main.js?v=772f988b68"></script>
   <!-- version:end -->
 </head>
 <body>
@@ -94,6 +95,7 @@
         <button data-tab="branches">Branches</button>
         <button data-tab="terrain">Terrain</button>
         <button data-tab="pl">Profil long</button>
+        <button data-tab="pt">Profils travers</button>
         <button data-tab="devers">Dévers</button>
         <button data-tab="controles">Contrôles <span id="chkBadge" class="badge"></span></button>
         <button data-tab="visibilite">Visibilité</button>
@@ -270,6 +272,39 @@
         </div>
         <div class="tablewrap"><table id="plStations" class="pts"></table></div>
         <p class="note" id="plNote"></p>
+      </div>
+
+      <div class="tab" id="tab-pt" hidden>
+        <p class="note">Profils en travers de la branche aux stations régulières de l'axe projet : plateforme (îlot ou TPC en saillie, voies avec leur dévers, BDD et berme en interurbain, caniveau, bordure, trottoir et contre-bordure en urbain — onglet Profil), talus jusqu'au terrain naturel du MNT, surfaces de déblai / remblai et volumes cumulés (aires moyennes).</p>
+        <div class="row">
+          <label class="fld"><span class="lb">Branche</span><select id="ptBranch"></select></label>
+          <label class="fld"><span class="lb">Exagération</span><select id="ptVe"><option value="0">auto</option><option value="1">× 1</option><option value="2">× 2</option><option value="5">× 5</option></select></label>
+        </div>
+        <div class="row">
+          <label class="fld"><span class="lb">Pas des stations</span><input data-k="pt.step" type="text" inputmode="decimal" placeholder="20"><span class="un">m</span></label>
+          <label class="fld"><span class="lb">Demi-largeur de coupe</span><input data-k="pt.halfW" type="text" inputmode="decimal" placeholder="25"><span class="un">m</span></label>
+        </div>
+        <div class="row">
+          <label class="fld"><span class="lb">Talus de remblai (H/V)</span><input data-k="pt.remblai" type="text" inputmode="decimal" placeholder="1,5"><span class="un"></span></label>
+          <label class="fld"><span class="lb">Talus de déblai (H/V)</span><input data-k="pt.deblai" type="text" inputmode="decimal" placeholder="1"><span class="un"></span></label>
+        </div>
+        <div class="row">
+          <label class="fld"><span class="lb">Fossé en déblai : profondeur</span><input data-k="pt.fosse" type="text" inputmode="decimal" placeholder="0"><span class="un">m</span></label>
+          <label class="fld"><span class="lb">largeur</span><input data-k="pt.fosseW" type="text" inputmode="decimal" placeholder="1,5"><span class="un">m</span></label>
+        </div>
+        <div class="row">
+          <button id="btnPtPrev">◀</button>
+          <label class="fld"><span class="lb">Station</span><select id="ptStation"></select></label>
+          <button id="btnPtNext">▶</button>
+        </div>
+        <div id="ptChart" class="chart pl"></div>
+        <h3>Stations et cubatures</h3>
+        <div class="tablewrap"><table id="ptTable" class="pts"></table></div>
+        <div class="row">
+          <button id="btnPtDxf" class="primary">Exporter les profils (DXF)</button>
+          <button id="btnPtCsv">Cubatures (CSV)</button>
+        </div>
+        <p class="note" id="ptNote"></p>
       </div>
 
       <div class="tab" id="tab-devers" hidden>
