@@ -11,6 +11,7 @@ import { GAMMES, CATALOG } from './signs.js';
 import { signSVG, signOutline } from './signicons.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
+import { plParams, plBuild, plStations, plTerrainLine, plFromTerrain, plChartSVG, plChartPick, plDXF, plChecks, axisLength } from './pl.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
 import { analyse, SITES } from './capacity.js';
@@ -106,6 +107,7 @@ const S = {
   tog: { snap: true, ortho: false, grid: false }, space: false,
   hist: [], fut: [],
   tn: null, tnSig: '', // MNT construit (tin, prims) et signature des points / options dont il dépend
+  plSel: -1, plPi: -1, plDrag: null, // profil en long : branche affichée, PI sélectionné, glissement en cours
 };
 let viewer, tiles, placeTiles;
 
@@ -874,6 +876,7 @@ function refreshPanels() {
   refreshProfile();
   refreshSigns();
   refreshTerrain();
+  refreshPL();
   setPrompt();
 }
 
@@ -1366,6 +1369,125 @@ function bindTerrain() {
   $('#btnTnClear').addEventListener('click', () => { S.prj.tn = { ...S.prj.tn, source: '', pts: [], info: null }; update(); });
 }
 
+// --------------------------------------------------------- Profil en long
+// Branche affichée dans l'onglet : celle choisie, sinon la branche sélectionnée sur le plan, sinon la première.
+function plBranch() {
+  const D = S.D, cands = (D?.branches || []).filter((bd) => bd.role !== 'principale');
+  if (!cands.length) return null;
+  let bd = cands.find((q) => q.idx === S.plSel) || cands.find((q) => q.idx === S.sel) || cands[0];
+  return bd;
+}
+function plData() {
+  const bd = plBranch();
+  if (!bd) return null;
+  const db = S.D.devers?.branches?.find((q) => q.idx === bd.idx);
+  if (!db) return null;
+  const br = S.prj.branches[bd.idx], sEnd = axisLength(bd);
+  // Sans profil saisi : ligne droite à la pente courante, affichée à titre indicatif.
+  const PL = db.pl || plBuild({ pis: [{ s: sEnd, z: db.z0 + db.grade * sEnd, R: 0 }] }, db.z0);
+  return { bd, db, br, sEnd, PL, defined: !!db.pl };
+}
+function refreshPL() {
+  const sel = $('#plBranch'), cands = (S.D?.branches || []).filter((bd) => bd.role !== 'principale');
+  const sig = JSON.stringify(cands.map((b) => [b.idx, b.name]));
+  if (sel.dataset.sig !== sig) { sel.dataset.sig = sig; sel.innerHTML = cands.map((b) => `<option value="${b.idx}">${esc(b.name)}</option>`).join(''); }
+  const d = plData();
+  if (!d) { $('#plChart').innerHTML = '<p class="note">Dessinez les branches pour afficher leur profil en long.</p>'; $('#plTable').innerHTML = ''; $('#plStations').innerHTML = ''; $('#plChecks').innerHTML = ''; return; }
+  sel.value = String(d.bd.idx);
+  const { bd, PL, sEnd, br } = d;
+  const tnLine = S.tn ? plTerrainLine(bd, S.tn.tin, Math.max(sEnd, PL.sEnd)) : [];
+  const ve = +($('#plVe').value || 0);
+  $('#plChart').innerHTML = plChartSVG(PL, tnLine, sEnd, { ve, sel: S.plPi });
+  // Tableau des PI
+  const pis = br.pl?.pis || [];
+  $('#plTable').innerHTML = '<thead><tr><th>PI</th><th>s (m)</th><th>z (m)</th><th>R (m)</th><th>pente aval</th><th></th></tr></thead><tbody>' +
+    `<tr><td>anneau</td><td class="mono">0,00</td><td class="mono">${fmt(d.db.z0)}</td><td class="mono">—</td><td class="mono">${PL.segs[0] ? fmt(PL.segs[0].g * 100, 2) + ' %' : '—'}</td><td></td></tr>` +
+    pis.map((q, i) => `<tr class="${i === S.plPi ? 'on' : ''}"><td>PI ${i + 1}</td>` +
+      ['s', 'z', 'R'].map((f) => `<td><input data-pi="${i}" data-f="${f}" type="text" inputmode="decimal" value="${showNum(q[f] ?? '')}"></td>`).join('') +
+      `<td class="mono">${PL.segs[i + 1] ? fmt(PL.segs[i + 1].g * 100, 2) + ' %' : '—'}</td><td class="act"><button data-pidel="${i}" title="Supprimer ce point">×</button></td></tr>`).join('') + '</tbody>';
+  // Contrôles du profil
+  const checks = d.defined ? plChecks(PL, S.prj.context, sEnd) : [];
+  $('#plChecks').innerHTML = checks.length ? '<ul class="checks">' + checks.map((c) => `<li class="${c.lvl}"><span class="ic">${{ err: '✖', warn: '!', info: 'i', ok: '✔' }[c.lvl] || 'i'}</span><span>${esc(c.msg)}</span></li>`).join('') + '</ul>'
+    : d.defined ? '<p class="note">Profil conforme aux valeurs de contrôle (ARP / ACI).</p>' : '<p class="note">Aucun profil saisi : pente constante de l\'onglet Branches. Cliquez sur le graphique ou « Proposer depuis le TN ».</p>';
+  // Stations
+  const step = parseNum($('#plStep').value) || 10;
+  const st = plStations(bd, PL, S.tn?.tin, sEnd, step);
+  $('#plStations').innerHTML = '<thead><tr><th>s (m)</th><th>X</th><th>Y</th><th>z TN</th><th>z projet</th><th>projet − TN</th><th>pente</th></tr></thead><tbody>' +
+    st.map((q) => `<tr><td>${fmt(q.s, 2)}</td><td>${q.p.x.toFixed(2)}</td><td>${q.p.y.toFixed(2)}</td><td>${q.zTN == null ? '—' : fmt(q.zTN)}</td><td>${fmt(q.zP)}</td>` +
+      `<td class="${q.dz == null ? '' : q.dz >= 0 ? 'fill' : 'cut'}">${q.dz == null ? '—' : (q.dz >= 0 ? '+' : '−') + fmt(Math.abs(q.dz))}</td><td>${fmt(q.g * 100, 2)} %</td></tr>`).join('') + '</tbody>';
+  $('#plNote').textContent = (S.tn ? '' : 'Aucun MNT : le terrain naturel n\'est pas tracé (onglet Terrain). ') + (bd.cont ? 'Au-delà de l\'alignement droit, s suit l\'axe saisi (raccordement compris).' : '');
+}
+function plSetPi(i, f, v) {
+  const br = S.prj.branches[plBranch()?.idx];
+  if (!br) return;
+  br.pl = br.pl || { pis: [] };
+  br.pl.pis[i] = { ...br.pl.pis[i], [f]: v };
+}
+function plAddPi(s, z, R) {
+  const br = S.prj.branches[plBranch()?.idx];
+  if (!br) return;
+  br.pl = br.pl || { pis: [] };
+  br.pl.pis.push({ s: Math.round(s * 10) / 10, z: Math.round(z * 100) / 100, R: R ?? (S.prj.context === 'urbain' ? 800 : 3000) });
+  br.pl.pis.sort((a, b) => +a.s - +b.s);
+  S.plPi = br.pl.pis.findIndex((q) => Math.abs(+q.s - Math.round(s * 10) / 10) < 1e-6);
+  update();
+}
+function bindPL() {
+  $('#plBranch').addEventListener('change', (e) => { S.plSel = +e.target.value; S.plPi = -1; refreshPL(); });
+  $('#plVe').addEventListener('change', refreshPL);
+  $('#plStep').addEventListener('change', refreshPL);
+  const chart = $('#plChart');
+  const pick = (e) => {
+    const svg = chart.querySelector('svg'); if (!svg) return null;
+    const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+    return plChartPick(svg, ((e.clientX - r.left) / r.width) * vb.width, ((e.clientY - r.top) / r.height) * vb.height);
+  };
+  chart.addEventListener('pointerdown', (e) => {
+    const h = e.target.closest('.pl-pi'); if (!h || h.classList.contains('fixed')) return;
+    S.plPi = +h.dataset.pi; S.plDrag = { moved: false };
+    chart.setPointerCapture?.(e.pointerId); e.preventDefault();
+  });
+  chart.addEventListener('pointermove', (e) => {
+    if (!S.plDrag) return;
+    const q = pick(e); if (!q) return;
+    S.plDrag.moved = true;
+    plSetPi(S.plPi, 's', Math.max(0.5, Math.round(q.s * 10) / 10)); plSetPi(S.plPi, 'z', Math.round(q.z * 100) / 100);
+    update({ commit: false });
+  });
+  chart.addEventListener('pointerup', (e) => {
+    if (S.plDrag) { const moved = S.plDrag.moved; S.plDrag = null; if (moved) { commitHistory(); refreshPL(); } else refreshPL(); return; }
+    const d = plData(), q = pick(e); if (!d || !q || q.s <= 0.5) return;
+    plAddPi(q.s, q.z);
+  });
+  $('#btnPlAdd').addEventListener('click', () => { const d = plData(); if (!d) return; const s = Math.min(d.sEnd, (d.PL.sEnd || 0) + 40); plAddPi(s, d.PL.zAt(s), 0); });
+  $('#btnPlTn').addEventListener('click', () => {
+    const d = plData(); if (!d) return;
+    if (!S.tn) { toast('Construisez d\'abord le MNT (onglet Terrain).', 'warn'); return; }
+    const pis = plFromTerrain(d.bd, S.tn.tin, d.sEnd, { R: S.prj.context === 'urbain' ? 800 : 3000, z0: d.db.z0 });
+    if (!pis.length) { toast('La branche est hors du MNT.', 'warn'); return; }
+    d.br.pl = { ...d.br.pl, pis }; S.plPi = -1; update();
+  });
+  $('#btnPlClear').addEventListener('click', () => { const d = plData(); if (!d) return; if (d.br.pl) d.br.pl.pis = []; S.plPi = -1; update(); });
+  $('#plTable').addEventListener('input', (e) => { const t = e.target; if (t.dataset.pi == null) return; plSetPi(+t.dataset.pi, t.dataset.f, parseNum(t.value)); update({ commit: false }); });
+  $('#plTable').addEventListener('change', (e) => { if (e.target.dataset.pi != null) { const br = S.prj.branches[plBranch()?.idx]; if (br?.pl) br.pl.pis.sort((a, b) => +a.s - +b.s); commitHistory(); refreshPL(); } });
+  $('#plTable').addEventListener('click', (e) => { const b = e.target.closest('[data-pidel]'); if (!b) return; const br = S.prj.branches[plBranch()?.idx]; if (!br?.pl) return; br.pl.pis.splice(+b.dataset.pidel, 1); S.plPi = -1; update(); });
+  $('#btnPlDxf').addEventListener('click', () => {
+    const d = plData(); if (!d) { toast('Aucune branche.', 'warn'); return; }
+    const tnLine = S.tn ? plTerrainLine(d.bd, S.tn.tin, Math.max(d.sEnd, d.PL.sEnd)) : [];
+    const st = plStations(d.bd, d.PL, S.tn?.tin, d.sEnd, parseNum($('#plStep').value) || 10);
+    const ve = +($('#plVe').value || 0) || 5;
+    download(fname('dxf').replace(/\.dxf$/, `_PL_${d.bd.name}.dxf`), plDXF(d.PL, tnLine, st, `Profil en long ${d.bd.name} — ${S.prj.name}`, ve), 'application/dxf');
+    toast(`Profil en long ${d.bd.name} exporté (exagération × ${ve}).`);
+  });
+  $('#btnPlCsv').addEventListener('click', () => {
+    const d = plData(); if (!d) return;
+    const st = plStations(d.bd, d.PL, S.tn?.tin, d.sEnd, parseNum($('#plStep').value) || 10);
+    const c = (v, k = 3) => (v == null ? '' : v.toFixed(k).replace('.', ','));
+    const rows = ['s;X;Y;Z_TN;Z_projet;projet-TN;pente_%', ...st.map((q) => `${c(q.s, 2)};${c(q.p.x)};${c(q.p.y)};${c(q.zTN, 2)};${c(q.zP, 2)};${c(q.dz, 2)};${c(q.g * 100, 2)}`)];
+    download(fname('csv').replace(/\.csv$/, `_PL_${d.bd.name}.csv`), '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
+  });
+}
+
 // --------------------------------------------------------- Visibilité
 function refreshVisibility() {
   const plan = isPlan(S.prj), V = S.D?.vis || [];
@@ -1632,6 +1754,7 @@ function bindUI() {
   });
 
   bindTerrain();
+  bindPL();
   $('#btnImportDxf').addEventListener('click', () => $('#fileDxf').click());
   $('#fileDxf').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) importDXF(f); e.target.value = ''; });
   $('#dxfLayers').addEventListener('input', (e) => {

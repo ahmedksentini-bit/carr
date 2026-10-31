@@ -8,40 +8,41 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%2338bdf8' stroke-width='4'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%234ade80'/%3E%3C/svg%3E">
   <!-- data-cfasync : exclut les scripts de Rocket Loader (Cloudflare), qui casse les modules ES. -->
   <!-- version:start (généré par tools/version.sh) -->
-  <link rel="stylesheet" href="css/app.css?v=fa9c884453">
+  <link rel="stylesheet" href="css/app.css?v=c35fa00348">
   <script data-cfasync="false" type="importmap">
   { "imports": {
-    "./js/approach.js": "./js/approach.js?v=fa9c884453",
-    "./js/bypass.js": "./js/bypass.js?v=fa9c884453",
-    "./js/capacity-plan.js": "./js/capacity-plan.js?v=fa9c884453",
-    "./js/capacity.js": "./js/capacity.js?v=fa9c884453",
-    "./js/common.js": "./js/common.js?v=fa9c884453",
-    "./js/crossing.js": "./js/crossing.js?v=fa9c884453",
-    "./js/crs.js": "./js/crs.js?v=fa9c884453",
-    "./js/devers.js": "./js/devers.js?v=fa9c884453",
-    "./js/dims.js": "./js/dims.js?v=fa9c884453",
-    "./js/dxf-parse.js": "./js/dxf-parse.js?v=fa9c884453",
-    "./js/dxf-write.js": "./js/dxf-write.js?v=fa9c884453",
-    "./js/geom.js": "./js/geom.js?v=fa9c884453",
-    "./js/i18n-ar.js": "./js/i18n-ar.js?v=fa9c884453",
-    "./js/i18n.js": "./js/i18n.js?v=fa9c884453",
-    "./js/layers.js": "./js/layers.js?v=fa9c884453",
-    "./js/main.js": "./js/main.js?v=fa9c884453",
-    "./js/norms.js": "./js/norms.js?v=fa9c884453",
-    "./js/plan.js": "./js/plan.js?v=fa9c884453",
-    "./js/profile.js": "./js/profile.js?v=fa9c884453",
-    "./js/roundabout.js": "./js/roundabout.js?v=fa9c884453",
-    "./js/signicons.js": "./js/signicons.js?v=fa9c884453",
-    "./js/signs.js": "./js/signs.js?v=fa9c884453",
-    "./js/swept.js": "./js/swept.js?v=fa9c884453",
-    "./js/terrain.js": "./js/terrain.js?v=fa9c884453",
-    "./js/tiles.js": "./js/tiles.js?v=fa9c884453",
-    "./js/tin.js": "./js/tin.js?v=fa9c884453",
-    "./js/viewer.js": "./js/viewer.js?v=fa9c884453"
+    "./js/approach.js": "./js/approach.js?v=c35fa00348",
+    "./js/bypass.js": "./js/bypass.js?v=c35fa00348",
+    "./js/capacity-plan.js": "./js/capacity-plan.js?v=c35fa00348",
+    "./js/capacity.js": "./js/capacity.js?v=c35fa00348",
+    "./js/common.js": "./js/common.js?v=c35fa00348",
+    "./js/crossing.js": "./js/crossing.js?v=c35fa00348",
+    "./js/crs.js": "./js/crs.js?v=c35fa00348",
+    "./js/devers.js": "./js/devers.js?v=c35fa00348",
+    "./js/dims.js": "./js/dims.js?v=c35fa00348",
+    "./js/dxf-parse.js": "./js/dxf-parse.js?v=c35fa00348",
+    "./js/dxf-write.js": "./js/dxf-write.js?v=c35fa00348",
+    "./js/geom.js": "./js/geom.js?v=c35fa00348",
+    "./js/i18n-ar.js": "./js/i18n-ar.js?v=c35fa00348",
+    "./js/i18n.js": "./js/i18n.js?v=c35fa00348",
+    "./js/layers.js": "./js/layers.js?v=c35fa00348",
+    "./js/main.js": "./js/main.js?v=c35fa00348",
+    "./js/norms.js": "./js/norms.js?v=c35fa00348",
+    "./js/pl.js": "./js/pl.js?v=c35fa00348",
+    "./js/plan.js": "./js/plan.js?v=c35fa00348",
+    "./js/profile.js": "./js/profile.js?v=c35fa00348",
+    "./js/roundabout.js": "./js/roundabout.js?v=c35fa00348",
+    "./js/signicons.js": "./js/signicons.js?v=c35fa00348",
+    "./js/signs.js": "./js/signs.js?v=c35fa00348",
+    "./js/swept.js": "./js/swept.js?v=c35fa00348",
+    "./js/terrain.js": "./js/terrain.js?v=c35fa00348",
+    "./js/tiles.js": "./js/tiles.js?v=c35fa00348",
+    "./js/tin.js": "./js/tin.js?v=c35fa00348",
+    "./js/viewer.js": "./js/viewer.js?v=c35fa00348"
   } }
   </script>
   <script data-cfasync="false" src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script>
-  <script data-cfasync="false" type="module" src="js/main.js?v=fa9c884453"></script>
+  <script data-cfasync="false" type="module" src="js/main.js?v=c35fa00348"></script>
   <!-- version:end -->
 </head>
 <body>
@@ -92,6 +93,7 @@
         <button data-tab="profil">Profil</button>
         <button data-tab="branches">Branches</button>
         <button data-tab="terrain">Terrain</button>
+        <button data-tab="pl">Profil long</button>
         <button data-tab="devers">Dévers</button>
         <button data-tab="controles">Contrôles <span id="chkBadge" class="badge"></span></button>
         <button data-tab="visibilite">Visibilité</button>
@@ -243,6 +245,31 @@
           <button id="btnTnClear">Supprimer le MNT</button>
         </div>
         <p class="note" id="tnNote"></p>
+      </div>
+
+      <div class="tab" id="tab-pl" hidden>
+        <p class="note">Profil en long de chaque branche : ligne rouge saisie par points d'inflexion (abscisse s depuis le carrefour, cote z, rayon R du raccordement parabolique), à partir de la cote imposée du bord de l'anneau (ou de la principale) sur l'axe. Terrain naturel issu du MNT (onglet Terrain). Sans profil saisi, la branche garde sa pente constante (onglet Branches).</p>
+        <div class="row">
+          <label class="fld"><span class="lb">Branche</span><select id="plBranch"></select></label>
+          <label class="fld"><span class="lb">Exagération verticale</span><select id="plVe"><option value="0">auto</option><option value="1">× 1</option><option value="2">× 2</option><option value="5">× 5</option><option value="10">× 10</option><option value="20">× 20</option></select></label>
+        </div>
+        <div id="plChart" class="chart pl"></div>
+        <p class="note">Cliquez sur le graphique pour ajouter un point d'inflexion à cet endroit ; glissez un point pour le déplacer ; modifiez s, z et R dans le tableau (R = 0 : angle sans raccordement).</p>
+        <div class="tablewrap"><table id="plTable" class="pts"></table></div>
+        <div class="row">
+          <button id="btnPlAdd">+ Point d'inflexion</button>
+          <button id="btnPlTn">Proposer depuis le TN</button>
+          <button id="btnPlClear">Supprimer le profil</button>
+        </div>
+        <div id="plChecks"></div>
+        <h3>Stations</h3>
+        <div class="row">
+          <label class="fld"><span class="lb">Pas</span><input id="plStep" type="text" inputmode="decimal" value="10"><span class="un">m</span></label>
+          <button id="btnPlDxf" class="primary">Exporter le profil (DXF)</button>
+          <button id="btnPlCsv">Stations (CSV)</button>
+        </div>
+        <div class="tablewrap"><table id="plStations" class="pts"></table></div>
+        <p class="note" id="plNote"></p>
       </div>
 
       <div class="tab" id="tab-devers" hidden>

@@ -237,3 +237,22 @@ html[dir=rtl] .chart svg, html[dir=rtl] svg text { direction: ltr; }
 /* Vignettes des panneaux (onglet Signalisation) */
 td.pict { padding: 2px 4px; width: 30px; }
 td.pict svg { display: block; }
+
+/* Profil en long */
+.chart.pl svg { background: var(--panel2); }
+.plsvg .pl-tn { fill: none; stroke: #9ca3af; stroke-width: 1.4; }
+.plsvg .pl-red { fill: none; stroke: #ef4444; stroke-width: 2; }
+.plsvg .pl-fill { fill: rgba(249,115,22,0.22); }
+.plsvg .pl-cut { fill: rgba(56,189,248,0.22); }
+.plsvg .pl-tg { stroke: #fbbf24; stroke-width: 1; }
+.plsvg .pl-lb { fill: #e5e7eb; font-size: 10.5px; }
+.plsvg .pl-sl { fill: #fca5a5; font-size: 10.5px; font-family: var(--mono); }
+.plsvg .pl-pi { fill: #ef4444; stroke: #fff; stroke-width: 1.5; cursor: grab; }
+.plsvg .pl-pi.fixed { fill: #38bdf8; cursor: default; }
+.plsvg .pl-pi.sel { stroke: #fde047; stroke-width: 3; }
+.plsvg .pf-note { fill: var(--muted); font-size: 10.5px; }
+.plsvg { cursor: crosshair; user-select: none; }
+#plTable input { width: 76px; font-family: var(--mono); text-align: right; }
+#plTable td.act button { padding: 1px 7px; }
+#plStations td { font-family: var(--mono); text-align: right; }
+#plStations td.cut { color: #7dd3fc; } #plStations td.fill { color: #fdba74; }

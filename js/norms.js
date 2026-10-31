@@ -3,6 +3,8 @@
 //  • CERTU, « Guide des carrefours urbains » (1999) et fiche CERTU n°24 « Giratoires urbains » ; CERTU « Les mini-giratoires » (1997).
 // Les valeurs marquées (≈) proviennent de sources secondaires (IDRRIM 2015, cours) et sont à confirmer sur le guide.
 
+import { plChecks } from './pl.js';
+
 // Dévers de l'anneau vers l'extérieur : valeur imposée (règle de conception retenue pour GIRA).
 export const RING_DEVERS = 1.5;
 
@@ -430,6 +432,7 @@ function checkPlan(prj, D) {
   }
   for (const it of D.issues) add(it.lvl, 'Géométrie', it.msg);
   for (const it of D.signIssues || []) add(it.lvl, 'Signalisation', it.msg);
+  plCheckAll(prj, D, add);
   return out;
 }
 
@@ -491,7 +494,16 @@ export function checkDesign(prj, D) {
   }
   for (const it of D.issues) add(it.lvl, 'Géométrie', it.msg);
   for (const it of D.signIssues || []) add(it.lvl, 'Signalisation', it.msg);
+  plCheckAll(prj, D, add);
   return out;
+}
+
+// Profils en long saisis : contrôles ARP / ACI par branche.
+function plCheckAll(prj, D, add) {
+  for (const db of D.devers?.branches || []) {
+    if (!db.pl) continue;
+    for (const it of plChecks(db.pl, prj.context, db.sEnd)) add(it.lvl, `${db.name} · profil en long`, it.msg);
+  }
 }
 
 // Aides des champs de signalisation (onglet Signalisation).

@@ -8,6 +8,7 @@
 //           variant linéairement, sur la longueur de transition, de la valeur imposée par l'anneau au bord
 //           extérieur jusqu'au dévers courant de la section (toit).
 import * as G from './geom.js';
+import { plParams, plBuild, axisLength } from './pl.js';
 
 const { sub, dot, mul, add, polar } = G;
 
@@ -84,7 +85,9 @@ export function addDevers(prj, D) {
 // linéairement de la valeur imposée au raccordement (d0) au dévers courant sur la longueur de transition.
 function branchDevers(prj, D, bd, { z0, d0In, d0Out, defGrade, base, arrow, TH }) {
   const b = prj.branches[bd.idx], O = D.O;
-  const grade = b.pente !== '' && b.pente != null && isFinite(+b.pente) ? +b.pente / 100 : defGrade;
+  // Profil en long saisi (onglet Profil long) : ligne rouge depuis (0, z0) ; sinon pente constante.
+  const PLp = plParams(b), PL = PLp.pis.length ? plBuild(PLp, z0) : null;
+  const grade = PL ? PL.gradeAt(0) : b.pente !== '' && b.pente != null && isFinite(+b.pente) ? +b.pente / 100 : defGrade;
   const camber = -(+b.camber || 2.5) / 100;
   const Ltr = b.transition !== '' && b.transition != null && +b.transition > 0 ? +b.transition : Math.max(bd.h, 10);
   const d0 = { 1: d0In, [-1]: d0Out };
@@ -92,7 +95,7 @@ function branchDevers(prj, D, bd, { z0, d0In, d0Out, defGrade, base, arrow, TH }
     const t = G.clamp((x - bd.x0) / Ltr, 0, 1);
     return d0[s] + (camber - d0[s]) * t;
   };
-  const zAxis = (x) => z0 + grade * (x - bd.x0);
+  const zAxis = (x) => (PL ? PL.zAt(x - bd.x0) : z0 + grade * (x - bd.x0));
   const zAt = (Pw) => {
     const q = sub(Pw, O), x = dot(q, bd.u), y = dot(q, bd.n);
     const zb = base(Pw, x);
@@ -106,8 +109,8 @@ function branchDevers(prj, D, bd, { z0, d0In, d0Out, defGrade, base, arrow, TH }
     if (x > bd.xEnd) break;
     stations.push({ dx, zAxe: zAxis(x), dIn: dev(1, x), dOut: dev(-1, x) });
   }
-  D.devers.branches.push({ idx: bd.idx, name: bd.name, grade, Ltr, camber, d0In, d0Out, stations, zAt });
-  bd.zAt = zAt;
+  D.devers.branches.push({ idx: bd.idx, name: bd.name, grade, Ltr, camber, d0In, d0Out, stations, zAt, z0, pl: PL, sEnd: axisLength(bd) });
+  bd.zAt = zAt; bd.z0 = z0; bd.pl = PL;
 
   // Flèches sur la branche : début, milieu et fin de transition, section courante.
   for (const dx of [2, Ltr / 2, Ltr, Ltr + 12]) {
