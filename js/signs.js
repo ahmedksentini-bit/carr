@@ -12,7 +12,7 @@
 // (mât, face du panneau vue de dessus, code).
 import * as G from './geom.js';
 import { isPlan, sectionParams, planParams, signParams } from './norms.js';
-import { fmt, upright } from './common.js';
+import { fmt } from './common.js';
 import { cutAtX } from './crossing.js';
 
 const { add, sub, mul, norm, rot90, neg, ang, dot, L } = G;
@@ -253,8 +253,8 @@ export function addSigns(prj, D) {
     const w = sg.w, pf = rot90(sg.face);
     D.prims.push({ k: 'circle', L: 'SIGNALISATION', c: sg.p, r: 0.12 });
     D.prims.push({ k: 'path', L: 'SIGNALISATION', segs: [L(add(sg.p, mul(pf, -w / 2)), add(sg.p, mul(pf, w / 2)))], wm: 0.1 });
-    const tp = add(sg.p, mul(sg.out, w / 2 + 0.3 + TH * 0.4));
-    D.prims.push({ k: 'text', L: 'SIGNALISATION', p: tp, s: sg.code, rot: upright(ang(pf)), align: 'center', h: TH * 0.7 });
+    // Pictogramme (vue de face schématique) posé à côté du mât, du côté opposé à la chaussée, puis le code.
+    D.prims.push({ k: 'sign', L: 'SIGNALISATION', p: sg.p, out: sg.out, face: sg.face, code: sg.code, w, h: TH * 0.7 });
     D.points.push({ n: D.points.length + 1, name: `${sg.branch} · mât ${sg.code}`, p: sg.p, bi: sg.bi, kind: 'signal' });
   }
 }
