@@ -250,8 +250,13 @@ tab. 3-1 (Rdn, Rm), § 3.2.2 (enchaînement : R1 ≤ 1,5 R2 pour les branches, R
 (profil en long), § 3.4.2 (bretelle : BDD 1,00 / 3,50 / BDG 0,50 ; surlargeur 50/R si R < 100 m), § 3.5 (dévers),
 § 4.1.3.1 (biseau), schéma 5-1 (insertion 200 + 75 m), § 6.1 (tpl, obliquité, Lm), tab. 4-2 (d3, d2), annexe tab. 12-1
 (vitesse associée au rayon). ICTAAL 2015 maj 2021 : tab. 3-1 et 3-2 (section courante), § 4.1 (profil en travers).
-Points à confirmer : la largeur au tpl par défaut (BAU + BDG + 0,70 m) ; l'obliquité d'une sortie en déboîtement est
-prise égale à 4,50 m / biseau.
+Largeur au tpl par défaut : BAU + 2,00 m (emprise de la balise J14, déduite du schéma 6-1) + BDG portée à 0,70 m
+(note 9), soit 5,20 m avec une BAU de 2,50 m comme dans le schéma 6-1. Traitement de la BAU : absorbée le long du biseau
+de déboîtement (bord de plate-forme = max(BAU ; rive de la bretelle + BDD)), interrompue et couverte par la zone
+hachurée de S.1,00 m au tpl, rétablie après le nez (schémas 4-1, 6-1, 6-2) ; en entrée, reportée à l'extérieur de la
+voie d'insertion (raccord de principe sur 50 m depuis la BDD de la bretelle), puis le long du biseau de rabattement.
+Points à confirmer : l'obliquité d'une sortie en déboîtement est prise égale à 4,50 m / biseau ; la balise J14 est
+placée sur le nez du musoir (le guide la considère au point S.5,00 m pour la visibilité, § 2.3.1).
 
 ### Capacité
 
