@@ -9,7 +9,7 @@ import { buildDesign, fmt, fmtGis } from './roundabout.js';
 import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan, SECTION, sectionParams, TAD, SIGNS, signParams } from './norms.js';
 import { GAMMES, CATALOG } from './signs.js';
 import { signSVG, signOutline } from './signicons.js';
-import { hwyParams, rampParams, rampFrame, HWY_CAT, RAMP_CAT } from './echangeur.js';
+import { rampParams, endFrame, normRamp, trumpet, HWY_CAT, RAMP_CAT } from './echangeur.js';
 import { pathProject } from './clotho.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
@@ -89,7 +89,7 @@ function migrate(p) {
     center: { ...base.center, ...p.center }, crs: { ...base.crs, ...p.crs }, bg: { ...base.bg, ...p.bg },
     plan: { ...base.plan, ...p.plan, tag: { ...base.plan.tag, ...p.plan?.tag } },
     section: { ...p.section }, signs: { ...p.signs }, tn: { ...base.tn, ...p.tn, pts: Array.isArray(p.tn?.pts) ? p.tn.pts : [] }, pt: { ...p.pt },
-    hwy: { ...base.hwy, ...p.hwy, axis: Array.isArray(p.hwy?.axis) ? p.hwy.axis : [] }, ramps: Array.isArray(p.ramps) ? p.ramps : [],
+    hwy: { ...base.hwy, ...p.hwy, axis: Array.isArray(p.hwy?.axis) ? p.hwy.axis : [] }, ramps: Array.isArray(p.ramps) ? p.ramps.map(normRamp) : [],
     traffic: { ...base.traffic, ...p.traffic, od: { ...p.traffic?.od }, pl: { ...p.traffic?.pl }, qp: { ...p.traffic?.qp }, tad: { ...p.traffic?.tad } },
   };
   delete out.view;
@@ -233,29 +233,40 @@ function refreshEch() {
   const H = S.prj.hwy, ramps = S.prj.ramps || [], D = S.D;
   if (S.rsel >= ramps.length) S.rsel = ramps.length - 1;
   const r = ramps[S.rsel], R = D?.ramps?.[S.rsel];
-  const sig = `${S.rsel}|${ramps.length}|${r?.kind}|${r?.pis?.length}|${H.axis?.length}|${ramps.map((q) => q.name).join(',')}`;
+  const sig = JSON.stringify([S.rsel, H.axis?.length, ramps.map((q) => [q.id, q.name, q.from?.ref, q.to?.ref, q.pis?.length, q.cat])]);
   if (sig !== S.echSig) {
     S.echSig = sig;
-    $('#rampList').innerHTML = ramps.map((q, i) => `<li data-ri="${i}" class="rli${i === S.rsel ? ' on' : ''}"><b>${esc(q.name)}</b> ${q.kind === 'entree' ? 'entrée Ei1' : 'sortie Sd1'} · sens ${q.sens} · ${esc(RAMP_CAT[q.cat]?.label || '')}</li>`).join('') || '<li class="empty-li">Aucune bretelle.</li>';
+    $('#rampList').innerHTML = ramps.map((q, i) => `<li data-ri="${i}" class="rli${i === S.rsel ? ' on' : ''}"><b>${esc(q.name)}</b> ${esc(rampParams(S.prj, q).label)} · ${esc(RAMP_CAT[q.cat]?.label || '')}</li>`).join('') || '<li class="empty-li">Aucune bretelle.</li>';
     const nV = H.axis?.length || 0;
     $('#hwyVertices').innerHTML = nV > 2 ? '<h3>Sommets de l\'axe</h3><div class="tablewrap"><table class="pts"><tr><th>#</th><th>X</th><th>Y</th><th>R (m)</th></tr>' +
       H.axis.map((q, k) => `<tr><td>${k}</td><td><input data-k="hwy.axis.${k}.x" inputmode="decimal"></td><td><input data-k="hwy.axis.${k}.y" inputmode="decimal"></td><td>${k && k < nV - 1 ? `<input data-k="hwy.axis.${k}.r" inputmode="decimal">` : ''}</td></tr>`).join('') + '</table></div>' : '';
     if (!r) $('#rampForm').innerHTML = '';
     else {
-      const i = S.rsel, k = (f) => `ramps.${i}.${f}`, out = r.kind !== 'entree';
+      const i = S.rsel, k = (f) => `ramps.${i}.${f}`;
+      const refs = (role) => [['free', 'Libre (extrémité du tracé)'], ['hwy1', `${H.name || 'Autoroute'} — sens 1`], ['hwy2', `${H.name || 'Autoroute'} — sens 2`],
+        ...ramps.filter((q) => q.id !== r.id).map((q) => [q.id, `Bretelle ${q.name}`])].map(([v, l]) => [v, role === 'from' && v !== 'free' ? `Sortie de ${l.replace(/^Bretelle /, '')}` : role === 'to' && v !== 'free' ? `Entrée sur ${l.replace(/^Bretelle /, '')}` : l]);
+      const endFields = (role) => {
+        const e = r[role], att = e?.ref && e.ref !== 'free', hw = att && /^hwy/.test(e.ref), div = role === 'from';
+        return '<div class="row">' + sel(k(`${role}.ref`), div ? 'Origine' : 'Extrémité', refs(role), { branch: false }) + (att ? fld(k(`${role}.s`), div ? 'Abscisse de S.1,00' : 'Abscisse de E.1,00', 'm', { title: hw ? 'Abscisse sur l\'axe de l\'autoroute' : 'Abscisse le long de l\'axe de la bretelle hôte' }) : '') + '</div>' +
+          (!att ? '' : '<div class="row">' +
+            fld(k(`${role}.biseau`), div ? 'Biseau de déboîtement' : 'Biseau de rabattement', 'm', { ph: div ? (hw ? '150' : '90') : '75', title: div ? '150 m sur autoroute (110 en relief difficile, 90 si une voie, § 4.1.3.1) ; 90 m depuis une bretelle à une voie (schéma 4-8)' : '75 m (schémas 5-1, 5-6)' }) +
+            fld(k(`${role}.obl`), 'Obliquité', '%', { ph: div ? '(1 + l) / biseau' : (hw ? '3' : '5'), title: div ? 'Découle du biseau en déboîtement : 3 % (150 m), 5 % (90 m) (§ 6.1)' : '3 à 5 % (§ 6.1)' }) + '</div>' +
+            '<div class="row">' + fld(k(`${role}.tpl`), 'Largeur au tpl', 'm', { ph: 'BAU + 2,00 + 0,70' }) + (div ? '' : fld(k(`${role}.ins`), 'Voie d\'insertion', 'm', { ph: hw ? '200' : '100' })) + '</div>');
+      };
+      const fromFree = !(r.from?.ref && r.from.ref !== 'free'), toFree = !(r.to?.ref && r.to.ref !== 'free');
       $('#rampForm').innerHTML =
-        '<div class="row">' + fld(k('name'), 'Nom', '', { text: true }) + sel(k('kind'), 'Type', [['sortie', 'Sortie (déboîtement Sd1)'], ['entree', 'Entrée (insertion Ei1)']], { branch: false }) + '</div>' +
-        '<div class="row">' + sel(k('sens'), 'Chaussée', [['1', 'Sens 1 (à droite de l\'axe)'], ['2', 'Sens 2 (à gauche)']], { branch: false }) + fld(k('s'), out ? 'Abscisse de S.1,00' : 'Abscisse de E.1,00', 'm') + '</div>' +
-        '<div class="row">' + sel(k('cat'), 'Catégorie', Object.entries(RAMP_CAT).map(([c, q]) => [c, q.label]), { branch: false }) + fld(k('pente'), out ? 'Déclivité (pente < 0)' : 'Déclivité (rampe > 0)', '%', { ph: '0' }) + '</div>' +
-        '<div class="row">' + fld(k('biseau'), out ? 'Biseau de déboîtement' : 'Biseau de rabattement', 'm', { ph: out ? '150' : '75', title: out ? '150 m ; 110 m en relief difficile ; 90 m si une seule voie (§ 4.1.3.1)' : 'Schéma 5-1 : 75 m' }) +
-        fld(k('obl'), 'Obliquité', '%', { ph: out ? '4,5 / biseau' : '3', title: out ? 'Découle du biseau en déboîtement ; 3 %, 4 % en relief, 5 % depuis une bretelle (§ 6.1)' : '3 à 5 % (§ 6.1)' }) + '</div>' +
-        '<div class="row">' + fld(k('tpl'), 'Largeur au tpl', 'm', { ph: 'BAU + BDG + 0,70' }) + (out ? '' : fld(k('ins'), 'Voie d\'insertion', 'm', { ph: '200' })) + '</div>' +
-        '<h3>Sommets (PI) de la bretelle</h3><p class="note">Depuis le divergent / convergent vers l\'extrémité. R : rayon de l\'arc, A : paramètre des clothoïdes (L = A²/R).</p>' +
-        '<div class="tablewrap"><table class="pts"><tr><th>PI</th><th>X</th><th>Y</th><th>R (m)</th><th>A (m)</th><th></th></tr>' +
-        r.pis.map((q, j) => `<tr><td>${j + 1}</td><td><input data-k="${k(`pis.${j}.x`)}" inputmode="decimal"></td><td><input data-k="${k(`pis.${j}.y`)}" inputmode="decimal"></td>` +
-          (j < r.pis.length - 1 ? `<td><input data-k="${k(`pis.${j}.R`)}" inputmode="decimal"></td><td><input data-k="${k(`pis.${j}.A`)}" inputmode="decimal"></td>` : '<td colspan="2" class="note">extrémité</td>') +
-          `<td>${r.pis.length > 1 ? `<button class="mini" data-rpidel="${j}" title="Supprimer ce sommet">✕</button>` : ''}</td></tr>`).join('') + '</table></div>' +
-        '<div class="row"><button id="btnRpiAdd">+ Sommet en bout</button></div>';
+        '<div class="row">' + fld(k('name'), 'Nom', '', { text: true }) + sel(k('cat'), 'Catégorie', Object.entries(RAMP_CAT).map(([c, q]) => [c, q.label]), { branch: false }) + '</div>' +
+        '<div class="row">' + fld(k('pente'), 'Déclivité (sens de circulation)', '%', { ph: '0', title: 'Valeur algébrique : pente < 0, rampe > 0 (§ 3.2.5)' }) + '</div>' +
+        '<h3>Origine</h3>' + endFields('from') + '<h3>Extrémité</h3>' + endFields('to') +
+        '<h3>Sommets (PI) de la bretelle</h3><p class="note">Dans le sens de circulation. R : rayon de l\'arc, A : paramètre des clothoïdes (L = A²/R). Boucle : le raccordement tourne par le grand côté (environ 270°), l\'axe se recoupe au sommet (ouvrage).</p>' +
+        '<div class="tablewrap"><table class="pts"><tr><th>PI</th><th>X</th><th>Y</th><th>R (m)</th><th>A (m)</th><th>Boucle</th><th></th></tr>' +
+        r.pis.map((q, j) => {
+          const endp = (j === 0 && fromFree) || (j === r.pis.length - 1 && toFree);
+          return `<tr><td>${j + 1}</td><td><input data-k="${k(`pis.${j}.x`)}" inputmode="decimal"></td><td><input data-k="${k(`pis.${j}.y`)}" inputmode="decimal"></td>` +
+            (endp ? `<td colspan="3" class="note">${j === 0 && fromFree ? 'origine' : 'extrémité'}</td>` : `<td><input data-k="${k(`pis.${j}.R`)}" inputmode="decimal"></td><td><input data-k="${k(`pis.${j}.A`)}" inputmode="decimal"></td><td><input type="checkbox" data-k="${k(`pis.${j}.loop`)}"></td>`) +
+            `<td>${r.pis.length > 1 ? `<button class="mini" data-rpidel="${j}" title="Supprimer ce sommet">✕</button>` : ''}</td></tr>`;
+        }).join('') + '</table></div>' +
+        '<div class="row"><button id="btnRpiAdd">+ Sommet</button></div>';
     }
   }
   // Résultats (recalculés à chaque mise à jour).
@@ -267,51 +278,77 @@ function refreshEch() {
     ['Rm / Rdn (ICTAAL tab. 3-1)', `${hw.H.C.Rm} / ${hw.H.C.Rdn} m`],
   ]) : '<p class="note">Activez l\'autoroute et dessinez son axe (milieu du terre-plein central).</p>';
   if (R?.al) {
-    const rows = [
-      ['Longueur de l\'axe', fmt(R.length) + ' m'],
-      ['Obliquité p · Lm = (tpl − 1) / p', `${fmt(R.rp.p * 100, 2)} % · ${fmt(R.rp.Lm)} m`],
-      ['Alignement droit initial', fmt(R.lad) + ' m'],
-    ];
-    if (R.kind === 'sortie' && R.Ld != null) rows.push(['Ld (70 → VR) · disponible', `${fmt(R.Ld)} m (VR ${fmt(R.VR, 0)} km/h) · ${fmt(R.Ldisp)} m`]);
-    if (R.kind === 'entree' && R.La != null) rows.push(['La (VR → 55) · disponible', `${fmt(R.La)} m (VR ${fmt(R.VR, 0)} km/h) · ${fmt(R.Ladisp)} m`]);
-    R.al.tangents.forEach((t) => rows.push([`PI ${t.i} : R · A · L clothoïde`, `${fmt(t.R)} m · ${fmt(t.A)} · ${fmt(t.L)} m`]));
+    const rp = R.rp, rows = [['Type', rp.label], ['Longueur de l\'axe', fmt(R.length) + ' m']];
+    if (rp.from) rows.push(['Divergent : obliquité · Lm = (tpl − 1) / p', `${fmt(rp.from.p * 100, 2)} % · ${fmt(rp.from.Lm)} m`], ['Alignement droit depuis S.1,00', fmt(R.lad) + ' m']);
+    if (R.Ld != null) rows.push([`Ld (${R.Vs} → VR) · disponible`, `${fmt(R.Ld)} m (VR ${fmt(R.VR, 0)} km/h) · ${fmt(R.Ldisp)} m`]);
+    if (rp.to) rows.push(['Convergent : obliquité · Lm', `${fmt(rp.to.p * 100, 2)} % · ${fmt(rp.to.Lm)} m`], ['Alignement droit jusqu\'à E.1,00', fmt(R.ladE) + ' m']);
+    if (R.La != null) rows.push(['La (VR → 55) · disponible', `${fmt(R.La)} m (VR ${fmt(R.VRe, 0)} km/h) · ${fmt(R.Ladisp)} m`]);
+    R.al.tangents.forEach((t) => rows.push([`PI ${t.i}${t.loop ? ' (boucle)' : ''} : R · A · L clothoïde`, `${fmt(t.R)} m · ${fmt(t.A)} · ${fmt(t.L)} m`]));
     $('#rampOut').innerHTML = kv(rows) + (R.issues.length ? '<ul class="rissues">' + R.issues.map((q) => `<li class="${q.lvl}">${esc(q.msg)}</li>`).join('') + '</ul>' : '');
-  } else $('#rampOut').innerHTML = '';
+  } else $('#rampOut').innerHTML = R?.issues?.length ? '<ul class="rissues">' + R.issues.map((q) => `<li class="${q.lvl}">${esc(q.msg)}</li>`).join('') + '</ul>' : '';
 }
 
-// Place une bretelle au point cliqué sur l'autoroute (sens déduit du côté de l'axe).
+// Chaussée hôte sous le point cliqué : autoroute (sens selon le côté) ou bretelle existante.
+function hostAt(w) {
+  const D = S.D;
+  let best = null;
+  if (D?.hwy?.ok) {
+    const pr = pathProject(D.hwy.path, w);
+    if (pr && Math.abs(pr.off) >= D.hwy.E0 && Math.abs(pr.off) <= D.hwy.E2 + 30) best = { ref: pr.off < 0 ? 'hwy1' : 'hwy2', s: pr.s, d: Math.abs(pr.off) - D.hwy.E1 };
+  }
+  for (const R of D?.ramps || []) {
+    if (!R?.al) continue;
+    const pr = pathProject(R.al.path, w);
+    if (pr && pr.d < R.w / 2 + 6 && (!best || pr.d < Math.abs(best.d))) best = { ref: R.id, s: pr.s, d: pr.d };
+  }
+  return best;
+}
+
+// Place une bretelle (sortie ou entrée) sur la chaussée cliquée : autoroute ou autre bretelle.
 function addRampAt(w) {
   const D = S.D, kind = S.rampKind || 'sortie';
-  if (!D?.hwy?.ok) { toast('Dessinez d\'abord l\'axe de l\'autoroute.', 'warn'); return; }
-  const pr = pathProject(D.hwy.path, w);
-  if (!pr || Math.abs(pr.off) > D.hwy.E2 + 30) { toast('Cliquez sur une chaussée de l\'autoroute.', 'warn'); return; }
-  if (Math.abs(pr.off) < D.hwy.E0) { toast('Cliquez sur la chaussée du sens voulu, pas sur le terre-plein central.', 'warn'); return; }
-  const ramps = S.prj.ramps;
-  const n = ramps.filter((q) => q.kind === kind).length + 1;
-  const r = { id: uid(), name: (kind === 'sortie' ? 'S' : 'E') + n, kind, sens: pr.off < 0 ? 1 : 2, s: Math.round(pr.s * 10) / 10, cat: 'b50', lanes: 1, biseau: '', obl: '', tpl: '', ins: '', pente: '', pis: [] };
-  const rp = rampParams(S.prj, r), F = rampFrame(S.prj, hwyParams(S.prj), D.hwy.path, rp);
-  const P1 = G.add(F.A, G.mul(F.dA, rp.Lm + 200)), P2 = G.add(P1, G.mul(F.nr, 260));
-  r.pis = [{ x: +P1.x.toFixed(3), y: +P1.y.toFixed(3), R: 120, A: 80 }, { x: +P2.x.toFixed(3), y: +P2.y.toFixed(3), R: '', A: '' }];
+  const h = hostAt(w);
+  if (!h) { toast('Cliquez sur une chaussée de l\'autoroute (pas sur le terre-plein central) ou sur une bretelle.', 'warn'); return; }
+  const ramps = S.prj.ramps, div = kind === 'sortie';
+  const n = ramps.length + 1;
+  const end = { ref: h.ref, s: Math.round(h.s * 10) / 10, biseau: '', obl: '', tpl: '', ...(div ? {} : { ins: '' }) };
+  const r = { id: uid(), name: (div ? 'S' : 'E') + n, cat: 'b50', lanes: 1, pente: '', from: div ? end : { ref: 'free' }, to: div ? { ref: 'free' } : end, pis: [] };
+  const rp = rampParams(S.prj, r), e = div ? rp.from : rp.to, host = D.echHost(h.ref);
+  if (!host) { toast('Chaussée hôte non calculée.', 'warn'); return; }
+  const F = endFrame(host, e, rp.w);
+  const fx = (q) => ({ x: +q.x.toFixed(3), y: +q.y.toFixed(3) });
+  if (div) { const P1 = G.add(F.A, G.mul(F.dir, e.Lm + 200)), P2 = G.add(P1, G.mul(F.nr, 260)); r.pis = [{ ...fx(P1), R: 120, A: 80 }, { ...fx(P2), R: '', A: '' }]; }
+  else { const P1 = G.sub(F.A, G.mul(F.dir, e.Lm + 200)), P0 = G.add(P1, G.mul(F.nr, 260)); r.pis = [{ ...fx(P0), R: '', A: '' }, { ...fx(P1), R: 120, A: 80 }]; }
   ramps.push(r); S.rsel = ramps.length - 1;
   setTool('select'); update();
   toast(`${r.name} placée : déplacez ses sommets ou saisissez-les dans l'onglet Échangeur.`);
+}
+
+// Trompette : quatre bretelles générées autour du point d'ouvrage cliqué sur l'axe ; la tige part du côté du clic.
+function addTrumpetAt(w) {
+  const T = trumpet(S.prj, S.D, w, uid);
+  if (T.err) { toast(T.err, 'warn'); return; }
+  S.prj.ramps.push(...T.ramps); S.rsel = S.prj.ramps.length - 4;
+  setTool('select'); update(); zoomAll();
+  toast('Trompette générée (boucle en entrée) : ajustez les sommets, puis raccordez le haut de la tige au carrefour.' + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
 }
 
 // Axe de l'autoroute et polygones des bretelles (sommets déplaçables).
 function drawEch(ctx, v, T, exp) {
   const H = S.prj.hwy;
   if (exp || !H?.on) return;
-  const poly = (pts, col, w, dash, sq) => {
+  const poly = (pts, col, w, dash) => {
     ctx.strokeStyle = col; ctx.lineWidth = w; ctx.setLineDash(dash);
     ctx.beginPath(); pts.forEach((p, k) => { const [x, y] = v.w2s(p.x, p.y); if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); ctx.stroke();
     ctx.setLineDash([]);
-    if (sq) { ctx.fillStyle = col; for (const p of pts.slice(sq === 'skip0' ? 1 : 0)) { const [x, y] = v.w2s(p.x, p.y); ctx.fillRect(x - 3.5, y - 3.5, 7, 7); } }
   };
-  if (H.axis?.length >= 2) poly(H.axis, T.L.AXE_SAISI.stroke, 1.2, [7, 5], S.tool === 'select');
+  const sq = (pts, col) => { ctx.fillStyle = col; for (const p of pts) { const [x, y] = v.w2s(p.x, p.y); ctx.fillRect(x - 3.5, y - 3.5, 7, 7); } };
+  if (H.axis?.length >= 2) { poly(H.axis, T.L.AXE_SAISI.stroke, 1.2, [7, 5]); if (S.tool === 'select') sq(H.axis, T.L.AXE_SAISI.stroke); }
   (S.D?.ramps || []).forEach((R, i) => {
-    if (!R.pis) return;
-    const on = i === S.rsel;
-    poly([R.F.A, ...R.pis], on ? T.sel : T.L.AXE_SAISI.stroke, on ? 1.6 : 1, [5, 4], S.tool === 'select' ? 'skip0' : false);
+    if (!R?.pts) return;
+    const on = i === S.rsel, col = on ? T.sel : T.L.AXE_SAISI.stroke;
+    poly(R.pts, col, on ? 1.6 : 1, [5, 4]);
+    if (S.tool === 'select') sq(R.pis, col);
   });
 }
 function hitEchHandle(px, py) {
@@ -320,7 +357,7 @@ function hitEchHandle(px, py) {
   const order = (S.D?.ramps || []).map((R, i) => i).sort((a, b) => (b === S.rsel) - (a === S.rsel));
   for (const i of order) {
     const R = S.D.ramps[i];
-    if (!R.pis) continue;
+    if (!R?.pis) continue;
     for (let k = 0; k < R.pis.length; k++) if (near(R.pis[k])) return { kind: 'rpi', ri: i, k };
   }
   const ax = S.prj.hwy.axis || [];
@@ -332,25 +369,48 @@ function bindEch() {
   $('#btnHwyAxis').addEventListener('click', () => { setTool('axis'); S.hwyDraw = true; setPrompt(); });
   const place = (kind) => {
     if (!S.D?.hwy?.ok) { toast('Activez l\'autoroute et dessinez d\'abord son axe.', 'warn'); return; }
-    setTool('ramp'); S.rampKind = kind; setPrompt();
+    setTool(kind === 'trompette' ? 'trumpet' : 'ramp'); S.rampKind = kind; setPrompt();
   };
   $('#btnRampOut').addEventListener('click', () => place('sortie'));
   $('#btnRampIn').addEventListener('click', () => place('entree'));
+  $('#btnTrumpet').addEventListener('click', () => place('trompette'));
   $('#btnRampDel').addEventListener('click', () => {
     const r = S.prj.ramps[S.rsel];
     if (!r || !confirm(t(`Supprimer la bretelle ${r.name} ?`))) return;
+    for (const q of S.prj.ramps) for (const e of [q.from, q.to]) if (e?.ref === r.id) e.ref = 'free'; // les raccordements à cette bretelle deviennent libres
     S.prj.ramps.splice(S.rsel, 1); S.rsel = -1; update();
   });
   $('#rampList').addEventListener('click', (e) => { const li = e.target.closest('[data-ri]'); if (!li) return; S.rsel = +li.dataset.ri; refreshPanels(); viewer.invalidate(); });
+  // Changement d'extrémité (capturé avant la mise à jour) : une extrémité qui devient libre reçoit un sommet à la position
+  // actuelle ; une extrémité raccordée prend l'abscisse du sommet le plus proche projeté sur la chaussée hôte.
+  $('#rampForm').addEventListener('input', (e) => {
+    const m = /^ramps\.(\d+)\.(from|to)\.ref$/.exec(e.target.dataset.k || ''); if (!m) return;
+    const r = S.prj.ramps[+m[1]], R = S.D?.ramps?.[+m[1]], role = m[2], ref = e.target.value;
+    const wasFree = !(r[role]?.ref && r[role].ref !== 'free');
+    if (ref === 'free' && !wasFree && R?.pts) { const q = role === 'from' ? R.pts[0] : R.pts[R.pts.length - 1]; const pnt = { x: +q.x.toFixed(3), y: +q.y.toFixed(3), R: '', A: '' }; if (role === 'from') r.pis.unshift(pnt); else r.pis.push(pnt); }
+    if (ref !== 'free') {
+      const path = ref.startsWith('hwy') ? S.D?.hwy?.path : S.D?.ramps?.find((x) => x?.id === ref)?.al?.path;
+      const q = role === 'from' ? r.pis[0] : r.pis[r.pis.length - 1];
+      if (path && q) { const pr = pathProject(path, q); r[role] = { biseau: '', obl: '', tpl: '', ...(role === 'to' ? { ins: '' } : {}), ...r[role], ref, s: Math.round(pr.s * 10) / 10 }; }
+      if (wasFree && r.pis.length > 1) { if (role === 'from') r.pis.shift(); else r.pis.pop(); } // l'ancien point libre devient le divergent / convergent
+    }
+  }, true);
   $('#rampForm').addEventListener('click', (e) => {
     const r = S.prj.ramps[S.rsel]; if (!r) return;
     const del = e.target.closest('[data-rpidel]');
     if (del) { r.pis.splice(+del.dataset.rpidel, 1); update(); return; }
     if (e.target.id === 'btnRpiAdd') {
-      const R = S.D?.ramps?.[S.rsel], pts = R?.pis || r.pis, a = pts[pts.length - 2] || R?.F.A, b = pts[pts.length - 1];
-      const d = G.norm(G.sub(b, a)), q = G.add(b, G.mul(d, 120));
-      if (r.pis.length) { const last = r.pis[r.pis.length - 1]; last.R = last.R || 150; last.A = last.A || 90; }
-      r.pis.push({ x: +q.x.toFixed(3), y: +q.y.toFixed(3), R: '', A: '' }); update();
+      const R = S.D?.ramps?.[S.rsel], pts = R?.pts || r.pis;
+      const toFree = !(r.to?.ref && r.to.ref !== 'free');
+      if (toFree) { // prolonge au-delà de l'extrémité libre
+        const a = pts[pts.length - 2], b = pts[pts.length - 1], d = G.norm(G.sub(b, a)), q = G.add(b, G.mul(d, 120));
+        const last = r.pis[r.pis.length - 1]; if (last) { last.R = last.R || 150; last.A = last.A || 90; }
+        r.pis.push({ x: +q.x.toFixed(3), y: +q.y.toFixed(3), R: '', A: '' });
+      } else { // insère un sommet au milieu du dernier côté, avant le convergent
+        const a = pts[pts.length - 2], b = pts[pts.length - 1], q = G.lerp(a, b, 0.5);
+        r.pis.push({ x: +q.x.toFixed(3), y: +q.y.toFixed(3), R: 150, A: 90 });
+      }
+      update();
     }
   });
 }
@@ -474,14 +534,15 @@ const PROMPTS = {
   extend: 'Prolonger l\'axe : cliquez les points suivants vers l\'extérieur — Entrée / clic droit pour terminer, Échap pour annuler.',
   center: 'Centre : cliquez la position du centre de l\'anneau.',
   hwy: 'Autoroute : cliquez les sommets de l\'axe (milieu du TPC) — Entrée / clic droit pour terminer.',
-  ramp: 'Bretelle : cliquez sur la chaussée de l\'autoroute au point S.1,00 m (sortie) ou E.1,00 m (entrée).',
+  ramp: 'Bretelle : cliquez sur la chaussée de l\'autoroute ou d\'une bretelle au point S.1,00 m (sortie) ou E.1,00 m (entrée).',
+  trumpet: 'Trompette : cliquez sur l\'axe de l\'autoroute à l\'endroit de l\'ouvrage, du côté de la voirie ordinaire.',
   measure: 'Mesure : cliquez deux points.',
 };
 
 function setTool(t) {
   if (S.tool === 'axis' && t !== 'axis' && S.draft.length >= 2) finishAxis();
   S.tool = t; S.draft = []; S.meas = []; S.drag = null; S.extend = null; S.hwyDraw = false;
-  if (t !== 'ramp') S.rampKind = null;
+  if (t !== 'ramp' && t !== 'trumpet') S.rampKind = null;
   $$('.tools [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
   updateCursor(); setPrompt(); viewer.invalidate();
 }
@@ -660,6 +721,7 @@ function bindCanvas() {
     if (S.tool === 'axis') { S.draft.push(w); setPrompt(); }
     else if (S.tool === 'center') { S.prj.center = { auto: false, x: w.x, y: w.y }; syncInputs(); update(); setTool('select'); }
     else if (S.tool === 'ramp') addRampAt(w);
+    else if (S.tool === 'trumpet') addTrumpetAt(w);
     else if (S.tool === 'measure') { S.meas.push(w); if (S.meas.length > 2) S.meas = [w]; showMeasure(); }
     else if (S.tool === 'select') {
       const h = hitHandle(px, py);
@@ -824,7 +886,7 @@ function designBBox() {
     for (const bd of S.D.branches) pts.push(bd.entry.F, bd.exit.F, bd.W({ x: bd.xEnd + 8, y: bd.a }));
   }
   S.prj.branches.forEach((b) => pts.push(...b.axis));
-  if (S.prj.hwy?.on) { pts.push(...(S.prj.hwy.axis || [])); for (const R of S.D?.ramps || []) if (R.al) pts.push(R.F.A, ...R.pis); }
+  if (S.prj.hwy?.on) { pts.push(...(S.prj.hwy.axis || [])); for (const R of S.D?.ramps || []) if (R?.pts) pts.push(...R.pts); }
   return pts.length ? G.bboxOf(pts) : null;
 }
 function zoomGira() {

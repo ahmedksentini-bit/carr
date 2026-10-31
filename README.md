@@ -141,6 +141,12 @@ ou sur un fond topographique DXF.
   de type Autoroute » (2013, maj 2021) : rayons limites (tab. 3-1), premier rayon de sortie, enchaînement des courbes,
   alignements intermédiaires, longueur minimale de clothoïde, zones de décélération Ld et d'accélération La (§ 3.2.5,
   vitesses de l'annexe), obliquité. Placement d'une bretelle d'un clic sur la chaussée, sommets déplaçables.
+  Chaque bretelle a deux extrémités, libres ou raccordées à l'autoroute ou à une autre bretelle (sortie depuis une
+  bretelle, biseau 90 m à 5 %, § 4.3 ; entrée Eb11 sur bretelle, 100 + 75 m, § 5.3, avec les distances de 25 m).
+  **Boucles** (sommet « boucle » : arc unique d'environ 270° encadré de clothoïdes, 40 à 60 m, § 3.2.1 ; sortie en
+  boucle signalée comme exceptionnelle, collectrice ≥ 60 m au-delà du tpl, § 6.2.4). **Gabarit de trompette** : un clic
+  sur l'axe à l'endroit de l'ouvrage génère l'entrée en boucle, la sortie semi-directe qui l'enveloppe, la sortie et
+  l'entrée directes raccordées à la tige bidirectionnelle.
 - **Exports** : DXF R12 par calques `GIRA_*` (AutoCAD, Covadis, BricsCAD…), PNG, points d'implantation X, Y, Z en CSV,
   projet `.gira.json` (et sauvegarde automatique dans le navigateur).
 
@@ -291,8 +297,9 @@ structure de l'HCM, d'après Troutbeck & Brilon, *Traffic Flow Theory*, chap. 8 
 
 ## Limites connues
 
-- Échangeur : seules les sorties Sd1 et entrées Ei1 à une voie sont dessinées (pas d'affectation Sa, d'adjonction Ea,
-  de sortie depuis une bretelle ni d'entrecroisement) ; la section courante est tracée en droites et arcs (sans
+- Échangeur : seules les sorties en déboîtement et les entrées en insertion à une voie sont dessinées (pas
+  d'affectation Sa, d'adjonction Ea / Eb21 ni d'entrecroisement) ; la trompette est un gabarit de principe (rayons,
+  emprise de l'ordre de 1,5 km le long de l'autoroute) à ajuster ; l'ouvrage de franchissement n'est pas dessiné ; la section courante est tracée en droites et arcs (sans
   clothoïdes) ; les bretelles n'ont pas encore de profil en long ni de profils en travers, ni de vue 3D, et leur
   extrémité n'est pas encore raccordée automatiquement au giratoire (branche à sens unique) : l'axe se termine sur la
   branche dessinée.

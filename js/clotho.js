@@ -30,11 +30,13 @@ export function cloMinLength(R, dDev, lanes = 1) {
   return lanes >= 2 ? Math.max(R / 9, 14 * dDev) : Math.max(6 * Math.pow(R, 0.4), 7 * dDev);
 }
 
-// Construit l'alignement. pis : [{x, y, R?, A?}] ; le premier et le dernier sommet sont des extrémités.
+// Construit l'alignement. pis : [{x, y, R?, A?, loop?}] ; le premier et le dernier sommet sont des extrémités.
+// loop : le raccordement tourne « par le grand côté » (déviation 2π − δ du côté opposé) — boucle d'échangeur
+// d'environ 270° : l'axe se recoupe au sommet (franchissement dénivelé).
 // Retourne { elems, path, length, pointAt, headAt, curvAt, points, issues, tangents }.
 export function buildAlignment(pis, { name = '' } = {}) {
   const issues = [], elems = [], points = [];
-  const P = pis.map((p) => ({ x: +p.x, y: +p.y, R: +p.R || 0, A: +p.A || 0 }));
+  const P = pis.map((p) => ({ x: +p.x, y: +p.y, R: +p.R || 0, A: +p.A || 0, loop: !!p.loop }));
   const n = P.length;
   const out = { elems, path: [], length: 0, points, issues, pointAt: null, headAt: null, curvAt: null, tangents: [] };
   if (n < 2) return out;
@@ -42,9 +44,11 @@ export function buildAlignment(pis, { name = '' } = {}) {
   const T = new Array(n).fill(0), geo = new Array(n).fill(null);
   for (let i = 1; i < n - 1; i++) {
     const d1 = norm(sub(P[i], P[i - 1])), d2 = norm(sub(P[i + 1], P[i]));
-    const cr = cross(d1, d2), defl = Math.atan2(Math.abs(cr), dot(d1, d2));
+    const cr = cross(d1, d2);
+    let defl = Math.atan2(Math.abs(cr), dot(d1, d2)), sg = cr >= 0 ? 1 : -1;
+    if (P[i].loop) { defl = 2 * Math.PI - defl; sg = -sg; }
     if (!(P[i].R > 0) || defl < 1e-5) { geo[i] = null; continue; }
-    const sg = cr >= 0 ? 1 : -1, R = P[i].R;
+    const R = P[i].R;
     let A = P[i].A, L = A > 0 ? (A * A) / R : 0, tau = L / (2 * R);
     if (2 * tau > defl) { // les deux clothoïdes consomment plus que la déflexion : on les raccourcit (ove sans arc)
       tau = defl / 2; L = 2 * R * tau; A = Math.sqrt(L * R);
@@ -53,11 +57,11 @@ export function buildAlignment(pis, { name = '' } = {}) {
     const e = L > 0 ? cloXY(A, L) : { x: 0, y: 0 };
     const dR = e.y - R * (1 - Math.cos(tau)), Xm = e.x - R * Math.sin(tau);
     T[i] = Xm + (R + dR) * Math.tan(defl / 2);
-    geo[i] = { d1, d2, defl, sg, R, A, L, tau, th0: ang(d1), th1: ang(d2) };
+    geo[i] = { d1, d2, defl, sg, R, A, L, tau, th0: ang(d1), th1: ang(d2), loop: P[i].loop };
   }
   for (let i = 1; i < n - 1; i++) {
     const seg = dist(P[i - 1], P[i]);
-    if (T[i - 1] + T[i] > seg + 1e-6) issues.push({ lvl: 'err', msg: `${name} : les raccordements des PI ${i - 1} et ${i} se chevauchent (${(T[i - 1] + T[i]).toFixed(1)} m > ${seg.toFixed(1)} m).` });
+    if (T[i - 1] + T[i] > seg + 1e-6 || (P[i].loop && -T[i] > dist(P[i], P[i + 1]) + 1e-6)) issues.push({ lvl: 'err', msg: `${name} : les raccordements des PI ${i - 1} et ${i} se chevauchent (${(T[i - 1] + T[i]).toFixed(1)} m > ${seg.toFixed(1)} m).` });
   }
   if (T[n - 2] > dist(P[n - 2], P[n - 1]) + 1e-6) issues.push({ lvl: 'err', msg: `${name} : le dernier raccordement dépasse l'extrémité de l'axe.` });
   // Éléments successifs.
@@ -167,4 +171,11 @@ export function pathProject(path, q) {
     acc += l;
   }
   return best;
+}
+
+// Longueur de tangente d'un raccordement symétrique clothoïde – arc – clothoïde de déviation defl (rad).
+export function tangentLength(R, A, defl) {
+  const L = A > 0 ? (A * A) / R : 0, tau = L / (2 * R), e = L > 0 ? cloXY(A, L) : { x: 0, y: 0 };
+  const dR = e.y - R * (1 - Math.cos(tau)), Xm = e.x - R * Math.sin(tau);
+  return Xm + (R + dR) * Math.tan(defl / 2);
 }
