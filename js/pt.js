@@ -19,7 +19,7 @@ export function ptParams(prj) {
 }
 
 // Plateforme projet à la station s de la branche bd : [{ y, z, label }] du côté sortie (y < 0) au côté entrée (y > 0).
-function platform(prj, bd, s, sec) {
+export function platform(prj, bd, s, sec) {
   const { p, t } = axisPointAt(bd, s), n = G.rot90(t);
   const at = (y) => G.add(p, G.mul(n, y));
   const zOf = (y) => bd.zAt(at(y));
@@ -54,7 +54,7 @@ function platform(prj, bd, s, sec) {
 }
 
 // TN le long de la coupe : [{ y, z }] de −halfW à +halfW (pas 0,5 m) ; null si hors MNT.
-function terrainLine(tin, p, n, halfW, step = 0.5) {
+export function terrainLine(tin, p, n, halfW, step = 0.5) {
   const out = [];
   for (let y = -halfW; y <= halfW + 1e-9; y += step) { const q = G.add(p, G.mul(n, y)); const z = tin ? tinZ(tin, q.x, q.y) : null; out.push({ y, z }); }
   return out;
@@ -68,7 +68,7 @@ const tnAt = (tl, y) => {
 };
 
 // Talus depuis le point de plateforme (y0, z0) vers l'extérieur (sd = ±1) : point d'entrée en terre ou null.
-function talus(tl, y0, z0, sd, P, halfW) {
+export function talus(tl, y0, z0, sd, P, halfW) {
   const zt0 = tnAt(tl, y0);
   if (zt0 == null) return null;
   const fill = z0 > zt0, pente = fill ? 1 / P.remblai : 1 / P.deblai; // V/H
@@ -103,13 +103,68 @@ function areas(proj, tl) {
 export function crossSection(prj, bd, s, tin, P = ptParams(prj)) {
   const sec = sectionParams(prj);
   const pf = platform(prj, bd, s, sec);
+  const cs = crossSectionFrom(pf, tin, P);
+  cs.s = s; cs.zAxe = bd.zAt(pf.p);
+  return cs;
+}
+// Plateforme de la route principale d'un carrefour plan à l'abscisse X (repère principal, 0 au centre).
+export function mainPlatform(prj, D, X, sec) {
+  const M = D.main, Pm = D.plan, p = M.toW(X, 0), n = M.Y, zOf = (y) => D.zMain(M.toW(X, y));
+  const hw = Pm.widened && X >= -(Pm.lenA || 0) && X <= (Pm.lenB || 0) ? Pm.hw : Pm.half;
+  const bands = sideBands(prj, sec), half = [];
+  for (const sd of [1, -1]) {
+    const pts = [{ y: 0, z: zOf(0), label: 'axe' }];
+    let y = sd * hw, z = zOf(y); pts.push({ y, z, label: `voies ${fmt(hw, 2)}` });
+    const slopeLane = zOf(y) - zOf(y - sd * 1);
+    if (sec.bdd > 0) { y += sd * sec.bdd; z += slopeLane * sec.bdd; pts.push({ y, z, label: `BDD ${fmt(sec.bdd, 2)}` }); }
+    for (const [nm, bw] of bands) {
+      if (nm === 'caniveau') { y += sd * bw; z += slopeLane * bw; pts.push({ y, z, label: 'caniveau' }); }
+      else if (nm === 'bordure') { pts.push({ y, z: z + sec.bordureVue, label: 'bordure' }); z += sec.bordureVue; y += sd * bw; pts.push({ y, z, label: '' }); }
+      else if (nm === 'trottoir') { z += (sec.trottoirPente / 100) * bw; y += sd * bw; pts.push({ y, z, label: `trottoir ${fmt(bw, 2)}` }); }
+      else if (nm === 'contre-bordure') { y += sd * bw; pts.push({ y, z, label: '' }); }
+      else if (nm === 'berme') { z -= (sec.bermePente / 100) * bw; y += sd * bw; pts.push({ y, z, label: `berme ${fmt(bw, 2)}` }); }
+    }
+    half.push(pts);
+  }
+  return { line: [...half[1].slice().reverse(), ...half[0].slice(1)], p, t: M.u, n };
+}
+// Coupe complète à partir d'une plateforme { line, p, n } : talus, TN, surfaces.
+export function crossSectionFrom(pf, tin, P) {
   const tl = terrainLine(tin, pf.p, pf.n, P.halfW);
   const L0 = pf.line[0], R0 = pf.line[pf.line.length - 1];
   const tL = talus(tl, L0.y, L0.z, -1, P, P.halfW), tR = talus(tl, R0.y, R0.z, 1, P, P.halfW);
   const proj = [...(tL ? tL.pts.slice().reverse() : []), ...pf.line, ...(tR ? tR.pts : [])];
   const hasTN = tl.some((q) => q.z != null);
   const ar = hasTN ? areas(proj, tl) : { cut: 0, fill: 0 };
-  return { s, p: pf.p, n: pf.n, platform: pf.line, proj, tn: tl, cut: ar.cut, fill: ar.fill, endL: tL?.end, endR: tR?.end, ok: hasTN, zAxe: bd.zAt(pf.p), zTN: tin ? tinZ(tin, pf.p.x, pf.p.y) : null, halfW: P.halfW };
+  return { s: 0, p: pf.p, n: pf.n, platform: pf.line, proj, tn: tl, cut: ar.cut, fill: ar.fill, endL: tL?.end, endR: tR?.end, ok: hasTN, zAxe: pf.line.find((q) => q.label === 'axe')?.z ?? pf.line[Math.floor(pf.line.length / 2)].z, zTN: tin ? tinZ(tin, pf.p.x, pf.p.y) : null, halfW: P.halfW };
+}
+
+// Nature d'un point de la plateforme / du talus d'après son libellé (pour les couleurs de la vue 3D).
+export function kindOf(label) {
+  if (!label) return 'bordure';
+  if (/^îlot/.test(label)) return 'ilot';
+  if (/^(voie|rive|axe|caniveau)/.test(label)) return 'chaussee';
+  if (/^BDD/.test(label)) return 'bdd';
+  if (/^trottoir/.test(label)) return 'trottoir';
+  if (/^berme/.test(label)) return 'berme';
+  if (/^bordure/.test(label)) return 'bordure';
+  return 'talus';
+}
+// Échantillonnage de la coupe aux ordonnées ys : { z: [], kind: [] } (z = null hors de la ligne projet).
+export function sampleSection(cs, ys) {
+  const L = cs.proj, z = [], kind = [];
+  for (const y of ys) {
+    let zz = null, kk = null;
+    for (let i = 0; i + 1 < L.length; i++) {
+      const a = L[i], b = L[i + 1];
+      if (y < a.y - 1e-9 || y > b.y + 1e-9) continue;
+      zz = b.y - a.y < 1e-9 ? Math.max(a.z, b.z) : a.z + ((y - a.y) / (b.y - a.y)) * (b.z - a.z);
+      kk = kindOf(y < 0 ? a.label : b.label);
+      break;
+    }
+    z.push(zz); kind.push(kk);
+  }
+  return { z, kind };
 }
 
 // Stations régulières (pas P.step) de 0 à la fin de l'axe, avec les volumes cumulés (aires moyennes).

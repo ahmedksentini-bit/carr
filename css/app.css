@@ -256,3 +256,13 @@ td.pict svg { display: block; }
 #plTable td.act button { padding: 1px 7px; }
 #plStations td { font-family: var(--mono); text-align: right; }
 #plStations td.cut { color: #7dd3fc; } #plStations td.fill { color: #fdba74; }
+
+/* Vue 3D */
+.v3d { position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; z-index: 5; }
+.v3d-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.v3d-bar .sep { width: 1px; height: 20px; background: var(--line); }
+.v3d-bar .grow { flex: 1; }
+.v3d-bar input[type=text] { width: 56px; }
+.v3d-host { flex: 1; min-height: 0; position: relative; }
+.v3d-host canvas { display: block; width: 100% !important; height: 100% !important; }
+.v3d-note { margin: 0; padding: 4px 10px; font-size: 11.5px; color: var(--muted); background: var(--panel); border-top: 1px solid var(--line); }
