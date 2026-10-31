@@ -233,3 +233,7 @@ html[dir=rtl] .chart svg, html[dir=rtl] svg text { direction: ltr; }
 @media (max-width: 760px) {
   html[dir=rtl] .panel { border-right: 0; }
 }
+
+/* Vignettes des panneaux (onglet Signalisation) */
+td.pict { padding: 2px 4px; width: 30px; }
+td.pict svg { display: block; }

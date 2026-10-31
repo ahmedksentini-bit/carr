@@ -1,5 +1,6 @@
 // viewer.js — vue CAD en mètres (Y vers le haut), zoom au curseur, rendu canvas du projet et du fond DXF.
 import * as G from './geom.js';
+import { signImage } from './signicons.js';
 
 export const THEMES = {
   dark: {
@@ -192,6 +193,19 @@ export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
         ctx.setLineDash([]); ctx.strokeStyle = st.stroke; ctx.lineWidth = 1;
         const [x, y] = v.w2s(pr.p.x, pr.p.y), r = Math.max(4, pr.size * v.s);
         ctx.beginPath(); ctx.moveTo(x - r, y); ctx.lineTo(x + r, y); ctx.moveTo(x, y - r); ctx.lineTo(x, y + r); ctx.stroke();
+      } else if (pr.k === 'sign') {
+        // Pictogramme droit à l'écran, de 22 px au moins, posé derrière le mât (côté opposé à la chaussée).
+        const px = Math.max(22, pr.w * v.s), half = px / 2 / v.s;
+        const c = G.add(pr.p, G.mul(pr.out, half + 0.3));
+        const [x, y] = v.w2s(c.x, c.y);
+        if (x < -60 || y < -60 || x > v.W + 60 || y > v.H + 60) continue;
+        const img = signImage(pr.code, opts.onImage);
+        if (img.complete && img.naturalWidth) ctx.drawImage(img, x - px / 2, y - px / 2, px, px);
+        else { ctx.setLineDash([]); ctx.strokeStyle = st.stroke; ctx.lineWidth = 1; ctx.strokeRect(x - px / 2, y - px / 2, px, px); }
+        if (v.s > 2.5) {
+          ctx.font = `${Math.max(10, Math.min(16, pr.h * v.s))}px "Segoe UI", system-ui, sans-serif`; ctx.fillStyle = st.text || st.stroke; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+          ctx.fillText(pr.code, x, y + px / 2 + 2);
+        }
       } else if (pr.k === 'text') {
         drawText(ctx, v, pr.p, pr.s, pr.h, pr.rot, pr.align, st.text || st.stroke);
       } else if (pr.k === 'arrow') {

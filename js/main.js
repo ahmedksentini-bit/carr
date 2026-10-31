@@ -8,6 +8,7 @@ import { Viewer, THEMES, drawDesign, drawDxf, buildDxfCache, snapDxf, drawGrid, 
 import { buildDesign, fmt, fmtGis } from './roundabout.js';
 import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan, SECTION, sectionParams, TAD, SIGNS, signParams } from './norms.js';
 import { GAMMES, CATALOG } from './signs.js';
+import { signSVG, signOutline } from './signicons.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
@@ -224,7 +225,7 @@ function renderScene(ctx, v, exp = null) {
   if (S.tog.grid) drawGrid(ctx, v, theme);
   if (S.dxf) { drawDxf(ctx, v, S.dxf, S.dxfCache, theme, +S.prj.opts.dxfOpacity || 1); ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0); }
   if (S.tn) drawDesign(ctx, v, { prims: S.tn.prims }, theme, S.prj.opts.vis, {});
-  drawDesign(ctx, v, S.D, theme, S.prj.opts.vis, { onImagery: imagery && S.prj.bg.provider === 'esri' });
+  drawDesign(ctx, v, S.D, theme, S.prj.opts.vis, { onImagery: imagery && S.prj.bg.provider === 'esri', onImage: () => viewer.invalidate() });
   drawAxes(ctx, v, T, !!exp);
   if (!exp) drawOverlay(ctx, v, T);
   drawHud(ctx, v, theme, northAngle(v), imagery ? PROVIDERS[S.prj.bg.provider].attr + (places ? ' · ' + PROVIDERS.places.attr : '') : '');
@@ -1255,8 +1256,8 @@ function refreshSigns() {
   $('#signInfo').textContent = !SP.on ? 'Signalisation désactivée.' : list.length ? `${list.length} panneau(x) et balise(s) — calque GIRA_SIGNALISATION, mâts dans les points d'implantation.` : 'Aucun panneau : dessinez les branches.';
   const c = (v, d = 2) => (v == null || v === '' || !Number.isFinite(+v) ? '—' : fmt(+v, d));
   $('#signTable').innerHTML = !list.length ? '' :
-    '<thead><tr><th>N°</th><th>Branche</th><th>Panneau</th><th>Désignation</th><th>Implantation</th><th>Abscisse</th><th>X</th><th>Y</th><th>Gamme</th><th>Largeur</th><th>Hauteur</th><th>Remarque</th></tr></thead><tbody>' +
-    list.map((s) => `<tr><td class="mono">${s.n}</td><td>${esc(s.branch)}</td><td class="mono"><b>${esc(s.code)}</b></td><td>${esc(CATALOG[s.code]?.label || '')}</td><td>${esc(s.where || '')}</td>` +
+    '<thead><tr><th>N°</th><th>Branche</th><th></th><th>Panneau</th><th>Désignation</th><th>Implantation</th><th>Abscisse</th><th>X</th><th>Y</th><th>Gamme</th><th>Largeur</th><th>Hauteur</th><th>Remarque</th></tr></thead><tbody>' +
+    list.map((s) => `<tr><td class="mono">${s.n}</td><td>${esc(s.branch)}</td><td class="pict">${signSVG(s.code, 26)}</td><td class="mono"><b>${esc(s.code)}</b></td><td>${esc(CATALOG[s.code]?.label || '')}</td><td>${esc(s.where || '')}</td>` +
       `<td class="mono">${s.x == null ? '—' : c(s.x, 1) + ' m'}</td><td class="mono">${s.p.x.toFixed(3)}</td><td class="mono">${s.p.y.toFixed(3)}</td>` +
       `<td>${esc(GAMMES[s.gamme]?.label || s.gamme)}</td><td class="mono">${c(s.w)} m</td><td class="mono">${c(s.h)} m</td><td class="dim">${esc(s.note || '')}</td></tr>`).join('') + '</tbody>';
 }
@@ -1838,6 +1839,12 @@ function buildDxfText() {
       const b = G.add(pr.p, G.mul(pr.dir, pr.len)), hl = Math.min(0.6, pr.len * 0.3), back = G.mul(pr.dir, -hl), sd = G.mul(G.rot90(pr.dir), hl * 0.4);
       w.line(L, pr.p, b); w.line(L, b, G.add(G.add(b, back), sd)); w.line(L, b, G.sub(G.add(b, back), sd));
       w.text(L, G.add(G.lerp(pr.p, b, 0.5), G.mul(G.rot90(pr.dir), pr.h * 0.85)), pr.h, pr.rot, pr.text, 'center');
+    } else if (pr.k === 'sign') {
+      // Symbole du panneau (contour de la forme à sa largeur réelle, « haut » vers l'extérieur de la route) et code.
+      const up = pr.out, rt = G.rot90(G.neg(up)), c = G.add(pr.p, G.mul(up, pr.w / 2 + 0.3));
+      const pts = signOutline(pr.code).map(([x, y]) => G.add(G.add(c, G.mul(rt, x * pr.w)), G.mul(up, y * pr.w)));
+      w.path(L, pts.map((q, i) => G.L(q, pts[(i + 1) % pts.length])), true);
+      w.text(L, G.add(c, G.mul(up, pr.w * 0.75 + 0.2)), pr.h, G.ang(rt) > Math.PI / 2 || G.ang(rt) < -Math.PI / 2 ? G.ang(rt) + Math.PI : G.ang(rt), pr.code, 'center');
     }
   }
   if (S.prj.opts.vis.AXE_SAISI !== false) for (const b of S.prj.branches) w.path(lay('AXE_SAISI'), b.axis.slice(1).map((p, i) => G.L(b.axis[i], p)));
