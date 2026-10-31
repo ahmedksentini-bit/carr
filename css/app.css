@@ -266,3 +266,12 @@ td.pict svg { display: block; }
 .v3d-host { flex: 1; min-height: 0; position: relative; }
 .v3d-host canvas { display: block; width: 100% !important; height: 100% !important; }
 .v3d-note { margin: 0; padding: 4px 10px; font-size: 11.5px; color: var(--muted); background: var(--panel); border-top: 1px solid var(--line); }
+
+/* Échangeur */
+.blist li.rli { display: block; }
+.rissues { list-style: none; padding: 0; margin: 8px 0; font-size: 12.5px; }
+.rissues li { padding: 5px 8px 5px 10px; margin-bottom: 4px; border-radius: 6px; background: var(--panel2); border-left: 3px solid var(--info); }
+.rissues li.err { border-left-color: var(--err); }
+.rissues li.warn { border-left-color: var(--warn); }
+#tab-echangeur table.pts input { width: 100%; min-width: 0; }
+button.mini { padding: 1px 6px; font-size: 11px; }
