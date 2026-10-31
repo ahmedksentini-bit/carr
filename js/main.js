@@ -6,7 +6,8 @@ import { parseDXF, buildDxfGeometry } from './dxf-parse.js';
 import { DxfWriter } from './dxf-write.js';
 import { Viewer, THEMES, drawDesign, drawDxf, buildDxfCache, snapDxf, drawGrid, drawHud, niceStep } from './viewer.js';
 import { buildDesign, fmt, fmtGis } from './roundabout.js';
-import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan, SECTION, sectionParams, TAD } from './norms.js';
+import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan, SECTION, sectionParams, TAD, SIGNS, signParams } from './norms.js';
+import { GAMMES, CATALOG } from './signs.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
 import { analyse, SITES } from './capacity.js';
@@ -62,6 +63,7 @@ function newProject(context = 'interurbain') {
     ring: { Rg: R.Rg, la: R.la, bf: R.bf, zC: 100, devers: R.devers, pente: 0, gisPente: 0, mode: 'aci' },
     plan: defaultPlan(context),
     section: {}, // profil en travers : valeurs vides = valeurs par défaut du contexte (norms.SECTION)
+    signs: {}, // signalisation verticale : valeurs vides = valeurs par défaut du contexte (norms.SIGNS)
     traffic: { period: 'HPM', site: context === 'urbain' ? 'urbain' : 'rase', uvpPL: 2, od: {}, pl: {}, qp: {}, tad: {} },
     branches: [],
     opts: { angleUnit: 'gon', textH: 0.8, theme: 'dark', vis: {}, dxfOpacity: 0.9 },
@@ -75,7 +77,7 @@ function migrate(p) {
     ring: { ...base.ring, ...p.ring }, opts: { ...base.opts, ...p.opts, vis: { ...(p.opts?.vis || {}) } },
     center: { ...base.center, ...p.center }, crs: { ...base.crs, ...p.crs }, bg: { ...base.bg, ...p.bg },
     plan: { ...base.plan, ...p.plan, tag: { ...base.plan.tag, ...p.plan?.tag } },
-    section: { ...p.section },
+    section: { ...p.section }, signs: { ...p.signs },
     traffic: { ...base.traffic, ...p.traffic, od: { ...p.traffic?.od }, pl: { ...p.traffic?.pl }, qp: { ...p.traffic?.qp }, tad: { ...p.traffic?.tad } },
   };
   delete out.view;
@@ -748,6 +750,7 @@ function buildStaticPanels() {
 function syncCtxUI() {
   const plan = isPlan(S.prj);
   buildSectionFields();
+  buildSignFields();
   $$('#ctxSeg [data-ctx]').forEach((b) => b.classList.toggle('on', b.dataset.ctx === S.prj.context));
   $$('#kindSeg [data-kind]').forEach((b) => b.classList.toggle('on', b.dataset.kind === (S.prj.kind || 'giratoire')));
   $('#ctxNote').textContent = S.prj.context === 'interurbain'
@@ -786,7 +789,9 @@ function syncInputs() {
     if (el === document.activeElement) continue;
     const src = el.dataset.k ? S.prj : br;
     if (!src) continue;
-    const v = getPath(src, el.dataset.k || el.dataset.bk);
+    let v = getPath(src, el.dataset.k || el.dataset.bk);
+    // Signalisation : cases et listes non renseignées → valeur par défaut du contexte.
+    if (el.dataset.k?.startsWith('signs.') && (v == null || v === '') && (el.type === 'checkbox' || el.tagName === 'SELECT')) v = signParams(S.prj)[el.dataset.k.slice(6)];
     // Cases du profil en travers non renseignées : valeur par défaut du contexte.
     if (el.type === 'checkbox') el.checked = !!(v ?? (el.dataset.k?.startsWith('section.') ? sectionParams(S.prj)[el.dataset.k.slice(8)] : v));
     else if (el.tagName === 'SELECT') el.value = v ?? '';
@@ -858,6 +863,7 @@ function refreshPanels() {
   refreshCapacity();
   refreshVisibility();
   refreshProfile();
+  refreshSigns();
   setPrompt();
 }
 
@@ -1199,6 +1205,51 @@ function buildSectionFields() {
     '<h3>Îlot central et bande franchissable</h3>' + f('bfPente', 'Pente de la bande franchissable', '%') +
     f('bfVue', 'Vue de la bordure de la bande franchissable', 'm') + f('ilotVue', 'Vue de la bordure de l\'îlot central', 'm') +
     '<h3>Axes des branches</h3>' + f('axeR', 'Rayon de raccordement à l\'axe saisi', 'm');
+}
+
+// --------------------------------------------------------- Signalisation verticale
+function buildSignFields() {
+  const urb = S.prj.context === 'urbain', plan = isPlan(S.prj), d = SIGNS[S.prj.context];
+  const f = (k, label, unit = 'm') => fld('signs.' + k, label, unit, { ph: d[k] === '' ? 'aucun' : showNum(d[k]) });
+  const gammes = Object.entries(GAMMES).map(([k, g]) => [k, g.label]);
+  $('#signFields').innerHTML =
+    '<label class="chk"><input type="checkbox" data-k="signs.on"> Placer la signalisation verticale sur le plan</label>' +
+    '<div class="row">' + sel('signs.gamme', 'Gamme des panneaux', gammes, { branch: false }) +
+    sel('signs.classe', 'Rétroréflexion', [['1', 'classe 1'], ['2', 'classe 2']], { branch: false }) + '</div>' +
+    `<p class="note">${urb ? 'IISR : gamme normale en agglomération, petite ou miniature si l\'espace manque ; classe 2 recommandée.' : 'SETRA (type R) : tous les panneaux du carrefour en grande gamme, classe 2 ; signal avancé de la secondaire en gamme normale.'}</p>` +
+    f('recul', 'Recul du bord du panneau (depuis la BDD / le bord de la voie)') +
+    f('hauteur', 'Hauteur sous panneau') +
+    (plan
+      ? '<h3>Branches secondaires</h3>' +
+        (urb ? sel('signs.regimeUrb', 'Régime (signalisation)', [['auto', 'selon l\'onglet Carrefour'], ['cedez', 'Cédez-le-passage'], ['stop', 'STOP'], ['feux', 'Feux tricolores'], ['droite', 'Priorité à droite']], { branch: false }) : '') +
+        f('dAv', 'Signal avancé AB3b / AB5 (distance)') +
+        '<div class="row">' + sel('signs.gammeAv', 'Gamme du signal avancé', gammes, { branch: false }) + '</div>' +
+        '<h3>Route principale</h3>' +
+        '<label class="chk"><input type="checkbox" data-k="signs.main"> Signalisation de priorité de la route principale (AB2 / AB6)</label>' +
+        '<label class="chk"><input type="checkbox" data-k="signs.gc"> Route principale classée à grande circulation (AB6 après le carrefour)</label>' +
+        f('dAB2', 'AB2 en amont du carrefour') + f('dAB6', 'AB6 après le carrefour') +
+        '<label class="chk"><input type="checkbox" data-k="signs.dir"> Signalisation de direction D40 / D20 / D60</label>' +
+        f('dD40', 'Présignalisation D40') + f('dD60', 'Confirmation D60')
+      : '<h3>Giratoire</h3>' +
+        f('dA25', 'AB25 (A25) avant la ligne de cédez-le-passage') +
+        '<label class="chk"><input type="checkbox" data-k="signs.d42"> Présignalisation diagrammatique D42b</label>' +
+        f('dD42', 'D42b avant l\'AB25') +
+        sel('signs.doubleAB3a', 'AB3a répété à gauche sur l\'îlot', [['auto', 'si entrée à 2 voies'], ['oui', 'toujours'], ['non', 'jamais']], { branch: false }) +
+        f('dB21', 'B21-1 : distance de contrôle à la ligne') +
+        '<label class="chk"><input type="checkbox" data-k="signs.d21"> D21 de sortie sur les îlots séparateurs</label>' +
+        '<label class="chk"><input type="checkbox" data-k="signs.gc"> Route classée à grande circulation (AB6 après le giratoire)</label>' +
+        f('dAB6', 'AB6 après la sortie'));
+}
+
+function refreshSigns() {
+  const list = S.D?.signs || [], SP = signParams(S.prj);
+  $('#signInfo').textContent = !SP.on ? 'Signalisation désactivée.' : list.length ? `${list.length} panneau(x) et balise(s) — calque GIRA_SIGNALISATION, mâts dans les points d'implantation.` : 'Aucun panneau : dessinez les branches.';
+  const c = (v, d = 2) => (v == null || v === '' || !Number.isFinite(+v) ? '—' : fmt(+v, d));
+  $('#signTable').innerHTML = !list.length ? '' :
+    '<thead><tr><th>N°</th><th>Branche</th><th>Panneau</th><th>Désignation</th><th>Implantation</th><th>Abscisse</th><th>X</th><th>Y</th><th>Gamme</th><th>Largeur</th><th>Hauteur</th><th>Remarque</th></tr></thead><tbody>' +
+    list.map((s) => `<tr><td class="mono">${s.n}</td><td>${esc(s.branch)}</td><td class="mono"><b>${esc(s.code)}</b></td><td>${esc(CATALOG[s.code]?.label || '')}</td><td>${esc(s.where || '')}</td>` +
+      `<td class="mono">${s.x == null ? '—' : c(s.x, 1) + ' m'}</td><td class="mono">${s.p.x.toFixed(3)}</td><td class="mono">${s.p.y.toFixed(3)}</td>` +
+      `<td>${esc(GAMMES[s.gamme]?.label || s.gamme)}</td><td class="mono">${c(s.w)} m</td><td class="mono">${c(s.h)} m</td><td class="dim">${esc(s.note || '')}</td></tr>`).join('') + '</tbody>';
 }
 
 // --------------------------------------------------------- Visibilité
@@ -1744,5 +1795,7 @@ function toast(msg, lvl = 'info') {
 }
 
 init();
+// Accès de diagnostic (console, tests automatisés) : état du projet, vue et recalcul.
+window.GIRA = { get S() { return S; }, get viewer() { return viewer; }, update, buildDxfText };
 // Poignée de débogage (console du navigateur).
 window.GIRA = { S, update, get viewer() { return viewer; }, zoomGira, newBranch, finishAxis, setTool, buildDxfText, parseDXF, buildDxfGeometry };

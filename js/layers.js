@@ -16,5 +16,6 @@ export const LAYERS = {
   LIMITE: { label: 'Limites de projet', dxf: 'GIRA_LIMITE', aci: 8, ltype: 'TIRETS' },
   COTATION: { label: 'Cotations', dxf: 'GIRA_COTATION', aci: 4 },
   DEVERS: { label: 'Dévers', dxf: 'GIRA_DEVERS', aci: 30 },
+  SIGNALISATION: { label: 'Signalisation verticale (panneaux, balises)', dxf: 'GIRA_SIGNALISATION', aci: 1 },
   IMPLANTATION: { label: "Points d'implantation", dxf: 'GIRA_IMPLANTATION', aci: 6 },
 };

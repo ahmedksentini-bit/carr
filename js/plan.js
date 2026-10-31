@@ -604,10 +604,11 @@ export function buildPlan(prj, opt = {}) {
     const obs = W({ x: x0 + P.dObs, y: yOut != null ? yOut - 2 : Math.max(bd.hb + 0.5, bd.hb + bd.entry.w - 2) });
     const om = toM(obs), sY = bd.sY;
     const tNear = toW(om.x + sY * Dv, sY * P.wLane / 2), tFar = toW(om.x - sY * Dv, -sY * P.wLane / 2);
-    bd.vis = { obs, tNear, tFar, D: Dv };
+    const pN = toW(om.x, (sY * P.wLane) / 2), pF = toW(om.x, (-sY * P.wLane) / 2);
+    bd.vis = { obs, tNear, tFar, D: Dv, pN, pF };
     if (sec.visOn) {
       // Triangle œil – point de conflit sur la voie (même abscisse) – cible à D, de chaque côté (branche choisie seulement).
-      const pN = toW(om.x, (sY * P.wLane) / 2), pF = toW(om.x, (-sY * P.wLane) / 2), pick = prj.section?.visBranch;
+      const pick = prj.section?.visBranch;
       for (const [t, p] of !pick || String(bd.id) === String(pick) ? [[tNear, pN], [tFar, pF]] : []) {
         Pp({ k: 'fill', L: 'VISIBILITE', role: 'vis', rings: [closedSegs([obs, p, t])] });
         Pp({ k: 'path', L: 'VISIBILITE', segs: [L(obs, t), L(t, p)] });

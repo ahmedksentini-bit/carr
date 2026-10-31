@@ -4,6 +4,31 @@
 // bordure حجر الحافة, dévers الميل العرضي, cédez-le-passage أعطِ الأولوية, piétons المترجلون, PL الثقيلة.
 
 export const AR = {
+  // Signalisation verticale
+  'Signalisation': 'التشوير',
+  'Placer la signalisation verticale sur le plan': 'وضع التشوير العمودي على المخطط',
+  'Gamme des panneaux': 'حجم اللوحات',
+  'Rétroréflexion': 'الانعكاس الرجعي',
+  'Recul du bord du panneau (depuis la BDD / le bord de la voie)': 'تراجع حافة اللوحة (من الشريط المنخفض / حافة المسلك)',
+  'Hauteur sous panneau': 'الارتفاع تحت اللوحة',
+  'Branches secondaires': 'الفروع الثانوية',
+  'Route principale': 'الطريق الرئيسية',
+  'Panneaux implantés': 'اللوحات الموضوعة',
+  'Signalisation verticale (panneaux, balises)': 'التشوير العمودي (لوحات، علامات)',
+  'Panneau': 'اللوحة',
+  'Désignation': 'التسمية',
+  'Abscisse': 'الفاصلة',
+  'Gamme': 'الحجم',
+  'Largeur': 'العرض',
+  'Hauteur': 'الارتفاع',
+  'Remarque': 'ملاحظة',
+  'à droite, en approche': 'على اليمين، عند الاقتراب',
+  'à droite, en sortie': 'على اليمين، عند الخروج',
+  'à droite, après le carrefour': 'على اليمين، بعد المفترق',
+  'îlot séparateur': 'الجزيرة الفاصلة',
+  'îlot central, face à l\'entrée': 'الجزيرة المركزية، مقابل المدخل',
+  'Signalisation désactivée.': 'التشوير معطّل.',
+  'Aucun panneau : dessinez les branches.': 'لا توجد لوحات: ارسم الفروع.',
   // Barre du haut, onglets, barre d'état
   'GIRA — Conception de carrefours giratoires': 'GIRA — تصميم المفترقات الدائرية',
   'Conception de giratoires · SETRA / CERTU': 'تصميم المفترقات الدائرية · SETRA / CERTU',
@@ -174,7 +199,6 @@ export const AR = {
   // Onglet Carrefour / route principale (T et X)
   'Carrefour en X (croix)': 'مفترق على شكل X (تقاطع)',
   'Carrefour en T': 'مفترق على شكل T',
-  'Route principale': 'الطريق الرئيسية',
   'Route principale (A – B)': 'الطريق الرئيسية (A – B)',
   'route principale': 'الطريق الرئيسية',
   'Branche A': 'الفرع A',
