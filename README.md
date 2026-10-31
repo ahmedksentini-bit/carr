@@ -114,6 +114,14 @@ ou sur un fond topographique DXF.
   (`js/tin.js`, incrémentale avec marche et retournements de Lawson), interpolation linéaire, courbes de niveau
   (équidistance réglable, maîtresses toutes les 5), arêtes du TIN et points affichables, cote TN sous le curseur dans
   la barre d'état, calage de la cote zC du carrefour sur le TN ; points conservés dans le projet et exportés en DXF.
+- **Profil en long** (onglet Profil long) : ligne rouge de chaque branche saisie par points d'inflexion (s depuis le
+  carrefour, z, rayon R du raccordement parabolique, T = R·|Δg|/2), depuis la cote imposée du bord de l'anneau (ou de
+  la principale) sur l'axe ; terrain naturel du MNT le long de l'axe projet (alignement, raccordement, axe saisi),
+  déblai / remblai, pentes, graphique interactif (clic pour ajouter un PI, glisser pour le déplacer), proposition
+  automatique depuis le TN, stations (TN, projet, écart, pente) en CSV, export DXF du profil (exagération verticale).
+  La ligne rouge remplace la pente constante de la branche dans le modèle altimétrique (dévers, points d'implantation).
+  Contrôles : chevauchement des raccordements, pente maximale et rayons minimaux (ARP catégorie R80 par défaut, valeurs
+  urbaines usuelles — à confirmer selon la catégorie), pente ≤ 2 % sur les 20 derniers mètres (ACI), PI hors de l'axe.
 - **Exports** : DXF R12 par calques `GIRA_*` (AutoCAD, Covadis, BricsCAD…), PNG, points d'implantation X, Y, Z en CSV,
   projet `.gira.json` (et sauvegarde automatique dans le navigateur).
 
