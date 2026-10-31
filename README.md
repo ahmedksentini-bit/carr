@@ -93,6 +93,20 @@ ou sur un fond topographique DXF.
   branche suivante (ACI : voie de 4 m, bandes dérasées 2,00 m à droite et 0,50 m à gauche, rive intérieure de rayon
   40 m, îlot de séparation de 2 m minimum le long des bordures du giratoire, biseau de décélération de 80 m,
   voie d'insertion de 70 m et biseau de 70 m) ; les branches concernées sont allongées automatiquement.
+- **Signalisation verticale** (onglet Signalisation, calque `GIRA_SIGNALISATION`, mâts dans les points d'implantation) :
+  panneaux placés automatiquement sur l'axe de chaque branche, à droite du sens concerné, le bord du panneau à 0,70 m
+  de la BDD (ou du bord de la voie derrière le caniveau en urbain), ou sur l'axe des îlots séparateurs.
+  Giratoire : AB25 (A25) à 100–150 m (10–50 m en urbain), D42b ≥ 50 m avant l'AB25, AB3a + M9c au plus près de la
+  ligne T'2 (répété à gauche sur l'îlot si l'entrée a 2 voies), B21-1 sur l'îlot central axé sur chaque voie d'entrée
+  (sauf mini-giratoire), J5 au nez amont de chaque îlot en saillie, D21 de sortie sur l'îlot, AB6 après la sortie si la
+  route est classée à grande circulation, D31 sur l'îlot d'une voie directe. Carrefours en T et en X : AB3a ou AB4 au
+  plus près de la ligne (jamais répété à gauche), signal avancé AB3b / AB5 + M1 (150 m en interurbain), J5 et B21a1 au
+  nez amont de l'îlot en saillie, sur la principale AB2 (≈ 200 m au cédez-le-passage, ≥ 50 m au STOP) ou AB6, D40 /
+  D20 / D60 ; en urbain, régimes feux et priorité à droite (sans panneaux) et présignalisation non systématique.
+  Gammes (grande en interurbain, normale en urbain), classe de rétroréflexion, hauteur sous panneau (1,00 m ;
+  2,30 m en agglomération) et distances réglables ; tableau récapitulatif (code, implantation, abscisse, X, Y, gamme,
+  largeur, hauteur). Contrôles : distances du guide, panneau de la principale dans un triangle de visibilité, îlot
+  trop étroit pour une J5 de 500 (1,90 m), cheminement libre de 1,40 m sur trottoir, panneau au-delà de l'axe dessiné.
 - **Exports** : DXF R12 par calques `GIRA_*` (AutoCAD, Covadis, BricsCAD…), PNG, points d'implantation X, Y, Z en CSV,
   projet `.gira.json` (et sauvegarde automatique dans le navigateur).
 
@@ -177,6 +191,18 @@ Pour les carrefours plans :
 - le raccordement du dévers de la secondaire sur le bord de la principale n'est pas décrit par l'ACI (modèle de principe).
 
 L'altimétrie est un modèle de principe (avant-projet) : elle ne remplace pas un calcul de profils sur MNT.
+
+### Signalisation verticale
+
+Règles d'implantation reprises de SETRA, « L'équipement des routes interurbaines » (1998), vol. 2 ch. 2.11 (carrefours
+plans et giratoires des routes de type R), vol. 1 ch. 2 § 2.7 (hauteur sous panneau 1 à 2,30 m, recul 0,70 m) et ch. 7
+(balises J5) ; de l'ACI/P (ch. 2 § 4.1 et ch. 3 § 4.1 : distances AB25, B21-1, AB2, J5) ; du CERTU, « Carrefours
+urbains » (2010) § 7.5, 8.5 et 9.6 (A25 à 10–50 m, B21-1, B21a1 / J5, D42b optionnel, D21, feux et priorité à droite) ;
+de l'IISR Livre I, 1re partie (hauteur jusqu'à 2,30 m en agglomération, gammes). Les dimensions des panneaux par gamme
+sont celles de la NF P 98-531 pour les triangles et les disques ; celles des AB4, AB6 et J5 sont usuelles (à confirmer).
+Points à vérifier : distances de la signalisation de direction (D40 / D60) pour des vitesses autres que 75–90 km/h
+(circulaire 82-31) ; la position exacte du B21-1 dépend de la déflexion de l'entrée ; aucun panneau B1 (branches à sens
+unique) ni A17 (feux) n'est dessiné.
 
 ### Capacité
 

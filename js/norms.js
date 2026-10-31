@@ -76,6 +76,41 @@ export function sideBands(prj, sec = sectionParams(prj)) {
 // Voie directe de tourne-à-droite : rayon en axe de la chaussée et largeur de chaussée (hors bandes dérasées).
 export const TAD = { interurbain: { R: 42, w: 4 }, urbain: { R: 20, w: 3.5 } };
 
+// Signalisation verticale — valeurs par défaut (voir signs.js pour les règles d'implantation).
+// Interurbain : SETRA « L'équipement des routes interurbaines » (1998) ch. 2.11 (type R) et ACI/P ch. 2 § 4.1, ch. 3 § 4.1 ;
+// urbain : CERTU « Carrefours urbains » (2010) § 7.5, 8.5 et 9.6 ; IISR Livre I, 1re partie (hauteurs, gammes).
+//  gamme : gamme des panneaux de police du carrefour (interurbain : grande, classe 2 ; urbain : normale) ;
+//  recul : aplomb du bord du panneau à ≥ 0,70 m de la zone de récupération (BDD) ou du bord de la voie ;
+//  hauteur : sous panneau, 1,00 m sur accotement (1 à 2,30 m), jusqu'à 2,30 m en agglomération (IISR 1re partie) ;
+//  dA25 : AB25 (A25) à 100–150 m du giratoire (150 m dans l'ACI/P), 10–50 m en urbain ; dD42 : D42b ≥ 50 m avant l'AB25 ;
+//  dB21 : B21-1 sur l'îlot central face à chaque entrée, à ≈ 20 m de la ligne de cédez-le-passage (ACI/P) ;
+//  dAv : signal avancé AB3b / AB5 de la branche secondaire (gamme normale), 150 m en interurbain, non systématique en ville ;
+//  dAB2 : AB2 (priorité ponctuelle) sur la principale, hors des triangles de visibilité : ≈ 200 m (cédez-le-passage),
+//  ≥ 50 m (STOP) ; dAB6 : AB6 après le carrefour si la principale est classée à grande circulation ;
+//  dD40 / dD60 : présignalisation D40 et confirmation D60 (300 m de l'axe de la secondaire, guide type R).
+export const SIGNS = {
+  interurbain: {
+    on: true, gamme: 'grande', gammeAv: 'normale', classe: 2, recul: 0.7, hauteur: 1.0,
+    dA25: 150, dD42: 50, d42: true, d21: true, doubleAB3a: 'auto', dB21: 20, gc: false, dAB6: 30,
+    dAv: 150, dAB2: '', dir: true, dD40: 150, dD60: 300, main: true, regimeUrb: 'auto',
+  },
+  urbain: {
+    on: true, gamme: 'normale', gammeAv: 'normale', classe: 2, recul: 0.7, hauteur: 2.3,
+    dA25: 30, dD42: 50, d42: false, d21: true, doubleAB3a: 'auto', dB21: 20, gc: false, dAB6: 20,
+    dAv: '', dAB2: '', dir: false, dD40: 100, dD60: 150, main: false, regimeUrb: 'auto',
+  },
+};
+export function signParams(prj) {
+  const d = SIGNS[prj.context], s = prj.signs || {}, out = {};
+  for (const k in d) out[k] = typeof d[k] === 'boolean' ? s[k] ?? d[k] : typeof d[k] === 'string' ? (s[k] || d[k]) : num(s[k], d[k]);
+  // Champs numériques dont la valeur vide signifie « aucun panneau » (et non la valeur par défaut).
+  out.dAv = s.dAv === '' ? '' : num(s.dAv, d.dAv);
+  out.dAB2 = s.dAB2 === '' || s.dAB2 == null ? '' : +s.dAB2;
+  out.gamme = s.gamme || d.gamme; out.gammeAv = s.gammeAv || d.gammeAv;
+  out.doubleAB3a = s.doubleAB3a || d.doubleAB3a; out.regimeUrb = s.regimeUrb || d.regimeUrb;
+  return out;
+}
+
 // Carrefours plans (T, X) d'après l'ACI (chap. « Carrefours plans ») et le CERTU (« Carrefours urbains »).
 // l : largeur de la chaussée de la branche secondaire (somme de ses voies).
 export const PLAN = {
@@ -222,6 +257,7 @@ const f = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d).replace('.', ',') : '
 
 // Aide affichée sous un champ : { txt, lvl } ; lvl ∈ ok | warn | err | ''
 export function hintFor(key, prj, br) {
+  { const h = signHint(key, prj); if (h !== undefined) return h; }
   if (isPlan(prj)) { const h = planHint(key, prj, br); if (h !== undefined) return h; }
   const C = prj.context, Rg = +prj.ring.Rg, la = +prj.ring.la;
   const v = br ? +getPath(br, key) : +getPath(prj, key);
@@ -393,6 +429,7 @@ function checkPlan(prj, D) {
     if (bd.vis) add('info', bd.name, `Dégager le triangle de visibilité : ${f(bd.vis.D, 0)} m de part et d'autre (${f(P.tVis, 0)} s à ${f(P.v85, 0)} km/h).`);
   }
   for (const it of D.issues) add(it.lvl, 'Géométrie', it.msg);
+  for (const it of D.signIssues || []) add(it.lvl, 'Signalisation', it.msg);
   return out;
 }
 
@@ -453,7 +490,32 @@ export function checkDesign(prj, D) {
     if (D.devers.minRadial < 0) add('warn', 'Dévers', `Dévers inversé (vers l'îlot central) sur une partie de l'anneau : ${f(D.devers.minRadial * 100, 1)} %.`);
   }
   for (const it of D.issues) add(it.lvl, 'Géométrie', it.msg);
+  for (const it of D.signIssues || []) add(it.lvl, 'Signalisation', it.msg);
   return out;
+}
+
+// Aides des champs de signalisation (onglet Signalisation).
+function signHint(key, prj) {
+  if (!key.startsWith('signs.')) return undefined;
+  const urb = prj.context === 'urbain', SP = signParams(prj), v = +getPath(prj, key);
+  const H = (txt, lvl = '') => ({ txt, lvl });
+  switch (key) {
+    case 'signs.recul': return v < 0.7 - 1e-9 ? H('≥ 0,70 m entre le bord du panneau et la zone de récupération / le bord de la voie (SETRA, ACI/P)', 'warn') : H('SETRA : aplomb du panneau à 0,70 m minimum de la zone de récupération (BDD) ; urbain : du bord de la voie', 'ok');
+    case 'signs.hauteur': return urb
+      ? (rng(v, 1, 2.3) ? H('IISR : 1 m à 2,30 m en agglomération (2,30 m si les piétons passent dessous)', 'ok') : H('IISR : 1 m à 2,30 m en agglomération', 'warn'))
+      : (rng(v, 1, 2.3) ? H('SETRA : 1 m (à 2,30 m) sur accotement ; < 1 m admis sur les îlots directionnels', 'ok') : H('SETRA : 1 m à 2,30 m sur accotement', 'warn'));
+    case 'signs.dA25': return urb
+      ? (rng(v, 10, 50) ? H('CERTU : A25 obligatoire, 10 à 50 m avant le carrefour', 'ok') : H('CERTU : 10 à 50 m', 'warn'))
+      : (rng(v, 100, 150) ? H('SETRA : 100 à 150 m ; ACI/P : environ 150 m', 'ok') : H('SETRA : 100 à 150 m', 'warn'));
+    case 'signs.dD42': return v >= 50 - 1e-9 ? H('≥ 50 m avant l\'AB25 (100 m si le D42b est dédoublé)', 'ok') : H('≥ 50 m avant l\'AB25', 'warn');
+    case 'signs.dB21': return H('ACI/P : B21-1 axé sur la voie d\'entrée à ≈ 20 m de la ligne de cédez-le-passage (valeur de contrôle)');
+    case 'signs.dAB6': return H('AB6 après le carrefour, route classée à grande circulation (sinon AB2 en amont)');
+    case 'signs.dAv': return urb ? H('CERTU : présignalisation non systématique en ville (vide = aucun signal avancé)') : H('signal avancé AB3b / AB5 avec panonceau M1 de distance ; vide = aucun');
+    case 'signs.dAB2': return H(`vide = automatique : ${SP.dAB2 === '' ? 'selon le régime' : f(SP.dAB2, 0) + ' m'} — ACI/P : ≈ 200 m au cédez-le-passage, ≥ 50 m au STOP, hors des triangles de visibilité${urb ? ' ; en ville 100 m par défaut' : ''}`);
+    case 'signs.dD40': return H('présignalisation D40 ; distances indicatives pour V85 de 75 à 90 km/h (circulaire 82-31)');
+    case 'signs.dD60': return H('confirmation D60 à 300 m de l\'axe de la secondaire (guide type R)');
+    default: return undefined;
+  }
 }
 
 const LBL = {

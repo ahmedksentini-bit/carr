@@ -8,36 +8,37 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%2338bdf8' stroke-width='4'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%234ade80'/%3E%3C/svg%3E">
   <!-- data-cfasync : exclut les scripts de Rocket Loader (Cloudflare), qui casse les modules ES. -->
   <!-- version:start (généré par tools/version.sh) -->
-  <link rel="stylesheet" href="css/app.css?v=6332f1876e">
+  <link rel="stylesheet" href="css/app.css?v=165f29c3f3">
   <script data-cfasync="false" type="importmap">
   { "imports": {
-    "./js/approach.js": "./js/approach.js?v=6332f1876e",
-    "./js/bypass.js": "./js/bypass.js?v=6332f1876e",
-    "./js/capacity-plan.js": "./js/capacity-plan.js?v=6332f1876e",
-    "./js/capacity.js": "./js/capacity.js?v=6332f1876e",
-    "./js/common.js": "./js/common.js?v=6332f1876e",
-    "./js/crossing.js": "./js/crossing.js?v=6332f1876e",
-    "./js/crs.js": "./js/crs.js?v=6332f1876e",
-    "./js/devers.js": "./js/devers.js?v=6332f1876e",
-    "./js/dims.js": "./js/dims.js?v=6332f1876e",
-    "./js/dxf-parse.js": "./js/dxf-parse.js?v=6332f1876e",
-    "./js/dxf-write.js": "./js/dxf-write.js?v=6332f1876e",
-    "./js/geom.js": "./js/geom.js?v=6332f1876e",
-    "./js/i18n-ar.js": "./js/i18n-ar.js?v=6332f1876e",
-    "./js/i18n.js": "./js/i18n.js?v=6332f1876e",
-    "./js/layers.js": "./js/layers.js?v=6332f1876e",
-    "./js/main.js": "./js/main.js?v=6332f1876e",
-    "./js/norms.js": "./js/norms.js?v=6332f1876e",
-    "./js/plan.js": "./js/plan.js?v=6332f1876e",
-    "./js/profile.js": "./js/profile.js?v=6332f1876e",
-    "./js/roundabout.js": "./js/roundabout.js?v=6332f1876e",
-    "./js/swept.js": "./js/swept.js?v=6332f1876e",
-    "./js/tiles.js": "./js/tiles.js?v=6332f1876e",
-    "./js/viewer.js": "./js/viewer.js?v=6332f1876e"
+    "./js/approach.js": "./js/approach.js?v=165f29c3f3",
+    "./js/bypass.js": "./js/bypass.js?v=165f29c3f3",
+    "./js/capacity-plan.js": "./js/capacity-plan.js?v=165f29c3f3",
+    "./js/capacity.js": "./js/capacity.js?v=165f29c3f3",
+    "./js/common.js": "./js/common.js?v=165f29c3f3",
+    "./js/crossing.js": "./js/crossing.js?v=165f29c3f3",
+    "./js/crs.js": "./js/crs.js?v=165f29c3f3",
+    "./js/devers.js": "./js/devers.js?v=165f29c3f3",
+    "./js/dims.js": "./js/dims.js?v=165f29c3f3",
+    "./js/dxf-parse.js": "./js/dxf-parse.js?v=165f29c3f3",
+    "./js/dxf-write.js": "./js/dxf-write.js?v=165f29c3f3",
+    "./js/geom.js": "./js/geom.js?v=165f29c3f3",
+    "./js/i18n-ar.js": "./js/i18n-ar.js?v=165f29c3f3",
+    "./js/i18n.js": "./js/i18n.js?v=165f29c3f3",
+    "./js/layers.js": "./js/layers.js?v=165f29c3f3",
+    "./js/main.js": "./js/main.js?v=165f29c3f3",
+    "./js/norms.js": "./js/norms.js?v=165f29c3f3",
+    "./js/plan.js": "./js/plan.js?v=165f29c3f3",
+    "./js/profile.js": "./js/profile.js?v=165f29c3f3",
+    "./js/roundabout.js": "./js/roundabout.js?v=165f29c3f3",
+    "./js/signs.js": "./js/signs.js?v=165f29c3f3",
+    "./js/swept.js": "./js/swept.js?v=165f29c3f3",
+    "./js/tiles.js": "./js/tiles.js?v=165f29c3f3",
+    "./js/viewer.js": "./js/viewer.js?v=165f29c3f3"
   } }
   </script>
   <script data-cfasync="false" src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script>
-  <script data-cfasync="false" type="module" src="js/main.js?v=6332f1876e"></script>
+  <script data-cfasync="false" type="module" src="js/main.js?v=165f29c3f3"></script>
   <!-- version:end -->
 </head>
 <body>
@@ -91,6 +92,7 @@
         <button data-tab="controles">Contrôles <span id="chkBadge" class="badge"></span></button>
         <button data-tab="visibilite">Visibilité</button>
         <button data-tab="capacite">Capacité</button>
+        <button data-tab="signalisation">Signalisation</button>
         <button data-tab="implantation">Implantation</button>
       </div>
 
@@ -235,6 +237,14 @@
           <h3>Détail des mouvements non prioritaires</h3>
           <div class="tablewrap"><table id="capMoves" class="pts"></table></div>
         </div>
+      </div>
+
+      <div class="tab" id="tab-signalisation" hidden>
+        <p class="note">Panneaux de police, balises J5 et signalisation de direction placés automatiquement d'après le guide SETRA « L'équipement des routes interurbaines » (type R) et l'ACI/P en interurbain, le guide CERTU « Carrefours urbains » (2010) et l'IISR en urbain. Abscisses depuis la ligne de cédez-le-passage (ou le centre du carrefour pour la route principale, négatives en amont). Vérifier sur le terrain la visibilité de chaque panneau.</p>
+        <div id="signFields"></div>
+        <h3>Panneaux implantés</h3>
+        <p class="note" id="signInfo"></p>
+        <div class="tablewrap"><table id="signTable" class="pts"></table></div>
       </div>
 
       <div class="tab" id="tab-implantation" hidden>

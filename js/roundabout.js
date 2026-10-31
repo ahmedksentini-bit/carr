@@ -13,6 +13,7 @@ import { buildPlan } from './plan.js';
 import { buildBypass } from './bypass.js';
 import { makeDims } from './dims.js';
 import { crossing, crossingPrims, cutAtX, polyOf, closedSegs } from './crossing.js';
+import { addSigns } from './signs.js';
 
 const { add, sub, mul, dot, norm, rot90, neg, ang, polar, L, A } = G;
 const num = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
@@ -22,7 +23,10 @@ export { fmt, fmtGis, autoCenter };
 // Point d'entrée : giratoire ou carrefour plan (T, X) selon le type du projet.
 // opt.only : { bi, label } — ne calcule que cette épure de giration (recherche des corrections).
 export function buildDesign(prj, opt = {}) {
-  return prj.kind === 'T' || prj.kind === 'X' ? buildPlan(prj, opt) : buildRoundabout(prj);
+  const D = prj.kind === 'T' || prj.kind === 'X' ? buildPlan(prj, opt) : buildRoundabout(prj);
+  // Signalisation verticale (panneaux, balises J5) : ajoutée au projet dérivé, sauf pour les calculs intermédiaires.
+  if (!opt.only) { try { addSigns(prj, D); } catch (e) { console.error(e); D.signs = []; D.signIssues = [{ lvl: 'err', msg: 'Signalisation : ' + e.message }]; } }
+  return D;
 }
 
 // ext : longueurs minimales des alignements droits (abscisse locale), imposées par les voies directes de tourne-à-droite.
