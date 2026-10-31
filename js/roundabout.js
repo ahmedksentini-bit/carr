@@ -14,6 +14,7 @@ import { buildBypass } from './bypass.js';
 import { makeDims } from './dims.js';
 import { crossing, crossingPrims, cutAtX, polyOf, closedSegs } from './crossing.js';
 import { addSigns } from './signs.js';
+import { buildEchangeur } from './echangeur.js';
 
 const { add, sub, mul, dot, norm, rot90, neg, ang, polar, L, A } = G;
 const num = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
@@ -26,6 +27,8 @@ export function buildDesign(prj, opt = {}) {
   const D = prj.kind === 'T' || prj.kind === 'X' ? buildPlan(prj, opt) : buildRoundabout(prj);
   // Signalisation verticale (panneaux, balises J5) : ajoutée au projet dérivé, sauf pour les calculs intermédiaires.
   if (!opt.only) { try { addSigns(prj, D); } catch (e) { console.error(e); D.signs = []; D.signIssues = [{ lvl: 'err', msg: 'Signalisation : ' + e.message }]; } }
+  // Échangeur autoroutier (section courante et bretelles), s'il est activé.
+  if (!opt.only) { try { buildEchangeur(prj, D); } catch (e) { console.error(e); D.ramps = []; D.echIssues = [{ lvl: 'err', msg: 'Calcul impossible : ' + e.message }]; } }
   return D;
 }
 

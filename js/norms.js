@@ -410,7 +410,7 @@ function planHint(key, prj, br) {
 function checkPlan(prj, D) {
   const out = [], add = (lvl, group, msg) => out.push({ lvl, group, msg });
   const inter = prj.context === 'interurbain', P = planParams(prj), kind = prj.kind;
-  if (!D || !D.O) { add('info', 'Projet', 'Dessinez les axes des branches : la route principale est la paire la plus alignée.'); return out; }
+  if (!D || !D.O) { add('info', 'Projet', 'Dessinez les axes des branches : la route principale est la paire la plus alignée.'); for (const it of D?.echIssues || []) add(it.lvl, 'Échangeur', it.msg); return out; }
   if (inter) add('info', 'Choix', 'ACI : giratoire préférable si le trafic secondaire est important, en cas de problème de sécurité, pour deux routes de même niveau ou de 7 m et plus.');
   for (const k of ['plan.wLane', ...(P.tag.on ? ['plan.tag.width', 'plan.tag.island', 'plan.tag.storage', 'plan.tag.sifflet', 'plan.tag.align'] : [])]) {
     const h = planHint(k, prj);
@@ -433,6 +433,7 @@ function checkPlan(prj, D) {
   for (const it of D.issues) add(it.lvl, 'Géométrie', it.msg);
   for (const it of D.signIssues || []) add(it.lvl, 'Signalisation', it.msg);
   plCheckAll(prj, D, add);
+  for (const it of D.echIssues || []) add(it.lvl, 'Échangeur', it.msg);
   return out;
 }
 
@@ -448,7 +449,7 @@ export function checkDesign(prj, D) {
   if (isPlan(prj)) return checkPlan(prj, D);
   const out = [];
   const add = (lvl, group, msg) => out.push({ lvl, group, msg });
-  if (!D || !D.O) { add('info', 'Projet', 'Dessinez au moins un axe de branche pour générer le giratoire.'); return out; }
+  if (!D || !D.O) { add('info', 'Projet', 'Dessinez au moins un axe de branche pour générer le giratoire.'); for (const it of D?.echIssues || []) add(it.lvl, 'Échangeur', it.msg); return out; }
   for (const k of ['ring.Rg', 'ring.la', 'ring.bf', 'ring.devers', 'ring.pente']) {
     const h = hintFor(k, prj);
     if (h) add(h.lvl || 'info', 'Anneau', `${LBL[k]} = ${f(+getPath(prj, k))} — ${h.txt}`);
@@ -495,6 +496,7 @@ export function checkDesign(prj, D) {
   for (const it of D.issues) add(it.lvl, 'Géométrie', it.msg);
   for (const it of D.signIssues || []) add(it.lvl, 'Signalisation', it.msg);
   plCheckAll(prj, D, add);
+  for (const it of D.echIssues || []) add(it.lvl, 'Échangeur', it.msg);
   return out;
 }
 

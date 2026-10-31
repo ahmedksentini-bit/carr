@@ -133,6 +133,14 @@ ou sur un fond topographique DXF.
   bordure, trottoir, talus jusqu'au TN), mâts et panneaux avec leurs pictogrammes ; vue orbitale et vue conducteur
   (branche et distance au choix, œil à 1,10 m), exagération verticale, terrain en fil de fer, export PNG et OBJ
   (coordonnées du projet). Rendu three.js (vendu dans `js/vendor`, licence MIT), sans serveur.
+- **Échangeur** (onglet Échangeur) : section courante d'autoroute (ICTAAL 2015, maj 2021 : catégories L1 / L2, voies,
+  BDG, BAU, bande médiane, PK), bretelles de sortie par déboîtement (Sd1 : biseau 150 / 110 / 90 m, point S.1,00 m,
+  tpl, Lm = (tpl − 1) / p, musoir hachuré, balise J14 à S.5,00 m, D30 / D40 / D50 aux distances du tab. 4-2) et
+  d'entrée en insertion (Ei1 : voie de 200 m + biseau de 75 m) ; axe des bretelles par sommets avec arcs et
+  **clothoïdes** (paramètre A), surlargeur 50/R, dévers en 1/R ; contrôles du guide Cerema « Les échangeurs sur routes
+  de type Autoroute » (2013, maj 2021) : rayons limites (tab. 3-1), premier rayon de sortie, enchaînement des courbes,
+  alignements intermédiaires, longueur minimale de clothoïde, zones de décélération Ld et d'accélération La (§ 3.2.5,
+  vitesses de l'annexe), obliquité. Placement d'une bretelle d'un clic sur la chaussée, sommets déplaçables.
 - **Exports** : DXF R12 par calques `GIRA_*` (AutoCAD, Covadis, BricsCAD…), PNG, points d'implantation X, Y, Z en CSV,
   projet `.gira.json` (et sauvegarde automatique dans le navigateur).
 
@@ -157,6 +165,8 @@ js/swept.js         épures de giration (semi-remorque)
 js/profile.js       profil en travers type de l'anneau (SVG, DXF)
 js/viewer.js        rendu canvas (projet, DXF, HUD)
 js/geom.js          géométrie (droites, arcs, raccordements, décalages)
+js/clotho.js        alignements en plan avec clothoïdes (raccordements progressifs)
+js/echangeur.js     échangeur : section courante, bretelles, divergents / convergents, contrôles
 js/dxf-parse.js     lecture DXF        js/dxf-write.js   écriture DXF R12
 js/crs.js           systèmes de coordonnées   js/tiles.js   fonds en tuiles
 serve.ps1           serveur local de test (Windows, sans Node ni Python)
@@ -231,6 +241,18 @@ Points à vérifier : distances de la signalisation de direction (D40 / D60) pou
 (circulaire 82-31) ; la position exacte du B21-1 dépend de la déflexion de l'entrée ; aucun panneau B1 (branches à sens
 unique) ni A17 (feux) n'est dessiné.
 
+### Échangeurs
+
+Cerema, « Les échangeurs sur routes de type Autoroute », éd. 2013, version corrigée mai 2015, mise à jour 2021 :
+tab. 3-1 (Rdn, Rm), § 3.2.2 (enchaînement : R1 ≤ 1,5 R2 pour les branches, R1 < 2 R2 pour les bretelles ; 1er rayon
+≥ 1,5 Rdn ou 100 m), § 3.2.3 (clothoïde ≥ max(6 R^0,4 ; 7 |Δd|) à une voie, max(R/9 ; 14 |Δd|) à deux voies),
+§ 3.2.5 (Ld = (Vs² − VR²) / 2(1,5 + 10 p), La = (VE² − VR²) / 2(1 − 10 p), Vs = 70 km/h, VE = 55 km/h), tab. 3-2
+(profil en long), § 3.4.2 (bretelle : BDD 1,00 / 3,50 / BDG 0,50 ; surlargeur 50/R si R < 100 m), § 3.5 (dévers),
+§ 4.1.3.1 (biseau), schéma 5-1 (insertion 200 + 75 m), § 6.1 (tpl, obliquité, Lm), tab. 4-2 (d3, d2), annexe tab. 12-1
+(vitesse associée au rayon). ICTAAL 2015 maj 2021 : tab. 3-1 et 3-2 (section courante), § 4.1 (profil en travers).
+Points à confirmer : la largeur au tpl par défaut (BAU + BDG + 0,70 m) ; l'obliquité d'une sortie en déboîtement est
+prise égale à 4,50 m / biseau.
+
 ### Capacité
 
 Le calcul reprend les formules du logiciel **Girabase 4** (Cerema), d'après son manuel
@@ -263,6 +285,12 @@ structure de l'HCM, d'après Troutbeck & Brilon, *Traffic Flow Theory*, chap. 8 
   l'ACI (7 + 10p)·N avec N pris égal à la file à 95 %.
 
 ## Limites connues
+
+- Échangeur : seules les sorties Sd1 et entrées Ei1 à une voie sont dessinées (pas d'affectation Sa, d'adjonction Ea,
+  de sortie depuis une bretelle ni d'entrecroisement) ; la section courante est tracée en droites et arcs (sans
+  clothoïdes) ; les bretelles n'ont pas encore de profil en long ni de profils en travers, ni de vue 3D, et leur
+  extrémité n'est pas encore raccordée automatiquement au giratoire (branche à sens unique) : l'axe se termine sur la
+  branche dessinée.
 
 - Les largeurs par défaut de BDD (1,00 m), BDG (0,50 m) et berme (1,50 m) en interurbain sont des valeurs de départ
   à ajuster dans l'onglet Profil ; elles ne sont pas tirées du guide.
