@@ -43,6 +43,7 @@ export function deversOfRadius(R, cat) {
 }
 // [ECH] tab. 4-4 / 5-2 : longueur d'insertion Li (adjonction) ; Ei1 : 200 m + biseau 75 m (schéma 5-1).
 export const LI = { 130: 470, 110: 310, 90: 234 };
+export const J14_W = 2.0; // emprise de la balise J14 au musoir, déduite du schéma 6-1 (5,20 − 2,50 − 0,70)
 
 export function hwyParams(prj) {
   const h = prj.hwy || {};
@@ -65,7 +66,9 @@ export function rampParams(prj, r) {
   const H = hwyParams(prj);
   // Obliquité : 3 % (150 m), ≈ 4 % (110 m), 5 % (90 m) en sortie ([ECH] § 6.1, biseau sur 4,50 m = 1,00 + 3,50) ; 3 à 5 % en entrée.
   const p = kind === 'sortie' ? (r.obl !== '' && r.obl != null ? num(r.obl, 3) / 100 : 4.5 / biseau) : num(r.obl, 3) / 100;
-  const tpl = num(r.tpl, Math.round((H.bau + bdg + 0.7) * 100) / 100); // BAU émettrice + BDG bretelle + balise J14 (0,70 m) [ECH] § 6.1 (9)
+  // Largeur au tpl ([ECH] § 6.1 et schéma 6-1) : BAU de la chaussée émettrice + emprise de la balise J14 (2,00 m)
+  // + BDG de la bretelle portée à 0,70 m au moins (note 9) — soit 2,50 + 2,00 + 0,70 = 5,20 m dans l'exemple du guide.
+  const tpl = num(r.tpl, Math.round((H.bau + J14_W + Math.max(bdg, 0.7)) * 100) / 100);
   const Lm = Math.max(0, (tpl - 1) / p);
   return { kind, name: r.name || (kind === 'sortie' ? 'S' : 'E'), sens: +r.sens === 2 ? 2 : 1, s: num(r.s, 0), cat: RAMP_CAT[r.cat] ? r.cat : 'b50', C: cat, lanes, w, bdd, bdg, berme: num(r.berme, 0.75), biseau, p, tpl, Lm, pente: num(r.pente, 0), ins: num(r.ins, 200), pis: Array.isArray(r.pis) ? r.pis : [] };
 }
@@ -116,7 +119,7 @@ export function buildEchangeur(prj, D) {
     const rp = rampParams(prj, r), s0 = Math.max(0, Math.min(sEnd, rp.s));
     const sg = rp.sens === 1 ? -1 : 1, st = (rp.sens === 1 ? 1 : -1) * (rp.kind === 'sortie' ? 1 : -1);
     const I = (a, b) => [Math.min(a, b), Math.max(a, b)];
-    if (rp.kind === 'sortie') { gaps[sg].rive.push(I(s0 - st * rp.biseau, s0)); gaps[sg].bord.push(I(s0 - st * rp.biseau * 0.5, s0 + st * rp.Lm)); }
+    if (rp.kind === 'sortie') { gaps[sg].rive.push(I(s0 - st * rp.biseau, s0)); gaps[sg].bord.push(I(s0 - st * rp.biseau, s0 + st * rp.Lm)); }
     else { const sFin = s0 - st * (rp.ins + rp.biseau); gaps[sg].rive.push(I(s0, sFin)); gaps[sg].bord.push(I(s0 + st * rp.Lm, sFin)); }
   }
   // Ligne décalée de delta, échantillonnée le long de l'axe, coupée par les intervalles g : liste de morceaux.
@@ -248,50 +251,75 @@ export function buildEchangeur(prj, D) {
     const left = offsetPolyline(al, offL, stp), right = offsetPolyline(al, offR, stp);
     R.left = left; R.right = right;
     const sTpl = Math.min(al.length, rp.Lm);
-    const accL = offsetPolyline(al, (s) => offL(s) + rp.bdg, stp, sTpl), accR = offsetPolyline(al, (s) => offR(s) - rp.bdd, stp, 0);
-    const bermL = offsetPolyline(al, (s) => offL(s) + rp.bdg + rp.berme, stp, sTpl), bermR = offsetPolyline(al, (s) => offR(s) - rp.bdd - rp.berme, stp, 0);
+    // Côté autoroute de la bretelle (BDG, gauche dans le sens de circulation) et côté extérieur (BDD) : l'axe d'une sortie
+    // est orienté dans le sens de circulation, celui d'une entrée à contresens (depuis E.1,00 m vers l'extrémité).
+    const sgn = fwd ? 1 : -1, hwyS = fwd ? offL : offR, outS = fwd ? offR : offL;
+    const accL = offsetPolyline(al, (s) => hwyS(s) + sgn * rp.bdg, stp, sTpl), accR = offsetPolyline(al, (s) => outS(s) - sgn * rp.bdd, stp, 0);
+    const bermL = offsetPolyline(al, (s) => hwyS(s) + sgn * (rp.bdg + rp.berme), stp, sTpl), bermR = offsetPolyline(al, (s) => outS(s) - sgn * (rp.bdd + rp.berme), stp, 0);
     const hwyEdgeAt = (st) => F.edge(Math.max(0, Math.min(F.sEnd, st)));
-    const dir = rp.kind === 'sortie' ? 1 : -1; // sens du biseau le long de l'autoroute (station croissante si sens 1)
-    const stDir = rp.sens === 1 ? dir : -dir;
-    const hwyEdgeSeg = (s0, s1) => { const pts = []; const n = Math.max(2, Math.ceil(Math.abs(s1 - s0) / 2)); for (let i = 0; i <= n; i++) pts.push(hwyEdgeAt(s0 + ((s1 - s0) * i) / n)); return pts; };
+    const sd = rp.sens === 1 ? 1 : -1; // sens de circulation le long des stations de l'axe autoroutier
+    const offAt = (st, o) => add(hwyEdgeAt(st), mul(F.nr, o)); // point à o m à droite de la rive de l'autoroute (sens de circulation)
+    const along = (s0, s1, f, step = 2) => { const pts = [], n = Math.max(2, Math.ceil(Math.abs(s1 - s0) / step)); for (let i = 0; i <= n; i++) { const st = s0 + ((s1 - s0) * i) / n; pts.push(offAt(st, f(st))); } return pts; };
+    const hwyEdgeSeg = (s0, s1) => along(s0, s1, () => 0);
+    const bau = H.bau, sNose = F.s + (fwd ? sd : -sd) * sTpl; // station du tpl (nez du musoir physique)
     let ringPts;
     if (rp.kind === 'sortie') {
-      // Biseau de déboîtement : la rive droite s'écarte de 4,50 m sur Lb jusqu'à S.1,00 m, puis bord droit de la bretelle.
-      const D0 = hwyEdgeAt(F.s - stDir * rp.biseau);
-      ringPts = [...hwyEdgeSeg(F.s - stDir * rp.biseau, F.s), ...left, ...right.slice().reverse(), D0];
-      P({ k: 'path', L: 'BORDURE', segs: polySegs([D0, right[0]]), role: 'principale' });
-      P({ k: 'path', L: 'MARQUAGE', segs: polySegs(hwyEdgeSeg(F.s - stDir * rp.biseau, F.s)), dash: [3, 3.5], wm: 0.15 }); // T2 3u sur le biseau
-      pt(`${name} · origine du biseau (${fmt(rp.biseau)} m)`, D0);
-      text('COTATION', add(D0, mul(F.nr, -1.5)), `biseau ${fmt(rp.biseau)} m`, ang(F.d), 'center', TH * 0.8);
+      // Biseau de déboîtement (§ 4.1.3.1, schéma 4-1) : la rive droite de la bretelle s'écarte de 0 à 1,00 + l (S.1,00 m)
+      // sur la longueur du biseau, en empiétant sur la BAU ; le bord de plate-forme suit max(BAU, rive + BDD).
+      const st0 = F.s - sd * rp.biseau, k = (st) => Math.max(0, Math.min(1, (st - st0) / (F.s - st0)));
+      const lane = (st) => (1 + rp.w) * k(st);
+      const outer = along(st0, F.s, (st) => Math.max(bau, lane(st) + rp.bdd));
+      const berm = along(st0, F.s, (st) => Math.max(bau + H.berme, lane(st) + rp.bdd + rp.berme));
+      ringPts = [...outer, ...accR, ...accL.slice().reverse(), offAt(sNose, bau)];
+      P({ k: 'path', L: 'BORDURE', segs: polySegs(along(st0, F.s, lane)), role: 'principale' }); // rive droite du biseau
+      P({ k: 'path', L: 'BORDURE', segs: polySegs(outer) }); P({ k: 'path', L: 'ACCOTEMENT', segs: polySegs(berm) });
+      P({ k: 'path', L: 'MARQUAGE', segs: polySegs(hwyEdgeSeg(st0, F.s)), dash: [3, 3.5], wm: 0.15 }); // T2 3u sur le biseau
+      pt(`${name} · origine du biseau (${fmt(rp.biseau)} m)`, offAt(st0, 0));
+      text('COTATION', offAt(st0, -1.5), `origine du biseau ${fmt(rp.biseau)} m`, ang(F.d), 'center', TH * 0.8);
+      text('COTATION', offAt(st0 - sd * 25, bau / 2), `BAU ${fmt(bau)}`, ang(F.d), 'center', TH * 0.7);
     } else {
-      // Insertion : voie parallèle de 200 m après E.1,00 m, puis biseau de rabattement de 75 m (schéma 5-1).
-      const sIns = F.s + stDir * rp.ins, sFin = sIns + stDir * rp.biseau;
-      const outer = (st) => add(hwyEdgeAt(st), mul(F.nr, rp.w));
-      const ins = [outer(F.s), ...hwyEdgeSeg(F.s, sIns).slice(1).map((q) => add(q, mul(F.nr, rp.w))), hwyEdgeAt(sFin)];
-      ringPts = [hwyEdgeAt(sFin), ...hwyEdgeSeg(sFin, F.s).slice(1), ...left, ...right.slice().reverse(), ...ins];
-      P({ k: 'path', L: 'BORDURE', segs: polySegs([right[0], ...ins]), role: 'principale' });
+      // Insertion (schéma 5-1) : la rive gauche de la bretelle rejoint la rive de l'autoroute avec l'obliquité p après
+      // E.1,00 m, voie parallèle jusqu'à Li, puis biseau de rabattement ; la BAU est reportée à l'extérieur de la voie.
+      const sIns = F.s + sd * rp.ins, sFin = sIns + sd * rp.biseau;
+      const u = (st) => (st - F.s) * sd; // distance en aval de E.1,00 m
+      const lane = (st) => (u(st) <= rp.ins ? rp.w + Math.max(0, 1 - u(st) * rp.p) : rp.w * Math.max(0, 1 - (u(st) - rp.ins) / rp.biseau));
+      const sh = (st) => (u(st) <= rp.ins ? rp.bdd + (bau - rp.bdd) * Math.min(1, u(st) / 50) : bau);
+      const outer = along(F.s, sFin, (st) => lane(st) + sh(st));
+      const berm = along(F.s, sFin, (st) => lane(st) + sh(st) + (u(st) <= 50 ? rp.berme + (H.berme - rp.berme) * u(st) / 50 : H.berme));
+      ringPts = [offAt(sNose, bau), ...accL, ...accR.slice().reverse(), ...outer];
+      P({ k: 'path', L: 'BORDURE', segs: polySegs(along(F.s, sFin, lane)), role: 'principale' });
+      P({ k: 'path', L: 'BORDURE', segs: polySegs(outer) }); P({ k: 'path', L: 'ACCOTEMENT', segs: polySegs(berm) });
       P({ k: 'path', L: 'MARQUAGE', segs: polySegs(hwyEdgeSeg(F.s, sIns)), dash: [3, 3.5], wm: 0.15 }); // T2 3u le long de la voie d'insertion
-      P({ k: 'path', L: 'ACCOTEMENT', segs: polySegs([add(hwyEdgeAt(F.s), mul(F.nr, rp.w + H.bau)), ...hwyEdgeSeg(F.s, sIns).slice(1).map((q) => add(q, mul(F.nr, rp.w + H.bau))), add(hwyEdgeAt(sFin), mul(F.nr, H.bau))]) });
-      pt(`${name} · fin de la voie d'insertion (${fmt(rp.ins)} m)`, outer(sIns)); pt(`${name} · fin du biseau (${fmt(rp.biseau)} m)`, hwyEdgeAt(sFin));
-      text('COTATION', add(hwyEdgeAt(sIns), mul(F.nr, rp.w + 1.5)), `insertion ${fmt(rp.ins)} m + biseau ${fmt(rp.biseau)} m`, ang(F.d), 'center', TH * 0.8);
+      pt(`${name} · fin de la voie d'insertion (${fmt(rp.ins)} m)`, offAt(sIns, rp.w)); pt(`${name} · fin du biseau (${fmt(rp.biseau)} m)`, offAt(sFin, 0));
+      text('COTATION', offAt(sIns, rp.w + bau + 2), `insertion ${fmt(rp.ins)} m + biseau ${fmt(rp.biseau)} m`, ang(F.d), 'center', TH * 0.8);
+      text('COTATION', offAt(F.s + sd * 120, rp.w + bau / 2), `BAU ${fmt(bau)}`, ang(F.d), 'center', TH * 0.7);
     }
     P({ k: 'fill', L: 'CHAUSSEE', rings: [polySegs([...ringPts, ringPts[0]])], role: 'chaussee', rule: 'nonzero' });
     P({ k: 'path', L: 'BORDURE', segs: polySegs(left), role: 'principale' });
     P({ k: 'path', L: 'BORDURE', segs: polySegs(right), role: 'principale' });
-    P({ k: 'path', L: 'ACCOTEMENT', segs: polySegs(accL) }); P({ k: 'path', L: 'ACCOTEMENT', segs: polySegs(accR) });
+    P({ k: 'path', L: 'BORDURE', segs: polySegs(accL) }); P({ k: 'path', L: 'BORDURE', segs: polySegs(accR) });
+    P({ k: 'path', L: 'BORDURE', segs: polySegs([offAt(sNose, bau), accL[0]]) }); // nez du musoir physique (tpl)
     P({ k: 'path', L: 'ACCOTEMENT', segs: polySegs(bermL) }); P({ k: 'path', L: 'ACCOTEMENT', segs: polySegs(bermR) });
     P({ k: 'path', L: 'AXE', segs: al.path, role: 'secondaire', arrow: rp.kind === 'sortie' });
-    // Musoir peint entre la rive de l'autoroute et la rive gauche de la bretelle, de S.1,00 m au tpl ; balise J14 à S.5,00 m.
-    const sJ14 = Math.min(al.length, 4 / rp.p); // point théorique S.5,00 m (rives écartées de 5 m)
-    const musoir = [...hwyEdgeSeg(F.s, F.s + stDir * sTpl), ...offsetPolyline(al, offL, 2, 0, sTpl).reverse()];
+    // Zone hachurée entre la rive de l'autoroute et la rive gauche de la bretelle, de S.1,00 m (E.1,00 m) au tpl :
+    // elle recouvre la BAU, interrompue sur cette longueur (schémas 6-2, 6-5).
+    const musoir = [...hwyEdgeSeg(F.s, sNose), ...offsetPolyline(al, hwyS, 2, 0, sTpl).reverse()];
     P({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(musoir, ang(F.d) + Math.PI / 4, 1.0), wm: 0.12 });
     P({ k: 'path', L: 'MARQUAGE', segs: polySegs(musoir), wm: 0.15 });
-    const pJ14 = add(hwyEdgeAt(F.s + stDir * sJ14), mul(F.nr, 2.5)), pTpl = add(hwyEdgeAt(F.s + stDir * sTpl), mul(F.nr, rp.tpl / 2));
-    P({ k: 'circle', L: 'SIGNALISATION', c: pJ14, r: 0.3 });
-    text('SIGNALISATION', add(pJ14, mul(F.nr, -1.2)), 'J14', ang(F.d), 'center', TH * 0.8);
-    pt(`${name} · ${fwd ? 'S' : 'E'}.1,00 m`, F.S1); pt(`${name} · ${fwd ? 'S' : 'E'}.5,00 m (musoir, J14)`, pJ14); pt(`${name} · tpl (${fmt(rp.tpl)} m)`, pTpl);
-    text('COTATION', add(F.S1, mul(F.nr, -1.2)), `${fwd ? 'S' : 'E'}.1,00`, ang(F.d), 'center', TH * 0.8);
-    text('COTATION', add(pTpl, mul(F.nr, 2.5)), `tpl ${fmt(rp.tpl)} m · Lm ${fmt(rp.Lm)} m`, ang(F.dA), 'center', TH * 0.8);
+    const pTpl = offAt(sNose, rp.tpl / 2);
+    if (fwd) { // balise de divergence J14 sur le nez du musoir (assimilée au point S.5,00 m, § 2.3.1)
+      const pJ14 = offAt(sNose + sd * 1.5, bau + J14_W / 2);
+      P({ k: 'circle', L: 'SIGNALISATION', c: pJ14, r: 0.5 });
+      text('SIGNALISATION', offAt(sNose + sd * 6, bau + J14_W / 2), 'J14', ang(F.d), 'center', TH * 0.8);
+      pt(`${name} · balise J14 (nez du musoir)`, pJ14);
+    }
+    pt(`${name} · ${fwd ? 'S' : 'E'}.1,00 m`, F.S1); pt(`${name} · tpl (${fmt(rp.tpl)} m)`, pTpl);
+    text('COTATION', offAt(F.s, -1.5), `${fwd ? 'S' : 'E'}.1,00`, ang(F.d), 'center', TH * 0.8);
+    text('COTATION', offAt(sNose, -1.5), `tpl ${fmt(rp.tpl)} m · Lm ${fmt(rp.Lm)} m`, ang(F.d), 'center', TH * 0.8);
+    text('COTATION', offAt(sNose + (fwd ? sd : -sd) * 40, bau / 2), `BAU ${fmt(bau)}`, ang(F.d), 'center', TH * 0.7);
+    { const sl = Math.min(al.length, sTpl + 40), m = al.pointAt(sl), n = rot90(unit(al.headAt(sl)));
+      text('COTATION', add(m, mul(n, outS(sl) - sgn * rp.bdd / 2)), `BDD ${fmt(rp.bdd)}`, al.headAt(sl), 'center', TH * 0.6);
+      text('COTATION', add(m, mul(n, hwyS(sl) + sgn * rp.bdg / 2)), `BDG ${fmt(rp.bdg)}`, al.headAt(sl), 'center', TH * 0.6); }
     for (const q of al.points) pt(`${name} · ${q.name}`, q.p);
     pt(`${name} · fin d'axe`, al.pointAt(al.length));
     // Cotations des courbes : R, A, dévers.
@@ -303,17 +331,17 @@ export function buildEchangeur(prj, D) {
       text('COTATION', add(m, mul(n, side * (half + rp.bdd + 2))), `R ${fmt(e.R)} m · A ${fmt(tg?.A || 0)} · d ${fmt(deversOfRadius(e.R, C), 1)} %`, hd, 'center', TH * 0.8);
     });
     text('COTATION', add(al.pointAt(Math.min(al.length, sTpl + 30)), mul(rot90(unit(al.headAt(Math.min(al.length, sTpl + 30)))), half + rp.bdd + 2)), `${name} — ${rp.kind === 'sortie' ? 'sortie Sd1' : 'entrée Ei1'}, ${C.label}`, al.headAt(Math.min(al.length, sTpl + 30)), 'center', TH);
-    // Signalisation directionnelle de sortie [ECH] tab. 4-2 : D30 à l'origine du biseau, D40 à d3, D50 à d2.
+    // Signalisation directionnelle de sortie ([ECH] schéma 4-1, tab. 4-2) : D30 au point S.1,50 m, D40 à d3 et D50 à d2 en amont.
     if (rp.kind === 'sortie') {
       const d3 = { 90: 750, 110: 900, 130: 1000 }[H.V] || 900, d2 = { 90: 1500, 110: 1800, 130: 2000 }[H.V] || 1800;
-      const pos = (back) => add(hwyEdgeAt(F.s - stDir * (rp.biseau + back)), mul(F.nr, E2 - E1 + H.berme));
+      const sD30 = F.s + sd * 0.5 / rp.p;
       [['D30', 0], ['D40', d3], ['D50', d2]].forEach(([code, back]) => {
-        if (rp.biseau + back > F.s && rp.sens === 1) return;
-        if (F.sEnd - F.s < rp.biseau + back && rp.sens === 2) return;
-        const q = pos(back);
+        const st = sD30 - sd * back;
+        if (st < 0 || st > F.sEnd) { if (back) info(`${code} à ${fmt(back)} m en amont de D30 : hors de l'axe dessiné.`); return; }
+        const q = offAt(st, code === 'D30' ? 1.5 + rp.w + rp.bdd + 0.7 : bau + H.berme); // D30 sur l'accotement de la bretelle
         P({ k: 'circle', L: 'SIGNALISATION', c: q, r: 0.25 });
         text('SIGNALISATION', add(q, mul(F.nr, 1.5)), code, ang(F.d), 'center', TH * 0.8);
-        pt(`${name} · ${code}${back ? ` (${fmt(back)} m avant D30)` : ' (origine du biseau)'}`, q);
+        pt(`${name} · ${code}${back ? ` (${fmt(back)} m en amont de D30)` : ' (S.1,50 m)'}`, q);
       });
     }
     R.ok = !R.issues.some((i) => i.lvl === 'err');
