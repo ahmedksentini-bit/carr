@@ -1548,6 +1548,44 @@ function bindPT() {
   });
 }
 
+// --------------------------------------------------------- Vue 3D
+let v3d = null;
+async function open3D() {
+  if (!S.D?.ok) { toast('Dessinez d\'abord le carrefour.', 'warn'); return; }
+  const box = $('#view3d'); box.hidden = false;
+  if (!v3d) {
+    try {
+      const { View3D } = await import('./view3d.js');
+      v3d = new View3D($('#v3dHost'));
+      window.addEventListener('resize', () => v3d?.resize());
+    } catch (e) { console.error(e); box.hidden = true; toast('Vue 3D indisponible : ' + e.message, 'err'); return; }
+  }
+  v3d.resize();
+  const sel = $('#v3dBranch'), cands = S.D.branches.filter((bd) => bd.role !== 'principale' && bd.zAt);
+  sel.innerHTML = cands.map((bd) => `<option value="${bd.idx}">${esc(bd.name)}</option>`).join('');
+  build3D();
+}
+function build3D() {
+  if (!v3d || !S.D?.ok) return;
+  try { v3d.build(S.prj, S.D, S.tn?.tin, { ve: +$('#v3dVe').value || 1, wire: $('#v3dWire').checked }); }
+  catch (e) { console.error(e); toast('Vue 3D : ' + e.message, 'err'); }
+  $('#v3dNote').textContent = (S.tn ? '' : 'Aucun MNT (onglet Terrain) : terrain et talus absents. ') + 'Orbite : bouton gauche · panoramique : bouton droit · zoom : molette.';
+}
+function bind3D() {
+  $('#btn3d').addEventListener('click', open3D);
+  $('#v3dClose').addEventListener('click', () => { $('#view3d').hidden = true; });
+  $('#v3dOverview').addEventListener('click', () => v3d?.overview(S.D));
+  $('#v3dRebuild').addEventListener('click', build3D);
+  $('#v3dVe').addEventListener('change', build3D);
+  $('#v3dWire').addEventListener('change', build3D);
+  $('#v3dDriver').addEventListener('click', () => {
+    const bd = S.D?.branches.find((q) => q.idx === +$('#v3dBranch').value);
+    if (bd && v3d) v3d.driver(S.D, bd, Math.max(5, parseNum($('#v3dDist').value) || 80));
+  });
+  $('#v3dPng').addEventListener('click', () => { if (!v3d) return; const a = document.createElement('a'); a.href = v3d.snapshot(); a.download = fname('png').replace(/\.png$/, '_3D.png'); a.click(); });
+  $('#v3dObj').addEventListener('click', () => { if (!v3d) return; download(fname('obj'), v3d.exportOBJ(S.prj.name), 'text/plain'); toast('Modèle 3D exporté (OBJ, coordonnées du projet).'); });
+}
+
 // --------------------------------------------------------- Visibilité
 function refreshVisibility() {
   const plan = isPlan(S.prj), V = S.D?.vis || [];
@@ -1816,6 +1854,7 @@ function bindUI() {
   bindTerrain();
   bindPL();
   bindPT();
+  bind3D();
   $('#btnImportDxf').addEventListener('click', () => $('#fileDxf').click());
   $('#fileDxf').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) importDXF(f); e.target.value = ''; });
   $('#dxfLayers').addEventListener('input', (e) => {

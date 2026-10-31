@@ -128,6 +128,11 @@ ou sur un fond topographique DXF.
   de déblai (1/1) réglables, fossé triangulaire optionnel en déblai, terrain naturel du MNT sur la demi-largeur de
   coupe, surfaces de déblai / remblai par station et volumes cumulés (aires moyennes), graphique par station,
   export DXF en planches et CSV des cubatures.
+- **Vue 3D** (bouton 3D) : terrain du MNT, anneau (profil type en révolution sur le modèle altimétrique), branches
+  et route principale reconstruites par sections (voies avec dévers, îlots en saillie, BDD / berme ou caniveau,
+  bordure, trottoir, talus jusqu'au TN), mâts et panneaux avec leurs pictogrammes ; vue orbitale et vue conducteur
+  (branche et distance au choix, œil à 1,10 m), exagération verticale, terrain en fil de fer, export PNG et OBJ
+  (coordonnées du projet). Rendu three.js (vendu dans `js/vendor`, licence MIT), sans serveur.
 - **Exports** : DXF R12 par calques `GIRA_*` (AutoCAD, Covadis, BricsCAD…), PNG, points d'implantation X, Y, Z en CSV,
   projet `.gira.json` (et sauvegarde automatique dans le navigateur).
 
