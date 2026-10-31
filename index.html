@@ -8,37 +8,39 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%2338bdf8' stroke-width='4'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%234ade80'/%3E%3C/svg%3E">
   <!-- data-cfasync : exclut les scripts de Rocket Loader (Cloudflare), qui casse les modules ES. -->
   <!-- version:start (généré par tools/version.sh) -->
-  <link rel="stylesheet" href="css/app.css?v=165f29c3f3">
+  <link rel="stylesheet" href="css/app.css?v=1e0a20c335">
   <script data-cfasync="false" type="importmap">
   { "imports": {
-    "./js/approach.js": "./js/approach.js?v=165f29c3f3",
-    "./js/bypass.js": "./js/bypass.js?v=165f29c3f3",
-    "./js/capacity-plan.js": "./js/capacity-plan.js?v=165f29c3f3",
-    "./js/capacity.js": "./js/capacity.js?v=165f29c3f3",
-    "./js/common.js": "./js/common.js?v=165f29c3f3",
-    "./js/crossing.js": "./js/crossing.js?v=165f29c3f3",
-    "./js/crs.js": "./js/crs.js?v=165f29c3f3",
-    "./js/devers.js": "./js/devers.js?v=165f29c3f3",
-    "./js/dims.js": "./js/dims.js?v=165f29c3f3",
-    "./js/dxf-parse.js": "./js/dxf-parse.js?v=165f29c3f3",
-    "./js/dxf-write.js": "./js/dxf-write.js?v=165f29c3f3",
-    "./js/geom.js": "./js/geom.js?v=165f29c3f3",
-    "./js/i18n-ar.js": "./js/i18n-ar.js?v=165f29c3f3",
-    "./js/i18n.js": "./js/i18n.js?v=165f29c3f3",
-    "./js/layers.js": "./js/layers.js?v=165f29c3f3",
-    "./js/main.js": "./js/main.js?v=165f29c3f3",
-    "./js/norms.js": "./js/norms.js?v=165f29c3f3",
-    "./js/plan.js": "./js/plan.js?v=165f29c3f3",
-    "./js/profile.js": "./js/profile.js?v=165f29c3f3",
-    "./js/roundabout.js": "./js/roundabout.js?v=165f29c3f3",
-    "./js/signs.js": "./js/signs.js?v=165f29c3f3",
-    "./js/swept.js": "./js/swept.js?v=165f29c3f3",
-    "./js/tiles.js": "./js/tiles.js?v=165f29c3f3",
-    "./js/viewer.js": "./js/viewer.js?v=165f29c3f3"
+    "./js/approach.js": "./js/approach.js?v=1e0a20c335",
+    "./js/bypass.js": "./js/bypass.js?v=1e0a20c335",
+    "./js/capacity-plan.js": "./js/capacity-plan.js?v=1e0a20c335",
+    "./js/capacity.js": "./js/capacity.js?v=1e0a20c335",
+    "./js/common.js": "./js/common.js?v=1e0a20c335",
+    "./js/crossing.js": "./js/crossing.js?v=1e0a20c335",
+    "./js/crs.js": "./js/crs.js?v=1e0a20c335",
+    "./js/devers.js": "./js/devers.js?v=1e0a20c335",
+    "./js/dims.js": "./js/dims.js?v=1e0a20c335",
+    "./js/dxf-parse.js": "./js/dxf-parse.js?v=1e0a20c335",
+    "./js/dxf-write.js": "./js/dxf-write.js?v=1e0a20c335",
+    "./js/geom.js": "./js/geom.js?v=1e0a20c335",
+    "./js/i18n-ar.js": "./js/i18n-ar.js?v=1e0a20c335",
+    "./js/i18n.js": "./js/i18n.js?v=1e0a20c335",
+    "./js/layers.js": "./js/layers.js?v=1e0a20c335",
+    "./js/main.js": "./js/main.js?v=1e0a20c335",
+    "./js/norms.js": "./js/norms.js?v=1e0a20c335",
+    "./js/plan.js": "./js/plan.js?v=1e0a20c335",
+    "./js/profile.js": "./js/profile.js?v=1e0a20c335",
+    "./js/roundabout.js": "./js/roundabout.js?v=1e0a20c335",
+    "./js/signs.js": "./js/signs.js?v=1e0a20c335",
+    "./js/swept.js": "./js/swept.js?v=1e0a20c335",
+    "./js/terrain.js": "./js/terrain.js?v=1e0a20c335",
+    "./js/tiles.js": "./js/tiles.js?v=1e0a20c335",
+    "./js/tin.js": "./js/tin.js?v=1e0a20c335",
+    "./js/viewer.js": "./js/viewer.js?v=1e0a20c335"
   } }
   </script>
   <script data-cfasync="false" src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script>
-  <script data-cfasync="false" type="module" src="js/main.js?v=165f29c3f3"></script>
+  <script data-cfasync="false" type="module" src="js/main.js?v=1e0a20c335"></script>
   <!-- version:end -->
 </head>
 <body>
@@ -88,6 +90,7 @@
         <button data-tab="anneau" id="tabRingBtn">Anneau</button>
         <button data-tab="profil">Profil</button>
         <button data-tab="branches">Branches</button>
+        <button data-tab="terrain">Terrain</button>
         <button data-tab="devers">Dévers</button>
         <button data-tab="controles">Contrôles <span id="chkBadge" class="badge"></span></button>
         <button data-tab="visibilite">Visibilité</button>
@@ -199,6 +202,48 @@
         <div id="branchForm"></div>
       </div>
 
+      <div class="tab" id="tab-terrain" hidden>
+        <p class="note">Terrain naturel (TN) du projet : semis de points triangulé (MNT de Delaunay), courbes de niveau sur le calque GIRA_MNT, cote TN sous le curseur dans la barre d'état. Sert de base au calage altimétrique (zC), puis aux profils en long et en travers.</p>
+        <h3>Source des points</h3>
+        <div class="seg" id="tnSrcSeg">
+          <button data-tnsrc="dxf">Calque DXF <small>points 3D</small></button>
+          <button data-tnsrc="srtm">SRTM <small>téléchargé</small></button>
+          <button data-tnsrc="file">Fichier <small>XYZ / ASC</small></button>
+        </div>
+        <div id="tnDxfPane">
+          <div class="row">
+            <label class="fld"><span class="lb">Calque</span><select id="tnLayer"></select></label>
+          </div>
+          <p class="note" id="tnDxfInfo"></p>
+          <label class="chk"><input type="checkbox" id="tnTexts"> Utiliser aussi les cotes écrites (textes numériques) du calque</label>
+          <div class="row"><button id="btnTnDxf" class="primary">Construire le MNT depuis ce calque</button></div>
+        </div>
+        <div id="tnSrtmPane" hidden>
+          <p class="note">Tuiles « terrain » (AWS Open Data, Mapzen Terrarium : SRTM 1" ≈ 30 m, complété par GMTED / ETOPO), lues dans l'emprise du projet et reprojetées dans son système de coordonnées. Précision verticale de quelques mètres : avant-projet seulement. Nécessite un système de coordonnées géoréférencé.</p>
+          <div class="row">
+            <label class="fld"><span class="lb">Marge autour du projet</span><input id="tnMargin" type="text" inputmode="decimal" value="300"><span class="un">m</span></label>
+            <label class="fld"><span class="lb">Niveau</span><select id="tnZoom"><option value="11">11 (≈ 60 m)</option><option value="12" selected>12 (≈ 30 m)</option><option value="13">13 (≈ 15 m, interpolé)</option><option value="14">14 (≈ 8 m, interpolé)</option></select></label>
+          </div>
+          <div class="row"><button id="btnTnSrtm" class="primary">Télécharger le SRTM</button><span class="note" id="tnSrtmInfo"></span></div>
+        </div>
+        <div id="tnFilePane" hidden>
+          <p class="note">Semis « X Y Z » (txt, csv, xyz : séparateur espace, tabulation, ; ou ,) dans le système du projet, ou grille ESRI ASCII (.asc) exportée de QGIS (SRTM, MNT IGN…).</p>
+          <div class="row"><button id="btnTnFile" class="primary">Importer un fichier de points…</button></div>
+        </div>
+        <h3>Modèle numérique de terrain</h3>
+        <div id="tnOut" class="kv"></div>
+        <div class="row">
+          <label class="fld"><span class="lb">Équidistance des courbes</span><input data-k="tn.step" type="text" inputmode="decimal" placeholder="1"><span class="un">m</span></label>
+        </div>
+        <label class="chk"><input type="checkbox" data-k="tn.edges"> Afficher les arêtes du TIN</label>
+        <label class="chk"><input type="checkbox" data-k="tn.points"> Afficher les points du semis</label>
+        <div class="row">
+          <button id="btnTnZc">Caler la cote zC du carrefour sur le TN</button>
+          <button id="btnTnClear">Supprimer le MNT</button>
+        </div>
+        <p class="note" id="tnNote"></p>
+      </div>
+
       <div class="tab" id="tab-devers" hidden>
         <h3 id="dvHead">Anneau</h3>
         <div id="deversFields"></div>
@@ -270,6 +315,7 @@
 
   <input type="file" id="fileDxf" accept=".dxf,.DXF" hidden>
   <input type="file" id="fileOpen" accept=".json,.gira" hidden>
+  <input type="file" id="fileTn" accept=".txt,.csv,.xyz,.asc,.pts,.dat" hidden>
 
   <dialog id="dlgHelp">
     <form method="dialog">

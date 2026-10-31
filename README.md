@@ -107,6 +107,13 @@ ou sur un fond topographique DXF.
   2,30 m en agglomération) et distances réglables ; tableau récapitulatif (code, implantation, abscisse, X, Y, gamme,
   largeur, hauteur). Contrôles : distances du guide, panneau de la principale dans un triangle de visibilité, îlot
   trop étroit pour une J5 de 500 (1,90 m), cheminement libre de 1,40 m sur trottoir, panneau au-delà de l'axe dessiné.
+- **Terrain naturel (MNT)** (onglet Terrain, calque `GIRA_MNT`) : semis de points issu d'un calque 3D du fond DXF
+  (POINT, LINE, polylignes 3D ou à élévation, 3DFACE, maillages, cotes écrites en texte — avec contrôle des cotes non
+  nulles), du SRTM téléchargé dans le navigateur (tuiles Terrarium AWS Open Data ≈ 30 m, reprojetées dans le système
+  du projet, marge et niveau réglables) ou d'un fichier XYZ / grille ESRI ASCII ; triangulation de Delaunay
+  (`js/tin.js`, incrémentale avec marche et retournements de Lawson), interpolation linéaire, courbes de niveau
+  (équidistance réglable, maîtresses toutes les 5), arêtes du TIN et points affichables, cote TN sous le curseur dans
+  la barre d'état, calage de la cote zC du carrefour sur le TN ; points conservés dans le projet et exportés en DXF.
 - **Exports** : DXF R12 par calques `GIRA_*` (AutoCAD, Covadis, BricsCAD…), PNG, points d'implantation X, Y, Z en CSV,
   projet `.gira.json` (et sauvegarde automatique dans le navigateur).
 
@@ -164,6 +171,7 @@ Pour un autre hébergement :
 3. proj4js est chargé depuis cdnjs ; pour ne dépendre d'aucun CDN, copier `proj4.js` (2.11.0) dans `js/vendor/` et adapter la balise `<script>`.
 4. Conditions d'usage des services externes :
    - **Esri World Imagery** : attribution affichée ; pour un usage public soutenu, prévoir une clé ArcGIS (offre gratuite) ou un autre fournisseur.
+   - **Tuiles terrain Terrarium** (s3.amazonaws.com/elevation-tiles-prod, AWS Open Data) : données SRTM / GMTED / ETOPO1 du domaine public, servies sans clé ; précision verticale de quelques mètres.
    - **tile.openstreetmap.org** et **Nominatim** : politiques d'usage strictes (pas d'usage intensif, 1 requête/s pour Nominatim). Pour un site public, prévoir un fournisseur de tuiles et de géocodage avec clé (MapTiler, Stadia, Geoapify…).
 
 ## Sources des valeurs et points à confirmer

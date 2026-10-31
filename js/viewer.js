@@ -6,6 +6,7 @@ export const THEMES = {
     bg: '#1a1d22', grid: 'rgba(255,255,255,0.045)', gridMajor: 'rgba(255,255,255,0.09)', hud: '#d7dde5', hudBg: 'rgba(20,23,28,0.78)',
     dxfWhite: '#e8e8e8', sel: '#38bdf8', hover: '#7dd3fc', snap: '#facc15', rubber: '#facc15',
     L: {
+      MNT: { stroke: '#a3a3a3', w: 0.8, text: '#d4d4d4', roles: { tin: { stroke: 'rgba(163,163,163,0.35)', w: 0.5 }, major: { stroke: '#d6d3d1', w: 1.3 }, minor: { stroke: 'rgba(214,211,209,0.55)', w: 0.7 } } },
       CHAUSSEE: { fill: 'rgba(64,68,76,0.82)' },
       AXE_SAISI: { stroke: '#facc15', w: 1.4, dash: [7, 5] },
       AXE: { stroke: '#f87171', w: 1, dash: [16, 4, 3, 4] },
@@ -30,6 +31,7 @@ export const THEMES = {
     bg: '#ffffff', grid: 'rgba(0,0,0,0.05)', gridMajor: 'rgba(0,0,0,0.1)', hud: '#1f2937', hudBg: 'rgba(255,255,255,0.85)',
     dxfWhite: '#222222', sel: '#0369a1', hover: '#0284c7', snap: '#ca8a04', rubber: '#b45309',
     L: {
+      MNT: { stroke: '#8a7f6f', w: 0.8, text: '#6b5f4e', roles: { tin: { stroke: 'rgba(138,127,111,0.35)', w: 0.5 }, major: { stroke: '#7c6f5a', w: 1.3 }, minor: { stroke: 'rgba(124,111,90,0.55)', w: 0.7 } } },
       CHAUSSEE: { fill: 'rgba(205,207,211,0.85)' },
       AXE_SAISI: { stroke: '#b45309', w: 1.4, dash: [7, 5] },
       AXE: { stroke: '#dc2626', w: 1, dash: [16, 4, 3, 4] },
@@ -154,7 +156,7 @@ function arrowHead(ctx, x0, y0, x1, y1, size) {
 export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
   if (!D) return;
   const T = THEMES[theme];
-  const order = ['CHAUSSEE', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'PMR', 'VISIBILITE', 'EPURE', 'AXE', 'DEVERS', 'COTATION', 'SIGNALISATION'];
+  const order = ['MNT', 'CHAUSSEE', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'PMR', 'VISIBILITE', 'EPURE', 'AXE', 'DEVERS', 'COTATION', 'SIGNALISATION'];
   ctx.lineCap = 'butt'; ctx.lineJoin = 'round';
   for (const layer of order) {
     if (vis[layer] === false) continue;
@@ -169,7 +171,7 @@ export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
         ctx.fillStyle = opts.onImagery && layer === 'CHAUSSEE' ? 'rgba(52,55,62,0.78)' : col;
         ctx.fill(pr.rule || 'evenodd');
       } else if (pr.k === 'path') {
-        setStroke(ctx, v, st, pr);
+        setStroke(ctx, v, st.roles?.[pr.role] ? { ...st, ...st.roles[pr.role] } : st, pr);
         ctx.beginPath(); tracePath(ctx, v, pr.segs); if (pr.closed) ctx.closePath(); ctx.stroke();
         if (pr.arrow) {
           const s = pr.segs[pr.segs.length - 1], a = G.segStart(s), b = G.segEnd(s);

@@ -214,10 +214,15 @@ function emit(e, M, layer, color, ctx, out, depth) {
     const sc = Math.hypot(Mo[2], Mo[3]);
     const rot = Math.atan2(Mo[1], Mo[0]) + (rotDeg * Math.PI) / 180;
     out.texts.push({ layer: lay, color: col, x: wx, y: wy, h: h * sc, rot, s, align });
+    // Cote écrite (« 123.45 ») : exploitable comme point de terrain naturel.
+    const m = s.trim().match(/^[-+]?\d+(?:[.,]\d+)?$/);
+    if (m) out.verts3.push({ layer: lay, x: wx, y: wy, z: parseFloat(s.replace(',', '.')), src: 'TEXT', text: true });
   };
+  // Sommet 3D (terrain naturel) : z lu dans l'entité, x / y transformés comme le dessin.
+  const v3 = (x, y, z, src) => { const [wx, wy] = apply(Mo, x, y); out.verts3.push({ layer: lay, x: wx, y: wy, z, src }); };
 
   switch (e.type) {
-    case 'LINE': poly([num(g, 10), num(g, 20), num(g, 11), num(g, 21)], false); break;
+    case 'LINE': poly([num(g, 10), num(g, 20), num(g, 11), num(g, 21)], false); v3(num(g, 10), num(g, 20), num(g, 30), 'LINE'); v3(num(g, 11), num(g, 21), num(g, 31), 'LINE'); break;
     case 'LWPOLYLINE': {
       const vs = [];
       for (const [k, v] of g) {
@@ -227,11 +232,19 @@ function emit(e, M, layer, color, ctx, out, depth) {
       }
       const closed = (num(g, 70) & 1) === 1;
       poly(vertsWithBulge(vs, closed), closed);
+      const elev = num(g, 38, 0);
+      for (const v of vs) v3(v.x, v.y, elev, 'LWPOLYLINE');
       break;
     }
     case 'POLYLINE': {
       const fl = num(g, 70);
-      if (fl & (16 | 64)) break; // maillages : ignorés
+      // Sommets 3D (polylignes 3D, maillages) : terrain naturel.
+      for (const vg of e.verts || []) {
+        const fv = num(vg, 70);
+        if ((fv & 128) && !(fv & 64)) continue; // enregistrement de face d'un maillage polyface : pas de coordonnées
+        if (has(vg, 10)) v3(num(vg, 10), num(vg, 20), num(vg, 30, num(g, 30, 0)), fl & (16 | 64) ? 'MAILLAGE' : fl & 8 ? 'POLYLINE3D' : 'POLYLINE');
+      }
+      if (fl & (16 | 64)) break; // maillages : non dessinés
       const vs = (e.verts || []).filter((vg) => !(num(vg, 70) & 16)).map((vg) => ({ x: num(vg, 10), y: num(vg, 20), b: num(vg, 42) }));
       const closed = (fl & 1) === 1;
       poly(vertsWithBulge(vs, closed), closed);
@@ -279,7 +292,9 @@ function emit(e, M, layer, color, ctx, out, depth) {
       const p = [num(g, 10), num(g, 20), num(g, 11), num(g, 21)];
       if (e.type === 'SOLID' || e.type === 'TRACE') p.push(num(g, 13), num(g, 23), num(g, 12), num(g, 22));
       else p.push(num(g, 12), num(g, 22), num(g, 13), num(g, 23));
-      poly(p, true); break;
+      poly(p, true);
+      if (e.type === '3DFACE') for (const k of [0, 1, 2, 3]) if (has(g, 10 + k)) v3(num(g, 10 + k), num(g, 20 + k), num(g, 30 + k), '3DFACE');
+      break;
     }
     case 'LEADER': {
       const f = [];
@@ -289,6 +304,7 @@ function emit(e, M, layer, color, ctx, out, depth) {
     case 'POINT': {
       const [x, y] = apply(Mo, num(g, 10), num(g, 20));
       out.points.push({ layer: lay, color: col, x, y, z: num(g, 30) });
+      v3(num(g, 10), num(g, 20), num(g, 30), 'POINT');
       break;
     }
     case 'TEXT': case 'ATTRIB': {
@@ -341,14 +357,25 @@ function cleanMText(s) {
 
 // Convertit le résultat de parseDXF en géométrie exploitable (unité → mètres).
 export function buildDxfGeometry(parsed, unitFactor = 1) {
-  const out = { polys: [], texts: [], points: [] };
+  const out = { polys: [], texts: [], points: [], verts3: [] };
   const ctx = { blocks: parsed.blocks, layers: parsed.layers };
   for (const e of parsed.ents) emit(e, IDENT, null, null, ctx, out, 0);
   if (unitFactor !== 1) {
     for (const p of out.polys) for (let i = 0; i < p.pts.length; i++) p.pts[i] *= unitFactor;
     for (const t of out.texts) { t.x *= unitFactor; t.y *= unitFactor; t.h *= unitFactor; }
     for (const p of out.points) { p.x *= unitFactor; p.y *= unitFactor; }
+    for (const v of out.verts3) { v.x *= unitFactor; v.y *= unitFactor; if (!v.text) v.z *= unitFactor; }
   }
+  // Sommets 3D par calque : nombre, nombre de cotes non nulles, étendue en z, cotes écrites (textes numériques).
+  const tn = new Map();
+  for (const v of out.verts3) {
+    let s = tn.get(v.layer);
+    if (!s) { s = { n: 0, nz: 0, nText: 0, zmin: Infinity, zmax: -Infinity }; tn.set(v.layer, s); }
+    if (v.text) { s.nText++; continue; }
+    s.n++;
+    if (v.z !== 0 && Number.isFinite(v.z)) { s.nz++; if (v.z < s.zmin) s.zmin = v.z; if (v.z > s.zmax) s.zmax = v.z; }
+  }
+  out.tnLayers = tn;
   // Calques : ceux de la table + ceux rencontrés.
   const layers = new Map();
   for (const [n, l] of parsed.layers) layers.set(n, { name: n, color: l.color, visible: !l.off && !l.frozen, count: 0 });

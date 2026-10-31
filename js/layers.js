@@ -1,5 +1,6 @@
 // layers.js — calques du dessin projet (affichage + export DXF).
 export const LAYERS = {
+  MNT: { label: 'Terrain naturel (courbes de niveau, TIN)', dxf: 'GIRA_MNT', aci: 8 },
   CHAUSSEE: { label: 'Chaussée (remplissage)', dxf: null },
   AXE_SAISI: { label: 'Axes saisis (existant)', dxf: 'GIRA_AXE_EXISTANT', aci: 2, ltype: 'TIRETS' },
   AXE: { label: 'Axes projet', dxf: 'GIRA_AXE_PROJET', aci: 1, ltype: 'AXE' },
