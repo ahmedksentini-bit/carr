@@ -4,6 +4,19 @@
 // bordure حجر الحافة, dévers الميل العرضي, cédez-le-passage أعطِ الأولوية, piétons المترجلون, PL الثقيلة.
 
 export const AR = {
+  'Terrain': 'التضاريس',
+  'Source des points': 'مصدر النقاط',
+  'Calque DXF': 'طبقة DXF',
+  'Fichier': 'ملف',
+  'Télécharger le SRTM': 'تنزيل SRTM',
+  'Construire le MNT depuis ce calque': 'بناء النموذج الرقمي للتضاريس من هذه الطبقة',
+  'Modèle numérique de terrain': 'النموذج الرقمي للتضاريس',
+  'Équidistance des courbes': 'المسافة بين خطوط التسوية',
+  'Afficher les arêtes du TIN': 'إظهار أضلاع التثليث',
+  'Afficher les points du semis': 'إظهار نقاط المسح',
+  'Caler la cote zC du carrefour sur le TN': 'ضبط منسوب zC للمفترق على الأرض الطبيعية',
+  'Supprimer le MNT': 'حذف النموذج الرقمي للتضاريس',
+  'Terrain naturel (courbes de niveau, TIN)': 'الأرض الطبيعية (خطوط التسوية، التثليث)',
   // Signalisation verticale
   'Signalisation': 'التشوير',
   'Placer la signalisation verticale sur le plan': 'وضع التشوير العمودي على المخطط',

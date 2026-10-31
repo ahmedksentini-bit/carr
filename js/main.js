@@ -8,6 +8,8 @@ import { Viewer, THEMES, drawDesign, drawDxf, buildDxfCache, snapDxf, drawGrid, 
 import { buildDesign, fmt, fmtGis } from './roundabout.js';
 import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan, SECTION, sectionParams, TAD, SIGNS, signParams } from './norms.js';
 import { GAMMES, CATALOG } from './signs.js';
+import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
+import { tinZ } from './tin.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
 import { analyse, SITES } from './capacity.js';
@@ -64,6 +66,7 @@ function newProject(context = 'interurbain') {
     plan: defaultPlan(context),
     section: {}, // profil en travers : valeurs vides = valeurs par défaut du contexte (norms.SECTION)
     signs: {}, // signalisation verticale : valeurs vides = valeurs par défaut du contexte (norms.SIGNS)
+    tn: { source: '', step: '', edges: false, points: false, pts: [], info: null }, // terrain naturel (points x, y, z)
     traffic: { period: 'HPM', site: context === 'urbain' ? 'urbain' : 'rase', uvpPL: 2, od: {}, pl: {}, qp: {}, tad: {} },
     branches: [],
     opts: { angleUnit: 'gon', textH: 0.8, theme: 'dark', vis: {}, dxfOpacity: 0.9 },
@@ -77,7 +80,7 @@ function migrate(p) {
     ring: { ...base.ring, ...p.ring }, opts: { ...base.opts, ...p.opts, vis: { ...(p.opts?.vis || {}) } },
     center: { ...base.center, ...p.center }, crs: { ...base.crs, ...p.crs }, bg: { ...base.bg, ...p.bg },
     plan: { ...base.plan, ...p.plan, tag: { ...base.plan.tag, ...p.plan?.tag } },
-    section: { ...p.section }, signs: { ...p.signs },
+    section: { ...p.section }, signs: { ...p.signs }, tn: { ...base.tn, ...p.tn, pts: Array.isArray(p.tn?.pts) ? p.tn.pts : [] },
     traffic: { ...base.traffic, ...p.traffic, od: { ...p.traffic?.od }, pl: { ...p.traffic?.pl }, qp: { ...p.traffic?.qp }, tad: { ...p.traffic?.tad } },
   };
   delete out.view;
@@ -101,6 +104,7 @@ const S = {
   draft: [], meas: [], drag: null, mouse: null, cursorW: null, snap: null,
   tog: { snap: true, ortho: false, grid: false }, space: false,
   hist: [], fut: [],
+  tn: null, tnSig: '', // MNT construit (tin, prims) et signature des points / options dont il dépend
 };
 let viewer, tiles, placeTiles;
 
@@ -114,6 +118,7 @@ function init() {
   try { saved = JSON.parse(localStorage.getItem('gira.autosave') || 'null'); } catch { saved = null; }
   S.prj = saved && saved.app === 'GIRA' ? migrate(saved) : newProject();
   applyCRS();
+  rebuildTerrain();
   buildStaticPanels();
   bindUI();
   bindCanvas();
@@ -166,6 +171,7 @@ function changeCRS(cfg) {
 
 // ================================================================ Mise à jour
 function update({ commit = true, panels = true } = {}) {
+  rebuildTerrain();
   try { S.D = buildDesign(S.prj); } catch (e) { console.error(e); S.D = null; toast('Erreur de calcul : ' + e.message, 'err'); }
   if (S.prj.center.auto && S.D?.O) { S.prj.center.x = S.D.O.x; S.prj.center.y = S.D.O.y; }
   try { S.checks = checkDesign(S.prj, S.D); } catch (e) { console.error(e); S.checks = []; }
@@ -217,6 +223,7 @@ function renderScene(ctx, v, exp = null) {
   }
   if (S.tog.grid) drawGrid(ctx, v, theme);
   if (S.dxf) { drawDxf(ctx, v, S.dxf, S.dxfCache, theme, +S.prj.opts.dxfOpacity || 1); ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0); }
+  if (S.tn) drawDesign(ctx, v, { prims: S.tn.prims }, theme, S.prj.opts.vis, {});
   drawDesign(ctx, v, S.D, theme, S.prj.opts.vis, { onImagery: imagery && S.prj.bg.provider === 'esri' });
   drawAxes(ctx, v, T, !!exp);
   if (!exp) drawOverlay(ctx, v, T);
@@ -537,7 +544,8 @@ function onMove(px, py) {
     $('#cv').style.cursor = hh ? (hh.kind === 'plus' ? 'copy' : 'move') : h >= 0 ? 'pointer' : 'default';
   }
   // Barre d'état
-  $('#stXY').textContent = `X ${w.x.toFixed(3)}   Y ${w.y.toFixed(3)}`;
+  const zTn = S.tn ? tinZ(S.tn.tin, w.x, w.y) : null;
+  $('#stXY').textContent = `X ${w.x.toFixed(3)}   Y ${w.y.toFixed(3)}` + (zTn != null ? `   Z TN ${zTn.toFixed(2)}` : '');
   if (S.crs.geo) { try { const ll = S.crs.toLL(w.x, w.y); $('#stLL').textContent = `${ll.lat.toFixed(6)}°, ${ll.lon.toFixed(6)}°`; } catch { /* hors domaine */ } }
   else $('#stLL').textContent = '';
   // Info-bulle
@@ -864,6 +872,7 @@ function refreshPanels() {
   refreshVisibility();
   refreshProfile();
   refreshSigns();
+  refreshTerrain();
   setPrompt();
 }
 
@@ -1252,6 +1261,110 @@ function refreshSigns() {
       `<td>${esc(GAMMES[s.gamme]?.label || s.gamme)}</td><td class="mono">${c(s.w)} m</td><td class="mono">${c(s.h)} m</td><td class="dim">${esc(s.note || '')}</td></tr>`).join('') + '</tbody>';
 }
 
+// --------------------------------------------------------- Terrain naturel (MNT)
+// Reconstruit le TIN et ses primitives quand les points ou les options de dessin changent.
+function rebuildTerrain() {
+  const t = S.prj.tn || {};
+  const pts = Array.isArray(t.pts) ? t.pts : [];
+  const sig = pts.length ? `${pts.length}|${pts[0]}|${pts[pts.length - 1]}|${t.step}|${t.edges}|${t.points}|${S.prj.opts.textH}` : '';
+  if (sig === S.tnSig) return;
+  S.tnSig = sig;
+  if (pts.length < 3) { S.tn = null; return; }
+  try {
+    const list = pts.map((p) => ({ x: p[0], y: p[1], z: p[2] }));
+    S.tn = buildTerrain(list, { step: t.step === '' || t.step == null ? 1 : +t.step, edges: !!t.edges, points: !!t.points, textH: +S.prj.opts.textH || 0.8 });
+  } catch (e) { console.error(e); S.tn = null; toast('MNT : ' + e.message, 'err'); }
+}
+
+function setTerrainPoints(pts, source, info) {
+  if (pts.length < 3) { toast('Moins de 3 points : pas de MNT.', 'warn'); return; }
+  S.prj.tn = { ...S.prj.tn, source, pts: pts.map((p) => [Math.round(p.x * 1000) / 1000, Math.round(p.y * 1000) / 1000, Math.round(p.z * 1000) / 1000]), info: { ...info, n: pts.length } };
+  update();
+  const tn = S.tn;
+  toast(tn ? `MNT : ${tn.tin.n} points, ${tn.tin.nt} triangles, z de ${fmt(tn.tin.zmin)} à ${fmt(tn.tin.zmax)} m.` : 'MNT non construit.', tn ? 'info' : 'err');
+}
+
+function refreshTerrain() {
+  const t = S.prj.tn || {}, src = t.source || (S.dxf ? 'dxf' : S.crs.geo ? 'srtm' : 'file');
+  const cur = S.tnSrc || src;
+  $$('#tnSrcSeg [data-tnsrc]').forEach((b) => b.classList.toggle('on', b.dataset.tnsrc === cur));
+  $('#tnDxfPane').hidden = cur !== 'dxf'; $('#tnSrtmPane').hidden = cur !== 'srtm'; $('#tnFilePane').hidden = cur !== 'file';
+  // Calques 3D du DXF
+  const layers = dxfTerrainLayers(S.dxf), sel = $('#tnLayer'), sig = JSON.stringify(layers.map((l) => l.name));
+  if (sel.dataset.sig !== sig) {
+    sel.dataset.sig = sig;
+    sel.innerHTML = layers.length ? layers.map((l) => `<option value="${esc(l.name)}">${esc(l.name)} — ${l.nz} pt 3D${l.nText ? `, ${l.nText} cotes écrites` : ''}</option>`).join('') : '<option value="">(aucun calque avec des cotes)</option>';
+  }
+  const L = layers.find((l) => l.name === sel.value) || layers[0];
+  $('#tnDxfInfo').textContent = !S.dxf ? 'Importez d\'abord un fond DXF (onglet Projet).'
+    : !layers.length ? 'Aucune entité avec une cote non nulle dans ce DXF (POINT, LINE, polylignes 3D ou à élévation, 3DFACE, maillages) ni texte numérique.'
+      : `${L.name} : ${L.nz} sommets 3D${L.nz ? ` (z de ${fmt(L.zmin)} à ${fmt(L.zmax)} m)` : ''}${L.nText ? `, ${L.nText} cotes écrites` : ''}${L.n > L.nz ? ` ; ${L.n - L.nz} sommets à z = 0 ignorés` : ''}.`;
+  $('#btnTnDxf').disabled = !L || (!L.nz && !L.nText);
+  $('#btnTnSrtm').disabled = !S.crs.geo;
+  $('#tnSrtmInfo').textContent = S.crs.geo ? '' : 'Choisissez un système de coordonnées géoréférencé (onglet Projet).';
+  // Résultat
+  const tn = S.tn, info = t.info || {};
+  const srcLabel = { dxf: `calque DXF « ${info.layer || ''} »`, srtm: `SRTM (niveau ${info.zoom || ''}, ≈ ${fmt(info.res || 0, 0)} m)`, file: `fichier ${info.file || ''}` }[t.source] || '—';
+  $('#tnOut').innerHTML = tn ? kv([
+    ['Source', srcLabel],
+    ['Points / triangles', `${tn.tin.n} / ${tn.tin.nt}`],
+    ['Cotes', `${fmt(tn.tin.zmin)} à ${fmt(tn.tin.zmax)} m`],
+    ['Emprise', `${fmt(tn.tin.bbox.x1 - tn.tin.bbox.x0, 0)} × ${fmt(tn.tin.bbox.y1 - tn.tin.bbox.y0, 0)} m`],
+    ['Courbes de niveau', tn.step > 0 ? `${tn.contours} niveaux (équidistance ${fmt(tn.step, 2)} m)` : 'aucune'],
+    ['Cote TN au centre', S.D?.O ? (tinZ(tn.tin, S.D.O.x, S.D.O.y) != null ? fmt(tinZ(tn.tin, S.D.O.x, S.D.O.y)) + ' m' : 'hors du MNT') : '—'],
+  ]) : '<p class="note">Aucun MNT. Choisissez une source de points.</p>';
+  $('#btnTnZc').disabled = !tn || !S.D?.O;
+  $('#btnTnClear').disabled = !tn;
+  $('#tnNote').textContent = t.source === 'srtm' ? SRTM_ATTR + '. Altitudes orthométriques (EGM96) ; le projet peut être calé sur une autre référence.' : tn ? 'Cote TN affichée sous le curseur dans la barre d\'état.' : '';
+}
+
+function bindTerrain() {
+  $('#tnSrcSeg').addEventListener('click', (e) => { const b = e.target.closest('[data-tnsrc]'); if (!b) return; S.tnSrc = b.dataset.tnsrc; refreshTerrain(); });
+  $('#tnLayer').addEventListener('change', refreshTerrain);
+  $('#btnTnDxf').addEventListener('click', () => {
+    const layer = $('#tnLayer').value;
+    if (!S.dxf || !layer) return;
+    const pts = pointsFromDxf(S.dxf, layer, { texts: $('#tnTexts').checked });
+    setTerrainPoints(pts, 'dxf', { layer, file: S.dxfName });
+  });
+  $('#btnTnSrtm').addEventListener('click', async () => {
+    if (!S.crs.geo) return;
+    let bb = designBBox();
+    if (bb && !(isFinite(bb.x0) && isFinite(bb.y0) && isFinite(bb.x1) && isFinite(bb.y1))) bb = G.bboxOf(S.prj.branches.flatMap((b) => b.axis));
+    if (!bb || !isFinite(bb.x0)) { toast('Dessinez d\'abord les branches : l\'emprise du SRTM est celle du projet.', 'warn'); return; }
+    const margin = parseNum($('#tnMargin').value) || 300, zoom = +$('#tnZoom').value || 12, btn = $('#btnTnSrtm');
+    btn.disabled = true; $('#tnSrtmInfo').textContent = 'Téléchargement…';
+    try {
+      const r = await fetchSRTM(S.crs, bb, { zoom, margin, onProgress: (d, n) => { $('#tnSrtmInfo').textContent = `Tuiles ${d} / ${n}…`; } });
+      $('#tnSrtmInfo').textContent = `${r.raw} pixels lus${r.pts.length < r.raw ? `, ${r.pts.length} conservés` : ''}.`;
+      setTerrainPoints(r.pts, 'srtm', { zoom: r.zoom, res: r.res, tiles: r.tiles, margin });
+    } catch (e) {
+      console.error(e);
+      $('#tnSrtmInfo').textContent = '';
+      toast('SRTM : ' + e.message + ' — si le téléchargement est bloqué (réseau, CORS), exportez le MNT en .asc depuis QGIS et importez-le comme fichier.', 'err');
+    } finally { btn.disabled = false; }
+  });
+  $('#btnTnFile').addEventListener('click', () => $('#fileTn').click());
+  $('#fileTn').addEventListener('change', async (e) => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    try {
+      const pts = parsePointsFile(await f.text());
+      if (pts.length < 3) throw new Error('aucun point X Y Z lisible');
+      setTerrainPoints(pts, 'file', { file: f.name });
+    } catch (err) { toast('Fichier de points : ' + err.message, 'err'); }
+  });
+  $('#btnTnZc').addEventListener('click', () => {
+    if (!S.tn || !S.D?.O) return;
+    const z = tinZ(S.tn.tin, S.D.O.x, S.D.O.y);
+    if (z == null) { toast('Le centre du carrefour est hors du MNT.', 'warn'); return; }
+    S.prj.ring.zC = Math.round(z * 100) / 100;
+    update();
+    toast(`zC calée sur le TN : ${fmt(S.prj.ring.zC)} m.`);
+  });
+  $('#btnTnClear').addEventListener('click', () => { S.prj.tn = { ...S.prj.tn, source: '', pts: [], info: null }; update(); });
+}
+
 // --------------------------------------------------------- Visibilité
 function refreshVisibility() {
   const plan = isPlan(S.prj), V = S.D?.vis || [];
@@ -1517,6 +1630,7 @@ function bindUI() {
     if (li) { goToLL(+li.dataset.lat, +li.dataset.lon, 2.5); $('#geoRes').innerHTML = ''; }
   });
 
+  bindTerrain();
   $('#btnImportDxf').addEventListener('click', () => $('#fileDxf').click());
   $('#fileDxf').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) importDXF(f); e.target.value = ''; });
   $('#dxfLayers').addEventListener('input', (e) => {
@@ -1658,7 +1772,7 @@ async function importDXF(file) {
     const geo = buildDxfGeometry(parsed, factor);
     if (!geo.polys.length && !geo.texts.length && !geo.points.length) throw new Error('aucune entité lisible (le fichier est-il un DXF ASCII ?)');
     S.dxf = geo; S.dxfCache = buildDxfCache(geo); S.dxfName = file.name;
-    renderDxfLayers();
+    renderDxfLayers(); refreshTerrain();
     const far = S.dxf.bbox && (viewer.cx < S.dxf.bbox.x0 - 5000 || viewer.cx > S.dxf.bbox.x1 + 5000 || viewer.cy < S.dxf.bbox.y0 - 5000 || viewer.cy > S.dxf.bbox.y1 + 5000);
     if (!S.prj.branches.length || far) viewer.fit(S.dxf.bbox);
     viewer.invalidate();
@@ -1704,7 +1818,7 @@ function buildDxfText() {
   for (const l of Object.values(LAYERS)) if (l.dxf) w.layer(l.dxf, l.aci, l.ltype || 'CONTINUOUS');
   const lay = (k) => LAYERS[k]?.dxf;
   const TH = +S.prj.opts.textH || 0.8;
-  for (const pr of D.prims) {
+  for (const pr of [...(S.tn && S.prj.opts.vis.MNT !== false ? S.tn.prims : []), ...D.prims]) {
     const L = lay(pr.L);
     if (!L || S.prj.opts.vis[pr.L] === false) continue;
     const ex = pr.lt ? { ltype: pr.lt } : undefined;
@@ -1795,7 +1909,5 @@ function toast(msg, lvl = 'info') {
 }
 
 init();
-// Accès de diagnostic (console, tests automatisés) : état du projet, vue et recalcul.
-window.GIRA = { get S() { return S; }, get viewer() { return viewer; }, update, buildDxfText };
 // Poignée de débogage (console du navigateur).
-window.GIRA = { S, update, get viewer() { return viewer; }, zoomGira, newBranch, finishAxis, setTool, buildDxfText, parseDXF, buildDxfGeometry };
+window.GIRA = { S, update, get viewer() { return viewer; }, zoomGira, newBranch, finishAxis, setTool, buildDxfText, parseDXF, buildDxfGeometry, setTerrainPoints, tinZ };
