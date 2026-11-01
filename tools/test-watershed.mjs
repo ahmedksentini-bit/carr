@@ -166,6 +166,19 @@ section('3 bis. Lacet, bassins arrêtés au tracé sans emboîtement (GIRA : bas
   check('bassins disjoints (aucune cellule commune)', [...flat.rasters.totalCells[dnF.index]].every((i) => !setUp.has(i)));
   check('amont hydrologique toujours signalé (contains), sans surface supplémentaire', dnF.contains.includes(upF.id) && dnF.incrementalKm2 == null);
 }
+section('3 ter. Bassins = partition (GIRA) : jointifs, sans vide, arrêtés au tracé');
+{
+  const g = vGrid();
+  const r1 = 60, r2 = 140, cl = 160;
+  const trace = { key: 'AX', name: 'Axe en lacet', pts: [{ x: g.x0 + 0.1, y: Y(g, r1) }, { x: X(g, cl), y: Y(g, r1) }, { x: X(g, cl), y: Y(g, r2) }, { x: g.x0 + 0.1, y: Y(g, r2) }] };
+  const res = delineate(g, [trace], { minAreaKm2: 0.05, totalsFromPartition: true, nestTotals: false });
+  const sum = res.crossings.reduce((a, c) => a + c.totalKm2, 0);
+  check('Σ bassins = surface contributive (aucun vide)', near(sum, res.contributingKm2, 1e-9), `${sum.toFixed(4)} / ${res.contributingKm2.toFixed(4)} km²`);
+  check('bassin = partition pour chaque franchissement', res.crossings.every((c) => near(c.totalKm2, c.partitionKm2, 1e-12)));
+  const seen = new Set(); let overlap = 0;
+  for (const cells of res.rasters.totalCells) for (const i of cells) { if (seen.has(i)) overlap++; seen.add(i); }
+  check('bassins disjoints', overlap === 0, `${overlap}`);
+}
 section('4. MNT bruité avec cuvettes et trou sans donnée : conservation et invariants');
 function noisyGrid(nx, ny, cell, seed, holes = true) {
   const rnd = mulberry32(seed);

@@ -2921,17 +2921,40 @@ function hyAxisChecked(h, ax) { return h.axes ? h.axes.includes(ax.key) : ax.key
 // Bassins sur le plan : contours des bassins totaux, partition en trait fin, écoulements, étiquettes aux franchissements.
 function drawHydro() {
   const R = S.prj.hydro.res, TH = (S.prj.opts?.textH || 0.8) * 1.2, P = (o) => S.D.prims.push(o), segs = (pts) => polySegs(pts);
-  for (const st of R.streams || []) if (st.pts.length > 1) P({ k: 'path', L: 'BASSINS', segs: segs(st.pts), role: 'stream' });
+  // écoulements orientés de l'amont vers l'aval : flèches régulières (tous les ~250 m) et à l'extrémité aval
+  for (const st of R.streams || []) {
+    if (st.pts.length < 2) continue;
+    P({ k: 'path', L: 'BASSINS', segs: segs(st.pts), role: 'stream' });
+    let acc = 0, next = 120;
+    for (let i = 1; i < st.pts.length; i++) {
+      const a = st.pts[i - 1], b = st.pts[i], d = G.dist(a, b);
+      if (d < 1e-6) continue;
+      while (acc + d >= next) { const t = (next - acc) / d, q = G.lerp(a, b, t), u = G.norm(G.sub(b, a)); P({ k: 'path', L: 'BASSINS', segs: [G.L(G.sub(q, G.mul(u, 3)), q)], role: 'stream', arrow: true }); next += 250; }
+      acc += d;
+    }
+  }
   for (const c of R.crossings || []) {
     for (const ring of c.ring || []) { P({ k: 'fill', L: 'BASSINS', rings: [segs([...ring, ring[0]])], role: 'bv' }); P({ k: 'path', L: 'BASSINS', segs: segs([...ring, ring[0]]) }); }
-    for (const ring of c.part || []) P({ k: 'path', L: 'BASSINS', segs: segs([...ring, ring[0]]), role: 'part', dash: [2, 1.5] });
     const r = S.hyRes?.byId?.[c.id];
     P({ k: 'circle', L: 'BASSINS', c: { x: c.x, y: c.y }, r: TH * 0.8 });
     P({ k: 'text', L: 'BASSINS', p: { x: c.x + TH * 1.2, y: c.y + TH * 1.2 }, s: `${c.id} · ${fmt(c.totalKm2, 2)} km²${r?.Q ? ` · Q${r.T} ${fmt(r.Q, 2)} m³/s` : ''}${r?.size ? ` · ${r.size}` : ''}`, rot: 0, align: 'left', h: TH * 1.1 });
   }
 }
-// Simplification (pas d'échantillonnage) d'un anneau pour l'enregistrement.
-const hyThin = (ring, max = 300) => { if (ring.length <= max) return ring.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 })); const k = Math.ceil(ring.length / max); return ring.filter((_, i) => i % k === 0).map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 })); };
+// Simplification d'une polyligne pour l'enregistrement : Ramer-Douglas-Peucker (tolérance en m, doublée tant que la
+// ligne dépasse max points) — jamais d'échantillonnage par sauts, qui couperait les contours par des cordes.
+function hyRdp(pts, tol) {
+  if (pts.length < 3) return pts.slice();
+  const keep = new Uint8Array(pts.length); keep[0] = keep[pts.length - 1] = 1;
+  const st = [[0, pts.length - 1]];
+  while (st.length) {
+    const [a, b] = st.pop(), A = pts[a], B = pts[b], dx = B.x - A.x, dy = B.y - A.y, L = Math.hypot(dx, dy) || 1;
+    let dm = -1, im = -1;
+    for (let i = a + 1; i < b; i++) { const d = Math.abs((pts[i].x - A.x) * dy - (pts[i].y - A.y) * dx) / L; if (d > dm) { dm = d; im = i; } }
+    if (dm > tol && im > 0) { keep[im] = 1; st.push([a, im], [im, b]); }
+  }
+  return pts.filter((_, i) => keep[i]);
+}
+const hyThin = (ring, max = 1500, tol = 5) => { let r = ring, t = tol; for (let k = 0; k < 8 && r.length > max; k++, t *= 2) r = hyRdp(ring, t); return r.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 })); };
 async function runHydro() {
   const h = hyCfg(), axes = hyAxes().filter((ax) => hyAxisChecked(h, ax));
   if (!axes.length) { toast('Cochez au moins un axe.', 'warn'); return; }
@@ -2950,7 +2973,7 @@ async function runHydro() {
       grid = dem === 'srtm' ? await demFromSRTM(S.crs, bb, { margin, cell, onProgress: (d, n, w) => info(`${w === 'tuiles' ? 'Tuiles' : 'Grille'} ${d} / ${n}…`) }) : demFromTIN(S.tn.tin, { cell });
       info(`Délimitation sur ${grid.nx} × ${grid.ny} cellules…`); await new Promise((r) => setTimeout(r, 30));
       // comme BVTrace : chaque bassin s'arrête au tracé ; les bassins amont sont désignés dans le tableau (cumul des débits)
-      R = delineate(grid, traces, { minAreaKm2: minKm2, clipTotalsToTrace: true, nestTotals: false, onProgress: (m) => info(m) });
+      R = delineate(grid, traces, { minAreaKm2: minKm2, clipTotalsToTrace: true, nestTotals: false, totalsFromPartition: true, onProgress: (m) => info(m) });
       // un bassin qui touche le bord du MNT est tronqué : on élargit l'emprise (SRTM) jusqu'à fermeture
       if (dem !== 'srtm' || !R.crossings.some((c) => c.touchesEdge) || margin >= 24000) break;
       margin *= 2;
@@ -2962,10 +2985,9 @@ async function runHydro() {
         return { id: c.id, key: c.key, traceName: c.traceName, pk: Math.round(c.pk * 100) / 100, x: c.x, y: c.y, flowDir: c.flowDir, totalKm2: c.totalKm2, partitionKm2: c.partitionKm2, incrementalKm2: c.incrementalKm2, contains: c.contains, touchesEdge: c.touchesEdge,
           lon: ll?.lon ?? null, lat: ll?.lat ?? null,
           m: { perimeterKm: m.perimeterKm, lengthM: m.lengthM, dropM: m.dropM, slopePct: m.slopeTcPct ?? m.slopeEqPct ?? m.slopePct, hMax: m.hMax, hMin: m.hMin, hMean: m.hMean, hMedian: m.hMedian, meanReliefM: m.meanReliefM, deltaHM: m.deltaHM, zOutlet: m.zOutlet, gravelius: m.gravelius, igMPerKm: m.globalSlope },
-          ring: (c.polygonTotal || []).map((poly) => hyThin(poly[0])).filter((r) => r.length > 2),
-          part: (c.polygonPartition || []).map((poly) => hyThin(poly[0], 200)).filter((r) => r.length > 2) };
+          ring: (c.polygonTotal || []).map((poly) => hyThin(poly[0], 1500, grid.cell * 0.25)).filter((r) => r.length > 2) };
       }),
-      streams: (R.streams || []).filter((st) => st.accKm2 >= Math.max(minKm2, 0.2)).map((st) => ({ pts: hyThin(st.pts, 200), accKm2: st.accKm2 })),
+      streams: (R.streams || []).filter((st) => st.accKm2 >= Math.max(minKm2, 0.2)).map((st) => ({ pts: hyThin(st.pts, 600, grid.cell * 0.3), accKm2: st.accKm2 })),
       warnings: R.warnings,
     };
     S.hySig = null; update();
@@ -3052,7 +3074,7 @@ function renderHydro() {
   $('#hyDetail').innerHTML = sel ? (() => {
     const v = sel.r.values || {}, d = v.discharges || {};
     return `<h3>${esc(sel.c.id)} — ${esc(sel.c.traceName)}, PK ${fmt(sel.c.pk, 0)}</h3>` + kv([
-      ['Surface', `${fmt(sel.c.totalKm2, 3)} km² (arrêtée au tracé) ; versant de la section de tracé : ${fmt(sel.c.partitionKm2, 3)} km²`],
+      ['Surface', `${fmt(sel.c.totalKm2, 3)} km² (bassin arrêté au tracé, jointif avec ses voisins : tout le versant qui se déverse sur cette section du tracé)`],
       ['Plus long chemin, dénivelée', `${fmt((sel.c.m.lengthM || 0) / 1000, 2)} km, ${fmt(sel.c.m.dropM, 1)} m ; Hmax ${fmt(sel.c.m.hMax, 1)}, Hmin ${fmt(sel.c.m.hMin, 1)} m`],
       ['Temps de concentration', v.tc ? Object.entries(v.tc).map(([k, q]) => `${k} ${q?.value != null ? fmt(q.value, 2) : '—'} ${q?.unit || ''}`).join(' · ') + (v.tcRetained ? ` — retenu ${v.tcRetained.formula} ${fmt(v.tcRetained.minutes, 1)} min` : '') : '—'],
       ['Intensité', v.intensityMmH != null ? `${fmt(v.intensityMmH, 2)} mm/h (${esc(v.intensitySource || '')})` : '—'],

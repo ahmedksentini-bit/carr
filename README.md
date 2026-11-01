@@ -226,7 +226,7 @@ ou sur un fond topographique DXF.
   - bassins versants dont l'écoulement coupe les axes cochés (autoroute, voies secondaires, bretelles, branches), sur
     un MNT SRTM élargi autour des axes (marge doublée automatiquement tant qu'un bassin touche le bord, jusqu'à 24 km)
     ou sur le MNT du projet : Priority-Flood + ε, D8, rasterisation 4-connexe des tracés, partition sans vide aux PK
-    médians ; chaque bassin s'arrête au tracé (pas d'emboîtement) et l'utilisateur désigne, comme dans BVTrace, les bassins amont dont l'écoulement passe par l'ouvrage (colonne « Bassins amont » : leurs débits s'ajoutent ; l'amont hydrologique détecté est proposé) ; morphométrie (L, dénivelée, Ieq, Hmoy, ΔH…) ;
+    médians ; chaque bassin est la partition de son franchissement (tout le versant qui se déverse sur sa section de tracé) : bassins arrêtés au tracé, jointifs, sans aucun vide entre eux ni le long du tracé ; écoulements fléchés de l'amont vers l'aval et l'utilisateur désigne, comme dans BVTrace, les bassins amont dont l'écoulement passe par l'ouvrage (colonne « Bassins amont » : leurs débits s'ajoutent ; l'amont hydrologique détecté est proposé) ; morphométrie (L, dénivelée, Ieq, Hmoy, ΔH…) ;
   - débits : jeu tunisien (rationnelle avec station Montana — la plus proche par défaut —, abaque C selon le couvert
     végétal, SOGREAH, Ghorbel, Kallel, Fersi, Frigui, Francou-Rodier, note DGPC 1054) ou FAO 54 (CIEH, Orstom),
     temps de concentration Kirpich, Ventura, Passini, Giandotti (une formule retenue et affichée) ;

@@ -35,6 +35,8 @@ export const DEFAULTS = Object.freeze({
   streamKm2: 0.1, // PipelineOptions.NetworkThresholdKm2 (≤ 0 → minAreaKm2)
   simplifyCellFactor: 0.4, // tolérance RDP des contours, en fraction de cellule
   clipTotalsToTrace: true, // PipelineOptions.ClipTotalsToTrace
+  totalsFromPartition: false, // true (GIRA) : le bassin d'un franchissement est sa partition (premier impact, bornée aux
+  //                              PK médians) → bassins arrêtés au tracé, jointifs, sans aucun vide entre eux ni le long du tracé
   nestTotals: true, // emboîtement : le bassin aval englobe les bassins amont (double franchissement) ; false (GIRA) :
   //                   chaque bassin s'arrête au tracé, les bassins amont sont désignés par l'utilisateur (cumul des débits)
   stopAtSea: true, // réseau d'écoulement : arrêt aux cellules ≤ seaLevelM
@@ -965,6 +967,7 @@ export function delineate(grid, traces, opts = {}) {
       return Int32Array.from(out).sort();
     });
   }
+  if (o.totalsFromPartition) totCells = partCells.map((c) => Int32Array.from(c).sort());
   const totKm2 = totCells.map((c) => c.length * g.cellKm2);
   lap('totalsMs');
 
@@ -983,7 +986,7 @@ export function delineate(grid, traces, opts = {}) {
     for (let q = 0; q < pc.length; q++) if (g.edge[pc[q]]) { partEdge = true; break; }
     for (let q = 0; q < tc.length; q++) if (g.edge[tc[q]]) { totEdge = true; break; }
     const contained = containedIdx[k];
-    const incrementalKm2 = contained.length && o.nestTotals ? totKm2[k] - Math.max(...contained.map((m) => totKm2[m])) : null;
+    const incrementalKm2 = contained.length && o.nestTotals && !o.totalsFromPartition ? totKm2[k] - Math.max(...contained.map((m) => totKm2[m])) : null;
     const polygonTotal = o.polygons || o.metrics ? polygonizeBox(g, cellsBox(g, tc), tol) : null;
     const out = {
       id: ids[k],
