@@ -268,6 +268,10 @@ ou sur un fond topographique DXF.
   d'inflexion et les bretelles accrochées sont reportés sur les tronçons. Le profil en long d'une voie raccordée est
   calé à son extrémité sur la cote zC du carrefour (ignorée si elle s'écarte de plus de 30 m du terrain naturel).
   Bouton « Raccorder aux carrefours et croisements » dans la fiche de la voie pour une voie existante.
+  Carrefour posé (outil Centre) ou déplacé sur une voie secondaire existante : la voie est coupée à R + 60 m de part et
+  d'autre du centre et y arrive par deux branches ; les extrémités libres des bretelles voisines (losange,
+  demi-échangeur à extrémités libres) sont prolongées dans leur alignement final jusqu'à l'anneau, où elles dessinent
+  leur branche (raccourcie, 15 m au moins, si l'alignement final est trop court pour y couper la bretelle).
 - **Cadres PICF et portiques PIPO** (onglet Ouvrages, **+ PICF / PIPO**, un clic sur l'axe de la voie portée) : nombre
   de cellules, ouverture, hauteur intérieure, remblai sur traverse, biais (gr), longueur (automatique : plate-forme +
   talus 3/2 jusqu'à la traverse, divisée par le sinus du biais), épaisseurs (automatiques e ≈ 0,15 + B/20), murs en aile.
