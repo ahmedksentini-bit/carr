@@ -188,15 +188,20 @@ export function buildEchangeur(prj, D) {
   const XPs = crossList(prj).map((_, k) => crossParams(prj, k)), roads = ['hwy', ...XPs.map((_, k) => `cross${k}`)];
   const axisPaths = { hwy: H.axis.length >= 2 ? G.roundPolylineFit(H.axis, H.axis.map((p) => p.r)).segs : null };
   XPs.forEach((X, k) => { axisPaths[`cross${k}`] = X.on && X.axis.length >= 2 ? G.roundPolylineFit(X.axis, X.axis.map((p) => p.r)).segs : null; });
-  const drawRoad = (key, H) => {
+  const drawRoad = (key, H, rg = null) => {
     const { segs: path, fit } = G.roundPolylineFit(H.axis, H.axis.map((p) => p.r));
     // Rayons saisis non applicables : tangentes plus longues que les côtés disponibles (partagés avec les sommets voisins).
     for (const f of fit) if (f.r < f.req - 0.005) issues.push({ lvl: 'warn', msg: `${H.name} : sommet ${f.i}, rayon saisi ${fmt(f.req)} m non applicable — tangente nécessaire ${fmt(f.Tneed)} m, disponible ${fmt(f.T)} m entre les sommets voisins ; rayon appliqué ${fmt(f.r)} m. Déplacez les sommets ${f.i - 1} / ${f.i + 1} ou réduisez le rayon d'un sommet voisin.` });
     const sEnd = G.pathLen(path), isRoute = key !== 'hwy' && H.kind === 'route';
     const E0 = H.median / 2 + H.bdg, E1 = E0 + H.lanes * H.wLane, E2 = E1 + H.bau;
-    const off = (delta) => G.offsetPath(path, delta);
-    const road = { key, k: H.k, H, path, sEnd, E0, E1, E2, ok: sEnd > 1, isRoute };
+    // Partie dessinée [sA, sB] (voie secondaire d'une trompette : seulement au-delà de l'extrémité de la tige) ; l'axe
+    // complet reste la référence des abscisses et des raccordements.
+    const sA = rg ? Math.max(0, rg[0]) : 0, sB = rg ? Math.min(sEnd, rg[1]) : sEnd;
+    const pathD = sA > 1e-6 || sB < sEnd - 1e-6 ? (sB - sA > 1 ? G.revPath(G.pathHead(G.revPath(G.pathHead(path, sB)), sB - sA)) : []) : path;
+    const off = (delta) => G.offsetPath(pathD, delta);
+    const road = { key, k: H.k, H, path, sEnd, E0, E1, E2, ok: sEnd > 1, isRoute, drawn: [sA, sB] };
     if (!road.ok) return road;
+    const visible = pathD.length > 0;
     // Rayons de la section courante [ICTAAL] tab. 3-1 (autoroutes).
     if (H.C) path.forEach((sg) => {
       if (sg.t !== 'A') return;
@@ -215,9 +220,10 @@ export function buildEchangeur(prj, D) {
         else { const sFin = wv ? wv.sS : s0 + sd * (e.ins + e.biseau); gaps[sg].rive.push(I(s0, sFin)); gaps[sg].bord.push(I(s0 - sd * e.Lm, sFin)); }
       }
     }
+    if (!visible) return road;
     // Ligne décalée de delta, échantillonnée le long de l'axe, coupée par les intervalles g : liste de morceaux.
     const offPieces = (delta, g) => {
-      const cuts = [[0, sEnd]];
+      const cuts = [[sA, sB]];
       for (const [a, b] of g) for (let i = cuts.length - 1; i >= 0; i--) {
         const [c, d] = cuts[i]; if (b <= c || a >= d) continue;
         cuts.splice(i, 1, ...[[c, a], [b, d]].filter(([x, y]) => y - x > 0.5));
@@ -243,10 +249,12 @@ export function buildEchangeur(prj, D) {
       P({ k: 'fill', L: 'ILOT_SEP', rings: [ring(off(H.median / 2), off(-H.median / 2))], role: 'ilot' });
       P({ k: 'path', L: 'BORDURE', segs: off(H.median / 2) }); P({ k: 'path', L: 'BORDURE', segs: off(-H.median / 2) });
     } else P({ k: 'path', L: 'MARQUAGE', segs: off(0), dash: [3, 10], wm: 0.15 }); // ligne axiale T1 (chaussée bidirectionnelle)
-    P({ k: 'path', L: 'AXE', segs: path, role: 'principale' });
-    text('COTATION', G.pathPointAt(path, Math.min(sEnd, 30)), `${H.name} — ${isRoute ? `route ${H.median > 0 ? '2×' : ''}${H.lanes * (H.median > 0 ? 1 : 2)} voie(s)` : `${H.cat}, 2×${H.lanes} voies`}`, ang(pathTangentAt(path, 30)), 'center', TH * 1.2);
+    P({ k: 'path', L: 'AXE', segs: pathD, role: 'principale' });
+    const sLab = Math.min(sB, sA + 30);
+    text('COTATION', G.pathPointAt(path, sLab), `${H.name} — ${isRoute ? `route ${H.median > 0 ? '2×' : ''}${H.lanes * (H.median > 0 ? 1 : 2)} voie(s)` : `${H.cat}, 2×${H.lanes} voies`}`, ang(pathTangentAt(path, sLab)), 'center', TH * 1.2);
     // PK / PR tous les 100 m.
     for (let st = 0; st <= sEnd + 1e-6; st += 100) {
+      if (st < sA - 1e-6 || st > sB + 1e-6) continue;
       const p = G.pathPointAt(path, st), tg = pathTangentAt(path, st), n = rot90(tg);
       P({ k: 'path', L: 'COTATION', segs: [G.L(add(p, mul(n, -1)), add(p, mul(n, 1)))] });
       text('COTATION', add(p, mul(n, E2 + H.berme + 2.5)), `${isRoute ? 'PR' : 'PK'} ${fmt((H.pk0 + st) / 1000, 3)}`, ang(tg), 'center', TH * 0.8);
@@ -257,6 +265,7 @@ export function buildEchangeur(prj, D) {
     let sArc = 0;
     path.forEach((sg, j) => {
       const Ls = G.segLen(sg);
+      if (sArc + Ls < sA + 1e-6 || sArc > sB - 1e-6) { sArc += Ls; return; } // hors de la partie dessinée
       if (sg.t === 'A') {
         const sw = G.sweep(sg), sgn = sg.ccw ? 1 : -1, T = sg.r * Math.tan(sw / 2);
         const lbl = `R ${fmt(sg.r)} m · Lc ${fmt(Ls)} m · Δ ${fmtA(sw)} · T ${fmt(T)} m`, hL = TH * 1.6;
@@ -290,13 +299,37 @@ export function buildEchangeur(prj, D) {
       }
       sArc += Ls;
     });
-    pt(`${H.name} · origine`, G.pathPointAt(path, 0)); pt(`${H.name} · fin`, G.pathPointAt(path, sEnd));
+    if (sA < 1e-6) pt(`${H.name} · origine`, G.pathPointAt(path, 0));
+    if (sB > sEnd - 1e-6) pt(`${H.name} · fin`, G.pathPointAt(path, sEnd));
     return road;
   };
   const hwy = drawRoad('hwy', H);
   D.hwy = hwy;
   if (!hwy.ok) return;
-  D.crosses = XPs.map((X, k) => { const r = X.on && X.axis.length >= 2 ? drawRoad(`cross${k}`, X) : null; return r?.ok ? r : null; });
+  // Voie secondaire portant une trompette : la tige (deux bretelles, ouvrage compris) la remplace jusqu'à son extrémité,
+  // ou jusqu'au giratoire où elle se raccorde ; la voie n'est dessinée qu'au-delà, côté voirie ordinaire, et ne se
+  // prolonge pas au-delà de la boucle.
+  const tigeRange = (k, X) => {
+    const segs = axisPaths[`cross${k}`];
+    if (!segs) return null;
+    const sE = G.pathLen(segs);
+    let lo = 0, hi = sE, hit = false;
+    for (const r of prj.ramps || []) {
+      if (r.role !== 'semi' || r.tp?.crossK !== k || !r.tp.u || !r.pis?.length) continue;
+      const u = norm(r.tp.u);
+      let E = r.pis[r.pis.length - 1];
+      if (r.cut?.j) {
+        const J = r.cut.j === prj.jid ? prj : (prj.others || []).find((o) => o.id === r.cut.j), C = J?.center;
+        if (C?.x != null) { const Cc = { x: +C.x, y: +C.y }; E = add(Cc, mul(u, +J.ring?.Rg || 20)); }
+      }
+      const pr = pathProject(segs, E);
+      if (!pr) continue;
+      hit = true;
+      if (G.dot(pathTangentAt(segs, pr.s), u) >= 0) lo = Math.max(lo, pr.s); else hi = Math.min(hi, pr.s);
+    }
+    return hit ? [lo, hi] : null;
+  };
+  D.crosses = XPs.map((X, k) => { const r = X.on && X.axis.length >= 2 ? drawRoad(`cross${k}`, X, tigeRange(k, X)) : null; return r?.ok ? r : null; });
   D.cross = D.crosses[0] || null;
 
   // --- Bretelles ------------------------------------------------------------------------

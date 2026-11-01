@@ -195,6 +195,9 @@ ou sur un fond topographique DXF.
   l'axe de la branche. Les branches des bretelles se dessinent par le raccordement automatique ci-dessous ; un nouveau
   gabarit au même croisement remplace aussi les giratoires du précédent. Grands giratoires (Rg > 25 m, hors tableau
   ACI) : îlots séparateurs construits sur le triangle de Rg = 25 m.
+- **Voie secondaire d'une trompette** : elle s'arrête côté boucle à 30 m au-delà de la plate-forme de l'autoroute (la
+  tige ne se prolonge pas au-delà de la boucle) et n'est dessinée qu'au-delà de l'extrémité de la tige (ou du giratoire
+  où la tige se raccorde) : la tige et l'ouvrage la remplacent entre les deux.
 - **Biais de la voie secondaire** : le losange, le losange à giratoires, le demi-échangeur et le giratoire dénivelé
   gardent la direction de la voie secondaire au croisement (jusqu'à 50 gr) ; giratoires centrés sur l'axe biais, sortie
   et entrée d'un même côté calculées séparément (côté angle aigu plus long), branches de l'anneau du giratoire dénivelé
