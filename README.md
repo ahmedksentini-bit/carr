@@ -203,6 +203,13 @@ ou sur un fond topographique DXF.
 - **Trompette sur autoroute en courbe** : la S-semi est recalculée avec un alignement intermédiaire plus long si ses
   deux raccordements se chevauchent une fois le premier sommet reporté sur la ligne d'obliquité réelle ; les trompettes
   d'un projet ouvert sont recalculées dès l'ouverture.
+- **Trompette sur autoroute en courbe (concentricité)** : le premier sommet de la S-semi est placé sur la ligne
+  d'obliquité réelle et S.1,00 m déplacé pour garder l'alignement ≥ Lm, sans toucher la droite tangente à la grande
+  courbe ; la boucle est déduite de la grande courbe réellement dessinée et tangente à l'obliquité réelle de son
+  convergent : boucle et S-semi restent concentriques (plus de chevauchement). Le long de l'arc commun, les bords qui
+  tomberaient dans l'autre plate-forme ne sont plus dessinés et un terre-plein sépare les deux voies, comme sur la tige.
+- **Tablier de la tige** : son axe et sa largeur suivent les deux voies de la tige (S-semi et boucle) ; un tablier
+  allongé suit les bretelles là où elles s'écartent ; l'axe réel des voies secondaires est suivi sur ± 400 m.
 - **Onglet Ouvrages** : réglages communs (tirant d'air, piles, dispositifs de retenue et classes W, travure), liste des
   ouvrages et travure modifiable de chacun : travées le long de l'axe (centrées sur le croisement, décalage possible),
   ajout / suppression d'une travée, épaisseur imposée, retour à l'implantation automatique ; le dessin, la fiche et les

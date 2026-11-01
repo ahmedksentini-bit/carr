@@ -51,6 +51,12 @@ function offsetPoly(pts, d) {
     return add(p, mul(rot90(norm(sub(b, a))), d));
   });
 }
+function offsetPolyVar(pts, ds, sg) {
+  return pts.map((p, i) => {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+    return add(p, mul(rot90(norm(sub(b, a))), sg * ds[i]));
+  });
+}
 const arcLens = (pts) => { const L = [0]; for (let i = 1; i < pts.length; i++) L.push(L[i - 1] + dist(pts[i - 1], pts[i])); return L; };
 // Point de la polyligne où le décalage signé par rapport à l'autoroute vaut c (premier franchissement).
 function atOff(poly, offs, c) {
@@ -92,17 +98,43 @@ function collectDecks(prj, D, extra) {
     const offs = pts.map((p) => offOf(p).off);
     for (let i = 1; i < pts.length; i++) {
       if (Math.sign(offs[i - 1]) === Math.sign(offs[i]) || offs[i - 1] === 0) continue;
-      const j0 = Math.max(0, i - 160), j1 = Math.min(pts.length, i + 160);
+      const j0 = Math.max(0, i - 400), j1 = Math.min(pts.length, i + 400); // l'axe réel sur ± 400 m, puis prolongement droit
       decks.push({ key: `x:${cid}:${nX++}`, src: X.name, axis: extendAxis(pts.slice(j0, j1)), halfW: c.E2 + 0, road: true, kind: X.kind, X0: G.lerp(pts[i - 1], pts[i], offs[i - 1] / (offs[i - 1] - offs[i])) });
     }
   });
-  // Tiges de trompettes paramétriques : axe de la tige au droit de l'ouvrage.
-  for (const r of prj.ramps || []) {
-    if (r.role !== 'semi' || !r.tp?.P0 || !r.tp?.u) continue;
-    const P0 = r.tp.P0, u = norm(r.tp.u), pts = [];
-    for (let t = -200; t <= 200; t += 1) pts.push(add(P0, mul(u, t)));
-    decks.push({ key: `t:${r.id}`, src: `tige de la trompette (${r.name})`, axis: pts, halfW: Math.max(1, +r.tp.tpc || 1) / 2 + 3.5 + 1.0, tige: true, X0: P0 });
-  }
+  // Tiges de trompettes paramétriques : l'ouvrage porte les deux voies de la tige (S-semi et boucle) ; son axe est le
+  // milieu de leurs axes et sa largeur suit leur écartement, de sorte qu'un tablier allongé suit les bretelles là où
+  // elles s'écartent (bifurcation boucle / S-semi) au lieu de partir tout droit.
+  (prj.ramps || []).forEach((r, iS) => {
+    if (r.role !== 'semi' || !r.tp?.P0 || !r.tp?.u) return;
+    const P0 = r.tp.P0, u = norm(r.tp.u), n = rot90(u), half0 = Math.max(1, +r.tp.tpc || 1) / 2 + 3.5 + 1.0;
+    const iB = (prj.ramps || []).findIndex((q) => q.role === 'boucle' && q.grp === r.id);
+    const polyOf = (i) => (i >= 0 && D.ramps?.[i]?.al?.path ? G.samplePath(D.ramps[i].al.path, 1) : null);
+    const pS = polyOf(iS), pB = polyOf(iB);
+    // point d'une polyligne sur la perpendiculaire à u à l'abscisse t (le plus proche de l'axe de la tige)
+    const cut = (poly, t) => {
+      if (!poly) return null;
+      let best = null;
+      for (let i = 1; i < poly.length; i++) {
+        const a = dot(sub(poly[i - 1], P0), u) - t, b = dot(sub(poly[i], P0), u) - t;
+        if (Math.sign(a) === Math.sign(b) && a !== 0) continue;
+        const q = G.lerp(poly[i - 1], poly[i], a / (a - b || 1)), y = dot(sub(q, P0), n);
+        if (Math.abs(y) < 40 && (!best || Math.abs(y) < Math.abs(best.y))) best = { q, y };
+      }
+      return best;
+    };
+    const pts = [], hw = [];
+    for (let t = -200; t <= 200; t += 1) {
+      const a = cut(pS, t), b = cut(pB, t);
+      if (a && b && Math.abs(a.y - b.y) < 45) { pts.push(G.lerp(a.q, b.q, 0.5)); hw.push(Math.abs(a.y - b.y) / 2 + 1.75 + 1.0); }
+      else { pts.push(add(P0, mul(u, t))); hw.push(half0); }
+    }
+    // lissage de l'axe et des largeurs (raccord entre la tige et la partie droite de repli)
+    const sm = (arr, f) => arr.map((_, i) => { const w = arr.slice(Math.max(0, i - 3), i + 4); return f(w); });
+    const axis = sm(pts, (w) => ({ x: w.reduce((s, p) => s + p.x, 0) / w.length, y: w.reduce((s, p) => s + p.y, 0) / w.length }));
+    const halfWArr = sm(hw, (w) => w.reduce((s, v) => s + v, 0) / w.length);
+    decks.push({ key: `t:${r.id}`, src: `tige de la trompette (${r.name})`, axis, halfW: half0, halfWArr, tige: true, X0: P0 });
+  });
   // Giratoires dénivelés : anneau franchissant l'autoroute.
   for (const g of extra?.girden || []) {
     const Rm = g.Rg - g.la / 2, ring = [];
@@ -126,12 +158,13 @@ function collectDecks(prj, D, extra) {
 function designDeck(prj, D, deck, O) {
   const hw = D.hwy, Hm = hwyParams(prj), issues = [];
   const axis = deck.axis, aOff = axis.map((p) => pathProject(hw.path, p).off), aL = arcLens(axis);
-  const halfW = deck.halfW + O.corn;
-  const eL = offsetPoly(axis, halfW), eR = offsetPoly(axis, -halfW);
+  const hwArr = deck.halfWArr ? deck.halfWArr.map((v) => v + O.corn) : null;
+  const eL = hwArr ? offsetPolyVar(axis, hwArr, 1) : offsetPoly(axis, deck.halfW + O.corn), eR = hwArr ? offsetPolyVar(axis, hwArr, -1) : offsetPoly(axis, -(deck.halfW + O.corn));
   const oL = eL.map((p) => pathProject(hw.path, p).off), oR = eR.map((p) => pathProject(hw.path, p).off);
   const X0 = atOff(axis, aOff, 0);
   if (!X0) return null;
   const sX = pathProject(hw.path, X0.p).s, tH = pathTangentAt(hw.path, sX), nH = rot90(tH);
+  const halfW = hwArr ? hwArr[Math.min(hwArr.length - 1, X0.i)] : deck.halfW + O.corn;
   const tA = norm(sub(axis[X0.i + 1], axis[X0.i]));
   const psi = (Math.atan2(Math.abs(cross(tA, tH)), Math.abs(dot(tA, tH))) * 200) / Math.PI;
   const sinPsi = Math.sin((psi * Math.PI) / 200);
@@ -201,6 +234,11 @@ function designDeck(prj, D, deck, O) {
   if (+ov.h > 0.1 && Math.abs(h - hGuide) > 1e-6) items.push({ level: h < 0.95 * hGuide ? 'warn' : 'info', text: `Épaisseur imposée ${fmt(h)} m (guide : ${fmt(hGuide)} m).` });
   if (!user && !central && Hm.median >= 3 && O.nTrav === 'auto') items.push({ level: 'info', text: `Pas de pile centrale : la pile (${fmt(O.ep)} m) ne tient pas entre les largeurs de fonctionnement ${O.Wt} des dispositifs du TPC ; dispositif plus rigide (classe W plus faible) ou pile plus mince pour revenir à 4 travées.` });
   if (!user) for (const s of [-1, 1]) if (side[s].pushed) items.push({ level: 'info', text: `Culée côté sens ${s < 0 ? 1 : 2} reculée de ${fmt(side[s].yC - yC0)} m au-delà de la tête du talus pour que la travée de rive atteigne ${rMin} fois la travée voisine (§ 2.1.1).` });
+  if (hwArr) for (const q of sup2.filter((x) => x.kind === 'culee')) {
+    let k = 0; while (k < aL.length - 1 && aL[k] < q.a) k++;
+    const wC = 2 * hwArr[k];
+    if (wC > 2 * halfW + 1) items.push({ level: 'warn', text: `Tablier élargi à ${fmt(wC, 1)} m à la culée côté sens ${q.s < 0 ? 1 : 2} (${fmt(2 * halfW, 1)} m au croisement) : la tige s'y sépare en boucle et S-semi ; rapprocher la culée de l'autoroute ou prévoir un ouvrage à largeur variable.` });
+  }
   const about = longueurAbout({ type, psi: psiR });
   for (const it of items) if (it.level === 'warn') issues.push({ lvl: 'warn', msg: `${deck.src} : ${it.text}` });
   return { P0: X0.p, deck, axis, aOff, eL, eR, oL, oR, halfW, psi: psiR, sinPsi, central: sup2.some((q) => q.central), sup: sup2, spans, spansAuto, user: !!user, shift: +ov.shift || 0, hGuide, dom, type, ep, h, about, items, issues, sX, nH, yFace, yP, Wr, Wt, Ht, R, yToe, yCrest, side };
