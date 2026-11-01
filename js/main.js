@@ -2949,7 +2949,8 @@ async function runHydro() {
       info(dem === 'srtm' ? `MNT SRTM (marge ${fmt(margin / 1000, 1)} km)…` : 'MNT du projet…');
       grid = dem === 'srtm' ? await demFromSRTM(S.crs, bb, { margin, cell, onProgress: (d, n, w) => info(`${w === 'tuiles' ? 'Tuiles' : 'Grille'} ${d} / ${n}…`) }) : demFromTIN(S.tn.tin, { cell });
       info(`Délimitation sur ${grid.nx} × ${grid.ny} cellules…`); await new Promise((r) => setTimeout(r, 30));
-      R = delineate(grid, traces, { minAreaKm2: minKm2, onProgress: (m) => info(m) });
+      // comme BVTrace : chaque bassin s'arrête au tracé ; les bassins amont sont désignés dans le tableau (cumul des débits)
+      R = delineate(grid, traces, { minAreaKm2: minKm2, clipTotalsToTrace: true, nestTotals: false, onProgress: (m) => info(m) });
       // un bassin qui touche le bord du MNT est tronqué : on élargit l'emprise (SRTM) jusqu'à fermeture
       if (dem !== 'srtm' || !R.crossings.some((c) => c.touchesEdge) || margin >= 24000) break;
       margin *= 2;
@@ -2978,14 +2979,15 @@ function computeHydro() {
   const h = hyCfg(), R = h.res;
   if (!R?.crossings?.length) { S.hyRes = null; return null; }
   const zRoad = (c) => { const A = S.axpl?.get(c.key); return A?.defined ? A.PL.zAt(c.pk) : null; };
-  const sig = JSON.stringify([R.date, h.hyp, h.hyd, R.crossings.map((c) => [c.id, zRoad(c)])]);
+  const sig = JSON.stringify([R.date, h.hyp, h.hyd, h.upstream, R.crossings.map((c) => [c.id, zRoad(c)])]);
   if (S.hyRes && S.hySig === sig) return S.hyRes;
   const hyp = { ...h.hyp };
-  const basins = R.crossings.map((c) => ({ uid: c.id, name: c.id, areaKm2: c.totalKm2, ...c.m, slopePct: c.m.slopePct, zOutletM: c.m.zOutlet, lon: c.lon, lat: c.lat, vegetationCoverPct: h.hyd.coverPct }));
+  const ids = new Set(R.crossings.map((c) => c.id));
+  const basins = R.crossings.map((c) => ({ uid: c.id, name: c.id, areaKm2: c.totalKm2, ...c.m, slopePct: c.m.slopePct, zOutletM: c.m.zOutlet, lon: c.lon, lat: c.lat, vegetationCoverPct: h.hyd.coverPct, upstreamUids: (h.upstream?.[c.id] || []).filter((u) => ids.has(u) && u !== c.id) }));
   const res = hydroComputeAll(basins, hyp);
   const out = { list: [], byId: {} };
   R.crossings.forEach((c, i) => {
-    const r = res[i], Q = r.retained?.Q, ax = hyAxes().find((a) => a.key === c.key);
+    const r = res[i], Qp = r.retained?.Q, Q = r.effectiveQ ?? Qp, ax = hyAxes().find((a) => a.key === c.key);
     let biais = 100;
     if (ax && c.flowDir) { const t = ax.at(Math.max(0, Math.min(ax.len, c.pk))).t, a = Math.acos(Math.min(1, Math.abs(G.dot(G.norm(c.flowDir), t)))); biais = Math.round(Math.max(50, Math.min(100, (a * 200) / Math.PI))); }
     const zr = zRoad(c), zt = c.m.zOutlet;
@@ -2997,7 +2999,7 @@ function computeHydro() {
     }
     const ret = sz?.retained, rr = ret?.result;
     const size = ret ? (h.hyd.shape === 'circular' ? `${ret.cells > 1 ? `${ret.cells} × ` : ''}Ø ${fmt(ret.width ?? ret.diameter ?? ret.section?.diameter, 2)}` : `${ret.cells > 1 ? `${ret.cells} × ` : ''}${fmt(ret.width, 2)} × ${fmt(ret.height, 2)}`) : null;
-    const o = { c, r, Q, T: r.values?.returnPeriod ?? hyp.returnPeriod, biais, L, zr, zt, sz, ret, rr, size, hw: rr?.headwater, v: rr?.velocities?.outlet ?? rr?.velocities?.full ?? null };
+    const o = { c, r, Q, Qp, up: basins[i].upstreamUids, T: r.values?.returnPeriod ?? hyp.returnPeriod, biais, L, zr, zt, sz, ret, rr, size, hw: rr?.headwater, v: rr?.velocities?.outlet ?? rr?.velocities?.full ?? null };
     out.list.push(o); out.byId[c.id] = o;
   });
   S.hyRes = out; S.hySig = sig;
@@ -3044,18 +3046,20 @@ function renderHydro() {
   const HR = computeHydro();
   if (!HR) { $('#hyTable').innerHTML = '<tbody><tr><td class="note">Aucun bassin : cochez les axes et lancez « Délimiter les bassins versants ».</td></tr></tbody>'; $('#hyDetail').innerHTML = ''; $('#hyNote').textContent = ''; return; }
   const T = HR.list[0]?.T;
-  $('#hyTable').innerHTML = `<thead><tr><th>BV</th><th>Axe</th><th>PK</th><th>S km²</th><th>L km</th><th>I %</th><th>tc min</th><th>Q${T} m³/s</th><th>Ouvrage</th><th>HW m</th><th>V m/s</th><th></th></tr></thead><tbody>` +
-    HR.list.map((o) => { const c = o.c, v = o.r.values || {}; const warn = (o.r.warnings || []).length + (o.rr?.warnings || []).length; return `<tr data-hy="${esc(c.id)}" class="${S.hySel === c.id ? 'on' : ''}"><td>${esc(c.id)}${c.touchesEdge ? ' ⚠' : ''}</td><td>${esc(c.traceName)}</td><td class="mono">${fmt(c.pk, 0)}</td><td class="mono">${fmt(c.totalKm2, 3)}</td><td class="mono">${fmt((c.m.lengthM || 0) / 1000, 2)}</td><td class="mono">${fmt(c.m.slopePct, 2)}</td><td class="mono">${v.tcRetained ? fmt(v.tcRetained.minutes, 1) : '—'}</td><td class="mono"><b>${o.Q > 0 ? fmt(o.Q, 2) : '—'}</b></td><td>${o.size ? `${esc(o.size)} m` : o.sz?.error ? 'erreur' : '—'}</td><td class="mono">${o.hw != null ? fmt(o.hw, 2) : '—'}</td><td class="mono">${o.v != null ? fmt(o.v, 2) : '—'}</td><td>${warn ? `<span title="avertissements">!${warn}</span>` : ''}</td></tr>`; }).join('') + '</tbody>';
+  $('#hyTable').innerHTML = `<thead><tr><th>BV</th><th>Axe</th><th>PK</th><th>S km²</th><th>L km</th><th>I %</th><th>tc min</th><th>Q${T} propre</th><th>Bassins amont</th><th>Q${T} retenu m³/s</th><th>Ouvrage</th><th>HW m</th><th>V m/s</th><th></th></tr></thead><tbody>` +
+    HR.list.map((o) => { const c = o.c, v = o.r.values || {}; const warn = (o.r.warnings || []).length + (o.rr?.warnings || []).length; return `<tr data-hy="${esc(c.id)}" class="${S.hySel === c.id ? 'on' : ''}"><td>${esc(c.id)}${c.touchesEdge ? ' ⚠' : ''}</td><td>${esc(c.traceName)}</td><td class="mono">${fmt(c.pk, 0)}</td><td class="mono">${fmt(c.totalKm2, 3)}</td><td class="mono">${fmt((c.m.lengthM || 0) / 1000, 2)}</td><td class="mono">${fmt(c.m.slopePct, 2)}</td><td class="mono">${v.tcRetained ? fmt(v.tcRetained.minutes, 1) : '—'}</td><td class="mono">${o.Qp > 0 ? fmt(o.Qp, 2) : '—'}</td><td><input class="mini-in" data-hyup="${esc(c.id)}" type="text" size="9" value="${esc((h.upstream?.[c.id] || []).join(' ; '))}" placeholder="${c.contains?.length ? esc(c.contains.join(' ; ')) : ''}" title="Bassins dont l'écoulement passe par cet ouvrage (ex. BV-03 ; BV-05) : leurs débits s'ajoutent${c.contains?.length ? ` — amont hydrologique détecté : ${esc(c.contains.join(', '))}` : ''}"></td><td class="mono"><b>${o.Q > 0 ? fmt(o.Q, 2) : '—'}</b>${o.r.cumulative?.error ? ' !' : ''}</td><td>${o.size ? `${esc(o.size)} m` : o.sz?.error ? 'erreur' : '—'}</td><td class="mono">${o.hw != null ? fmt(o.hw, 2) : '—'}</td><td class="mono">${o.v != null ? fmt(o.v, 2) : '—'}</td><td>${warn ? `<span title="avertissements">!${warn}</span>` : ''}</td></tr>`; }).join('') + '</tbody>';
   const sel = HR.byId[S.hySel];
   $('#hyDetail').innerHTML = sel ? (() => {
     const v = sel.r.values || {}, d = v.discharges || {};
     return `<h3>${esc(sel.c.id)} — ${esc(sel.c.traceName)}, PK ${fmt(sel.c.pk, 0)}</h3>` + kv([
-      ['Surface (totale / propre)', `${fmt(sel.c.totalKm2, 3)} / ${fmt(sel.c.partitionKm2, 3)} km²${sel.c.incrementalKm2 != null ? ` ; supplément ${fmt(sel.c.incrementalKm2, 3)} km² (bassins inclus : ${esc((sel.c.contains || []).join(', '))})` : ''}`],
+      ['Surface', `${fmt(sel.c.totalKm2, 3)} km² (arrêtée au tracé) ; versant de la section de tracé : ${fmt(sel.c.partitionKm2, 3)} km²`],
       ['Plus long chemin, dénivelée', `${fmt((sel.c.m.lengthM || 0) / 1000, 2)} km, ${fmt(sel.c.m.dropM, 1)} m ; Hmax ${fmt(sel.c.m.hMax, 1)}, Hmin ${fmt(sel.c.m.hMin, 1)} m`],
       ['Temps de concentration', v.tc ? Object.entries(v.tc).map(([k, q]) => `${k} ${q?.value != null ? fmt(q.value, 2) : '—'} ${q?.unit || ''}`).join(' · ') + (v.tcRetained ? ` — retenu ${v.tcRetained.formula} ${fmt(v.tcRetained.minutes, 1)} min` : '') : '—'],
       ['Intensité', v.intensityMmH != null ? `${fmt(v.intensityMmH, 2)} mm/h (${esc(v.intensitySource || '')})` : '—'],
       ['Débits', Object.entries(d).filter(([, q]) => q != null).map(([k, q]) => `${k} ${fmt(q, 2)}`).join(' · ') || '—'],
-      ['Débit retenu', sel.Q > 0 ? `${fmt(sel.Q, 2)} m³/s (${esc(sel.r.retained.method || '')})` : '—'],
+      ['Débit propre', sel.Qp > 0 ? `${fmt(sel.Qp, 2)} m³/s (${esc(sel.r.retained.method || '')})` : '—'],
+      ['Bassins amont', sel.up?.length ? `${esc(sel.up.join(', '))} → débit cumulé ${sel.r.cumulative?.Q != null ? `${fmt(sel.r.cumulative.Q, 2)} m³/s` : esc(sel.r.cumulative?.error || '—')}` : `aucun${sel.c.contains?.length ? ` (amont hydrologique détecté : ${esc(sel.c.contains.join(', '))} — à saisir dans le tableau s'il se déverse dans cet ouvrage)` : ''}`],
+      ['Débit retenu pour l\'ouvrage', sel.Q > 0 ? `${fmt(sel.Q, 2)} m³/s` : '—'],
       ['Ouvrage', sel.size ? `${esc(sel.size)} m, L ${fmt(sel.L, 1)} m, biais ${sel.biais} gr — ${esc(sel.sz?.message || '')}` : esc(sel.sz?.message || sel.sz?.error || '—')],
       ['Cotes', `chaussée ${sel.zr != null ? fmt(sel.zr, 2) : 'à définir (profil en long)'} · TN au franchissement ${fmt(sel.zt, 2)} m${sel.zr != null && Number.isFinite(sel.zt) && sel.zr - sel.zt < 2 ? ` — chaussée à ${fmt(sel.zr - sel.zt, 2)} m seulement au-dessus du fil d'eau : relevez le profil en long pour loger l'ouvrage (hauteur + traverse + remblai + revanche)` : ''}`],
     ]) + `<ul class="checks">${[...(sel.r.warnings || []), ...(sel.rr?.warnings || [])].map((w) => `<li class="warn"><span class="ic">!</span><span>${esc(w)}</span></li>`).join('')}</ul><div class="row"><button data-hyzoom="${esc(sel.c.id)}">Voir sur le plan</button></div>`;
@@ -3085,14 +3089,23 @@ function bindHydro() {
     hySet(['hyp', k], v);
   });
   $('#hyHyd').addEventListener('change', (e) => { const kd = e.target.dataset.hyd; if (!kd) return; hySet(['hyd', kd], ['shape', 'inlet'].includes(kd) ? (kd === 'inlet' && /^\d+$/.test(e.target.value) ? +e.target.value : e.target.value) : parseNum(e.target.value)); });
-  $('#hyTable').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-hy]'); if (!tr) return; S.hySel = tr.dataset.hy; renderHydro(); });
+  $('#hyTable').addEventListener('change', (e) => {
+    const id = e.target.dataset.hyup; if (!id) return;
+    const h = hyCfg(), ids = new Set((h.res?.crossings || []).map((c) => c.id));
+    const list = String(e.target.value).toUpperCase().split(/[;,\s]+/).map((x) => x.trim()).filter(Boolean).map((x) => (/^\d+$/.test(x) ? `BV-${x.padStart(2, '0')}` : x.replace(/^BV-?(\d)$/, 'BV-0$1')));
+    const bad = list.filter((x) => !ids.has(x) || x === id);
+    if (bad.length) toast(`Bassins inconnus ou identiques ignorés : ${bad.join(', ')}.`, 'warn');
+    h.upstream = h.upstream || {}; h.upstream[id] = list.filter((x) => ids.has(x) && x !== id); if (!h.upstream[id].length) delete h.upstream[id];
+    S.hySig = null; update();
+  });
+  $('#hyTable').addEventListener('click', (e) => { if (e.target.closest('input')) return; const tr = e.target.closest('tr[data-hy]'); if (!tr) return; S.hySel = tr.dataset.hy; renderHydro(); });
   $('#hyDetail').addEventListener('click', (e) => { const b = e.target.closest('[data-hyzoom]'); const o = b && S.hyRes?.byId?.[b.dataset.hyzoom]; if (!o) return; viewer.cx = o.c.x; viewer.cy = o.c.y; viewer.s = Math.max(viewer.s, 1.5); viewer.invalidate(); });
   $('#btnHyClear').addEventListener('click', () => { if (S.prj.hydro) delete S.prj.hydro.res; S.hyRes = null; update(); });
   $('#btnHyCsv').addEventListener('click', () => {
     const HR = computeHydro(); if (!HR) { toast('Aucun bassin.', 'warn'); return; }
     const c = (v, k = 2) => (v == null || !Number.isFinite(+v) ? '' : (+v).toFixed(k).replace('.', ','));
-    const rows = ['BV;Axe;PK;X;Y;S_totale_km2;S_propre_km2;L_km;I_%;tc_min;formule_tc;I_mm_h;Q_m3_s;methode;T_ans;ouvrage;L_ouvrage_m;biais_gr;HW_m;V_m_s'];
-    for (const o of HR.list) { const v = o.r.values || {}; rows.push([o.c.id, o.c.traceName, c(o.c.pk, 1), c(o.c.x, 2), c(o.c.y, 2), c(o.c.totalKm2, 4), c(o.c.partitionKm2, 4), c((o.c.m.lengthM || 0) / 1000, 3), c(o.c.m.slopePct), c(v.tcRetained?.minutes, 1), v.tcRetained?.formula || '', c(v.intensityMmH), c(o.Q), o.r.retained?.method || '', o.T, o.size || '', c(o.L, 1), o.biais, c(o.hw), c(o.v)].join(';')); }
+    const rows = ['BV;Axe;PK;X;Y;S_km2;L_km;I_%;tc_min;formule_tc;I_mm_h;Q_propre_m3_s;methode;bassins_amont;Q_retenu_m3_s;T_ans;ouvrage;L_ouvrage_m;biais_gr;HW_m;V_m_s'];
+    for (const o of HR.list) { const v = o.r.values || {}; rows.push([o.c.id, o.c.traceName, c(o.c.pk, 1), c(o.c.x, 2), c(o.c.y, 2), c(o.c.totalKm2, 4), c((o.c.m.lengthM || 0) / 1000, 3), c(o.c.m.slopePct), c(v.tcRetained?.minutes, 1), v.tcRetained?.formula || '', c(v.intensityMmH), c(o.Qp), o.r.retained?.method || '', (o.up || []).join(' '), c(o.Q), o.T, o.size || '', c(o.L, 1), o.biais, c(o.hw), c(o.v)].join(';')); }
     download(fname('csv').replace(/\.csv$/, '_hydrologie.csv'), '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
   });
   $('#btnHyOH').addEventListener('click', () => {

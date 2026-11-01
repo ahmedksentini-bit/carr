@@ -35,6 +35,8 @@ export const DEFAULTS = Object.freeze({
   streamKm2: 0.1, // PipelineOptions.NetworkThresholdKm2 (≤ 0 → minAreaKm2)
   simplifyCellFactor: 0.4, // tolérance RDP des contours, en fraction de cellule
   clipTotalsToTrace: true, // PipelineOptions.ClipTotalsToTrace
+  nestTotals: true, // emboîtement : le bassin aval englobe les bassins amont (double franchissement) ; false (GIRA) :
+  //                   chaque bassin s'arrête au tracé, les bassins amont sont désignés par l'utilisateur (cumul des débits)
   stopAtSea: true, // réseau d'écoulement : arrêt aux cellules ≤ seaLevelM
   seaLevelM: 0,
 });
@@ -937,7 +939,7 @@ export function delineate(grid, traces, opts = {}) {
     }
     const clip = groupBy(g.n, clipOf, nc);
     // Masque affiché = découpe de k ∪ découpes des bassins qu'il englobe (disjointes → simple concaténation).
-    totCells = X.map((_, k) => (containedIdx[k].length ? mergeSorted([clip[k], ...containedIdx[k].map((m) => clip[m])]) : clip[k]));
+    totCells = X.map((_, k) => (o.nestTotals && containedIdx[k].length ? mergeSorted([clip[k], ...containedIdx[k].map((m) => clip[m])]) : clip[k]));
   } else {
     // Remontée D8 inversée complète, sans barrière (UpstreamMask), union avec les bassins englobés.
     const stamp = new Int32Array(g.n).fill(-1), queue = new Int32Array(g.n);
@@ -981,7 +983,7 @@ export function delineate(grid, traces, opts = {}) {
     for (let q = 0; q < pc.length; q++) if (g.edge[pc[q]]) { partEdge = true; break; }
     for (let q = 0; q < tc.length; q++) if (g.edge[tc[q]]) { totEdge = true; break; }
     const contained = containedIdx[k];
-    const incrementalKm2 = contained.length ? totKm2[k] - Math.max(...contained.map((m) => totKm2[m])) : null;
+    const incrementalKm2 = contained.length && o.nestTotals ? totKm2[k] - Math.max(...contained.map((m) => totKm2[m])) : null;
     const polygonTotal = o.polygons || o.metrics ? polygonizeBox(g, cellsBox(g, tc), tol) : null;
     const out = {
       id: ids[k],
