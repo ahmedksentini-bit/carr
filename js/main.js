@@ -303,7 +303,7 @@ function buildEchFields() {
     '<div class="row">' + fld('cross.bau', 'BAU / BDD', 'm', { ph: '2,00 / 2,50' }) + fld('cross.median', 'Bande médiane', 'm', { ph: '0 / 3,00' }) + '</div>' +
     '<div class="row">' + fld('cross.bdg', 'BDG', 'm', { ph: '0 / 1,00' }) + fld('cross.berme', 'Berme', 'm', { ph: '0,75 / 1,00' }) + '</div>';
   $('#hwyFields').innerHTML +=
-    '<div class="row">' + fld('hwy.trR2', 'Trompette : rayon R2 de la S-semi', 'm', { ph: '62', title: 'Grande courbe de la sortie semi-directe ; la boucle en est déduite (concentrique)' }) + fld('hwy.trGap', 'Trompette : écart boucle / S-semi', 'm', { ph: '0', title: 'Terre-plein entre la boucle et la sortie semi-directe, côté amont (0 : plates-formes tangentes)' }) + '</div>';
+    '<div class="row">' + fld('hwy.trR2', 'Trompette : rayon R2 de la S-semi', 'm', { ph: '62', title: 'Grande courbe de la sortie semi-directe ; la boucle en est déduite (concentrique)' }) + fld('hwy.trGap', 'Trompette : écart boucle / S-semi', 'm', { ph: '0', title: 'Terre-plein entre la boucle et la sortie semi-directe, côté amont (0 : plates-formes tangentes)' }) + fld('hwy.trTpc', 'Trompette : séparation des voies de la tige (TPC)', 'm', { ph: '1', title: 'Entre les bords des deux voies de la tige, BDG comprises ; constante sur toute la tige et sur l\'ouvrage' }) + '</div>';
 }
 
 // Panneaux : liste des bretelles, formulaire de la bretelle sélectionnée, sommets de l'autoroute, résultats.
@@ -445,12 +445,13 @@ function syncTrumpets() {
   if (!S.D?.hwy?.ok) return;
   S.trSig = S.trSig || new Map();
   for (const semi of S.prj.ramps.filter((r) => r.role === 'semi' || (r.name === 'S-semi' && r.from?.ref?.startsWith('hwy')))) {
-    const sig = JSON.stringify([semi.from, semi.pis, semi.cut, trumpetGroup(semi).boucle?.cut, S.prj.hwy.axis, S.prj.hwy.trGap, S.prj.hwy.E1]);
+    const sig = JSON.stringify([semi.from, semi.pis, semi.cut, trumpetGroup(semi).boucle?.cut, S.prj.hwy.axis, S.prj.hwy.trGap, S.prj.hwy.trTpc, S.prj.hwy.E1]);
     if (S.trSig.get(semi.id) === sig) continue;
     S.trSig.set(semi.id, sig);
     const grp = trumpetGroup(semi);
     if (!grp.boucle) continue;
     const dv = deriveTrumpet(S.prj, S.D, semi, grp, { gap: parseNum(String(S.prj.hwy.trGap ?? '')) || 0 });
+    // La S-semi garde sa place : seule sa dernière branche (voie droite de la tige) fixe l'axe de la tige.
     if (dv.err) { if (S.trErr !== dv.err) toast(dv.err, 'warn'); S.trErr = dv.err; continue; }
     S.trErr = null;
     for (const k of ['boucle', 'sdir', 'edir']) { const j = grp[k] ? S.prj.ramps.findIndex((q) => q.id === grp[k].id) : -1; if (j >= 0) S.prj.ramps[j] = dv[k]; }
@@ -498,6 +499,9 @@ function syncRampBranches() {
       const axis = [at(Rg + AUTO_BL + 30), at(Rg + 6)];
       let b = q.j.branches.find((x) => x.rampLink === key);
       if (!b) { b = { ...newBranch(q.j, axis), rampLink: key, length: AUTO_BL }; q.j.branches.push(b); }
+      // Tige de trompette (deux bretelles d'un même groupe) : la branche reprend la séparation des voies de la tige.
+      const tpc = parseNum(String(S.prj.hwy.trTpc ?? '')) || 1;
+      if (g.length === 2 && g[0].r.grp && g[0].r.grp === g[1].r.grp && tpc > 1.001 && (!b.tpc?.on || Math.abs(+b.tpc.width - tpc) > 1e-3)) b.tpc = { ...b.tpc, on: true, width: tpc };
       else if (G.dist(b.axis[0], axis[0]) > 0.01 || G.dist(b.axis[b.axis.length - 1], axis[1]) > 0.01) b.axis = axis;
       keep.add(key);
       for (const e of g) {

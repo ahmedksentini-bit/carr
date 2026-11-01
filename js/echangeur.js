@@ -644,6 +644,28 @@ export function buildEchangeur(prj, D) {
     text('COTATION', add(m0, mul(n0, offR(sl) - rp.bdd / 2)), `BDD ${fmt(rp.bdd)}`, al.headAt(sl), 'center', TH * 0.6);
     text('COTATION', add(m0, mul(n0, offL(sl) + rp.bdg / 2)), `BDG ${fmt(rp.bdg)}`, al.headAt(sl), 'center', TH * 0.6);
   }
+  // Tige des trompettes : les deux voies restent un bloc ; le terre-plein central (largeur constante) est dessiné entre
+  // les plates-formes de la S-semi et de la boucle, sur leur alignement commun le long de la tige.
+  {
+    const tpc = tigeTpc(prj);
+    (prj.ramps || []).forEach((r, i) => {
+      if (r.role !== 'semi' || !r.grp) return;
+      const j = (prj.ramps || []).findIndex((q) => q.grp === r.grp && q.role === 'boucle');
+      const Rs = D.ramps[i], Rb = j >= 0 ? D.ramps[j] : null;
+      if (!Rs?.al || !Rb?.al) return;
+      const eS = Rs.al.elems[Rs.al.elems.length - 1], eB = Rb.al.elems[0];
+      if (eS?.kind !== 'L' || eB?.kind !== 'L') return;
+      const a = eS.p0, u = unit(eS.th0), nl = rot90(u), tB = [G.dot(sub(eB.p0, a), u), G.dot(sub(eB.pointAt(eB.len), a), u)];
+      const t0 = Math.max(0, Math.min(...tB)), t1 = Math.min(eS.len, Math.max(...tB));
+      const inS = Rs.rp.w / 2 + Rs.rp.bdg, inB = G.dot(sub(eB.p0, a), nl) - (Rb.rp.w / 2 + Rb.rp.bdg);
+      if (t1 - t0 < 1 || inB - inS < 0.05) return;
+      const q = (t, o) => add(add(a, mul(u, t)), mul(nl, o));
+      const poly = [q(t0, inS), q(t1, inS), q(t1, inB), q(t0, inB)];
+      P({ k: 'fill', L: 'ILOT_SEP', rings: [polySegs([...poly, poly[0]])], role: 'ilot' });
+      P({ k: 'path', L: 'BORDURE', segs: polySegs([q(t0, inS), q(t1, inS)]) }); P({ k: 'path', L: 'BORDURE', segs: polySegs([q(t0, inB), q(t1, inB)]) });
+      text('COTATION', q((t0 + t1) / 2, (inS + inB) / 2), `tige : TPC ${fmt(tpc)} m`, eS.th0, 'center', TH * 0.8);
+    });
+  }
 }
 
 // Contrôles pour l'onglet Contrôles.
@@ -652,6 +674,10 @@ export function echChecks(D) {
 }
 
 // --- Gabarit de trompette -------------------------------------------------------------------------------------------
+// Tige de trompette : séparation entre les bords des deux voies (BDG 0,50 m de chaque bretelle comprises) ; 1,00 m =
+// voies accolées, au-delà terre-plein central dessiné entre les plates-formes. Constante sur toute la tige.
+export const tigeTpc = (prj, opt = {}) => Math.max(1, num(opt.tpc, num(prj?.hwy?.trTpc, 1)));
+
 // Diffuseur en trompette avec boucle en entrée (la sortie en boucle n'est admise qu'à titre exceptionnel, § 6.2.4).
 // Ordre de construction : la sortie semi-directe (S-semi) est fixée d'abord (rayon R2 de sa grande courbe, R1 de sortie) ;
 // elle se termine sur la tige, qui suit la route transversale si elle est dessinée (même oblique) et franchit l'autoroute
@@ -689,7 +715,7 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
   if (tigeW) { u = { x: G.dot(tigeW, tL), y: G.dot(tigeW, nL) }; if (u.y < 0) u = neg(u); }
   if (u.y < Math.sin((40 * Math.PI) / 180)) return { err: 'Croisement trop oblique (< 40°) pour un gabarit de trompette.' };
   const r = { x: u.y, y: -u.x }, phi = Math.atan2(u.y, u.x);
-  const w = 3.5, half = w / 2, yA = hw.E1 + 1 + half, off2 = half + 0.5; // axe de bretelle à E.1,00 ; demi-entraxe de la tige
+  const w = 3.5, half = w / 2, yA = hw.E1 + 1 + half, off2 = half + tigeTpc(prj, opt) / 2; // axe de bretelle à E.1,00 ; demi-entraxe de la tige
   const Lp = mul(r, -off2), Rp = mul(r, off2), onTige = (P, y) => add(P, mul(u, (y - P.y) / u.y));
   // Longueurs adaptées au biais : alignements ≥ Lm (140 m côté autoroute, 54 m côté tige) + tangente du raccordement.
   const Ld = opt.Ldir || 300, Rd = opt.Rd || 120, Ad = opt.Ad || 80;
@@ -777,7 +803,7 @@ export function deriveTrumpet(prj, D, semi, prev, opt = {}) {
   const pis = semi.pis || [];
   if (pis.length < 3 || !(+pis[pis.length - 2].R > 0)) return { err: 'S-semi incomplète (il faut R1, R2 et l\'extrémité de la tige).' };
   const far = semi.from?.ref, sgn = far === 'hwy2' ? -1 : 1, near = far === 'hwy2' ? 'hwy1' : 'hwy2';
-  const w = 3.5, half = w / 2, yA = hw.E1 + 1 + half, off2 = half + 0.5, p3 = 0.03, g = Math.max(0, opt.gap ?? 0);
+  const w = 3.5, half = w / 2, yA = hw.E1 + 1 + half, off2 = half + tigeTpc(prj, opt) / 2, p3 = 0.03, g = Math.max(0, opt.gap ?? 0);
   const P2w = pis[pis.length - 2], Ew = pis[pis.length - 1], uw = norm(sub(Ew, P2w)), rw = { x: uw.y, y: -uw.x };
   // Ouvrage : croisement de l'axe de la tige avec l'axe de l'autoroute.
   const A0 = sub(Ew, mul(rw, off2)), pts = G.samplePath(hw.path, 2);
