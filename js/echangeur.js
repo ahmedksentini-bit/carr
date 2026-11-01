@@ -611,9 +611,14 @@ export function buildEchangeur(prj, D) {
       if (!woven) {
         P({ k: 'path', L: 'BORDURE', segs: polySegs(along(h, st0, Fs.s, lane)), role: 'principale' });
         P({ k: 'path', L: 'BORDURE', segs: polySegs(outer) }); P({ k: 'path', L: 'ACCOTEMENT', segs: polySegs(berm) });
-        P({ k: 'path', L: 'MARQUAGE', segs: polySegs(along(h, st0, Fs.s, () => 0)), dash: [3, 3.5], wm: 0.15 }); // T2 3u
       }
-      const mus = [...along(h, Fs.s, sNose, () => 0), ...edgeN.slice().reverse()];
+      // Triangle de zébrage : la rive de la chaussée émettrice et la rive gauche de la bretelle sont prolongées en amont de
+      // S.1,00 m jusqu'à leur point de rencontre (S.0, à 1/p du point S.1,00 le long de l'obliquité) ; la ligne T2 du
+      // biseau s'y arrête.
+      const L0 = woven ? 0 : Math.min(1 / Math.max(0.01, e.p || 0.03), Math.abs(Fs.s - st0)), s00 = Fs.s - sd * L0;
+      if (!woven) P({ k: 'path', L: 'MARQUAGE', segs: polySegs(along(h, st0, s00, () => 0)), dash: [3, 3.5], wm: 0.15 }); // T2 3u
+      const apex = L0 > 0.5 ? [h.off(s00, 0)] : [];
+      const mus = [...apex, ...along(h, Fs.s, sNose, () => 0), ...edgeN.slice().reverse(), ...apex];
       P({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(mus, ang(Fs.d) + Math.PI / 4, 1.0), wm: 0.12 });
       P({ k: 'path', L: 'MARQUAGE', segs: polySegs(mus), wm: 0.15 });
       P({ k: 'path', L: 'BORDURE', segs: polySegs([h.off(sNose, h.bau), accLAt(R.sTplS)]) }); // nez du musoir (tpl)
@@ -657,8 +662,12 @@ export function buildEchangeur(prj, D) {
       P({ k: 'fill', L: 'CHAUSSEE', rings: [polySegs([...poly, poly[0]])], role: 'chaussee', rule: 'nonzero' });
       P({ k: 'path', L: 'BORDURE', segs: polySegs(along(h, Ft.s, sFin, lane)), role: 'principale' });
       P({ k: 'path', L: 'BORDURE', segs: polySegs(outer) }); P({ k: 'path', L: 'ACCOTEMENT', segs: polySegs(berm) });
-      P({ k: 'path', L: 'MARQUAGE', segs: polySegs(along(h, Ft.s, sIns, () => 0)), dash: [3, 3.5], wm: 0.15 });
-      const mus = [...edgeN, ...along(h, Ft.s, sNoseE, () => 0)];
+      // Triangle de zébrage prolongé en aval de E.1,00 m jusqu'à la rencontre des deux rives (E.0, à 1/p) ; la ligne de
+      // l'insertion commence à ce point.
+      const L0 = wv ? 0 : Math.min(1 / Math.max(0.01, e.p || 0.03), Math.max(0, insL - 1)), sE0 = Ft.s + sd * L0;
+      P({ k: 'path', L: 'MARQUAGE', segs: polySegs(along(h, sE0, sIns, () => 0)), dash: [3, 3.5], wm: 0.15 });
+      const apexE = L0 > 0.5 ? [h.off(sE0, 0)] : [];
+      const mus = [...edgeN, ...apexE, ...along(h, Ft.s, sNoseE, () => 0)];
       P({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(mus, ang(Ft.d) + Math.PI / 4, 1.0), wm: 0.12 });
       P({ k: 'path', L: 'MARQUAGE', segs: polySegs(mus), wm: 0.15 });
       P({ k: 'path', L: 'BORDURE', segs: polySegs([h.off(sNoseE, h.bau), accLAt(L - R.sTplE)]) });

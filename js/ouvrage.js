@@ -40,6 +40,7 @@ export function ouvrParams(prj) {
     corn: num(o.corn, 0.5), // largeur hors chaussée de chaque côté (corniche, longrine du dispositif de retenue) (m)
     fck: num(o.fck, 30),
     pente: 1.5, // talus 3/2
+    decks: o.decks && typeof o.decks === 'object' ? o.decks : {}, // réglages par ouvrage (onglet Ouvrages) : spans, shift, h
   };
 }
 
@@ -85,13 +86,14 @@ function collectDecks(prj, D, extra) {
   // Voies secondaires : chaque franchissement de l'autoroute.
   (D.crosses || []).forEach((c, k) => {
     if (!c?.ok) return;
-    const X = crossParams(prj, k);
+    const X = crossParams(prj, k), cid = crossList(prj)[k]?.id || `k${k}`;
+    let nX = 0;
     const pts = G.samplePath(c.path, 1);
     const offs = pts.map((p) => offOf(p).off);
     for (let i = 1; i < pts.length; i++) {
       if (Math.sign(offs[i - 1]) === Math.sign(offs[i]) || offs[i - 1] === 0) continue;
       const j0 = Math.max(0, i - 160), j1 = Math.min(pts.length, i + 160);
-      decks.push({ src: X.name, axis: extendAxis(pts.slice(j0, j1)), halfW: c.E2 + 0, road: true, kind: X.kind, X0: G.lerp(pts[i - 1], pts[i], offs[i - 1] / (offs[i - 1] - offs[i])) });
+      decks.push({ key: `x:${cid}:${nX++}`, src: X.name, axis: extendAxis(pts.slice(j0, j1)), halfW: c.E2 + 0, road: true, kind: X.kind, X0: G.lerp(pts[i - 1], pts[i], offs[i - 1] / (offs[i - 1] - offs[i])) });
     }
   });
   // Tiges de trompettes paramétriques : axe de la tige au droit de l'ouvrage.
@@ -99,19 +101,20 @@ function collectDecks(prj, D, extra) {
     if (r.role !== 'semi' || !r.tp?.P0 || !r.tp?.u) continue;
     const P0 = r.tp.P0, u = norm(r.tp.u), pts = [];
     for (let t = -200; t <= 200; t += 1) pts.push(add(P0, mul(u, t)));
-    decks.push({ src: `tige de la trompette (${r.name})`, axis: pts, halfW: Math.max(1, +r.tp.tpc || 1) / 2 + 3.5 + 1.0, tige: true, X0: P0 });
+    decks.push({ key: `t:${r.id}`, src: `tige de la trompette (${r.name})`, axis: pts, halfW: Math.max(1, +r.tp.tpc || 1) / 2 + 3.5 + 1.0, tige: true, X0: P0 });
   }
   // Giratoires dénivelés : anneau franchissant l'autoroute.
   for (const g of extra?.girden || []) {
     const Rm = g.Rg - g.la / 2, ring = [];
     for (let k = 0; k < 720; k++) ring.push(G.polar(g.O, Rm, (k / 720) * G.TAU));
     const offs = ring.map((p) => offOf(p).off);
+    let nX = 0;
     for (let k = 0; k < 720; k++) {
       const a = offs[k], b = offs[(k + 1) % 720];
       if (!((a <= 0 && b > 0) || (a >= 0 && b < 0))) continue; // un seul franchissement si un point tombe sur l'axe
       const pts = [];
       for (let j = -110; j <= 110; j++) pts.push(ring[(k + j + 720) % 720]);
-      decks.push({ src: `${g.name} (anneau)`, axis: pts, halfW: g.la / 2 + 1.0, ring: true });
+      decks.push({ key: `g:${g.id}:${nX++}`, src: `${g.name} (anneau)`, axis: pts, halfW: g.la / 2 + 1.0, ring: true });
     }
   }
   // La voie secondaire d'une trompette suit la tige : un seul ouvrage, celui de la tige (deux voies et leur TPC).
@@ -157,11 +160,35 @@ function designDeck(prj, D, deck, O) {
   const sup = [{ kind: 'culee', s: order[0], y: side[order[0]].yC, a: side[order[0]].aC }, { kind: 'pile', s: order[0], y: yP, a: aP[order[0]] }];
   if (central) sup.push({ kind: 'pile', s: 0, y: 0, a: a0, central: true });
   sup.push({ kind: 'pile', s: order[1], y: yP, a: aP[order[1]] }, { kind: 'culee', s: order[1], y: side[order[1]].yC, a: side[order[1]].aC });
-  const spans = sup.slice(1).map((q, i) => +Math.abs(q.a - sup[i].a).toFixed(2));
+  for (const q of sup) if (q.kind === 'culee') q.yCrest = q.y - 0.5;
+  const spansAuto = sup.slice(1).map((q, i) => +Math.abs(q.a - sup[i].a).toFixed(2));
+  // Travure saisie dans l'onglet Ouvrages (travées le long de l'axe, centrées sur le croisement, décalage éventuel) :
+  // appuis replacés sur l'axe, lignes d'appui toujours parallèles à l'autoroute ; implantation contrôlée.
+  const ov = (O.decks || {})[deck.key] || {};
+  const user = Array.isArray(ov.spans) && ov.spans.length >= 1 && ov.spans.every((v) => +v > 1) ? ov.spans.map(Number) : null;
+  let sup2 = sup;
+  if (user) {
+    const S = user.reduce((x, y) => x + y, 0), a1 = a0 + (+ov.shift || 0) - S / 2;
+    const pos = [a1]; for (const L of user) pos.push(pos[pos.length - 1] + L);
+    if (pos[0] < 1 || pos[pos.length - 1] > aL[aL.length - 1] - 1) return null;
+    sup2 = pos.map((a, i) => {
+      let k = 1; while (k < aL.length - 1 && aL[k] < a) k++;
+      const p = G.lerp(axis[k - 1], axis[k], (a - aL[k - 1]) / (aL[k] - aL[k - 1] || 1)), c = pathProject(hw.path, p).off;
+      const kind = i === 0 || i === pos.length - 1 ? 'culee' : 'pile';
+      return { kind, s: Math.sign(c) || 1, y: Math.abs(c), a, central: kind === 'pile' && Math.abs(c) < Hm.median / 2, ...(kind === 'culee' ? { yCrest: Math.abs(c) - 0.5 } : {}) };
+    });
+    const zLo = Hm.median / 2 - Wt - O.ep / 2, zHi = yFace + Wr + O.ep / 2;
+    sup2.forEach((q, i) => {
+      if (q.kind === 'pile' && q.y > zLo + 1e-6 && q.y < zHi - 1e-6) issues.push({ lvl: 'err', msg: `${deck.src} : pile P${i} à ${fmt(q.y)} m de l'axe de l'autoroute, dans la chaussée ou la largeur de fonctionnement des dispositifs de retenue (axe de pile ≤ ${fmt(Math.max(0, zLo))} m dans le TPC ou ≥ ${fmt(zHi)} m).` });
+      if (q.kind === 'culee' && q.yCrest - R < yFace + Wr - 1e-6) issues.push({ lvl: 'warn', msg: `${deck.src} : culée C${i} trop proche, le pied du talus 3/2 (${fmt(q.yCrest - R)} m de l'axe) empiète sur la largeur de fonctionnement du dispositif de retenue (${fmt(yFace + Wr)} m) : reculez la culée.` });
+    });
+    if (sup2.some((q) => q.central) && Hm.median < 3) issues.push({ lvl: 'warn', msg: `${deck.src} : pile dans un TPC de moins de 3 m (guide SETRA 1989 § 1.2.2).` });
+  }
+  const spans = user ? user.map((v) => +(+v).toFixed(2)) : spansAuto;
   const dom = domaineEmploi(spans);
   const type = dom.recommande === 'autre' ? 'DP' : dom.recommande;
   const ep = epaisseurGuide({ spans, type, fck: O.fck, encorbellements: dom.types.includes('DP à encorbellements') });
-  const h = Math.ceil(ep.h * 20) / 20, width = 2 * halfW;
+  const hGuide = Math.ceil(ep.h * 20) / 20, h = +ov.h > 0.1 ? +ov.h : hGuide, width = 2 * halfW;
   const psiR = Math.round(psi * 10) / 10;
   const items = [
     { level: dom.level, text: dom.text },
@@ -170,11 +197,13 @@ function designDeck(prj, D, deck, O) {
     ...verifierCoupe({ width, spans, h, type }),
     ...verifierOuvertures({ spans, tirantAir: O.gab }),
   ];
-  if (!central && Hm.median >= 3 && O.nTrav === 'auto') items.push({ level: 'info', text: `Pas de pile centrale : la pile (${fmt(O.ep)} m) ne tient pas entre les largeurs de fonctionnement ${O.Wt} des dispositifs du TPC ; dispositif plus rigide (classe W plus faible) ou pile plus mince pour revenir à 4 travées.` });
-  for (const s of [-1, 1]) if (side[s].pushed) items.push({ level: 'info', text: `Culée côté sens ${s < 0 ? 1 : 2} reculée de ${fmt(side[s].yC - yC0)} m au-delà de la tête du talus pour que la travée de rive atteigne ${rMin} fois la travée voisine (§ 2.1.1).` });
+  if (user) items.unshift({ level: 'info', text: `Travure saisie (automatique : ${spansAuto.map((v) => fmt(v, 2)).join(' + ')} m).` });
+  if (+ov.h > 0.1 && Math.abs(h - hGuide) > 1e-6) items.push({ level: h < 0.95 * hGuide ? 'warn' : 'info', text: `Épaisseur imposée ${fmt(h)} m (guide : ${fmt(hGuide)} m).` });
+  if (!user && !central && Hm.median >= 3 && O.nTrav === 'auto') items.push({ level: 'info', text: `Pas de pile centrale : la pile (${fmt(O.ep)} m) ne tient pas entre les largeurs de fonctionnement ${O.Wt} des dispositifs du TPC ; dispositif plus rigide (classe W plus faible) ou pile plus mince pour revenir à 4 travées.` });
+  if (!user) for (const s of [-1, 1]) if (side[s].pushed) items.push({ level: 'info', text: `Culée côté sens ${s < 0 ? 1 : 2} reculée de ${fmt(side[s].yC - yC0)} m au-delà de la tête du talus pour que la travée de rive atteigne ${rMin} fois la travée voisine (§ 2.1.1).` });
   const about = longueurAbout({ type, psi: psiR });
   for (const it of items) if (it.level === 'warn') issues.push({ lvl: 'warn', msg: `${deck.src} : ${it.text}` });
-  return { deck, axis, aOff, eL, eR, oL, oR, halfW, psi: psiR, sinPsi, central, sup, spans, dom, type, ep, h, about, items, issues, sX, nH, yFace, yP, Wr, Wt, Ht, R, yToe, yCrest, side };
+  return { P0: X0.p, deck, axis, aOff, eL, eR, oL, oR, halfW, psi: psiR, sinPsi, central: sup2.some((q) => q.central), sup: sup2, spans, spansAuto, user: !!user, shift: +ov.shift || 0, hGuide, dom, type, ep, h, about, items, issues, sX, nH, yFace, yP, Wr, Wt, Ht, R, yToe, yCrest, side };
 }
 
 // ---------------------------------------------------------------- dessin
@@ -215,7 +244,7 @@ function drawDeck(B, P, name, TH) {
   }
   // Talus 3/2 devant la culée et quarts de cône aux angles du tablier.
   for (const q of cul) {
-    const s = q.s, cr = s * B.yCrest;
+    const s = q.s, cr = s * q.yCrest;
     const cl = at(eL, oL, cr), crr = at(eR, oR, cr);
     if (!cl || !crr) continue;
     const toHwy = (p) => { const pr = pathProject(B.hwPath, p); return mul(rot90(pathTangentAt(B.hwPath, pr.s)), -s); };
@@ -297,7 +326,42 @@ export function buildOuvrages(prj, D, extra = {}) {
     B.name = name; B.hwPath = D.hwy.path; B.median = Hm.median;
     drawDeck(B, (o) => D.prims.push(o), name, TH);
     out.issues.push(...B.issues.map((q) => ({ ...q, msg: `${name} – ${q.msg}` })));
-    out.list.push({ name, src: B.deck.src, psi: B.psi, spans: B.spans, central: B.central, type: B.type, h: B.h, hText: B.ep.text, width: 2 * B.halfW, about: B.about, items: B.items, yP: B.yP, yC: B.side, Ht: B.Ht });
+    out.list.push({ P: B.P0, key: B.deck.key, spansAuto: B.spansAuto, user: B.user, shift: B.shift, hGuide: B.hGuide, name, src: B.deck.src, psi: B.psi, spans: B.spans, central: B.central, type: B.type, h: B.h, hText: B.ep.text, width: 2 * B.halfW, about: B.about, items: B.items, yP: B.yP, yC: B.side, Ht: B.Ht, roadHalf: B.deck.halfW, gab: O.gab, fck: O.fck, ep: O.ep, nPiles: B.sup.filter((q) => q.kind === 'pile').length });
   });
   return out;
 }
+
+// ---------------------------------------------------------------- export vers PSIDA (psida.ksr-infra.org)
+// Données du formulaire PSIDA (noms des champs de son index.html) : ouvrage dalle, travure, largeur, épaisseur du guide,
+// type de dalle, biais, tirant d'air, béton, abouts, chaussée, superstructures, piles voiles et culées noyées. Les champs
+// absents gardent les valeurs par défaut de PSIDA. Superstructures : charges linéaires par défaut de PSIDA (corniche,
+// dispositif de retenue) reportées aux mêmes distances des bords du tablier.
+export const PSIDA_URL = 'https://psida.ksr-infra.org/';
+const f2 = (v) => String(Math.round(v * 100) / 100);
+export function psidaData(o, prj) {
+  const b = o.width / 2, rh = o.roadHalf, about = Math.ceil(Math.max(0.5, o.about) * 20) / 20;
+  const lines = [[5, b - 0.1], [6.5, b - 0.7], [5, b - 0.5]].flatMap(([g, e]) => [`${g} @ ${f2(-e)}`, `${g} @ ${f2(e)}`]).join(' ; ');
+  return {
+    ouvrage: 'dalle',
+    spans: o.spans.map(f2).join(', '),
+    width: f2(o.width),
+    h: f2(o.h),
+    typeDalle: o.type === 'DP' ? 'DP' : 'DA',
+    psi: f2(Math.max(30, Math.min(100, o.psi))),
+    tirantAir: f2(o.gab),
+    fck: f2(o.fck),
+    overhangs: `${f2(about)}, ${f2(about)}`,
+    roadway: `${f2(-rh)}, ${f2(rh)}`,
+    footways: '',
+    lines,
+    ap_pileType: 'voile',
+    ap_pileB: f2(o.ep),
+    ap_pileH: Array(Math.max(1, o.nPiles)).fill(f2(o.gab)).join(', '),
+    ap_culType: 'enterree',
+    plan_ouvrage: `${o.name} – ${o.src}`,
+    plan_projet: prj?.name || '',
+  };
+}
+const b64 = (txt) => (typeof btoa === 'function' ? btoa(unescape(encodeURIComponent(txt))) : Buffer.from(txt, 'utf8').toString('base64'));
+export function psidaLink(o, prj) { return `${PSIDA_URL}#conception/d=${encodeURIComponent(b64(JSON.stringify(psidaData(o, prj))))}`; }
+export function psidaProject(o, prj) { return JSON.stringify({ format: 'psida-projet', version: '0.99', date: new Date().toISOString(), source: 'GIRA (carr.ksr-infra.org)', data: psidaData(o, prj) }, null, 1); }

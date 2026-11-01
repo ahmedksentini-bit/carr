@@ -195,6 +195,15 @@ ou sur un fond topographique DXF.
   l'axe de la branche. Les branches des bretelles se dessinent par le raccordement automatique ci-dessous ; un nouveau
   gabarit au même croisement remplace aussi les giratoires du précédent. Grands giratoires (Rg > 25 m, hors tableau
   ACI) : îlots séparateurs construits sur le triangle de Rg = 25 m.
+- **Onglet Ouvrages** : réglages communs (tirant d'air, piles, dispositifs de retenue et classes W, travure), liste des
+  ouvrages et travure modifiable de chacun : travées le long de l'axe (centrées sur le croisement, décalage possible),
+  ajout / suppression d'une travée, épaisseur imposée, retour à l'implantation automatique ; le dessin, la fiche et les
+  contrôles suivent (pile dans la chaussée ou dans la largeur de fonctionnement d'un dispositif de retenue : erreur ;
+  talus de culée qui l'empiète : alerte). **Export vers PSIDA** : bouton « Ouvrir dans PSIDA » (lien
+  psida.ksr-infra.org/#conception avec travure, largeur, épaisseur, type de dalle, biais, tirant d'air, béton, abouts,
+  chaussée, superstructures, piles voiles et culées noyées) et fichier projet PSIDA (.json) à ouvrir dans PSIDA.
+- **Triangle de zébrage** des divergents et convergents : la rive de la chaussée et la rive gauche de la bretelle sont
+  prolongées au-delà de S.1,00 / E.1,00 jusqu'à leur rencontre (1/p, soit 33 m à 3 %), la ligne T2 s'y arrête.
 - **Axe de l'autoroute trop court pour un gabarit** : il est prolongé en ligne droite à ses extrémités (emprise des
   biseaux et insertions + 50 m), les abscisses des raccordements existants et le PK origine sont décalés (PK
   inchangés) ; un point S.1,00 / E.1,00 hors de l'axe est signalé en erreur (auparavant ramené en bout d'axe, d'où des
