@@ -87,7 +87,7 @@ export function talus(tl, y0, z0, sd, P, halfW) {
 }
 
 // Surfaces de déblai et de remblai entre la ligne projet (plateforme + talus) et le TN, par intégration à 0,1 m.
-function areas(proj, tl) {
+export function areas(proj, tl) {
   const zP = (y) => { for (let i = 0; i + 1 < proj.length; i++) { const a = proj[i], b = proj[i + 1]; if (y >= a.y - 1e-9 && y <= b.y + 1e-9) return b.y - a.y < 1e-9 ? Math.max(a.z, b.z) : a.z + ((y - a.y) / (b.y - a.y)) * (b.z - a.z); } return null; };
   let cut = 0, fill = 0;
   const y0 = proj[0].y, y1 = proj[proj.length - 1].y, dy = 0.1;
@@ -214,7 +214,7 @@ export function ptChartSVG(cs, opts = {}) {
   out += `<path class="pl-red" d="${cs.proj.map((q, i) => `${i ? 'L' : 'M'}${X(q.y).toFixed(1)},${Y(q.z).toFixed(1)}`).join('')}"/>`;
   for (const q of cs.platform) if (q.label && /^(voie|berme|trottoir|îlot)/.test(q.label)) out += `<text class="pl-lb" x="${X(q.y)}" y="${Y(q.z) - 6}" text-anchor="middle" font-size="9">${q.label}</text>`;
   out += `<line class="pl-tg" x1="${X(0)}" y1="${m.t}" x2="${X(0)}" y2="${h - m.b}"/>`;
-  out += `<text class="pf-note" x="${w - m.r}" y="12" text-anchor="end">s = ${fmt(cs.s, 1)} m · exagération × ${ve}</text>`;
+  out += `<text class="pf-note" x="${w - m.r}" y="12" text-anchor="end">${cs.name ? `${cs.name} · ` : ''}s = ${fmt(cs.s, 1)} m${cs.dev ? ` · dévers ${fmt(cs.dev.d * 100, 1)} %${cs.dev.inner ? ' (courbe)' : ''}` : ''} · exagération × ${ve}</text>`;
   out += `<text class="al" x="${m.l}" y="12">axe z ${fmt(cs.zAxe)}${cs.zTN != null ? ` · TN ${fmt(cs.zTN)}` : ''} · déblai ${fmt(cs.cut, 2)} m² · remblai ${fmt(cs.fill, 2)} m²</text></svg>`;
   return out;
 }
@@ -235,7 +235,7 @@ export function ptDXF(list, title, ve = 2, cols = 3) {
     w.poly('GIRA_PT_PROJET', cs.proj.map((q) => ({ x: X(q.y), y: Y(q.z), b: 0 })));
     w.line('GIRA_PT_COTES', { x: X(-cs.halfW), y: oy }, { x: X(cs.halfW), y: oy });
     w.line('GIRA_PT_COTES', { x: X(0), y: oy }, { x: X(0), y: Y(cs.zAxe) + 1 });
-    w.text('GIRA_PT_COTES', { x: X(-cs.halfW), y: oy - 1.2 }, H, 0, `PT s = ${fmt(cs.s, 1)} m — axe z ${fmt(cs.zAxe)} · TN ${cs.zTN == null ? '—' : fmt(cs.zTN)} · D ${fmt(cs.cut, 2)} m² · R ${fmt(cs.fill, 2)} m² · plan de comparaison ${fmt(zref, 0)}`);
+    w.text('GIRA_PT_COTES', { x: X(-cs.halfW), y: oy - 1.2 }, H, 0, `${cs.name || 'PT'} s = ${fmt(cs.s, 1)} m — axe z ${fmt(cs.zAxe)} · TN ${cs.zTN == null ? '—' : fmt(cs.zTN)} · D ${fmt(cs.cut, 2)} m² · R ${fmt(cs.fill, 2)} m² · plan de comparaison ${fmt(zref, 0)}`);
     for (const q of cs.platform) if (q.label) w.text('GIRA_PT_COTES', { x: X(q.y), y: Y(q.z) + 0.3 }, H * 0.7, 0, `${q.label} ${fmt(q.z, 2)}`, 'center');
   });
   w.text('GIRA_PT_COTES', { x: 0, y: 3 }, H * 2, 0, `${title} — exagération verticale × ${ve}`);
