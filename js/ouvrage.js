@@ -22,6 +22,7 @@ import * as G from './geom.js';
 import { pathProject, pathTangentAt, polySegs } from './clotho.js';
 import { hwyParams, crossParams, crossList } from './echangeur.js';
 import { fmt, upright } from './common.js';
+import { deckTrace, deckTurn } from './psidatrace.js';
 import { domaineEmploi, epaisseurGuide, verifierTravure, verifierBiais, verifierCoupe, verifierOuvertures, longueurAbout, GUIDE89 } from './psida.js';
 
 const { add, sub, mul, dot, cross, norm, rot90, neg, dist } = G;
@@ -99,7 +100,7 @@ function collectDecks(prj, D, extra) {
     for (let i = 1; i < pts.length; i++) {
       if (Math.sign(offs[i - 1]) === Math.sign(offs[i]) || offs[i - 1] === 0) continue;
       const j0 = Math.max(0, i - 400), j1 = Math.min(pts.length, i + 400); // l'axe réel sur ± 400 m, puis prolongement droit
-      decks.push({ key: `x:${cid}:${nX++}`, src: X.name, axis: extendAxis(pts.slice(j0, j1)), halfW: c.E2 + 0, road: true, kind: X.kind, X0: G.lerp(pts[i - 1], pts[i], offs[i - 1] / (offs[i - 1] - offs[i])) });
+      decks.push({ key: `x:${cid}:${nX++}`, src: X.name, axis: extendAxis(pts.slice(j0, j1)), halfW: c.E2 + 0, road: true, kind: X.kind, geo: { path: c.path }, X0: G.lerp(pts[i - 1], pts[i], offs[i - 1] / (offs[i - 1] - offs[i])) });
     }
   });
   // Tiges de trompettes paramétriques : l'ouvrage porte les deux voies de la tige (S-semi et boucle) ; son axe est le
@@ -146,7 +147,7 @@ function collectDecks(prj, D, extra) {
       if (!((a <= 0 && b > 0) || (a >= 0 && b < 0))) continue; // un seul franchissement si un point tombe sur l'axe
       const pts = [];
       for (let j = -110; j <= 110; j++) pts.push(ring[(k + j + 720) % 720]);
-      decks.push({ key: `g:${g.id}:${nX++}`, src: `${g.name} (anneau)`, axis: pts, halfW: g.la / 2 + 1.0, ring: true });
+      decks.push({ key: `g:${g.id}:${nX++}`, src: `${g.name} (anneau)`, axis: pts, halfW: g.la / 2 + 1.0, ring: true, geo: { c: g.O, r: Rm } });
     }
   }
   // La voie secondaire d'une trompette suit la tige : un seul ouvrage, celui de la tige (deux voies et leur TPC).
@@ -379,7 +380,12 @@ export function buildOuvrages(prj, D, extra = {}) {
     B.name = name; B.hwPath = D.hwy.path; B.median = Hm.median;
     drawDeck(B, (o) => D.prims.push(o), name, TH);
     out.issues.push(...B.issues.map((q) => ({ ...q, msg: `${name} – ${q.msg}` })));
-    out.list.push({ poly: B.deckPoly || [], P: B.P0, sX: B.sX, nameAuto, key: B.deck.key, spansAuto: B.spansAuto, user: B.user, shift: B.shift, hGuide: B.hGuide, name, src: B.deck.src, psi: B.psi, spans: B.spans, central: B.central, type: B.type, h: B.h, hText: B.ep.text, width: 2 * B.halfW, about: B.about, items: B.items, yP: B.yP, yC: B.side, Ht: B.Ht, roadHalf: B.deck.halfW, gab: O.gab, fck: O.fck, ep: O.ep, nPiles: B.sup.filter((q) => q.kind === 'pile').length });
+    // axe courbe : tracé en plan exporté vers PSIDA (calculé à la demande, la reconstitution d'une tige coûte ~0,5 s)
+    const turn = deckTurn(B);
+    let tr;
+    const trace = () => { if (tr === undefined) { try { tr = deckTrace(B); } catch (e) { console.error(e); tr = null; } } return tr; };
+    if (turn > 1e-3) B.items.push({ level: 'info', text: `Axe courbe (déviation ${fmt((turn * 200) / Math.PI, 1)} gr entre les culées) : le lien PSIDA transmet le tracé en plan (${B.deck.geo ? 'droites et arcs exacts' : 'droites, arcs et clothoïdes reconstitués'}) et le biais propre à chaque ligne d'appui ; tablier calculé en plaque.` });
+    out.list.push({ trace, curved: turn > 1e-3, poly: B.deckPoly || [], P: B.P0, sX: B.sX, nameAuto, key: B.deck.key, spansAuto: B.spansAuto, user: B.user, shift: B.shift, hGuide: B.hGuide, name, src: B.deck.src, psi: B.psi, spans: B.spans, central: B.central, type: B.type, h: B.h, hText: B.ep.text, width: 2 * B.halfW, about: B.about, items: B.items, yP: B.yP, yC: B.side, Ht: B.Ht, roadHalf: B.deck.halfW, gab: O.gab, fck: O.fck, ep: O.ep, nPiles: B.sup.filter((q) => q.kind === 'pile').length });
   });
   return out;
 }
@@ -413,6 +419,19 @@ export function psidaData(o, prj) {
     ap_culType: 'enterree',
     plan_ouvrage: `${o.name} – ${o.src}`,
     plan_projet: prj?.name || '',
+    ...psidaTraceFields(o),
+  };
+}
+// Ouvrage courbe : champ caché « trace » de PSIDA (tracé en plan, abscisses et biais des lignes d'appui), travure le
+// long de l'axe courbe, biais le plus prononcé (choix des appareils d'appui) et méthode en plaque, comme l'import DXF.
+function psidaTraceFields(o) {
+  const t = o.curved && typeof o.trace === 'function' ? o.trace() : null;
+  if (!t) return {};
+  return {
+    trace: JSON.stringify({ segments: t.segments, s0: t.s0, source: t.source, stations: t.stations, ...(t.psiLignes ? { psiLignes: t.psiLignes } : {}) }),
+    spans: t.spans.map((L) => String(Math.round(L * 1000) / 1000)).join(', '),
+    psi: String(Math.round(t.psiMin)),
+    methodeTablier: 'plaque',
   };
 }
 const b64 = (txt) => (typeof btoa === 'function' ? btoa(unescape(encodeURIComponent(txt))) : Buffer.from(txt, 'utf8').toString('base64'));

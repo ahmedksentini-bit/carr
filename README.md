@@ -276,6 +276,11 @@ ou sur un fond topographique DXF.
   talus de culée qui l'empiète : alerte). **Export vers PSIDA** : bouton « Ouvrir dans PSIDA » (lien
   psida.ksr-infra.org/#conception avec travure, largeur, épaisseur, type de dalle, biais, tirant d'air, béton, abouts,
   chaussée, superstructures, piles voiles et culées noyées) et fichier projet PSIDA (.json) à ouvrir dans PSIDA.
+  **Ouvrage courbe** (voie secondaire en courbe, anneau d'un giratoire dénivelé, tige de trompette qui s'incurve) :
+  le lien remplit aussi le « Tracé en plan (ouvrage courbe) » de PSIDA, comme son import DXF — axe en droites, arcs
+  et clothoïdes (exact pour une voie secondaire ou un anneau, reconstitué par le diagramme des courbures pour une
+  tige, `js/clofit.js` repris de PSIDA), abscisses des lignes d'appui et biais propre à chaque ligne (lignes parallèles
+  à l'autoroute, `js/psidatrace.js`) ; travure le long de l'axe et tablier calculé en plaque.
 - **Triangle de zébrage** des divergents et convergents : la rive de la chaussée et la rive gauche de la bretelle sont
   prolongées au-delà de S.1,00 / E.1,00 jusqu'à leur rencontre (1/p, soit 33 m à 3 %), la ligne T2 s'y arrête.
 - **Axe de l'autoroute trop court pour un gabarit** : il est prolongé en ligne droite à ses extrémités (emprise des
