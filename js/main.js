@@ -17,7 +17,7 @@ import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF } from './pt.j
 import { plParams, plBuild, plStations, plTerrainLine, plFromTerrain, plChartSVG, plChartPick, plDXF, plChecks, axisLength } from './pl.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
-import { buildOuvrages, W_CLASSES, psidaLink, psidaProject, PSIDA_URL } from './ouvrage.js';
+import { buildOuvrages, W_CLASSES, psidaLink, psidaProject, psidaWarnings, PSIDA_URL } from './ouvrage.js';
 import { buildProfils, listAxes, nearestAxis, profParams, profilsCsv } from './profils.js';
 import { cadreGeoms, drawCadre, cadreChecks, cadreLink, cadreProject, CADRE_DEF } from './cadres.js';
 import { axisSections, axisType, typeParams, typeText } from './ptaxes.js';
@@ -1154,6 +1154,15 @@ function bindEch() {
     else return;
     $('#ouvrEdit').dataset.key = ''; renderOuvr();
   });
+  // ouvrage courbe : lien complété dès l'appui (clic du milieu, menu contextuel « ouvrir dans un nouvel onglet » ou
+  // « copier le lien » compris) ; alertes du tracé exporté affichées une fois
+  const prepPsidaLink = (lk, warn) => {
+    const o = (S.ouvr?.list || []).find((q) => q.key === lk.dataset.psidalink); if (!o) return;
+    lk.href = psidaLink(o, S.prj);
+    const w = psidaWarnings(o);
+    if (warn && w.length && lk.dataset.warned !== '1') { lk.dataset.warned = '1'; toast(`${o.name} — export PSIDA : ${w.join(' ; ')}.`, 'warn'); }
+  };
+  for (const ev of ['pointerdown', 'contextmenu', 'focusin']) $('#ouvrOut').addEventListener(ev, (e) => { const lk = e.target.closest?.('a[data-psidalink]'); if (lk) prepPsidaLink(lk, ev !== 'focusin'); });
   $('#ouvrOut').addEventListener('click', (e) => { // projet PSIDA (.json) de l'ouvrage
     const br = e.target.closest('[data-raise]');
     if (br) {
@@ -1177,7 +1186,7 @@ function bindEch() {
     }
     // ouvrage courbe : le tracé en plan (reconstitution éventuelle) n'est calculé qu'au clic, avant l'ouverture du lien
     const lk = e.target.closest('a[data-psidalink]');
-    if (lk) { const o = (S.ouvr?.list || []).find((q) => q.key === lk.dataset.psidalink); if (o) lk.href = psidaLink(o, S.prj); return; }
+    if (lk) { prepPsidaLink(lk, true); return; }
     const bc = e.target.closest('[data-cadrejson]');
     if (bc) {
       const g = (S.cadres || []).find((q) => q.c.id === bc.dataset.cadrejson); if (!g?.K) return;
@@ -1187,6 +1196,7 @@ function bindEch() {
     }
     const b = e.target.closest('[data-psidajson]'); if (!b) return;
     const o = (S.ouvr?.list || []).find((q) => q.name === b.dataset.psidajson); if (!o) return;
+    { const w = psidaWarnings(o); if (w.length) toast(`${o.name} — export PSIDA : ${w.join(' ; ')}.`, 'warn'); }
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([psidaProject(o, S.prj)], { type: 'application/json' }));
     a.download = `psida-${o.name}-${o.spans.map((v) => fmt(v, 1)).join('-')}.json`.replace(/[\s,]+/g, '_'); a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);

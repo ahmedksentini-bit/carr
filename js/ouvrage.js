@@ -384,7 +384,7 @@ export function buildOuvrages(prj, D, extra = {}) {
     const turn = deckTurn(B);
     let tr;
     const trace = () => { if (tr === undefined) { try { tr = deckTrace(B); } catch (e) { console.error(e); tr = null; } } return tr; };
-    if (turn > 1e-3) B.items.push({ level: 'info', text: `Axe courbe (déviation ${fmt((turn * 200) / Math.PI, 1)} gr entre les culées) : le lien PSIDA transmet le tracé en plan (${B.deck.geo ? 'droites et arcs exacts' : 'droites, arcs et clothoïdes reconstitués'}) et le biais propre à chaque ligne d'appui ; tablier calculé en plaque.` });
+    if (turn > 1e-3) B.items.push({ level: 'info', text: `Axe courbe (déviation ${fmt((turn * 200) / Math.PI, 1)} gr entre les culées) : le lien PSIDA transmet le tracé en plan (${B.deck.geo ? 'droites et arcs exacts' : 'droites, arcs et clothoïdes reconstitués'}) et le biais propre à chaque ligne d'appui ; tablier calculé en plaque (alertes éventuelles du tracé affichées à l'export).` });
     out.list.push({ trace, curved: turn > 1e-3, poly: B.deckPoly || [], P: B.P0, sX: B.sX, nameAuto, key: B.deck.key, spansAuto: B.spansAuto, user: B.user, shift: B.shift, hGuide: B.hGuide, name, src: B.deck.src, psi: B.psi, spans: B.spans, central: B.central, type: B.type, h: B.h, hText: B.ep.text, width: 2 * B.halfW, about: B.about, items: B.items, yP: B.yP, yC: B.side, Ht: B.Ht, roadHalf: B.deck.halfW, gab: O.gab, fck: O.fck, ep: O.ep, nPiles: B.sup.filter((q) => q.kind === 'pile').length });
   });
   return out;
@@ -426,7 +426,7 @@ export function psidaData(o, prj) {
 // long de l'axe courbe, biais le plus prononcé (choix des appareils d'appui) et méthode en plaque, comme l'import DXF.
 function psidaTraceFields(o) {
   const t = o.curved && typeof o.trace === 'function' ? o.trace() : null;
-  if (!t) return {};
+  if (!t?.curved) return {};
   return {
     trace: JSON.stringify({ segments: t.segments, s0: t.s0, source: t.source, stations: t.stations, ...(t.psiLignes ? { psiLignes: t.psiLignes } : {}) }),
     spans: t.spans.map((L) => String(Math.round(L * 1000) / 1000)).join(', '),
@@ -435,5 +435,7 @@ function psidaTraceFields(o) {
   };
 }
 const b64 = (txt) => (typeof btoa === 'function' ? btoa(unescape(encodeURIComponent(txt))) : Buffer.from(txt, 'utf8').toString('base64'));
+// Alertes du tracé exporté (biais < 50 gr à une ligne d'appui, angle vif, reconstitution imprécise) à montrer avant l'export.
+export function psidaWarnings(o) { const t = o.curved && typeof o.trace === 'function' ? o.trace() : null; return t?.warnings || []; }
 export function psidaLink(o, prj) { return `${PSIDA_URL}#conception/d=${encodeURIComponent(b64(JSON.stringify(psidaData(o, prj))))}`; }
 export function psidaProject(o, prj) { return JSON.stringify({ format: 'psida-projet', version: '0.99', date: new Date().toISOString(), source: 'GIRA (carr.ksr-infra.org)', data: psidaData(o, prj) }, null, 1); }
