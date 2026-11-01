@@ -100,7 +100,7 @@ function collectDecks(prj, D, extra) {
     for (let i = 1; i < pts.length; i++) {
       if (Math.sign(offs[i - 1]) === Math.sign(offs[i]) || offs[i - 1] === 0) continue;
       const j0 = Math.max(0, i - 400), j1 = Math.min(pts.length, i + 400); // l'axe réel sur ± 400 m, puis prolongement droit
-      decks.push({ key: `x:${cid}:${nX++}`, src: X.name, axis: extendAxis(pts.slice(j0, j1)), halfW: c.E2 + 0, road: true, kind: X.kind, geo: { path: c.path }, X0: G.lerp(pts[i - 1], pts[i], offs[i - 1] / (offs[i - 1] - offs[i])) });
+      decks.push({ key: `x:${cid}:${nX++}`, src: X.name, axis: extendAxis(pts.slice(j0, j1)), halfW: c.E2 + 0, road: true, kind: X.kind, geo: { path: c.path, al: c.al }, X0: G.lerp(pts[i - 1], pts[i], offs[i - 1] / (offs[i - 1] - offs[i])) });
     }
   });
   // Tiges de trompettes paramétriques : l'ouvrage porte les deux voies de la tige (S-semi et boucle) ; son axe est le

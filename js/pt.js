@@ -214,7 +214,7 @@ export function ptChartSVG(cs, opts = {}) {
   out += `<path class="pl-red" d="${cs.proj.map((q, i) => `${i ? 'L' : 'M'}${X(q.y).toFixed(1)},${Y(q.z).toFixed(1)}`).join('')}"/>`;
   for (const q of cs.platform) if (q.label && /^(voie|berme|trottoir|îlot)/.test(q.label)) out += `<text class="pl-lb" x="${X(q.y)}" y="${Y(q.z) - 6}" text-anchor="middle" font-size="9">${q.label}</text>`;
   out += `<line class="pl-tg" x1="${X(0)}" y1="${m.t}" x2="${X(0)}" y2="${h - m.b}"/>`;
-  out += `<text class="pf-note" x="${w - m.r}" y="12" text-anchor="end">${cs.name ? `${cs.name} · ` : ''}s = ${fmt(cs.s, 1)} m${cs.dev ? ` · dévers ${fmt(cs.dev.d * 100, 1)} %${cs.dev.inner ? ' (courbe)' : ''}` : ''} · exagération × ${ve}</text>`;
+  out += `<text class="pf-note" x="${w - m.r}" y="12" text-anchor="end">${cs.name ? `${cs.name} · ` : ''}s = ${fmt(cs.s, 1)} m${cs.dev ? ` · dévers ${cs.dev.f > 0 && cs.dev.f < 1 && cs.dev.left != null ? `G ${fmt(cs.dev.left * 100, 1)} % / D ${fmt(cs.dev.right * 100, 1)} % (bascule sur clothoïde)` : `${fmt(cs.dev.d * 100, 1)} %${cs.dev.inner ? ' (courbe)' : ' (toit)'}`}` : ''} · exagération × ${ve}</text>`;
   out += `<text class="al" x="${m.l}" y="12">axe z ${fmt(cs.zAxe)}${cs.zTN != null ? ` · TN ${fmt(cs.zTN)}` : ''} · déblai ${fmt(cs.cut, 2)} m² · remblai ${fmt(cs.fill, 2)} m²</text></svg>`;
   return out;
 }
