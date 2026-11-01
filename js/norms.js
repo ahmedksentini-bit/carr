@@ -200,8 +200,8 @@ export function islandDims(prj, br) {
   const autoShift = prj.context === 'interurbain' && Rg > 15 ? (0.5 + Rg / 50) / 2 : 0;
   return {
     type: i.type || 'physique',
-    b: num(i.base, Rg / 4),
-    h: num(i.length, Rg),
+    b: num(i.base, Math.min(Rg, 25) / 4),
+    h: num(i.length, Math.min(Rg, 25)), // grand giratoire (Rg > 25 m, hors tableau ACI : giratoire dénivelé) : triangle de Rg = 25 m
     gap: num(i.gap, Math.max(PRESETS[prj.context].island.gap, sectionParams(prj).bdd)), // tête hors de la chaussée de l'anneau
     rHead: Math.max(0.3, Rg / 50),
     rTip: Math.max(0.3, Rg / 50),
