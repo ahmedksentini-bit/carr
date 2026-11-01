@@ -20,6 +20,7 @@ import { LAYERS } from './layers.js';
 import { buildOuvrages, W_CLASSES, psidaLink, psidaProject } from './ouvrage.js';
 import { buildProfils, listAxes, nearestAxis, profParams, profilsCsv } from './profils.js';
 import { cadreGeoms, drawCadre, cadreChecks, cadreLink, cadreProject, CADRE_DEF } from './cadres.js';
+import { buildAxisProfiles, axisPlChecks, clearanceChecks, axisTerrainLine, axisFromTerrain, buildNodes, axisLimits } from './axpl.js';
 import { chausseeOverlaps } from './overlap.js';
 import { analyse, SITES } from './capacity.js';
 import { initLang, getLang, t } from './i18n.js';
@@ -300,6 +301,14 @@ function update({ commit = true, panels = true } = {}) {
   }
   S.prof = null;
   if (S.D) try { S.prof = buildProfils(S.prj, S.D, (S.prj.opts?.textH || 0.8) * 1.2); for (const q of S.prof.issues) S.checks.push({ ...q, group: 'Profils' }); } catch (e) { console.error(e); }
+  S.axpl = null; S.clear = [];
+  if (S.D?.hwy?.ok) try { // profils en long de l'autoroute, des voies secondaires et des bretelles ; tirant d'air
+    const axes = (S.prof?.axes || listAxes(S.prj, S.D)).filter((a) => !a.key.startsWith('b:'));
+    S.axpl = buildAxisProfiles(S.prj, S.D, axes, junctionsZ(), S.tn?.tin || null);
+    for (const A of S.axpl.values()) for (const q of axisPlChecks(S.prj, A)) S.checks.push({ ...q, group: 'Profil en long' });
+    S.clear = clearanceChecks(S.prj, S.axpl, axes, S.ouvr?.list || []);
+    for (const q of S.clear) if (q.lvl === 'err') S.checks.push({ lvl: 'err', group: 'Ouvrages', msg: q.msg });
+  } catch (e) { console.error(e); }
   for (const id of S.rampKinks || []) { const r = S.prj.ramps.find((q) => q.id === id); if (r) S.checks.push({ lvl: 'err', group: 'Échangeur', msg: `${r.name} : arrivée au giratoire non tangente (la courbe se termine dans la branche) — allongez le dernier alignement ou déplacez le dernier sommet dans l'axe de la branche.` }); }
   if (S.D?.hwy?.ok) try { // chaussées superposées hors ouvrage
     const juncs = [{ O: S.D.O, Rg: +S.prj.ring.Rg, kind: S.prj.kind }, ...(S.Do || []).map((d) => { const o = S.prj.others.find((q) => q.id === d.id); return { O: d.D.O, Rg: +o?.ring?.Rg || 20, kind: o?.kind }; })].filter((j) => j.O && (j.kind || 'giratoire') === 'giratoire');
@@ -312,6 +321,13 @@ function update({ commit = true, panels = true } = {}) {
   autosave();
 }
 
+// Carrefours et leur cote zC (calage des extrémités de bretelles qui y aboutissent).
+function junctionsZ() {
+  const out = [];
+  if (S.D?.O) out.push({ O: S.D.O, Rg: +S.prj.ring?.Rg || 20, zC: S.prj.ring?.zC === '' || S.prj.ring?.zC == null ? null : +S.prj.ring.zC, name: S.prj.jname || 'giratoire' });
+  for (const d of S.Do || []) { const o = S.prj.others.find((q) => q.id === d.id); if (d.D?.O && o) out.push({ O: d.D.O, Rg: +o.ring?.Rg || 20, zC: o.ring?.zC === '' || o.ring?.zC == null ? null : +o.ring.zC, name: o.name }); }
+  return out;
+}
 // Onglet Ouvrages : liste, travure modifiable de l'ouvrage choisi (réglages par ouvrage dans prj.ouvr.decks), fiche.
 const parseSpans = (t) => String(t || '').split(/;|\s+|,(?=\s)/).map((x) => parseNum(x.trim())).filter((v) => Number.isFinite(v) && v > 0);
 const cadreItem = (g) => ({ key: `c:${g.c.id}`, cadre: true, g, name: g.name, src: `${g.K?.type === 'pipo' ? 'PIPO' : 'PICF'} sous ${g.ax?.name || g.c.axisName || '?'}`, sX: g.sX ?? 0, P: g.p });
@@ -344,7 +360,8 @@ function renderOuvr() {
     ['Dalle', `PSI-${o.type}, h ≈ ${fmt(o.h, 2)} m ; about ≥ ${fmt(o.about, 2)} m`],
     ['Axe des piles de rive', `à ${fmt(o.yP, 2)} m de l'axe de l'autoroute`],
     ['Talus 3/2 sous culée', `hauteur ${fmt(o.Ht, 2)} m, emprise ${fmt(1.5 * o.Ht, 2)} m`],
-  ]) + `<div class="row"><a class="btn primary" href="${esc(psidaLink(o, S.prj))}" target="_blank" rel="noopener" title="Ouvre psida.ksr-infra.org (onglet Conception) avec la travure, la largeur, l'épaisseur, le biais, le tirant d'air et les appuis de cet ouvrage">Ouvrir dans PSIDA ↗</a><button class="mini" data-psidajson="${esc(o.name)}" title="Projet PSIDA (.json) à ouvrir avec le bouton Ouvrir de PSIDA">Exporter (.json)</button></div>` + `<p class="note">${esc(o.hText)}</p><ul class="ouvr-items">${o.items.map((it) => `<li class="${lvlCls[it.level] || ''}">${esc(it.text)}</li>`).join('')}</ul></div>`).join('');
+    ...(() => { const q = (S.clear || []).find((c) => c.ouvr === o.name); return q ? [['Tirant d\'air (profils en long)', `${fmt(q.ta, 2)} m ${q.lvl === 'err' ? `< gabarit ${fmt(o.gab, 2)} m ✖` : `≥ ${fmt(o.gab, 2)} m ✔`}`]] : [['Tirant d\'air', 'profils en long de l\'autoroute et de la voie portée à saisir (onglet Profil en long)']]; })(),
+  ]) + (() => { const q = (S.clear || []).find((c) => c.ouvr === o.name); return q && q.lvl === 'err' ? `<div class="row"><button data-raise="${esc(o.name)}" title="Place un point d'inflexion sur la voie portée, au droit de l'ouvrage, à la cote assurant le gabarit + 0,10 m (les points à moins de 40 m sont remplacés)">Relever ${esc(S.axpl?.get(q.key)?.name || 'la voie portée')} au gabarit (z = ${fmt(q.zNeed, 2)} m)</button></div>` : ''; })() + `<div class="row"><a class="btn primary" href="${esc(psidaLink(o, S.prj))}" target="_blank" rel="noopener" title="Ouvre psida.ksr-infra.org (onglet Conception) avec la travure, la largeur, l'épaisseur, le biais, le tirant d'air et les appuis de cet ouvrage">Ouvrir dans PSIDA ↗</a><button class="mini" data-psidajson="${esc(o.name)}" title="Projet PSIDA (.json) à ouvrir avec le bouton Ouvrir de PSIDA">Exporter (.json)</button></div>` + `<p class="note">${esc(o.hText)}</p><ul class="ouvr-items">${o.items.map((it) => `<li class="${lvlCls[it.level] || ''}">${esc(it.text)}</li>`).join('')}</ul></div>`).join('');
 }
 // Fiche d'un cadre PICF / PIPO : paramètres modifiables (vides = valeurs automatiques), grandeurs, lien PSIDA.
 function renderCadreEdit(o) {
@@ -1096,6 +1113,26 @@ function bindEch() {
     $('#ouvrEdit').dataset.key = ''; renderOuvr();
   });
   $('#ouvrOut').addEventListener('click', (e) => { // projet PSIDA (.json) de l'ouvrage
+    const br = e.target.closest('[data-raise]');
+    if (br) {
+      const q = (S.clear || []).find((c) => c.ouvr === br.dataset.raise); if (!q) return;
+      S.prj.axpl = S.prj.axpl || {}; const st = (S.prj.axpl[q.key] = S.prj.axpl[q.key] || { pis: [] });
+      // dégagement : les points voisins sont retirés sur la distance nécessaire pour rattraper la hausse à pente ≤ max
+      const lim = axisLimits(S.prj, q.key), cur = S.axpl?.get(q.key);
+      const rise = Math.max(0, q.zNeed - (cur?.defined ? cur.PL.zAt(q.sX) : q.zNeed)), Dk = Math.max(60, (2.5 * rise) / lim.gMax);
+      st.pis = (st.pis || []).filter((p) => Math.abs(+p.s - q.sX) > Dk);
+      const pi = { s: Math.round(q.sX * 10) / 10, z: Math.round(q.zNeed * 100) / 100, R: lim.Rconv };
+      st.pis.push(pi); st.pis.sort((a, b) => +a.s - +b.s);
+      // le raccordement parabolique passe sous le sommet : on relève le sommet jusqu'à ce que la courbe atteigne la cote,
+      // en réduisant au besoin le rayon pour que les tangentes tiennent entre les points voisins (rayon contrôlé ensuite)
+      for (let it = 0; it < 30; it++) {
+        const k = st.pis.indexOf(pi), a = st.pis[k - 1], b = st.pis[k + 1];
+        if (a && b) { const g1 = (pi.z - +a.z) / (pi.s - +a.s), g2 = (+b.z - pi.z) / (+b.s - pi.s), dg = Math.abs(g2 - g1); const Tmax = 0.9 * Math.min(pi.s - +a.s, +b.s - pi.s); if (dg > 1e-6 && (pi.R * dg) / 2 > Tmax) pi.R = Math.max(100, Math.floor((2 * Tmax) / dg)); }
+        const PLx = buildNodes(st.pis.map((p) => ({ s: +p.s, z: +p.z, R: +p.R || 0 }))); const d = q.zNeed - PLx.zAt(q.sX);
+        if (Math.abs(d) < 0.005) break; pi.z = Math.round((pi.z + d) * 1000) / 1000;
+      }
+      update(); toast(`Point d'inflexion placé sur ${S.axpl?.get(q.key)?.name || 'la voie portée'} au droit de ${q.ouvr} : vérifiez les pentes et les rayons dans l'onglet Profil en long.`); return;
+    }
     const bc = e.target.closest('[data-cadrejson]');
     if (bc) {
       const g = (S.cadres || []).find((q) => q.c.id === bc.dataset.cadrejson); if (!g?.K) return;
@@ -2520,11 +2557,63 @@ function bindTerrain() {
 
 // --------------------------------------------------------- Profil en long
 // Branche affichée dans l'onglet : celle choisie, sinon la branche sélectionnée sur le plan, sinon la première.
+const plBrIdx = () => (typeof S.plSel === 'string' ? (S.plSel.startsWith('b:') ? +S.plSel.slice(2) : null) : S.plSel);
 function plBranch() {
   const D = S.D, cands = (D?.branches || []).filter((bd) => bd.role !== 'principale');
   if (!cands.length) return null;
-  let bd = cands.find((q) => q.idx === S.plSel) || cands.find((q) => q.idx === S.sel) || cands[0];
+  let bd = cands.find((q) => q.idx === plBrIdx()) || cands.find((q) => q.idx === S.sel) || cands[0];
   return bd;
+}
+// Axe de l'échangeur affiché dans l'onglet Profil en long (autoroute, voie secondaire, bretelle) : { key, A, ax, store }.
+function plAxisCtx() {
+  const key = typeof S.plSel === 'string' && !S.plSel.startsWith('b:') ? S.plSel : (!(S.D?.branches || []).some((bd) => bd.role !== 'principale') && S.axpl?.size ? [...S.axpl.keys()][0] : null);
+  if (!key || !S.axpl?.has(key)) return null;
+  const A = S.axpl.get(key), ax = (S.prof?.axes || listAxes(S.prj, S.D)).find((a) => a.key === key);
+  if (!ax) return null;
+  S.prj.axpl = S.prj.axpl || {};
+  const store = (S.prj.axpl[key] = S.prj.axpl[key] || { pis: [] });
+  if (!Array.isArray(store.pis)) store.pis = [];
+  return { key, A, ax, store };
+}
+function axStations(ax, PL, tin, step, defined) {
+  const ss = new Set();
+  for (let s = 0; s <= ax.len + 1e-9; s += step) ss.add(Math.round(s * 100) / 100);
+  ss.add(Math.round(ax.len * 100) / 100);
+  if (defined) { for (const n of PL.nodes) if (n.s >= 0 && n.s <= ax.len) ss.add(Math.round(n.s * 100) / 100); for (const c of PL.curves) for (const v of [c.sA, c.sB]) if (v >= 0 && v <= ax.len) ss.add(Math.round(v * 100) / 100); }
+  return [...ss].sort((a, b) => a - b).map((s) => {
+    const { p } = ax.at(s), zTN = tin ? tinZ(tin, p.x, p.y) : null, zP = defined ? PL.zAt(s) : null;
+    return { s, p, zTN, zP, dz: zTN == null || zP == null ? null : zP - zTN, g: defined ? PL.gradeAt(s) : null };
+  });
+}
+function refreshPLAxis(c) {
+  const { A, ax, key, store } = c;
+  const tnLine = axisTerrainLine(ax, S.tn?.tin || null);
+  const ve = +($('#plVe').value || 0);
+  const PL = A.defined ? A.PL : buildNodes(A.tied.length ? A.tied : [{ s: 0, z: tnLine[0]?.[1] ?? 0, R: 0 }]);
+  const info = (i, nd) => {
+    const t = A.tied.find((q) => Math.abs(q.s - nd.s) < 1e-6);
+    if (t) return { fixed: true, pi: -1, label: `calé sur ${t.why}` };
+    const k = store.pis.findIndex((q) => Math.abs(+q.s - nd.s) < 1e-6);
+    return { fixed: k < 0, pi: k, label: `PI ${k + 1}` };
+  };
+  $('#plChart').innerHTML = plChartSVG(PL, tnLine, ax.len, { ve, sel: S.plPi, nodeInfo: info, noRed: !A.defined, axisLabel: `s (m) le long de ${ax.name} · z (m)` });
+  const lim = axisLimits(S.prj, key);
+  $('#plTable').innerHTML = '<thead><tr><th>Point</th><th>s (m)</th><th>z (m)</th><th>R (m)</th><th>pente aval</th><th></th></tr></thead><tbody>' +
+    A.tied.map((t) => `<tr><td>calé (${t.end ? 'fin' : 'début'})</td><td class="mono">${fmt(t.s, 2)}</td><td class="mono">${fmt(t.z, 3)}</td><td class="mono">—</td><td class="mono" colspan="2">${esc(t.why)}</td></tr>`).join('') +
+    store.pis.map((q, i) => {
+      const seg = A.defined ? A.PL.segs.find((sg) => Math.abs(sg.s0 - +q.s) < 1e-6) : null;
+      return `<tr class="${i === S.plPi ? 'on' : ''}"><td>PI ${i + 1}</td>` + ['s', 'z', 'R'].map((f) => `<td><input data-pi="${i}" data-f="${f}" type="text" inputmode="decimal" value="${showNum(q[f] ?? '')}"></td>`).join('') +
+        `<td class="mono">${seg ? fmt(seg.g * 100, 2) + ' %' : '—'}</td><td class="act"><button data-pidel="${i}" title="Supprimer ce point">×</button></td></tr>`;
+    }).join('') + '</tbody>';
+  const checks = [...axisPlChecks(S.prj, A), ...(S.clear || []).filter((q) => (S.ouvr?.list || []).some((o) => o.name === q.ouvr && o.key.startsWith(key + ':')) || key === 'hwy')];
+  $('#plChecks').innerHTML = (checks.length ? '<ul class="checks">' + checks.map((q) => `<li class="${q.lvl}"><span class="ic">${{ err: '✖', warn: '!', info: 'i', ok: '✔' }[q.lvl] || 'i'}</span><span>${esc(q.msg)}</span></li>`).join('') + '</ul>' : '')
+    + `<p class="note">${A.defined ? '' : 'Aucun profil saisi. '}Limites : ${esc(lim.label)}.${key.startsWith('r:') ? ' Les extrémités se calent sur la chaussée hôte (dévers 2,5 %) dès qu\'elle a un profil, ou sur la cote zC du giratoire.' : ''}</p>`;
+  const step = parseNum($('#plStep').value) || 10;
+  const st = axStations(ax, PL, S.tn?.tin, step, A.defined);
+  $('#plStations').innerHTML = '<thead><tr><th>s (m)</th><th>X</th><th>Y</th><th>z TN</th><th>z projet</th><th>projet − TN</th><th>pente</th></tr></thead><tbody>' +
+    st.map((q) => `<tr><td>${fmt(q.s, 2)}</td><td>${q.p.x.toFixed(2)}</td><td>${q.p.y.toFixed(2)}</td><td>${q.zTN == null ? '—' : fmt(q.zTN)}</td><td>${q.zP == null ? '—' : fmt(q.zP)}</td>` +
+      `<td class="${q.dz == null ? '' : q.dz >= 0 ? 'fill' : 'cut'}">${q.dz == null ? '—' : (q.dz >= 0 ? '+' : '−') + fmt(Math.abs(q.dz))}</td><td>${q.g == null ? '—' : fmt(q.g * 100, 2) + ' %'}</td></tr>`).join('') + '</tbody>';
+  $('#plNote').textContent = S.tn ? '' : 'Aucun MNT : le terrain naturel n\'est pas tracé (onglet Terrain).';
 }
 function plData() {
   const bd = plBranch();
@@ -2538,11 +2627,18 @@ function plData() {
 }
 function refreshPL() {
   const sel = $('#plBranch'), cands = (S.D?.branches || []).filter((bd) => bd.role !== 'principale');
-  const sig = JSON.stringify(cands.map((b) => [b.idx, b.name]));
-  if (sel.dataset.sig !== sig) { sel.dataset.sig = sig; sel.innerHTML = cands.map((b) => `<option value="${b.idx}">${esc(b.name)}</option>`).join(''); }
+  const axs = [...(S.axpl?.values() || [])];
+  const sig = JSON.stringify([cands.map((b) => [b.idx, b.name]), axs.map((a) => [a.key, a.name])]);
+  if (sel.dataset.sig !== sig) {
+    sel.dataset.sig = sig;
+    sel.innerHTML = (cands.length ? `<optgroup label="Branches du carrefour">${cands.map((b) => `<option value="b:${b.idx}">${esc(b.name)}</option>`).join('')}</optgroup>` : '')
+      + (axs.length ? `<optgroup label="Échangeur">${axs.map((a) => `<option value="${esc(a.key)}">${esc(a.name)}</option>`).join('')}</optgroup>` : '');
+  }
+  const ac = plAxisCtx();
+  if (ac) { sel.value = ac.key; refreshPLAxis(ac); return; }
   const d = plData();
   if (!d) { $('#plChart').innerHTML = '<p class="note">Dessinez les branches pour afficher leur profil en long.</p>'; $('#plTable').innerHTML = ''; $('#plStations').innerHTML = ''; $('#plChecks').innerHTML = ''; return; }
-  sel.value = String(d.bd.idx);
+  sel.value = `b:${d.bd.idx}`;
   const { bd, PL, sEnd, br } = d;
   const tnLine = S.tn ? plTerrainLine(bd, S.tn.tin, Math.max(sEnd, PL.sEnd)) : [];
   const ve = +($('#plVe').value || 0);
@@ -2567,12 +2663,19 @@ function refreshPL() {
   $('#plNote').textContent = (S.tn ? '' : 'Aucun MNT : le terrain naturel n\'est pas tracé (onglet Terrain). ') + (bd.cont ? 'Au-delà de l\'alignement droit, s suit l\'axe saisi (raccordement compris).' : '');
 }
 function plSetPi(i, f, v) {
+  const ac = plAxisCtx();
+  if (ac) { if (ac.store.pis[i]) ac.store.pis[i] = { ...ac.store.pis[i], [f]: v }; return; }
   const br = S.prj.branches[plBranch()?.idx];
   if (!br) return;
   br.pl = br.pl || { pis: [] };
   br.pl.pis[i] = { ...br.pl.pis[i], [f]: v };
 }
 function plAddPi(s, z, R) {
+  const ac = plAxisCtx();
+  if (ac) {
+    const q = { s: Math.round(Math.max(0, Math.min(ac.ax.len, s)) * 10) / 10, z: Math.round(z * 100) / 100, R: R ?? axisLimits(S.prj, ac.key).Rconv };
+    ac.store.pis.push(q); ac.store.pis.sort((a, b) => +a.s - +b.s); S.plPi = ac.store.pis.indexOf(q); update(); return;
+  }
   const br = S.prj.branches[plBranch()?.idx];
   if (!br) return;
   br.pl = br.pl || { pis: [] };
@@ -2582,7 +2685,7 @@ function plAddPi(s, z, R) {
   update();
 }
 function bindPL() {
-  $('#plBranch').addEventListener('change', (e) => { S.plSel = +e.target.value; S.plPi = -1; refreshPL(); });
+  $('#plBranch').addEventListener('change', (e) => { S.plSel = e.target.value; S.plPi = -1; refreshPL(); });
   $('#plVe').addEventListener('change', refreshPL);
   $('#plStep').addEventListener('change', refreshPL);
   const chart = $('#plChart');
@@ -2604,23 +2707,43 @@ function bindPL() {
     update({ commit: false });
   });
   chart.addEventListener('pointerup', (e) => {
-    if (S.plDrag) { const moved = S.plDrag.moved; S.plDrag = null; if (moved) { commitHistory(); refreshPL(); } else refreshPL(); return; }
+    if (S.plDrag) { const moved = S.plDrag.moved; S.plDrag = null; const ac = plAxisCtx(); if (ac && moved) { const q0 = ac.store.pis[S.plPi]; ac.store.pis.sort((a, b) => +a.s - +b.s); S.plPi = ac.store.pis.indexOf(q0); } if (moved) { commitHistory(); refreshPL(); } else refreshPL(); return; }
+    const ac = plAxisCtx();
+    if (ac) { const q = pick(e); if (q && q.s >= 0 && q.s <= ac.ax.len) plAddPi(q.s, q.z); return; }
     const d = plData(), q = pick(e); if (!d || !q || q.s <= 0.5) return;
     plAddPi(q.s, q.z);
   });
-  $('#btnPlAdd').addEventListener('click', () => { const d = plData(); if (!d) return; const s = Math.min(d.sEnd, (d.PL.sEnd || 0) + 40); plAddPi(s, d.PL.zAt(s), 0); });
+  $('#btnPlAdd').addEventListener('click', () => {
+    const ac = plAxisCtx();
+    if (ac) { const last = ac.store.pis.length ? +ac.store.pis[ac.store.pis.length - 1].s : 0, s1 = Math.min(ac.ax.len, ac.store.pis.length ? last + 100 : 0); const { p } = ac.ax.at(s1); const z = ac.A.defined ? ac.A.PL.zAt(s1) : (S.tn ? tinZ(S.tn.tin, p.x, p.y) : null) ?? 0; plAddPi(s1, z, ac.store.pis.length ? undefined : 0); return; }
+    const d = plData(); if (!d) return; const s = Math.min(d.sEnd, (d.PL.sEnd || 0) + 40); plAddPi(s, d.PL.zAt(s), 0); });
   $('#btnPlTn').addEventListener('click', () => {
+    const ac = plAxisCtx();
+    if (ac) {
+      if (!S.tn) { toast('Construisez d\'abord le MNT (onglet Terrain).', 'warn'); return; }
+      const pis = axisFromTerrain(ac.ax, S.tn.tin, { R: axisLimits(S.prj, ac.key).Rconv, tied: ac.A.tied });
+      if (!pis.length) { toast(`${ac.ax.name} est hors du MNT.`, 'warn'); return; }
+      ac.store.pis = pis; S.plPi = -1; update(); toast(`Profil de ${ac.ax.name} proposé depuis le TN (${pis.length} points) : ajustez les points pour équilibrer déblais et remblais et respecter le tirant d'air des ouvrages.`); return;
+    }
     const d = plData(); if (!d) return;
     if (!S.tn) { toast('Construisez d\'abord le MNT (onglet Terrain).', 'warn'); return; }
     const pis = plFromTerrain(d.bd, S.tn.tin, d.sEnd, { R: S.prj.context === 'urbain' ? 800 : 3000, z0: d.db.z0 });
     if (!pis.length) { toast('La branche est hors du MNT.', 'warn'); return; }
     d.br.pl = { ...d.br.pl, pis }; S.plPi = -1; update();
   });
-  $('#btnPlClear').addEventListener('click', () => { const d = plData(); if (!d) return; if (d.br.pl) d.br.pl.pis = []; S.plPi = -1; update(); });
+  $('#btnPlClear').addEventListener('click', () => { const ac = plAxisCtx(); if (ac) { ac.store.pis = []; S.plPi = -1; update(); return; } const d = plData(); if (!d) return; if (d.br.pl) d.br.pl.pis = []; S.plPi = -1; update(); });
   $('#plTable').addEventListener('input', (e) => { const t = e.target; if (t.dataset.pi == null) return; plSetPi(+t.dataset.pi, t.dataset.f, parseNum(t.value)); update({ commit: false }); });
-  $('#plTable').addEventListener('change', (e) => { if (e.target.dataset.pi != null) { const br = S.prj.branches[plBranch()?.idx]; if (br?.pl) br.pl.pis.sort((a, b) => +a.s - +b.s); commitHistory(); refreshPL(); } });
-  $('#plTable').addEventListener('click', (e) => { const b = e.target.closest('[data-pidel]'); if (!b) return; const br = S.prj.branches[plBranch()?.idx]; if (!br?.pl) return; br.pl.pis.splice(+b.dataset.pidel, 1); S.plPi = -1; update(); });
+  $('#plTable').addEventListener('change', (e) => { const ac = plAxisCtx(); if (ac && e.target.dataset.pi != null) { ac.store.pis.sort((a, b) => +a.s - +b.s); commitHistory(); refreshPL(); return; } if (e.target.dataset.pi != null) { const br = S.prj.branches[plBranch()?.idx]; if (br?.pl) br.pl.pis.sort((a, b) => +a.s - +b.s); commitHistory(); refreshPL(); } });
+  $('#plTable').addEventListener('click', (e) => { const b = e.target.closest('[data-pidel]'); if (!b) return; const ac = plAxisCtx(); if (ac) { ac.store.pis.splice(+b.dataset.pidel, 1); S.plPi = -1; update(); return; } const br = S.prj.branches[plBranch()?.idx]; if (!br?.pl) return; br.pl.pis.splice(+b.dataset.pidel, 1); S.plPi = -1; update(); });
   $('#btnPlDxf').addEventListener('click', () => {
+    const ac = plAxisCtx();
+    if (ac) {
+      if (!ac.A.defined) { toast('Aucun profil saisi pour cet axe.', 'warn'); return; }
+      const tnLine = axisTerrainLine(ac.ax, S.tn?.tin || null), st = axStations(ac.ax, ac.A.PL, S.tn?.tin, parseNum($('#plStep').value) || 25, true).map((q) => ({ ...q, zP: q.zP }));
+      const ve = +($('#plVe').value || 0) || 10;
+      download(fname('dxf').replace(/\.dxf$/, `_PL_${ac.ax.name}.dxf`), plDXF(ac.A.PL, tnLine, st, `Profil en long ${ac.ax.name} — ${S.prj.name}`, ve), 'application/dxf');
+      toast(`Profil en long ${ac.ax.name} exporté (exagération × ${ve}).`); return;
+    }
     const d = plData(); if (!d) { toast('Aucune branche.', 'warn'); return; }
     const tnLine = S.tn ? plTerrainLine(d.bd, S.tn.tin, Math.max(d.sEnd, d.PL.sEnd)) : [];
     const st = plStations(d.bd, d.PL, S.tn?.tin, d.sEnd, parseNum($('#plStep').value) || 10);
@@ -2629,6 +2752,13 @@ function bindPL() {
     toast(`Profil en long ${d.bd.name} exporté (exagération × ${ve}).`);
   });
   $('#btnPlCsv').addEventListener('click', () => {
+    const ac = plAxisCtx();
+    if (ac) {
+      const st = axStations(ac.ax, ac.A.PL, S.tn?.tin, parseNum($('#plStep').value) || 10, ac.A.defined);
+      const c = (v, k = 3) => (v == null ? '' : v.toFixed(k).replace('.', ','));
+      const rows = ['s;X;Y;Z_TN;Z_projet;projet-TN;pente_%', ...st.map((q) => `${c(q.s, 2)};${c(q.p.x)};${c(q.p.y)};${c(q.zTN, 2)};${c(q.zP, 2)};${c(q.dz, 2)};${c(q.g == null ? null : q.g * 100, 2)}`)];
+      download(fname('csv').replace(/\.csv$/, `_PL_${ac.ax.name}.csv`), '\ufeff' + rows.join('\r\n'), 'text/csv;charset=utf-8'); return;
+    }
     const d = plData(); if (!d) return;
     const st = plStations(d.bd, d.PL, S.tn?.tin, d.sEnd, parseNum($('#plStep').value) || 10);
     const c = (v, k = 3) => (v == null ? '' : v.toFixed(k).replace('.', ','));

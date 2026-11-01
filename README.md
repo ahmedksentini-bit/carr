@@ -208,6 +208,13 @@ ou sur un fond topographique DXF.
   courbe ; la boucle est déduite de la grande courbe réellement dessinée et tangente à l'obliquité réelle de son
   convergent : boucle et S-semi restent concentriques (plus de chevauchement). Le long de l'arc commun, les bords qui
   tomberaient dans l'autre plate-forme ne sont plus dessinés et un terre-plein sépare les deux voies, comme sur la tige.
+- **Profils en long de l'échangeur** (onglet Profil en long, liste « Axe ») : autoroute, voies secondaires et bretelles,
+  en plus des branches du carrefour. Points d'inflexion et raccordements paraboliques, proposition depuis le MNT.
+  Extrémités des bretelles calées sur la chaussée hôte (cote de l'hôte au raccordement, dévers 2,5 % sur le décalage),
+  sur la voie secondaire pour une extrémité libre (carrefour à compléter) ou sur la cote zC du giratoire. Contrôles :
+  pente maximale et rayons saillants / rentrants de la catégorie (ICTAAL, guide des échangeurs, ARP). Tirant d'air
+  sous chaque passage supérieur (voie portée − tablier − autoroute ≥ gabarit) dans la fiche de l'ouvrage, avec un
+  bouton qui relève la voie portée au gabarit (sommet placé au droit de l'ouvrage, voisins dégagés, rayon adapté).
 - **Ouvrages numérotés** : passages supérieurs, tiges, anneaux de giratoire dénivelé et cadres sont numérotés OA1, OA2…
   dans l'ordre des abscisses de l'autoroute (numéro cerclé sur le plan) ; le nom de chaque ouvrage se modifie dans
   l'onglet Ouvrages. **+ Passage supérieur** : dessinez une voie secondaire qui franchit l'autoroute, l'ouvrage est

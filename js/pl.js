@@ -162,6 +162,12 @@ export function plChartSVG(PL, tnLine, sEnd, opts = {}) {
     out += `<path class="pl-fill" d="${fill}"/><path class="pl-cut" d="${cut}"/>`;
     out += `<path class="pl-tn" d="${tnLine.map(([s, z], i) => `${i ? 'L' : 'M'}${X(s).toFixed(1)},${vis(z).toFixed(1)}`).join('')}"/>`;
   }
+  if (opts.noRed) { // axe sans profil : terrain seul, les points s'ajoutent par clic
+    out += `<text class="pf-note" x="${(w + m.l) / 2}" y="${m.t + 18}" text-anchor="middle">Aucun profil : cliquez pour placer des points, ou « Proposer depuis le TN »</text>`;
+    PL.nodes.forEach((nd, i) => { const inf = opts.nodeInfo ? opts.nodeInfo(i, nd) : null; if (inf?.fixed) out += `<circle class="pl-pi fixed" cx="${X(nd.s)}" cy="${vis(nd.z)}" r="4"/><text class="pl-lb" x="${X(nd.s)}" y="${vis(nd.z) + 18}" text-anchor="middle">${inf.label}</text>`; });
+    out += `<text class="al" x="${m.l}" y="12">${opts.axisLabel || 's (m) · z (m)'}</text></svg>`;
+    return out;
+  }
   // Ligne rouge
   const n = 160, pts = [];
   for (let i = 0; i <= n; i++) { const s = (sMax * i) / n; pts.push(`${i ? 'L' : 'M'}${X(s).toFixed(1)},${vis(PL.zAt(s)).toFixed(1)}`); }
@@ -174,13 +180,15 @@ export function plChartSVG(PL, tnLine, sEnd, opts = {}) {
   // Pentes par segment
   for (const sg of PL.segs) { const sm = (sg.s0 + sg.s1) / 2; out += `<text class="pl-sl" x="${X(sm)}" y="${vis(PL.zAt(sm)) - 8}" text-anchor="middle">${sg.g >= 0 ? '+' : '−'}${fmt(Math.abs(sg.g) * 100, 2)} %</text>`; }
   // PI (poignées)
+  // nodeInfo(i, nœud) → { fixed, pi (indice du point saisi), label } ; par défaut : nœud 0 imposé (anneau), puis PI 1, 2…
   PL.nodes.forEach((nd, i) => {
-    const sel = opts.sel === i - 1;
-    out += `<circle class="pl-pi${i ? '' : ' fixed'}${sel ? ' sel' : ''}" data-pi="${i - 1}" cx="${X(nd.s)}" cy="${vis(nd.z)}" r="${i ? 5 : 4}"/>`;
-    out += `<text class="pl-lb" x="${X(nd.s)}" y="${vis(nd.z) - (i ? 14 : -18)}" text-anchor="middle">${i ? `PI ${i}` : 'anneau'} · ${fmt(nd.z, 2)}</text>`;
+    const inf = opts.nodeInfo ? opts.nodeInfo(i, nd) : { fixed: !i, pi: i - 1, label: i ? `PI ${i}` : 'anneau' };
+    const sel = !inf.fixed && opts.sel === inf.pi;
+    out += `<circle class="pl-pi${inf.fixed ? ' fixed' : ''}${sel ? ' sel' : ''}" data-pi="${inf.pi}" cx="${X(nd.s)}" cy="${vis(nd.z)}" r="${inf.fixed ? 4 : 5}"/>`;
+    out += `<text class="pl-lb" x="${X(nd.s)}" y="${vis(nd.z) - (inf.fixed ? -18 : 14)}" text-anchor="middle">${inf.label} · ${fmt(nd.z, 2)}</text>`;
   });
   out += `<text class="pf-note" x="${w - m.r}" y="12" text-anchor="end">exagération verticale × ${ve}${opts.ve > 0 ? '' : ' (auto)'}</text>`;
-  out += `<text class="al" x="${m.l}" y="12">s (m) depuis le carrefour · z (m)</text></svg>`;
+  out += `<text class="al" x="${m.l}" y="12">${opts.axisLabel || 's (m) depuis le carrefour · z (m)'}</text></svg>`;
   return out;
 }
 function niceStep(v) { const p = 10 ** Math.floor(Math.log10(Math.max(1e-9, v))), r = v / p; return (r < 1.5 ? 1 : r < 3.5 ? 2 : r < 7.5 ? 5 : 10) * p; }
