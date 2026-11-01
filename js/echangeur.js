@@ -508,10 +508,11 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
   const arc = alL.elems.find((e) => e.kind === 'A');
   const yc = arc ? arc.C.y : yPI - Rl; // la grande courbe de S-semi enveloppe la boucle (tangente à la tige à cette hauteur)
   // S-semi : sortie par la droite (R1), puis grande courbe à gauche qui enveloppe la boucle (R2) et remonte la tige.
-  // Le cercle de R2 est centré à g mètres à l'ouest du centre de la boucle et tangent à la tige : les plates-formes se
-  // touchent le long de la tige (chaussée bidirectionnelle) et le terre-plein entre les deux s'ouvre jusqu'à 2g à l'ouest.
+  // Le cercle de R2 est centré à g mètres en amont du centre de la boucle et tangent à la tige. Par défaut g = 0 : les deux
+  // cercles sont concentriques et les plates-formes de la boucle et de S-semi sont tangentes sur tout le contour ; g > 0
+  // ouvre un terre-plein qui croît de 0 (le long de la tige) à 2g (côté amont).
   // Contraintes : 1er rayon de sortie ≥ 100 m et R1 < 2·R2 (§ 3.2.2) ; clothoïdes ≥ max(6R^0,4 ; 7|Δd|) (§ 3.2.3).
-  const g = opt.gap ?? 10, Cl = arc ? arc.C : { x: -off2 - Rl, y: yPI - Rl };
+  const g = Math.max(0, opt.gap ?? 0), Cl = arc ? arc.C : { x: -off2 - Rl, y: yPI - Rl };
   const Qx = Cl.x - g, Qy = Cl.y, rho = off2 - Qx; // rayon effectif (arc + ripage de la clothoïde)
   const Amin = (R) => Math.ceil(Math.sqrt(cloMinLength(R, Math.abs(deversOfRadius(R, RAMP_CAT.b50) - 2.5), 1) * R) / 5) * 5;
   let R2 = rho, A2 = 50;

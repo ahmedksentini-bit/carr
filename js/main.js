@@ -225,7 +225,8 @@ function buildEchFields() {
     '<div class="row">' + fld('hwy.V', 'Vitesse limite', 'km/h', { ph: '110' }) + sel('hwy.lanes', 'Voies par sens', [['2', '2'], ['3', '3'], ['4', '4']], { branch: false }) + '</div>' +
     '<div class="row">' + fld('hwy.wLane', 'Largeur de voie', 'm', { ph: '3,50' }) + fld('hwy.bau', 'BAU', 'm', { ph: '2,50', title: '2,50 m ; 3,00 m si plus de 2 000 PL/j (ICTAAL § 4.1.3)' }) + '</div>' +
     '<div class="row">' + fld('hwy.bdg', 'BDG', 'm', { ph: '1,00' }) + fld('hwy.median', 'Bande médiane', 'm', { ph: '3,00' }) + '</div>' +
-    '<div class="row">' + fld('hwy.berme', 'Berme', 'm', { ph: '1,00' }) + fld('hwy.pk0', 'PK origine', 'm', { ph: '0' }) + '</div>';
+    '<div class="row">' + fld('hwy.berme', 'Berme', 'm', { ph: '1,00' }) + fld('hwy.pk0', 'PK origine', 'm', { ph: '0' }) + '</div>' +
+    '<div class="row">' + fld('hwy.trGap', 'Trompette : écart boucle / S-semi', 'm', { ph: '0', title: 'Terre-plein entre la boucle et la sortie semi-directe, côté amont (0 : plates-formes tangentes)' }) + '</div>';
 }
 
 // Panneaux : liste des bretelles, formulaire de la bretelle sélectionnée, sommets de l'autoroute, résultats.
@@ -326,7 +327,7 @@ function addRampAt(w) {
 
 // Trompette : quatre bretelles générées autour du point d'ouvrage cliqué sur l'axe ; la tige part du côté du clic.
 function addTrumpetAt(w) {
-  const T = trumpet(S.prj, S.D, w, uid);
+  const T = trumpet(S.prj, S.D, w, uid, { gap: parseNum(String(S.prj.hwy.trGap ?? '')) || 0 });
   if (T.err) { toast(T.err, 'warn'); return; }
   S.prj.ramps.push(...T.ramps); S.rsel = S.prj.ramps.length - 4;
   setTool('select'); update(); zoomAll();
