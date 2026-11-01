@@ -24,7 +24,7 @@ import { axisSections, axisType, typeParams, typeText } from './ptaxes.js';
 import { demFromSRTM, demFromTIN } from './hydro/dem.js';
 import { delineate } from './hydro/watershed.js';
 import { computeAll as hydroComputeAll, defaultHypotheses, listMontanaStations, TC_FORMULAS, FRANCOU_RODIER_REGIONS, suggestCiehRegressions } from './hydro/hydrology.js';
-import { sizeCulvert, inletsForShape, defaultInletFor } from './hydro/culvert.js';
+import { sizeCulvert, culvertHydraulics, inletsForShape, defaultInletFor } from './hydro/culvert.js';
 import { buildAxisProfiles, axisPlChecks, clearanceChecks, axisTerrainLine, axisFromTerrain, buildNodes, axisLimits } from './axpl.js';
 import { chausseeOverlaps } from './overlap.js';
 import { analyse, SITES } from './capacity.js';
@@ -380,18 +380,18 @@ function renderCadreEdit(o) {
       `<div class="row"><label class="fld">Nom de l'ouvrage<input data-cf="name" type="text" autocomplete="off" value="${esc(c.name || '')}" placeholder="${esc(g.nameAuto || o.name)} (automatique)"></label>` +
       sel('type', 'Type', [['picf', 'cadre fermé (PICF, dalot)'], ['pipo', 'portique ouvert (PIPO)'], ['buse', 'buse (B = diamètre)']]) + sel('usage', 'Voie franchie', [['eau', 'écoulement (ouvrage hydraulique)'], ['route', 'route (passage inférieur)'], ['rail', 'voie ferrée']]) + `</div>` +
       `<div class="row">${inp('n', 'Cellules', '1', '')}${inp('B', 'Ouverture B', '3,00')}${inp('H', 'Hauteur intérieure H', '2,50')}${inp('Hr', 'Remblai sur traverse', '1,50')}</div>` +
-      `<div class="row">${inp('biais', 'Biais', '100 (droit)', 'gr')}${inp('L', 'Longueur L', `${fmt(K?.Lauto ?? 0, 2)} (auto)`)}${inp('s', 'Abscisse sur l\'axe porteur', '')}</div>` +
+      `<div class="row">${inp('biais', 'Orientation (20 à 180, 100 = droit)', '100', 'gr')}${inp('L', 'Longueur L', `${fmt(K?.Lauto ?? 0, 2)} (auto)`)}${inp('s', 'Abscisse sur l\'axe porteur', '')}</div>` +
       `<div class="row">${inp('ep', 'Piédroits', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('et', 'Traverse', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('er', 'Radier', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('ei', 'Voiles intermédiaires', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}</div>` +
       `<div class="row">${inp('wingA', 'Murs en aile : angle', '30', '°')}${inp('wingL', 'longueur', `${fmt(K?.wingL ?? 0, 2)} (auto)`)}</div>` +
       `<div class="row"><button id="cdZoom">Voir sur le plan</button><button id="cdDel">Supprimer l'ouvrage</button></div>` +
-      `<p class="note">Biais : angle entre l'axe de l'ouvrage et l'axe de la voie portée (100 gr = ouvrage perpendiculaire) ; les têtes restent parallèles à la voie portée. Épaisseurs automatiques : e ≈ 0,15 + B/20 (ordre de grandeur des cadres Sétra PICF), à confirmer dans PSIDA. Longueur automatique : plate-forme + talus 3/2 jusqu'au niveau de la traverse, divisée par le sinus du biais.</p>`;
+      `<p class="note">Orientation : angle de l'axe de l'ouvrage avec la voie portée, mesuré à gauche (100 gr = perpendiculaire ; en dessous et au-dessus de 100, biais d'un côté ou de l'autre ; biais ψ = min(angle, 200 − angle)) ; les têtes restent parallèles à la voie portée. Sur le plan : poignée ronde pleine au-delà d'une tête pour orienter, poignée centrale pour déplacer le long de l'axe, poignée carrée pour la longueur. Épaisseurs automatiques : e ≈ 0,15 + B/20 (ordre de grandeur des cadres Sétra PICF), à confirmer dans PSIDA. Longueur automatique : plate-forme + talus 3/2 jusqu'au niveau de la traverse, divisée par le sinus du biais.</p>`;
   }
   $('#ouvrOut').innerHTML = !K ? `<p class="note">${esc(g.err || '')}</p>` : `<div class="ouvr">` + kv([
     ['Type', K.type === 'buse' ? `${K.n} buse${K.n > 1 ? 's' : ''} Ø ${fmt(K.B, 2)} m` : `${K.type === 'pipo' ? 'Portique ouvert PIPO' : 'Cadre fermé PICF'}, ${K.n} cellule${K.n > 1 ? 's' : ''} de ${fmt(K.B, 2)} × ${fmt(K.H, 2)} m`],
     ...(c.hydro ? [['Hydraulique', `${esc(c.hydro.id)} : Q${c.hydro.T} = ${fmt(c.hydro.Q, 2)} m³/s, HW ${fmt(c.hydro.hw, 2)} m, V ${fmt(c.hydro.v, 2)} m/s (onglet Hydrologie)`]] : []),
     ['Largeur extérieure', `${fmt(K.W, 2)} m (piédroits ${fmt(K.ep, 2)}${K.n > 1 ? `, voiles ${fmt(K.ei, 2)}` : ''} m)`],
     ['Traverse / radier', `${fmt(K.et, 2)} / ${K.type === 'pipo' ? 'semelles' : `${fmt(K.er, 2)} m`}`],
-    ['Longueur', `${fmt(K.L, 2)} m${+c.L ? '' : ' (automatique)'} ; biais ${fmt(K.psi, 1)} gr`],
+    ['Longueur', `${fmt(K.L, 2)} m${+c.L ? '' : ' (automatique)'} ; orientation ${fmt(K.ang, 0)} gr, biais ψ ${fmt(K.psi, 1)} gr`],
     ['Remblai sur traverse', `${fmt(K.Hr, 2)} m`],
     ['Murs en aile', K.wingL > 0.1 ? `${fmt(K.wingL, 2)} m à ${fmt(K.wingA, 0)}°` : 'sans'],
     ['Voie portée', `${esc(g.ax?.name || '')}, abscisse ${fmt(g.s, 2)} m`],
@@ -1020,6 +1020,41 @@ function addDiamondAt(w, kind, k) {
   toast(msgs.join(' '), T.warn ? 'warn' : 'info');
 }
 
+// Poignées des cadres (outil sélection) : centre (déplacement le long de l'axe porteur), rotation (orientation / biais)
+// au-delà d'une tête, longueur sur l'autre tête.
+function cadreHandles(g) {
+  if (!g?.p || !g.d || !g.K) return null;
+  return { c: g.p, rot: G.add(g.p, G.mul(g.d, g.K.L / 2 + 6)), len: G.sub(g.p, G.mul(g.d, g.K.L / 2)) };
+}
+function drawCadreHandles(ctx, v, T) {
+  if (S.tool !== 'select' || !S.cadres?.length) return;
+  for (const g of S.cadres) {
+    const h = cadreHandles(g); if (!h) continue;
+    const [cx, cy] = v.w2s(h.c.x, h.c.y), [rx, ry] = v.w2s(h.rot.x, h.rot.y), [lx, ly] = v.w2s(h.len.x, h.len.y);
+    if (Math.hypot(rx - cx, ry - cy) < 14) continue; // trop petit à cette échelle
+    const on = S.osel === `c:${g.c.id}`;
+    ctx.strokeStyle = on ? T.sel : '#38bdf8'; ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth = 1.2;
+    ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(rx, ry); ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(rx, ry, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillRect(lx - 3.5, ly - 3.5, 7, 7);
+  }
+}
+function hitCadreHandle(px, py) {
+  if (!S.cadres?.length) return null;
+  const near = (p) => { const [x, y] = viewer.w2s(p.x, p.y); return Math.hypot(px - x, py - y) < 8; };
+  for (const g of S.cadres) {
+    const h = cadreHandles(g); if (!h) continue;
+    const [cx, cy] = viewer.w2s(h.c.x, h.c.y), [rx, ry] = viewer.w2s(h.rot.x, h.rot.y);
+    if (Math.hypot(rx - cx, ry - cy) < 14) continue;
+    if (near(h.rot)) return { kind: 'cadr', id: g.c.id };
+    if (near(h.len)) return { kind: 'cadl', id: g.c.id };
+    if (near(h.c)) return { kind: 'cadm', id: g.c.id };
+  }
+  return null;
+}
+// Orientation (gr, 20 à 180) de la direction u par rapport à la tangente t de la voie portée (direction non orientée).
+function orientGr(t, u) { let th = Math.atan2(G.cross(t, u), G.dot(t, u)); if (th < 0) th += Math.PI; return Math.max(20, Math.min(180, Math.round((th * 200) / Math.PI))); }
 // Axe de l'autoroute et polygones des bretelles (sommets déplaçables).
 function drawEch(ctx, v, T, exp) {
   const H = S.prj.hwy;
@@ -1217,6 +1252,7 @@ function renderScene(ctx, v, exp = null) {
   }
   drawAxes(ctx, v, T, !!exp);
   drawEch(ctx, v, T, !!exp);
+  if (!exp) drawCadreHandles(ctx, v, T);
   if (!exp) drawOverlay(ctx, v, T);
   drawHud(ctx, v, theme, northAngle(v), imagery ? PROVIDERS[S.prj.bg.provider].attr + (places ? ' · ' + PROVIDERS.places.attr : '') : '');
 }
@@ -1596,6 +1632,8 @@ function hitHandle(px, py) {
   }
   const eh = hitEchHandle(px, py);
   if (eh) return eh;
+  const ch = hitCadreHandle(px, py);
+  if (ch) return ch;
   for (let i = 0; i < S.prj.branches.length; i++) {
     const e = outerEnd(i);
     if (!e) continue;
@@ -1677,7 +1715,7 @@ function bindCanvas() {
     const d = S.drag;
     S.drag = null; updateCursor();
     if (!d) return;
-    if (['vertex', 'seg', 'center', 'rpi', 'hvx', 'cvx', 'tige'].includes(d.kind) && d.moved) { syncInputs(); update(); }
+    if (['vertex', 'seg', 'center', 'rpi', 'hvx', 'cvx', 'tige', 'cadm', 'cadr', 'cadl'].includes(d.kind) && d.moved) { syncInputs(); update(); }
     else if (d.kind === 'pan') {
       if (!d.moved && d.clickEl) openPop(d.clickEl, d.cpx, d.cpy);
       else if (!d.moved && d.deselect) { if (S.sel >= 0) selectBranch(-1); closePop(); }
@@ -1708,6 +1746,15 @@ function onMove(px, py) {
   else if (d?.kind === 'rpi') { const q = S.prj.ramps[d.ri].pis[d.k]; S.prj.ramps[d.ri].pis[d.k] = { ...q, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
   else if (d?.kind === 'cvx') { const ax = S.prj.crosses[d.c].axis, q = ax[d.k]; ax[d.k] = { ...q, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
   else if (d?.kind === 'hvx') { const q = S.prj.hwy.axis[d.k]; S.prj.hwy.axis[d.k] = { ...q, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
+  else if (d && ['cadm', 'cadr', 'cadl'].includes(d.kind)) {
+    const c = (S.prj.cadres || []).find((q) => q.id === d.id), g = (S.cadres || []).find((q) => q.c.id === d.id);
+    if (c && g?.ax) {
+      if (d.kind === 'cadm') { const pr = g.ax.project(w); if (pr) c.s = Math.round(Math.max(0, Math.min(g.ax.len, pr.s)) * 100) / 100; }
+      else if (d.kind === 'cadr') c.biais = orientGr(g.t, G.sub(w, g.p));
+      else { const L = Math.round(2 * Math.abs(G.dot(G.sub(w, g.p), g.d)) * 2) / 2; c.L = Math.max(g.K.W, L); }
+      S.osel = `c:${c.id}`; $('#ouvrEdit').dataset.key = ''; d.moved = true; update({ commit: false, panels: false });
+    }
+  }
   else if (d?.kind === 'center') { S.prj.center = { auto: false, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
   else if (!d && S.tool === 'select') {
     const h = hitAxis(px, py);
@@ -3001,7 +3048,8 @@ function computeHydro() {
   const h = hyCfg(), R = h.res;
   if (!R?.crossings?.length) { S.hyRes = null; return null; }
   const zRoad = (c) => { const A = S.axpl?.get(c.key); return A?.defined ? A.PL.zAt(c.pk) : null; };
-  const sig = JSON.stringify([R.date, h.hyp, h.hyd, h.upstream, R.crossings.map((c) => [c.id, zRoad(c)])]);
+  const linkOf = (c) => (S.prj.cadres || []).find((q) => q.hydro?.id === c.id && q.axis === c.key);
+  const sig = JSON.stringify([R.date, h.hyp, h.hyd, h.upstream, R.crossings.map((c) => [c.id, zRoad(c)]), (S.cadres || []).filter((g) => g.c.hydro).map((g) => [g.c.id, g.K?.type, g.K?.n, g.K?.B, g.K?.H, g.K?.L, g.K?.ang])]);
   if (S.hyRes && S.hySig === sig) return S.hyRes;
   const hyp = { ...h.hyp };
   const ids = new Set(R.crossings.map((c) => c.id));
@@ -3010,18 +3058,25 @@ function computeHydro() {
   const out = { list: [], byId: {} };
   R.crossings.forEach((c, i) => {
     const r = res[i], Qp = r.retained?.Q, Q = r.effectiveQ ?? Qp, ax = hyAxes().find((a) => a.key === c.key);
+    // orientation de l'ouvrage : direction de l'écoulement au franchissement (20 à 180 gr, 100 = droit)
     let biais = 100;
-    if (ax && c.flowDir) { const t = ax.at(Math.max(0, Math.min(ax.len, c.pk))).t, a = Math.acos(Math.min(1, Math.abs(G.dot(G.norm(c.flowDir), t)))); biais = Math.round(Math.max(50, Math.min(100, (a * 200) / Math.PI))); }
+    if (ax && c.flowDir) biais = orientGr(ax.at(Math.max(0, Math.min(ax.len, c.pk))).t, G.norm(c.flowDir));
     const zr = zRoad(c), zt = c.m.zOutlet;
     const half = (ax?.half || 6) + 1, L = Math.ceil(((2 * (half + 1.5 * 1.0 + 0.5)) / Math.sin((biais * Math.PI) / 200)) * 2) / 2;
-    let sz = null;
-    if (Q > 0) {
+    let sz = null, linked = linkOf(c), lg = linked ? (S.cadres || []).find((g) => g.c.id === linked.id) : null, verif = null;
+    if (Q > 0 && lg?.K) { // ouvrage déjà placé (éventuellement modifié par l'utilisateur) : vérification de sa section
+      const K = lg.K, section = K.type === 'buse' ? { shape: 'circular', diameter: K.B, cells: K.n } : { shape: 'box', width: K.B, height: K.H, cells: K.n };
+      const params = { length: K.L, StricklerK: h.hyd.StricklerK, ...(h.hyd.inlet && (K.type === 'buse') === (h.hyd.shape === 'circular') ? { inlet: h.hyd.inlet } : {}), ...(Number.isFinite(zt) ? { upstreamInvert: zt } : {}), ...(zr != null && Number.isFinite(zt) ? { roadLevel: zr, minFreeboard: h.hyd.minFreeboard, maxHeadwater: Math.max(0.5, zr - h.hyd.minFreeboard - zt) } : {}) };
+      try { verif = culvertHydraulics(section, Q, params); } catch (e) { verif = { warnings: [e.message] }; }
+    }
+    if (Q > 0 && !verif) {
       const params = { length: L, StricklerK: h.hyd.StricklerK, ...(h.hyd.inlet ? { inlet: h.hyd.inlet } : {}), ...(Number.isFinite(zt) ? { upstreamInvert: zt } : {}), ...(zr != null && Number.isFinite(zt) ? { roadLevel: zr, minFreeboard: h.hyd.minFreeboard } : {}) };
       try { sz = sizeCulvert(Q, { shape: h.hyd.shape, maxHeadwaterRatio: h.hyd.maxHeadwaterRatio, ...(zr != null && Number.isFinite(zt) ? { maxHeadwater: Math.max(0.5, zr - h.hyd.minFreeboard - zt) } : {}) }, params); } catch (e) { sz = { error: e.message }; }
     }
-    const ret = sz?.retained, rr = ret?.result;
-    const size = ret ? (h.hyd.shape === 'circular' ? `${ret.cells > 1 ? `${ret.cells} × ` : ''}Ø ${fmt(ret.width ?? ret.diameter ?? ret.section?.diameter, 2)}` : `${ret.cells > 1 ? `${ret.cells} × ` : ''}${fmt(ret.width, 2)} × ${fmt(ret.height, 2)}`) : null;
-    const o = { c, r, Q, Qp, up: basins[i].upstreamUids, T: r.values?.returnPeriod ?? hyp.returnPeriod, biais, L, zr, zt, sz, ret, rr, size, hw: rr?.headwater, v: rr?.velocities?.outlet ?? rr?.velocities?.full ?? null };
+    let ret = sz?.retained, rr = ret?.result;
+    if (verif) { const K = lg.K; ret = { cells: K.n, width: K.B, height: K.H, diameter: K.type === 'buse' ? K.B : undefined }; rr = verif; biais = K.ang; }
+    const size = verif ? `${lg.name || ''} ${lg.K.type === 'buse' ? `${lg.K.n > 1 ? `${lg.K.n} × ` : ''}Ø ${fmt(lg.K.B, 2)}` : `${lg.K.n > 1 ? `${lg.K.n} × ` : ''}${fmt(lg.K.B, 2)} × ${fmt(lg.K.H, 2)}`}`.trim() : ret ? (h.hyd.shape === 'circular' ? `${ret.cells > 1 ? `${ret.cells} × ` : ''}Ø ${fmt(ret.width ?? ret.diameter ?? ret.section?.diameter, 2)}` : `${ret.cells > 1 ? `${ret.cells} × ` : ''}${fmt(ret.width, 2)} × ${fmt(ret.height, 2)}`) : null;
+    const o = { c, r, Q, Qp, linked, lg, verif: !!verif, ok: rr ? !(rr.headwaterOk === false) && (rr.valid !== false) && !((rr.velocities?.outlet ?? rr.velocities?.full ?? 0) > 3.0001) && !(rr.freeboard != null && rr.freeboard < h.hyd.minFreeboard - 1e-6) : null, up: basins[i].upstreamUids, T: r.values?.returnPeriod ?? hyp.returnPeriod, biais, L, zr, zt, sz, ret, rr, size, hw: rr?.headwater, v: rr?.velocities?.outlet ?? rr?.velocities?.full ?? null };
     out.list.push(o); out.byId[c.id] = o;
   });
   S.hyRes = out; S.hySig = sig;
@@ -3069,7 +3124,7 @@ function renderHydro() {
   if (!HR) { $('#hyTable').innerHTML = '<tbody><tr><td class="note">Aucun bassin : cochez les axes et lancez « Délimiter les bassins versants ».</td></tr></tbody>'; $('#hyDetail').innerHTML = ''; $('#hyNote').textContent = ''; return; }
   const T = HR.list[0]?.T;
   $('#hyTable').innerHTML = `<thead><tr><th>BV</th><th>Axe</th><th>PK</th><th>S km²</th><th>L km</th><th>I %</th><th>tc min</th><th>Q${T} propre</th><th>Bassins amont</th><th>Q${T} retenu m³/s</th><th>Ouvrage</th><th>HW m</th><th>V m/s</th><th></th></tr></thead><tbody>` +
-    HR.list.map((o) => { const c = o.c, v = o.r.values || {}; const warn = (o.r.warnings || []).length + (o.rr?.warnings || []).length; return `<tr data-hy="${esc(c.id)}" class="${S.hySel === c.id ? 'on' : ''}"><td>${esc(c.id)}${c.touchesEdge ? ' ⚠' : ''}</td><td>${esc(c.traceName)}</td><td class="mono">${fmt(c.pk, 0)}</td><td class="mono">${fmt(c.totalKm2, 3)}</td><td class="mono">${fmt((c.m.lengthM || 0) / 1000, 2)}</td><td class="mono">${fmt(c.m.slopePct, 2)}</td><td class="mono">${v.tcRetained ? fmt(v.tcRetained.minutes, 1) : '—'}</td><td class="mono">${o.Qp > 0 ? fmt(o.Qp, 2) : '—'}</td><td><input class="mini-in" data-hyup="${esc(c.id)}" type="text" size="9" value="${esc((h.upstream?.[c.id] || []).join(' ; '))}" placeholder="${c.contains?.length ? esc(c.contains.join(' ; ')) : ''}" title="Bassins dont l'écoulement passe par cet ouvrage (ex. BV-03 ; BV-05) : leurs débits s'ajoutent${c.contains?.length ? ` — amont hydrologique détecté : ${esc(c.contains.join(', '))}` : ''}"></td><td class="mono"><b>${o.Q > 0 ? fmt(o.Q, 2) : '—'}</b>${o.r.cumulative?.error ? ' !' : ''}</td><td>${o.size ? `${esc(o.size)} m` : o.sz?.error ? 'erreur' : '—'}</td><td class="mono">${o.hw != null ? fmt(o.hw, 2) : '—'}</td><td class="mono">${o.v != null ? fmt(o.v, 2) : '—'}</td><td>${warn ? `<span title="avertissements">!${warn}</span>` : ''}</td></tr>`; }).join('') + '</tbody>';
+    HR.list.map((o) => { const c = o.c, v = o.r.values || {}; const warn = (o.r.warnings || []).length + (o.rr?.warnings || []).length; return `<tr data-hy="${esc(c.id)}" class="${S.hySel === c.id ? 'on' : ''}"><td>${esc(c.id)}${c.touchesEdge ? ' ⚠' : ''}</td><td>${esc(c.traceName)}</td><td class="mono">${fmt(c.pk, 0)}</td><td class="mono">${fmt(c.totalKm2, 3)}</td><td class="mono">${fmt((c.m.lengthM || 0) / 1000, 2)}</td><td class="mono">${fmt(c.m.slopePct, 2)}</td><td class="mono">${v.tcRetained ? fmt(v.tcRetained.minutes, 1) : '—'}</td><td class="mono">${o.Qp > 0 ? fmt(o.Qp, 2) : '—'}</td><td><input class="mini-in" data-hyup="${esc(c.id)}" type="text" size="9" value="${esc((h.upstream?.[c.id] || []).join(' ; '))}" placeholder="${c.contains?.length ? esc(c.contains.join(' ; ')) : ''}" title="Bassins dont l'écoulement passe par cet ouvrage (ex. BV-03 ; BV-05) : leurs débits s'ajoutent${c.contains?.length ? ` — amont hydrologique détecté : ${esc(c.contains.join(', '))}` : ''}"></td><td class="mono"><b>${o.Q > 0 ? fmt(o.Q, 2) : '—'}</b>${o.r.cumulative?.error ? ' !' : ''}</td><td>${o.size ? `${esc(o.size)} m${o.verif ? (o.ok ? ' ✔' : ' ✖') : ''}` : o.sz?.error ? 'erreur' : '—'}</td><td class="mono">${o.hw != null ? fmt(o.hw, 2) : '—'}</td><td class="mono">${o.v != null ? fmt(o.v, 2) : '—'}</td><td>${warn ? `<span title="avertissements">!${warn}</span>` : ''}</td></tr>`; }).join('') + '</tbody>';
   const sel = HR.byId[S.hySel];
   $('#hyDetail').innerHTML = sel ? (() => {
     const v = sel.r.values || {}, d = v.discharges || {};
@@ -3084,7 +3139,18 @@ function renderHydro() {
       ['Débit retenu pour l\'ouvrage', sel.Q > 0 ? `${fmt(sel.Q, 2)} m³/s` : '—'],
       ['Ouvrage', sel.size ? `${esc(sel.size)} m, L ${fmt(sel.L, 1)} m, biais ${sel.biais} gr — ${esc(sel.sz?.message || '')}` : esc(sel.sz?.message || sel.sz?.error || '—')],
       ['Cotes', `chaussée ${sel.zr != null ? fmt(sel.zr, 2) : 'à définir (profil en long)'} · TN au franchissement ${fmt(sel.zt, 2)} m${sel.zr != null && Number.isFinite(sel.zt) && sel.zr - sel.zt < 2 ? ` — chaussée à ${fmt(sel.zr - sel.zt, 2)} m seulement au-dessus du fil d'eau : relevez le profil en long pour loger l'ouvrage (hauteur + traverse + remblai + revanche)` : ''}`],
-    ]) + `<ul class="checks">${[...(sel.r.warnings || []), ...(sel.rr?.warnings || [])].map((w) => `<li class="warn"><span class="ic">!</span><span>${esc(w)}</span></li>`).join('')}</ul><div class="row"><button data-hyzoom="${esc(sel.c.id)}">Voir sur le plan</button></div>`;
+    ]) + (() => {
+      const K = sel.lg?.K, buse = K ? K.type === 'buse' : h.hyd.shape === 'circular', r0 = sel.ret || {};
+      const val = (v) => (v == null || !Number.isFinite(+v) ? '' : esc(fmt(+v, 2)));
+      return `<h4>Ouvrage ${sel.linked ? `${esc(sel.lg?.name || '')} (placé — vérification de sa section)` : '(proposé — non placé)'}</h4>` +
+        `<div class="row"><label class="fld">Type<select data-hyoh="type"><option value="picf"${!buse ? ' selected' : ''}>dalot (PICF)</option><option value="buse"${buse ? ' selected' : ''}>buse</option></select></label>` +
+        `<label class="fld">Nombre<input data-hyoh="n" type="text" inputmode="decimal" value="${val(K ? K.n : r0.cells || 1)}"></label>` +
+        `<label class="fld">${buse ? 'Diamètre' : 'Ouverture B'} (m)<input data-hyoh="B" type="text" inputmode="decimal" value="${val(K ? K.B : r0.width ?? r0.diameter)}"></label>` +
+        (buse ? '' : `<label class="fld">Hauteur H (m)<input data-hyoh="H" type="text" inputmode="decimal" value="${val(K ? K.H : r0.height)}"></label>`) +
+        `<label class="fld">Orientation (gr, 100 = droit)<input data-hyoh="biais" type="text" inputmode="decimal" value="${val(K ? K.ang : sel.biais)}"></label></div>` +
+        `<div class="row"><button data-hyohapply="${esc(sel.c.id)}" class="primary">${sel.linked ? 'Mettre à jour l\'ouvrage' : 'Placer cet ouvrage'}</button>${sel.linked ? `<button data-hyohreset="${esc(sel.c.id)}" title="Remet les dimensions et l'orientation proposées par le dimensionnement">Revenir à la proposition</button><button data-hyohgo="${esc(sel.linked.id)}">Fiche de l'ouvrage</button>` : ''}</div>` +
+        `<p class="note">Sur le plan, l'ouvrage s'oriente par la poignée ronde pleine au-delà de sa tête, se déplace le long de l'axe par sa poignée centrale et s'allonge par la poignée carrée ; la section placée est vérifiée ici (HW, vitesse, revanche).</p>`;
+    })() + `<ul class="checks">${[...(sel.r.warnings || []), ...(sel.rr?.warnings || [])].map((w) => `<li class="warn"><span class="ic">!</span><span>${esc(w)}</span></li>`).join('')}</ul><div class="row"><button data-hyzoom="${esc(sel.c.id)}">Voir sur le plan</button></div>`;
   })() : '';
   const R = h.res;
   $('#hyNote').textContent = `${R.dem}, marge ${fmt(R.margin / 1000, 1)} km, bassin minimal ${fmt(R.minKm2, 2)} km². ${R.crossings.some((c) => c.touchesEdge) ? 'Des bassins (⚠) touchent le bord du MNT : élargissez la marge. ' : ''}${(R.warnings || []).join(' ')}`;
@@ -3121,6 +3187,26 @@ function bindHydro() {
     S.hySig = null; update();
   });
   $('#hyTable').addEventListener('click', (e) => { if (e.target.closest('input')) return; const tr = e.target.closest('tr[data-hy]'); if (!tr) return; S.hySel = tr.dataset.hy; renderHydro(); });
+  const hyPlace = (o, over = {}) => {
+    const buse = (over.type ?? (o.lg?.K?.type === 'buse' ? 'buse' : hyCfg().hyd.shape === 'circular' ? 'buse' : 'picf')) === 'buse';
+    const B = +(over.B ?? o.ret?.width ?? o.ret?.diameter ?? o.ret?.section?.diameter ?? 2), H = buse ? B : +(over.H ?? o.ret?.height ?? 2);
+    const ax = hyAxes().find((a) => a.key === o.c.key), et = buse ? 0.08 + B / 12 : 0.15 + B / 20;
+    const Hr = o.zr != null && Number.isFinite(o.zt) ? Math.max(0.3, Math.round((o.zr - o.zt - H - et) * 100) / 100) : 1;
+    const data = { type: buse ? 'buse' : 'picf', usage: 'eau', axis: o.c.key, axisName: ax?.name || o.c.traceName, s: o.c.pk, n: Math.max(1, Math.round(+(over.n ?? o.ret?.cells ?? 1))), B, H, biais: +(over.biais ?? o.biais), Hr, hydro: { id: o.c.id, Q: o.Q, T: o.T, hw: o.hw, v: o.v } };
+    S.prj.cadres = S.prj.cadres || [];
+    const ex = S.prj.cadres.find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key);
+    if (ex) { const keep = { s: ex.s, L: ex.L, name: ex.name }; Object.assign(ex, data, over.keepPos === false ? {} : { s: keep.s }); if (keep.L != null && over.keepL !== false) ex.L = keep.L; } else S.prj.cadres.push({ id: uid(), ...data });
+  };
+  $('#hyDetail').addEventListener('click', (e) => {
+    const ap = e.target.closest('[data-hyohapply]'), rs = e.target.closest('[data-hyohreset]'), go = e.target.closest('[data-hyohgo]');
+    if (go) { S.osel = `c:${go.dataset.hyohgo}`; showTab('ouvrages'); refreshPanels(); return; }
+    if (!ap && !rs) return;
+    const o = S.hyRes?.byId?.[(ap || rs).dataset[ap ? 'hyohapply' : 'hyohreset']]; if (!o) return;
+    if (rs) { const ex = (S.prj.cadres || []).find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key); if (ex) S.prj.cadres = S.prj.cadres.filter((q) => q !== ex); S.hySig = null; computeHydro(); const o2 = S.hyRes?.byId?.[o.c.id]; if (o2?.ret) hyPlace(o2, { keepL: false }); update(); toast(`${o.c.id} : ouvrage remis au dimensionnement proposé.`); return; }
+    const over = {}; for (const el of $('#hyDetail').querySelectorAll('[data-hyoh]')) { const k = el.dataset.hyoh, v = k === 'type' ? el.value : parseNum(el.value); if (k === 'type' || Number.isFinite(v)) over[k] = v; }
+    if (!(over.B > 0.2) || (over.type !== 'buse' && !(over.H > 0.2))) { toast('Dimensions de l\'ouvrage à saisir (m).', 'warn'); return; }
+    hyPlace(o, over); S.hySig = null; update(); toast(`${o.c.id} : ouvrage ${o.linked ? 'mis à jour' : 'placé'} — section vérifiée dans le tableau.`);
+  });
   $('#hyDetail').addEventListener('click', (e) => { const b = e.target.closest('[data-hyzoom]'); const o = b && S.hyRes?.byId?.[b.dataset.hyzoom]; if (!o) return; viewer.cx = o.c.x; viewer.cy = o.c.y; viewer.s = Math.max(viewer.s, 1.5); viewer.invalidate(); });
   $('#btnHyClear').addEventListener('click', () => { if (S.prj.hydro) delete S.prj.hydro.res; S.hyRes = null; update(); });
   $('#btnHyCsv').addEventListener('click', () => {
@@ -3132,21 +3218,14 @@ function bindHydro() {
   });
   $('#btnHyOH').addEventListener('click', () => {
     const HR = computeHydro(); if (!HR) { toast('Aucun bassin.', 'warn'); return; }
-    let n = 0;
-    S.prj.cadres = S.prj.cadres || [];
+    let n = 0, kept = 0;
     for (const o of HR.list) {
+      if (o.linked) { kept++; continue; } // ouvrage déjà placé (peut-être modifié) : conservé
       if (!o.ret) continue;
-      const buse = (hyCfg().hyd.shape === 'circular');
-      const B = buse ? (o.ret.width ?? o.ret.diameter ?? o.ret.section?.diameter) : o.ret.width, H = buse ? B : o.ret.height;
-      const ax = hyAxes().find((a) => a.key === o.c.key);
-      const et = buse ? 0.08 + B / 12 : 0.15 + B / 20;
-      const Hr = o.zr != null && Number.isFinite(o.zt) ? Math.max(0.3, Math.round((o.zr - o.zt - H - et) * 100) / 100) : 1;
-      const data = { type: buse ? 'buse' : 'picf', usage: 'eau', axis: o.c.key, axisName: ax?.name || o.c.traceName, s: o.c.pk, n: o.ret.cells || 1, B, H, biais: o.biais, Hr, hydro: { id: o.c.id, Q: o.Q, T: o.T, hw: o.hw, v: o.v } };
-      const ex = S.prj.cadres.find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key);
-      if (ex) Object.assign(ex, data); else S.prj.cadres.push({ id: uid(), ...data });
-      n++;
+      hyPlace(o); n++;
     }
-    update(); toast(`${n} ouvrage(s) hydraulique(s) créé(s) ou mis à jour : onglet Ouvrages (numérotation OA, export PSIDA des dalots).`);
+    S.hySig = null;
+    update(); toast(`${n} ouvrage(s) hydraulique(s) placé(s)${kept ? `, ${kept} déjà placé(s) conservé(s) (modifiables dans la fiche du bassin ou de l'ouvrage)` : ''} : onglet Ouvrages (numérotation OA, export PSIDA des dalots).`);
   });
 }
 

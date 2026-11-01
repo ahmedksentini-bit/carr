@@ -1,6 +1,7 @@
 // cadres.js — ouvrages enterrés sous remblai : cadre fermé (PICF, dalot) et portique ouvert (PIPO), placés sur un axe du
 // projet (autoroute, voie secondaire, bretelle, branche). Paramètres : nombre de cellules n, ouverture B, hauteur
-// intérieure H, biais (gr, 100 = droit, angle entre l'axe de l'ouvrage et l'axe de la voie portée), hauteur de remblai Hr
+// intérieure H, orientation (gr, 100 = droit, angle de 20 à 180 gr entre l'axe de la voie portée et celui de l'ouvrage ;
+// biais ψ = min(angle, 200 − angle), orientable sur le plan par la poignée de rotation), hauteur de remblai Hr
 // sur la traverse, épaisseurs (par défaut : table simplifiée des cadres Sétra PICF, e ≈ 0,15 + B/20 arrondi à 5 cm),
 // longueur L le long de l'axe de l'ouvrage (par défaut : plate-forme + talus 3/2 jusqu'au niveau de la traverse, divisée
 // par le sinus du biais), murs en aile évasés à α (30° par défaut) de longueur 1,5 (H + e).
@@ -26,12 +27,14 @@ export function cadreDims(c, half = 6) {
   // buse : épaisseur de paroi ≈ D/12 + 0,08 m, entraxe libre entre buses ≥ max(0,40 m, D/3)
   const eAuto = buse ? up5(0.08 + B / 12) : up5(0.15 + B / 20);
   const ep = num(c.ep, eAuto), et = num(c.et, eAuto), ei = num(c.ei, buse ? Math.max(0.4, up5(B / 3)) : eAuto), er = num(c.er, eAuto);
-  const psi = Math.max(30, Math.min(100, num(c.biais, 100))), sinP = Math.sin((psi * Math.PI) / 200);
+  // orientation : angle (gr) entre l'axe de la voie portée et l'axe de l'ouvrage, mesuré à gauche, de 20 à 180 gr
+  // (100 = droit ; < 100 et > 100 : biais d'un côté ou de l'autre) ; biais structurel ψ = min(angle, 200 − angle)
+  const ang = Math.max(20, Math.min(180, num(c.biais, 100))), psi = ang <= 100 ? ang : 200 - ang, sinP = Math.sin((psi * Math.PI) / 200);
   const W = n * B + (n - 1) * ei + 2 * ep;
   const Lauto = up50((2 * (half + 1.5 * Hr + 0.5)) / sinP);
   const L = Math.max(W, num(c.L, Lauto));
   const wingA = Math.max(0, Math.min(90, num(c.wingA, 30))), wingL = Math.max(0, num(c.wingL, up50(1.5 * (H + et))));
-  return { n, B, H, Hr, ep, et, ei, er, eAuto, psi, sinP, W, L, Lauto, wingA, wingL, type: buse ? 'buse' : c.type === 'pipo' ? 'pipo' : 'picf' };
+  return { n, B, H, Hr, ep, et, ei, er, eAuto, ang, psi, sinP, W, L, Lauto, wingA, wingL, type: buse ? 'buse' : c.type === 'pipo' ? 'pipo' : 'picf' };
 }
 
 // Implantation : point et directions sur l'axe porteur, abscisse le long de l'autoroute (numérotation des ouvrages).
@@ -42,7 +45,7 @@ export function cadreGeoms(prj, D) {
     if (!ax) { out.push({ c, err: `axe porteur introuvable (${c.axisName || c.axis})` }); continue; }
     const s = Math.max(0, Math.min(ax.len, num(c.s, 0))), { p, t } = ax.at(s), n = G.rot90(t);
     const K = cadreDims(c, (ax.half || 6) + 1);
-    const th = (K.psi * Math.PI) / 200, d = G.norm(G.add(G.mul(t, Math.cos(th)), G.mul(n, Math.sin(th))));
+    const th = (K.ang * Math.PI) / 200, d = G.norm(G.add(G.mul(t, Math.cos(th)), G.mul(n, Math.sin(th))));
     const sX = D?.hwy?.ok ? (pathProject(D.hwy.path, p)?.s ?? s) : s;
     out.push({ c, ax, s, p, t, n, d, K, sX });
   }
