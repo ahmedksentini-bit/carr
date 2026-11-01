@@ -7,6 +7,7 @@
 import * as G from './geom.js';
 import { buildAlignment, offsetPolyline, polySegs, pathTangentAt, pathProject, cloMinLength, tangentLength, tangentLengths, cloXY } from './clotho.js';
 import { fmt, upright } from './common.js';
+import { DCAT, designCatOf, clothoidNeed } from './roadcat.js';
 
 const { add, sub, mul, norm, rot90, neg, dist, ang, unit } = G;
 const num = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
@@ -54,7 +55,7 @@ export function hwyParams(prj) {
     on: !!h.on, name: h.name || 'Autoroute', cat: HWY_CAT[h.cat] ? h.cat : 'L2', C: cat, V: num(h.V, cat.V),
     lanes: Math.max(1, Math.round(num(h.lanes, 2))), wLane: num(h.wLane, 3.5), bau: num(h.bau, 2.5), bdg: num(h.bdg, 1.0),
     median: num(h.median, 3.0), berme: num(h.berme, 1.0), z0: num(h.z0, 100), pente: num(h.pente, 0), pk0: num(h.pk0, 0),
-    axis: (h.axis || []).map((p) => ({ x: +p.x, y: +p.y, r: +p.r || 0 })),
+    axis: (h.axis || []).map((p) => ({ x: +p.x, y: +p.y, r: +p.r || 0, a: p.a === '' || p.a == null || !isFinite(+p.a) ? null : +p.a })),
   };
 }
 
@@ -70,10 +71,10 @@ export function crossParams(prj, k = 0) {
   const cat = auto ? HWY_CAT[h.cat] || HWY_CAT.L2 : null;
   return {
     on: h.on !== false && !!(h.on || h.axis?.length), kind: auto ? 'autoroute' : 'route', name: h.name || (auto ? 'Autoroute 2' : `Voie secondaire ${k + 1}`), k,
-    cat: auto ? (HWY_CAT[h.cat] ? h.cat : 'L2') : '', C: cat, V: num(h.V, auto ? cat.V : 90),
+    cat: auto ? (HWY_CAT[h.cat] ? h.cat : 'L2') : '', dcat: auto ? '' : DCAT[h.dcat] ? h.dcat : 'R1', C: cat, V: num(h.V, auto ? cat.V : 90),
     lanes: Math.max(1, Math.round(num(h.lanes, auto ? 2 : 1))), wLane: num(h.wLane, 3.5), bau: num(h.bau, auto ? 2.5 : 2.0),
     bdg: num(h.bdg, auto ? 1.0 : 0), median: num(h.median, auto ? 3.0 : 0), berme: num(h.berme, auto ? 1.0 : 0.75), pk0: num(h.pk0, 0),
-    axis: (h.axis || []).map((p) => ({ x: +p.x, y: +p.y, r: +p.r || 0 })),
+    axis: (h.axis || []).map((p) => ({ x: +p.x, y: +p.y, r: +p.r || 0, a: p.a === '' || p.a == null || !isFinite(+p.a) ? null : +p.a })),
   };
 }
 
@@ -89,6 +90,55 @@ export function normRamp(r) {
 }
 
 const isHwyRef = (ref) => /^(hwy[12]|x[12]|x\d+:[12])$/.test(ref || ''); // chaussée d'un axe (autoroute ou voie secondaire)
+
+// Axe de l'autoroute ou d'une voie secondaire : droites et arcs aux sommets (rayons ramenés à la place disponible par
+// roundPolylineFit), puis clothoïdes symétriques à chaque sommet où la catégorie de conception les impose
+// (R < 1,5 Rdn, roadcat.js) : paramètre A saisi au sommet (champ a ; 0 = sans clothoïde) ou, à défaut, A = √(Lclo·R)
+// avec la longueur minimale de la catégorie. Les clothoïdes sont raccourcies (avec alerte) si les tangentes ne tiennent
+// pas entre les sommets voisins. Retourne { path (segments geom.js, clothoïdes échantillonnées au mètre et repérées
+// par .clo), fit, al (alignement clotho.js : éléments exacts L / C / A), cat }.
+export function roadAlignment(H, dn = 2.5, issues = []) {
+  const cat = designCatOf(H), Pt = H.axis, n = Pt.length;
+  const { segs: fitSegs, fit } = G.roundPolylineFit(Pt, Pt.map((p) => p.r));
+  const R = new Array(n).fill(0);
+  for (const f of fit) R[f.i] = f.r;
+  const defl = (i) => { const d1 = G.norm(sub(Pt[i], Pt[i - 1])), d2 = G.norm(sub(Pt[i + 1], Pt[i])); return Math.atan2(Math.abs(G.cross(d1, d2)), G.dot(d1, d2)); };
+  const need = Pt.map((p, i) => (i && i < n - 1 && R[i] > 0 ? clothoidNeed(cat, R[i], H, dn) : 0));
+  const A = Pt.map((p, i) => {
+    if (!i || i === n - 1 || !(R[i] > 0)) return 0;
+    const a = p.a != null ? Math.max(0, p.a) : need[i] > 0 ? Math.ceil(Math.sqrt(need[i] * R[i])) : 0;
+    return Math.min(a, R[i] * Math.sqrt(defl(i))); // L ≤ R·δ : la clothoïde ne consomme pas plus que la déflexion
+  });
+  const want = A.slice();
+  const T = (i) => (i > 0 && i < n - 1 && R[i] > 0 ? tangentLengths(R[i], A[i], A[i], defl(i)) : [0, 0]);
+  for (let it = 0; it < 60; it++) {
+    let ok = true;
+    for (let i = 0; i + 1 < n; i++) {
+      if (T(i)[1] + T(i + 1)[0] <= dist(Pt[i], Pt[i + 1]) - 0.01) continue;
+      ok = false;
+      for (const j of [i, i + 1]) if (A[j] > 0) { A[j] *= 0.95; if (A[j] < 3) A[j] = 0; }
+    }
+    if (ok) break;
+  }
+  for (let i = 1; i < n - 1; i++) {
+    if (!(want[i] > 0) || A[i] >= want[i] - 0.5) continue;
+    const L = (A[i] * A[i]) / R[i];
+    issues.push({ lvl: 'warn', msg: `${H.name} : sommet ${i}, clothoïde ${A[i] > 0 ? `réduite à A = ${fmt(A[i], 0)} m (L = ${fmt(L, 1)} m)` : 'supprimée'} faute de place entre les sommets voisins${need[i] > 0 ? ` — ${DCAT[cat].ref} : Lclo ≥ ${fmt(need[i], 1)} m pour R = ${fmt(R[i], 0)} m` : ''} ; écartez les sommets ou réduisez le rayon.` });
+  }
+  const al = buildAlignment(Pt.map((p, i) => ({ x: p.x, y: p.y, R: R[i], A: A[i] })), { name: H.name });
+  for (const q of al.issues) if (q.lvl === 'err') issues.push(q);
+  if (!A.some((a) => a > 0)) return { path: fitSegs, fit, al, cat };
+  const path = [];
+  al.elems.forEach((e, k) => {
+    if (e.kind === 'L') { if (e.len > 1e-6) path.push(G.L(e.p0, e.pointAt(e.len))); }
+    else if (e.kind === 'A') path.push(e.seg);
+    else {
+      const m = Math.max(4, Math.ceil(e.len)); let prev = e.pointAt(0);
+      for (let j = 1; j <= m; j++) { const q = e.pointAt((e.len * j) / m), sg = G.L(prev, q); sg.clo = k; path.push(sg); prev = q; }
+    }
+  });
+  return { path: path.filter((q) => G.segLen(q) > 1e-6), fit, al, cat };
+}
 
 export function rampParams(prj, r0) {
   const r = normRamp(r0);
@@ -186,10 +236,11 @@ export function buildEchangeur(prj, D) {
 
   // --- Sections courantes (autoroute et route transversale) ----------------------------------
   const XPs = crossList(prj).map((_, k) => crossParams(prj, k)), roads = ['hwy', ...XPs.map((_, k) => `cross${k}`)];
-  const axisPaths = { hwy: H.axis.length >= 2 ? G.roundPolylineFit(H.axis, H.axis.map((p) => p.r)).segs : null };
-  XPs.forEach((X, k) => { axisPaths[`cross${k}`] = X.on && X.axis.length >= 2 ? G.roundPolylineFit(X.axis, X.axis.map((p) => p.r)).segs : null; });
+  const dn = num(prj.pt?.dev, 2.5);
+  const axisPaths = { hwy: H.axis.length >= 2 ? roadAlignment({ ...H, kind: 'autoroute' }, dn).path : null };
+  XPs.forEach((X, k) => { axisPaths[`cross${k}`] = X.on && X.axis.length >= 2 ? roadAlignment(X, dn).path : null; });
   const drawRoad = (key, H, rg = null) => {
-    const { segs: path, fit } = G.roundPolylineFit(H.axis, H.axis.map((p) => p.r));
+    const { path, fit, al, cat } = roadAlignment(key === 'hwy' ? { ...H, kind: 'autoroute' } : H, dn, issues);
     // Rayons saisis non applicables : tangentes plus longues que les côtés disponibles (partagés avec les sommets voisins).
     for (const f of fit) if (f.r < f.req - 0.005) issues.push({ lvl: 'warn', msg: `${H.name} : sommet ${f.i}, rayon saisi ${fmt(f.req)} m non applicable — tangente nécessaire ${fmt(f.Tneed)} m, disponible ${fmt(f.T)} m entre les sommets voisins ; rayon appliqué ${fmt(f.r)} m. Déplacez les sommets ${f.i - 1} / ${f.i + 1} ou réduisez le rayon d'un sommet voisin.` });
     const sEnd = G.pathLen(path), isRoute = key !== 'hwy' && H.kind === 'route';
@@ -199,14 +250,13 @@ export function buildEchangeur(prj, D) {
     const sA = rg ? Math.max(0, rg[0]) : 0, sB = rg ? Math.min(sEnd, rg[1]) : sEnd;
     const pathD = sA > 1e-6 || sB < sEnd - 1e-6 ? (sB - sA > 1 ? G.revPath(G.pathHead(G.revPath(G.pathHead(path, sB)), sB - sA)) : []) : path;
     const off = (delta) => G.offsetPath(pathD, delta);
-    const road = { key, k: H.k, H, path, sEnd, E0, E1, E2, ok: sEnd > 1, isRoute, drawn: [sA, sB] };
+    const road = { key, k: H.k, H, path, al, cat, sEnd, E0, E1, E2, ok: sEnd > 1, isRoute, drawn: [sA, sB] };
     if (!road.ok) return road;
     const visible = pathD.length > 0;
     // Rayons de la section courante [ICTAAL] tab. 3-1 (autoroutes).
     if (H.C) path.forEach((sg) => {
       if (sg.t !== 'A') return;
-      if (sg.r < H.C.Rm) issues.push({ lvl: 'err', msg: `${H.name} : rayon ${fmt(sg.r)} m < Rm = ${H.C.Rm} m (catégorie ${H.cat}, ICTAAL tab. 3-1).` });
-      else if (sg.r < H.C.Rdn) issues.push({ lvl: 'warn', msg: `${H.name} : rayon ${fmt(sg.r)} m < Rdn = ${H.C.Rdn} m → courbe déversée ; pas d'échangeur dans une courbe déversée (guide échangeurs § 1).` });
+      if (sg.r >= H.C.Rm && sg.r < H.C.Rdn) issues.push({ lvl: 'warn', msg: `${H.name} : rayon ${fmt(sg.r)} m < Rdn = ${H.C.Rdn} m → courbe déversée ; pas d'échangeur dans une courbe déversée (guide échangeurs § 1).` });
     });
     // Interruptions des rives et des bords de plate-forme au droit des bretelles (stations le long de l'axe).
     const gaps = { 1: { rive: [], bord: [] }, '-1': { rive: [], bord: [] } };
@@ -286,13 +336,25 @@ export function buildEchangeur(prj, D) {
           text('COTATION', e.q, lbl, e.th, 'center', hL);
           P({ k: 'path', L: 'COTATION', segs: [G.L(e.P0, add(e.P0, mul(sub(e.q, e.P0), 1 - (0.35 * lbl.length * hL + 2) / need)))] });
         }
-        for (const [nm, a, st] of [['TC', sg.sa, sArc], ['CT', sg.ea, sArc + Ls]]) {
+        const cIn = path[j - 1]?.clo != null, cOut = path[j + 1]?.clo != null;
+        for (const [nm, a, st] of [[cIn ? 'SC' : 'TC', sg.sa, sArc], [cOut ? 'CS' : 'CT', sg.ea, sArc + Ls]]) {
           const v = G.unit(a);
           P({ k: 'path', L: 'COTATION', segs: [G.L(add(sg.c, mul(v, sg.r - W - 1)), add(sg.c, mul(v, sg.r + W + 1)))] });
           text('COTATION', add(sg.c, mul(v, sg.r + W + 2.5)), `${nm}${j}`, a, 'center', TH * 0.8);
           pt(`${H.name} · ${nm}${j} (${isRoute ? 'PR' : 'PK'} ${fmt((H.pk0 + st) / 1000, 3)}, R ${fmt(sg.r)} m)`, G.polar(sg.c, sg.r, a));
         }
         pt(`${H.name} · centre de la courbe ${j} (R ${fmt(sg.r)} m)`, sg.c);
+      } else if (sg.clo != null) { // clothoïde : repère TS / ST à l'extrémité droite, paramètre au milieu
+        const e = al.elems[sg.clo], first = path[j - 1]?.clo !== sg.clo, last = path[j + 1]?.clo !== sg.clo;
+        const th = ang(sub(sg.b, sg.a)), n = rot90(unit(th));
+        if ((first && !e.out) || (last && e.out)) {
+          const q = first ? sg.a : sg.b, nm = first ? 'TS' : 'ST';
+          P({ k: 'path', L: 'COTATION', segs: [G.L(add(q, mul(n, -W - 1)), add(q, mul(n, W + 1)))] });
+          text('COTATION', add(q, mul(n, W + 2.5)), `${nm}${j}`, th + Math.PI / 2, 'center', TH * 0.8);
+          pt(`${H.name} · ${nm}${j} (${isRoute ? 'PR' : 'PK'} ${fmt((H.pk0 + (first ? sArc : sArc + Ls)) / 1000, 3)}, clothoïde A ${fmt(e.A, 0)} m)`, q);
+        }
+        const mid = Math.floor(e.len / 2), u = sArc - e.s0;
+        if (u <= mid && u + Ls > mid) text('COTATION', add(G.segAt(sg, 0.5), mul(n, (e.sg > 0 ? -1 : 1) * (W + 3))), `clothoïde A ${fmt(e.A, 0)} m · L ${fmt(e.len, 1)} m`, th, 'center', TH * 1.2);
       } else if (Ls > 20) {
         const m = G.segAt(sg, 0.5), th = ang(sub(sg.b, sg.a)), n = rot90(unit(th));
         text('COTATION', add(m, mul(n, W + 3)), `alignement ${fmt(Ls)} m`, th, 'center', TH * 0.9);

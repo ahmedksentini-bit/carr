@@ -13,6 +13,7 @@ import { fmt } from './common.js';
 import { plBuild } from './pl.js';
 import { tinZ } from './tin.js';
 import { HWY_CAT, RAMP_CAT, crossList, crossParams, parseXref, hwyParams } from './echangeur.js';
+import { DCAT, designCatOf, profileChecks } from './roadcat.js';
 
 const num = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
 const CROSSFALL = 0.025;
@@ -45,14 +46,12 @@ const sortPis = (pis) => (Array.isArray(pis) ? pis : []).map((q) => ({ s: num(q.
 
 // Limites de la catégorie de l'axe : { gMax, Rconv, Rconc, label }.
 export function axisLimits(prj, key) {
-  if (key === 'hwy') {
-    const C = HWY_CAT[prj.hwy?.cat] || HWY_CAT.L2;
-    return { gMax: C.pente / 100, Rconv: C.Rs, Rconc: C.Rr, label: `ICTAAL ${prj.hwy?.cat || 'L2'} : pente ≤ ${C.pente} %, Rv saillant ≥ ${fmt(C.Rs, 0)} m, rentrant ≥ ${fmt(C.Rr, 0)} m` };
-  }
-  if (key.startsWith('x:')) {
-    const k = crossList(prj).findIndex((c) => `x:${c.id}` === key), X = crossParams(prj, Math.max(0, k));
-    if (X.kind === 'autoroute') { const C = HWY_CAT[X.cat] || HWY_CAT.L2; return { gMax: C.pente / 100, Rconv: C.Rs, Rconc: C.Rr, label: `ICTAAL : pente ≤ ${C.pente} %, Rv saillant ≥ ${fmt(C.Rs, 0)} m, rentrant ≥ ${fmt(C.Rr, 0)} m` }; }
-    return { gMax: 0.06, Rconv: 3000, Rconc: 2200, label: 'ARP catégorie R80 : pente ≤ 6 %, Rv saillant ≥ 3 000 m, rentrant ≥ 2 200 m' };
+  // autoroute et voies secondaires : catégorie de conception (roadcat.js, règles reprises de BVTrace)
+  if (key === 'hwy' || key.startsWith('x:')) {
+    const H = key === 'hwy' ? hwyParams(prj) : crossParams(prj, Math.max(0, crossList(prj).findIndex((c) => `x:${c.id}` === key)));
+    const cat = designCatOf(key === 'hwy' ? { ...H, kind: 'autoroute' } : H), C = DCAT[cat];
+    if (C.libre) return { cat, gMax: Infinity, Rconv: 1000, Rconc: 1000, label: 'conception libre (aucune règle ; rayon proposé 1 000 m)' };
+    return { cat, gMax: C.gMax / 100, Rconv: C.Rvs, Rconc: C.Rvr, label: `${C.label} : pente ≤ ${C.gMax} %, Rv saillant ≥ ${fmt(C.Rvs, 0)} m, rentrant ≥ ${fmt(C.Rvr, 0)} m (${C.ref})` };
   }
   const r = (prj.ramps || []).find((q) => `r:${q.id}` === key), C = RAMP_CAT[r?.cat] || RAMP_CAT.b70;
   return { gMax: C.pente / 100, Rconv: C.Rs, Rconc: C.Rr, label: `guide des échangeurs (${C.label}) : pente ≤ ${C.pente} %, Rv saillant ≥ ${fmt(C.Rs, 0)} m, rentrant ≥ ${fmt(C.Rr, 0)} m` };
@@ -66,7 +65,7 @@ export function buildAxisProfiles(prj, D, axes, juncs = [], tin = null) {
   const ramps = prj.ramps || [];
   const mk = (ax, nodes, user, tied) => {
     const PL = nodes.length >= 1 ? buildNodes(nodes) : null;
-    out.set(ax.key, { key: ax.key, name: ax.name, len: ax.len, PL, user, tied, defined: !!PL && nodes.length >= 2 });
+    out.set(ax.key, { key: ax.key, name: ax.name, len: ax.len, PL, user, tied, defined: !!PL && nodes.length >= 2, al: ax.al, cat: ax.cat });
   };
   for (const ax of axes) if (ax.key === 'hwy' || ax.key.startsWith('x:')) { const u = sortPis(store[ax.key]?.pis); mk(ax, u, u, []); }
   // Bretelles : extrémités calées sur l'hôte (dans l'ordre des dépendances : une collectrice avant ses bretelles).
@@ -111,6 +110,12 @@ export function axisPlChecks(prj, A) {
   if (!A?.defined) return out;
   const lim = axisLimits(prj, A.key), PL = A.PL, add = (lvl, msg) => out.push({ lvl, msg: `${A.name} (profil en long) : ${msg}` });
   for (const it of PL.issues) add(it.lvl, it.msg);
+  if (lim.cat) { // autoroute / voie secondaire : contrôles de la catégorie (pente, Rv, coordination, pente résultante)
+    out.push(...profileChecks(lim.cat, PL, A.al, A.name, Math.max(0, +(prj.pt?.dev ?? 2.5) || 2.5)));
+    for (let i = 1; i + 1 < PL.nodes.length; i++) if (!(PL.nodes[i].R > 0) && Math.abs(PL.segs[i].g - PL.segs[i - 1].g) > 0.005) add('warn', `changement de pente de ${fmt(Math.abs(PL.segs[i].g - PL.segs[i - 1].g) * 100, 2)} % à s = ${fmt(PL.nodes[i].s, 0)} m sans raccordement (R = 0).`);
+    if (PL.sEnd > A.len + 0.5) add('info', `dernier point à s = ${fmt(PL.sEnd, 0)} m, au-delà de l'axe (${fmt(A.len, 0)} m).`);
+    return out;
+  }
   for (const sg of PL.segs) if (Math.abs(sg.g) > lim.gMax + 1e-9) add('warn', `pente de ${fmt(Math.abs(sg.g) * 100, 2)} % entre s = ${fmt(sg.s0, 0)} et ${fmt(sg.s1, 0)} m — ${lim.label}.`);
   for (const c of PL.curves) { const Rmin = c.type === 'convexe' ? lim.Rconv : lim.Rconc; if (c.R < Rmin - 1e-9) add('warn', `raccordement ${c.type === 'convexe' ? 'saillant' : 'rentrant'} R = ${fmt(c.R, 0)} m à s = ${fmt(c.s, 0)} m < ${fmt(Rmin, 0)} m — ${lim.label}.`); }
   for (let i = 1; i + 1 < PL.nodes.length; i++) if (!(PL.nodes[i].R > 0) && Math.abs(PL.segs[i].g - PL.segs[i - 1].g) > 0.005) add('warn', `changement de pente de ${fmt(Math.abs(PL.segs[i].g - PL.segs[i - 1].g) * 100, 2)} % à s = ${fmt(PL.nodes[i].s, 0)} m sans raccordement (R = 0).`);

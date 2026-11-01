@@ -121,7 +121,8 @@ ou sur un fond topographique DXF.
   automatique depuis le TN, stations (TN, projet, écart, pente) en CSV, export DXF du profil (exagération verticale).
   La ligne rouge remplace la pente constante de la branche dans le modèle altimétrique (dévers, points d'implantation).
   Contrôles : chevauchement des raccordements, pente maximale et rayons minimaux (ARP catégorie R80 par défaut, valeurs
-  urbaines usuelles — à confirmer selon la catégorie), pente ≤ 2 % sur les 20 derniers mètres (ACI), PI hors de l'axe.
+  urbaines usuelles — à confirmer selon la catégorie ; l'autoroute et les voies secondaires suivent leur catégorie de
+  conception, voir « Catégories de conception »), pente ≤ 2 % sur les 20 derniers mètres (ACI), PI hors de l'axe.
 - **Profils en travers** (onglet Profils travers) : coupes perpendiculaires à l'axe projet aux stations régulières
   (pas réglable) : plateforme issue du modèle (îlot séparateur ou TPC en saillie, voies avec leur dévers, BDD et berme
   en interurbain, caniveau, bordure, trottoir et contre-bordure en urbain — onglet Profil), talus de remblai (3/2) et
@@ -340,6 +341,7 @@ js/profile.js       profil en travers type de l'anneau (SVG, DXF)
 js/viewer.js        rendu canvas (projet, DXF, HUD)
 js/geom.js          géométrie (droites, arcs, raccordements, décalages)
 js/clotho.js        alignements en plan avec clothoïdes (raccordements progressifs)
+js/roadcat.js       catégories de conception (ARP, ICTAAL, VSA, AU70), dévers, clothoïdes, contrôles (BVTrace)
 js/echangeur.js     échangeur : section courante, bretelles, divergents / convergents, contrôles
 js/dxf-parse.js     lecture DXF        js/dxf-write.js   écriture DXF R12
 js/crs.js           systèmes de coordonnées   js/tiles.js   fonds en tuiles
@@ -414,6 +416,26 @@ sont celles de la NF P 98-531 pour les triangles et les disques ; celles des AB4
 Points à vérifier : distances de la signalisation de direction (D40 / D60) pour des vitesses autres que 75–90 km/h
 (circulaire 82-31) ; la position exacte du B21-1 dépend de la déflexion de l'entrée ; aucun panneau B1 (branches à sens
 unique) ni A17 (feux) n'est dessiné.
+
+### Catégories de conception (autoroute et voies secondaires)
+
+Règles reprises de BVTrace (`js/roadcat.js`, même source que BVTrace.Core/RoadDesignTables, RoadDesignGeometry et
+RoadDesignChecks) : ARP 2022 R1 / R2 / artère 110 (tab. 10 et 11), ICTAAL 2021 L1 / L2 (tab. 3-1, § 4.6), VSA 90 / 110
+(Cerema 2014, chap. 2), AU70 (Certu 2013, § 2.2, sans clothoïde ni dévers) et conception libre ; rayons saillants du
+guide Visibilité Cerema 2018. L'autoroute suit sa catégorie ICTAAL ; une voie secondaire « route ordinaire » reçoit une
+catégorie de conception (R1 par défaut). Tracé en plan : clothoïdes symétriques posées automatiquement aux sommets de
+rayon < 1,5 Rdn, à la longueur minimale de la catégorie — ARP max(2·l·|Δd| ; 6 R^0,4 à 2 voies, 12 R^0,4 sinon),
+ICTAAL max(14 |Δd| ; R/9), VSA max(R/9 ; 2·l·|Δd|), Δd = dévers de l'arc − dévers normal (convention BVTrace) — ou
+paramètre A saisi au sommet (0 : sans clothoïde), raccourcies avec alerte faute de place ; repères TS / SC / CS / ST.
+Contrôles : Rm, longueur des clothoïdes, progressivité 0,67 < R/R' < 1,5 (courbes à moins de 500 m), largeur de voie et
+BDD / BAU. Profil en long : pente maximale (6–7 % en R2 : à justifier), rayons saillants / rentrants, coordination
+Rv ≥ 6 Rh sous une courbe de rayon < 1 500 m, entrée de courbe à moins de 50 m d'un point haut, pente résultante ≥ 1 %
+(0,5 % avec dispositions) là où le dévers s'annule. Dévers : toit au dévers normal (2,5 %) en alignement et pour
+R ≥ Rdn ; pour R < Rdn, plate-forme déversée vers l'intérieur, linéaire en 1/R de 2,5 % à Rdn à 7 % à Rm ; variation
+linéaire sur la clothoïde (côté extérieur de −2,5 % à +d, côté intérieur de −2,5 % à −d), jamais sur l'arc.
+Points à confirmer : définition de Δd (BVTrace retient d(R) − 2,5 %, le basculement du côté extérieur va de −2,5 % à
++d) ; option de dévers maximal 5 % (Rm recalculé) non proposée ; règles d'enchaînement en alerte (alignements,
+séparation 3 s à V85, partie circulaire ≥ 1/5) non encore contrôlées.
 
 ### Échangeurs
 

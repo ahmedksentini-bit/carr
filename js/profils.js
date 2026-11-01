@@ -29,9 +29,13 @@ export function listAxes(prj, D) {
     path.forEach((sg, i) => { if (i) t.push({ s, type: `${sg.t === 'A' || path[i - 1].t === 'A' ? 'tangence droite / arc' : 'sommet'}` }); s += G.segLen(sg); });
     return t;
   };
-  if (D?.hwy?.ok) fromPath('hwy', D.hwy.H?.name || 'Autoroute', D.hwy.path, segTan(D.hwy.path), { half: D.hwy.E2 });
-  (D?.crosses || []).forEach((c, k) => { if (c?.ok) fromPath(`x:${crossList(prj)[k]?.id || k}`, c.H?.name || `Voie secondaire ${k + 1}`, c.path, segTan(c.path), { half: c.E2 }); });
   const KN = { L: 'droite', C: 'clothoïde', A: 'arc' };
+  // points de tangence d'un alignement exact (droite / clothoïde / arc)
+  const alTan = (al) => { const els = al?.elems || [], tan = []; for (let j = 1; j < els.length; j++) if (els[j].kind !== els[j - 1].kind || els[j].kind !== 'L') tan.push({ s: els[j].s0, type: `${KN[els[j - 1].kind] || els[j - 1].kind} / ${KN[els[j].kind] || els[j].kind}` }); return tan; };
+  // autoroute et voies secondaires : alignement exact (clothoïdes) gardé pour le dévers et les contrôles de catégorie
+  const road = (key, r, name) => fromPath(key, name, r.path, r.al?.elems?.some((e) => e.kind === 'C') ? alTan(r.al) : segTan(r.path), { half: r.E2, al: r.al, cat: r.cat, H: r.H });
+  if (D?.hwy?.ok) road('hwy', D.hwy, D.hwy.H?.name || 'Autoroute');
+  (D?.crosses || []).forEach((c, k) => { if (c?.ok) road(`x:${crossList(prj)[k]?.id || k}`, c, c.H?.name || `Voie secondaire ${k + 1}`); });
   (prj.ramps || []).forEach((r, i) => {
     const R = D?.ramps?.[i];
     if (!R?.al?.path) return;

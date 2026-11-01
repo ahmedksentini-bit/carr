@@ -15,10 +15,10 @@
 import * as G from './geom.js';
 import { fmt } from './common.js';
 import { hwyParams, crossParams, crossList, RAMP_CAT, deversOfRadius } from './echangeur.js';
+import { DCAT, designCatOf, deversAt } from './roadcat.js';
 import { crossSectionFrom, ptParams, areas } from './pt.js';
 
 const num = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
-const ROUTE_CAT = { Rm: 240, Rdn: 900 };
 
 export function typeParams(prj) {
   const p = prj.pt || {};
@@ -29,15 +29,17 @@ export function typeParams(prj) {
 export function axisType(prj, D, key) {
   if (key === 'hwy' || key.startsWith('x:')) {
     let H, C, name;
-    if (key === 'hwy') { H = hwyParams(prj); C = H.C || { Rm: 400, Rdn: 650 }; name = 'autoroute'; }
-    else { const k = crossList(prj).findIndex((c) => `x:${c.id}` === key); H = crossParams(prj, Math.max(0, k)); C = H.kind === 'autoroute' ? H.C || { Rm: 400, Rdn: 650 } : ROUTE_CAT; name = H.kind === 'autoroute' ? 'autoroute' : 'route'; }
+    if (key === 'hwy') { H = { ...hwyParams(prj), kind: 'autoroute' }; name = 'autoroute'; }
+    else { const k = crossList(prj).findIndex((c) => `x:${c.id}` === key); H = crossParams(prj, Math.max(0, k)); name = H.kind === 'autoroute' ? 'autoroute' : 'route'; }
+    const cat = designCatOf(H), Dc = DCAT[cat];
+    C = { Rm: Dc.Rm, Rdn: Dc.noSuper ? Infinity : Dc.Rdn, cat };
     const side = [];
     if (H.median > 0) side.push({ w: H.median / 2, label: 'îlot TPC', paved: false, flat: true });
     if (H.bdg > 0) side.push({ w: H.bdg, label: `BDG ${fmt(H.bdg, 2)}`, paved: true });
     side.push({ w: H.lanes * H.wLane, label: `voies ${H.lanes} × ${fmt(H.wLane, 2)}`, paved: true });
     if (H.bau > 0) side.push({ w: H.bau, label: `BDD ${fmt(H.bau, 2)}${name === 'autoroute' ? ' (BAU)' : ''}`, paved: true });
     if (H.berme > 0) side.push({ w: H.berme, label: `berme ${fmt(H.berme, 2)}`, paved: false, berme: true });
-    return { kind: name, left: side, right: side, C, single: false };
+    return { kind: name, left: side, right: side, C, cat, single: false };
   }
   const r = (prj.ramps || []).find((q) => `r:${q.id}` === key), C = RAMP_CAT[r?.cat] || RAMP_CAT.b70;
   const w = (num(r?.lanes, C.lanes) || 1) * 3.5 + (C.two ? 0 : 0), bdd = num(r?.bdd, C.bdd), bdg = num(r?.bdg, C.bdg), berme = num(r?.berme, 0.75);
@@ -57,11 +59,21 @@ function curvature(ax, s) {
 
 // Plate-forme { line: [{ y, z, label }], p, t, n, dev } à l'abscisse s ; zAxe = cote du profil en long.
 export function axisPlatform(prj, D, ax, T, s, zAxe, TP = typeParams(prj)) {
-  const { p, t } = ax.at(s), n = G.rot90(t), k = curvature(ax, s), R = Math.abs(k) > 1e-9 ? 1 / Math.abs(k) : Infinity;
-  const dC = deversOfRadius(R, T.C) / 100, curve = R < T.C.Rdn;
-  const inner = k > 0 ? 1 : -1; // côté intérieur de la courbe (1 = gauche)
-  // pente transversale (dz/dy, y vers l'extérieur du côté sd) d'une bande revêtue
-  const slope = (sd) => (curve ? (sd === inner ? -dC : dC) : T.single ? (sd === 1 ? TP.dev : -TP.dev) : -TP.dev);
+  const { p, t } = ax.at(s), n = G.rot90(t);
+  let slope, dev;
+  if (T.cat && ax.al) {
+    // autoroute / voie secondaire : dévers de la catégorie, variation linéaire sur la clothoïde (roadcat.js)
+    const dv = deversAt(T.cat, ax.al, s, TP.dev * 100);
+    slope = (sd) => (sd === 1 ? dv.left : dv.right) / 100;
+    dev = { d: (dv.inner ? dv.d : TP.dev * 100) / 100, inner: dv.inner && dv.f > 0 ? dv.inner : 0, R: dv.R, f: dv.f, left: dv.left / 100, right: dv.right / 100 };
+  } else {
+    const k = curvature(ax, s), R = Math.abs(k) > 1e-9 ? 1 / Math.abs(k) : Infinity;
+    const dC = deversOfRadius(R, T.C) / 100, curve = R < T.C.Rdn;
+    const inner = k > 0 ? 1 : -1; // côté intérieur de la courbe (1 = gauche)
+    // pente transversale (dz/dy, y vers l'extérieur du côté sd) d'une bande revêtue
+    slope = (sd) => (curve ? (sd === inner ? -dC : dC) : T.single ? (sd === 1 ? TP.dev : -TP.dev) : -TP.dev);
+    dev = curve ? { d: dC, inner, R, left: slope(1), right: slope(-1) } : { d: TP.dev, R, left: slope(1), right: slope(-1) };
+  }
   const half = [];
   for (const sd of [1, -1]) {
     const bands = sd === 1 ? T.left : T.right, pts = [{ y: 0, z: zAxe, label: 'axe' }];
@@ -73,7 +85,7 @@ export function axisPlatform(prj, D, ax, T, s, zAxe, TP = typeParams(prj)) {
     }
     half.push(pts);
   }
-  return { line: [...half[1].slice().reverse(), ...half[0].slice(1)], p, t, n, dev: curve ? { d: dC, inner, R } : { d: TP.dev, R } };
+  return { line: [...half[1].slice().reverse(), ...half[0].slice(1)], p, t, n, dev };
 }
 
 // Ligne de fond de forme : la ligne projet abaissée de e sous les bandes revêtues (marches verticales aux bords).

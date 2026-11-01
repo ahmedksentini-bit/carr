@@ -9,7 +9,7 @@ import { buildDesign, fmt, fmtGis } from './roundabout.js';
 import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan, SECTION, sectionParams, TAD, SIGNS, signParams } from './norms.js';
 import { GAMMES, CATALOG } from './signs.js';
 import { signSVG, signOutline } from './signicons.js';
-import { rampParams, endFrame, normRamp, buildEchangeur, trumpet, deriveTrumpet, crossingWith, xref, cloverleaf, halfCloverleaf, diamond, gradeRoundabout, HWY_CAT, RAMP_CAT } from './echangeur.js';
+import { rampParams, endFrame, normRamp, buildEchangeur, trumpet, deriveTrumpet, crossingWith, xref, cloverleaf, halfCloverleaf, diamond, gradeRoundabout, HWY_CAT, RAMP_CAT, crossParams, roadAlignment } from './echangeur.js';
 import { pathProject, pathTangentAt, polySegs } from './clotho.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
@@ -25,6 +25,7 @@ import { demFromSRTM, demFromTIN } from './hydro/dem.js';
 import { delineate } from './hydro/watershed.js';
 import { computeAll as hydroComputeAll, defaultHypotheses, listMontanaStations, TC_FORMULAS, FRANCOU_RODIER_REGIONS, suggestCiehRegressions } from './hydro/hydrology.js';
 import { sizeCulvert, culvertHydraulics, inletsForShape, defaultInletFor } from './hydro/culvert.js';
+import { DCAT, planChecks, platformChecks, catText, designCatOf, clothoidNeed } from './roadcat.js';
 import { buildAxisProfiles, axisPlChecks, clearanceChecks, axisTerrainLine, axisFromTerrain, buildNodes, axisLimits } from './axpl.js';
 import { chausseeOverlaps } from './overlap.js';
 import { analyse, SITES } from './capacity.js';
@@ -312,6 +313,11 @@ function update({ commit = true, panels = true } = {}) {
     const axes = (S.prof?.axes || listAxes(S.prj, S.D)).filter((a) => !a.key.startsWith('b:'));
     S.axpl = buildAxisProfiles(S.prj, S.D, axes, junctionsZ(), S.tn?.tin || null);
     for (const A of S.axpl.values()) for (const q of axisPlChecks(S.prj, A)) S.checks.push({ ...q, group: 'Profil en long' });
+    // tracé en plan et plate-forme de l'autoroute et des voies secondaires : règles de leur catégorie (roadcat.js)
+    for (const ax of axes) if (ax.cat && ax.al) {
+      for (const q of planChecks(ax.cat, ax.al, ax.H, ax.name, Math.max(0, +(S.prj.pt?.dev ?? 2.5) || 2.5))) S.checks.push({ ...q, group: 'Tracé en plan' });
+      for (const q of platformChecks(ax.cat, ax.H, ax.name)) S.checks.push({ ...q, group: 'Tracé en plan' });
+    }
     S.clear = clearanceChecks(S.prj, S.axpl, axes, S.ouvr?.list || []);
     for (const q of S.clear) if (q.lvl === 'err') S.checks.push({ lvl: 'err', group: 'Ouvrages', msg: q.msg });
   } catch (e) { console.error(e); }
@@ -469,7 +475,8 @@ function renderCrossFields() {
   $('#crossFields').innerHTML = k < 0 ? '' :
     `<label class="chk"><input type="checkbox" data-k="${p}on"> Voie active</label>` +
     '<div class="row">' + fld(p + 'name', 'Nom', '', { text: true }) + sel(p + 'kind', 'Type', [['route', 'Route ordinaire (diffuseur)'], ['autoroute', 'Autoroute (nœud)']], { branch: false }) + '</div>' +
-    '<div class="row">' + sel(p + 'cat', 'Catégorie (autoroute)', Object.entries(HWY_CAT).map(([kk, c]) => [kk, c.label]), { branch: false }) + fld(p + 'V', 'Vitesse limite', 'km/h', { ph: '90 / 110' }) + '</div>' +
+    '<div class="row">' + (C[k]?.kind === 'autoroute' ? sel(p + 'cat', 'Catégorie (ICTAAL)', Object.entries(HWY_CAT).map(([kk, c]) => [kk, c.label]), { branch: false }) : sel(p + 'dcat', 'Catégorie de conception', Object.entries(DCAT).filter(([kk]) => !['L1', 'L2'].includes(kk)).map(([kk, c]) => [kk, c.label]), { branch: false })) + fld(p + 'V', 'Vitesse limite', 'km/h', { ph: '90 / 110' }) + '</div>' +
+    `<p class="note">${esc(catText(designCatOf(crossParams(S.prj, k))))}. Clothoïdes posées automatiquement aux sommets de rayon < 1,5 Rdn (longueur minimale de la catégorie ; colonne A des sommets pour l'imposer, 0 = aucune).</p>` +
     '<div class="row">' + fld(p + 'lanes', 'Voies par sens', '', { ph: '1 / 2' }) + fld(p + 'wLane', 'Largeur de voie', 'm', { ph: '3,50' }) + '</div>' +
     '<div class="row">' + fld(p + 'bau', 'BAU / BDD', 'm', { ph: '2,00 / 2,50' }) + fld(p + 'median', 'Bande médiane', 'm', { ph: '0 / 3,00' }) + '</div>' +
     '<div class="row">' + fld(p + 'bdg', 'BDG', 'm', { ph: '0 / 1,00' }) + fld(p + 'berme', 'Berme', 'm', { ph: '0,75 / 1,00' }) + '</div>';
@@ -508,12 +515,12 @@ function refreshEch() {
     S.echSig = sig;
     $('#rampList').innerHTML = ramps.map((q, i) => `<li data-ri="${i}" class="rli${i === S.rsel ? ' on' : ''}"><b>${esc(q.name)}</b> ${esc(rampParams(S.prj, q).label)} · ${esc(RAMP_CAT[q.cat]?.label || '')}</li>`).join('') || '<li class="empty-li">Aucune bretelle.</li>';
     const nV = H.axis?.length || 0;
-    $('#hwyVertices').innerHTML = nV > 2 ? '<h3>Sommets de l\'axe</h3><div class="tablewrap"><table class="pts"><tr><th>#</th><th>X</th><th>Y</th><th>R (m)</th></tr>' +
-      H.axis.map((q, k) => `<tr><td>${k}</td><td><input data-k="hwy.axis.${k}.x" inputmode="decimal"></td><td><input data-k="hwy.axis.${k}.y" inputmode="decimal"></td><td>${k && k < nV - 1 ? `<input data-k="hwy.axis.${k}.r" inputmode="decimal">` : ''}</td></tr>`).join('') + '</table></div>' : '';
+    $('#hwyVertices').innerHTML = nV > 2 ? '<h3>Sommets de l\'axe</h3><div class="tablewrap"><table class="pts"><tr><th>#</th><th>X</th><th>Y</th><th>R (m)</th><th title="Paramètre A des clothoïdes du sommet ; vide : longueur minimale de la catégorie, 0 : sans clothoïde">A (m)</th></tr>' +
+      H.axis.map((q, k) => `<tr><td>${k}</td><td><input data-k="hwy.axis.${k}.x" inputmode="decimal"></td><td><input data-k="hwy.axis.${k}.y" inputmode="decimal"></td><td>${k && k < nV - 1 ? `<input data-k="hwy.axis.${k}.r" inputmode="decimal">` : ''}</td><td>${k && k < nV - 1 ? `<input data-k="hwy.axis.${k}.a" inputmode="decimal" placeholder="${aAuto('hwy', k)}">` : ''}</td></tr>`).join('') + '</table></div>' : '';
     renderCrossFields();
     const xk = S.xsel, XC = S.prj.crosses?.[xk]?.axis || [], nX = XC.length;
-    $('#crossVertices').innerHTML = nX >= 2 ? '<h3>Sommets de l\'axe de la voie secondaire</h3><div class="tablewrap"><table class="pts"><tr><th>#</th><th>X</th><th>Y</th><th>R (m)</th></tr>' +
-      XC.map((q, k) => `<tr><td>${k}</td><td><input data-k="crosses.${xk}.axis.${k}.x" inputmode="decimal"></td><td><input data-k="crosses.${xk}.axis.${k}.y" inputmode="decimal"></td><td>${k && k < nX - 1 ? `<input data-k="crosses.${xk}.axis.${k}.r" inputmode="decimal">` : ''}</td></tr>`).join('') + '</table></div>' : '';
+    $('#crossVertices').innerHTML = nX >= 2 ? '<h3>Sommets de l\'axe de la voie secondaire</h3><div class="tablewrap"><table class="pts"><tr><th>#</th><th>X</th><th>Y</th><th>R (m)</th><th title="Paramètre A des clothoïdes du sommet ; vide : longueur minimale de la catégorie, 0 : sans clothoïde">A (m)</th></tr>' +
+      XC.map((q, k) => `<tr><td>${k}</td><td><input data-k="crosses.${xk}.axis.${k}.x" inputmode="decimal"></td><td><input data-k="crosses.${xk}.axis.${k}.y" inputmode="decimal"></td><td>${k && k < nX - 1 ? `<input data-k="crosses.${xk}.axis.${k}.r" inputmode="decimal">` : ''}</td><td>${k && k < nX - 1 ? `<input data-k="crosses.${xk}.axis.${k}.a" inputmode="decimal" placeholder="${aAuto(`x${xk}`, k)}">` : ''}</td></tr>`).join('') + '</table></div>' : '';
     if (!r) $('#rampForm').innerHTML = '';
     else {
       const i = S.rsel, k = (f) => `ramps.${i}.${f}`;
@@ -886,6 +893,8 @@ function addTrumpetAt(w, crossK) {
 function rectifyCross(k, P0, dirIn, Lneed, ramps, Lc) {
   const X = S.prj.crosses[k], orig = (X.axis || []).map((p) => ({ ...p }));
   const C = X.kind === 'autoroute' ? HWY_CAT[X.cat] || HWY_CAT.L2 : null, R0 = C ? Math.max(600, C.Rdn) : 250;
+  // place des clothoïdes de la catégorie de conception aux deux sommets de raccordement (roadcat.js)
+  const XH = crossParams(S.prj, k), Lclo = clothoidNeed(designCatOf(XH), R0, XH, Math.max(0, +(S.prj.pt?.dev ?? 2.5) || 2.5));
   let dir = G.norm(dirIn), flip = false;
   // projection de P0 sur le tracé saisi
   const Ls = [0]; for (let i = 1; i < orig.length; i++) Ls.push(Ls[i - 1] + G.dist(orig[i - 1], orig[i]));
@@ -904,20 +913,20 @@ function rectifyCross(k, P0, dirIn, Lneed, ramps, Lc) {
     let J = 120;
     if (nxt) {
       const E = G.add(P0, G.mul(dir, sg * Lneed)), v = G.norm(G.sub(nxt, E)), dl = Math.acos(Math.max(-1, Math.min(1, sg * G.dot(v, dir))));
-      J = Math.max(120, R0 * Math.tan(dl / 2) + 20);
+      J = Math.max(120, R0 * Math.tan(dl / 2) + 20 + Lclo);
     }
     const V = G.add(P0, G.mul(dir, sg * (Lneed + J)));
     const keep = best ? orig.filter((p, i) => (sg < 0 ? Ls[i] < best.s - Lneed - J - 60 : Ls[i] > best.s + Lneed + J + 60)) : [];
     return { V, J, keep };
   };
   const SA = sideOf(-1), SB = sideOf(1), before = SA.keep, after = SB.keep;
-  const rAt = (prev, V, next, J) => { const u = G.norm(G.sub(V, prev)), v = G.norm(G.sub(next, V)), dl = Math.acos(Math.max(-1, Math.min(1, G.dot(u, v)))); return dl < 1e-3 ? 0 : Math.floor(Math.min(R0, (J - 5) / Math.tan(dl / 2)) / 5) * 5; };
+  const rAt = (prev, V, next, J) => { const u = G.norm(G.sub(V, prev)), v = G.norm(G.sub(next, V)), dl = Math.acos(Math.max(-1, Math.min(1, G.dot(u, v)))); return dl < 1e-3 ? 0 : Math.floor(Math.min(R0, (J - 5 - Lclo / 2) / Math.tan(dl / 2)) / 5) * 5; };
   const A = SA.V, B = SB.V;
   const Av = { ...r3p(A), ...(before.length ? { r: rAt(before[before.length - 1], A, B, SA.J) } : {}) };
   const Bv = { ...r3p(B), ...(after.length ? { r: rAt(A, B, after[0], SB.J) } : {}) };
   X.on = true; X.axis = [...before, Av, Bv, ...after];
   // abscisses du gabarit → nouvel axe
-  const path = G.roundPolylineFit(X.axis, X.axis.map((p) => p.r)).segs, sc = pathProject(path, P0).s;
+  const path = roadAlignment(crossParams(S.prj, k), Math.max(0, +(S.prj.pt?.dev ?? 2.5) || 2.5)).path, sc = pathProject(path, P0).s; // axe avec ses clothoïdes
   const r1 = xref(k, 1), r2 = xref(k, 2);
   for (const r of ramps) for (const e of [r.from, r.to]) {
     if (!e || (e.ref !== r1 && e.ref !== r2) || e.s === '' || e.s == null) continue;
@@ -2948,7 +2957,7 @@ function refreshPTAxis(c) {
   const cs = list[S.ptSt];
   $('#ptChart').innerHTML = cs ? ptChartSVG(cs, { ve: +($('#ptVe').value || 0) }) : '';
   $('#ptTable').innerHTML = '<thead><tr><th>Profil</th><th>s (m)</th><th>z axe</th><th>z TN</th><th>dévers</th><th>déblai m²</th><th>remblai m²</th><th>V déblai m³</th><th>V remblai m³</th></tr></thead><tbody>' +
-    list.map((q, i) => `<tr class="${i === S.ptSt ? 'on' : ''}" data-pts="${i}"><td>${esc(q.name)}</td><td class="mono">${fmt(q.s, 1)}</td><td class="mono">${fmt(q.zAxe)}</td><td class="mono">${q.zTN == null ? '—' : fmt(q.zTN)}</td><td class="mono">${fmt(q.dev.d * 100, 1)} %${q.dev.inner ? ' ↺' : ''}</td>` +
+    list.map((q, i) => `<tr class="${i === S.ptSt ? 'on' : ''}" data-pts="${i}"><td>${esc(q.name)}</td><td class="mono">${fmt(q.s, 1)}</td><td class="mono">${fmt(q.zAxe)}</td><td class="mono">${q.zTN == null ? '—' : fmt(q.zTN)}</td><td class="mono" title="pentes transversales gauche / droite (positives : montent vers l'extérieur)">${devTxt(q.dev)}</td>` +
       `<td class="mono cut">${fmt(q.cut, 2)}</td><td class="mono fill">${fmt(q.fill, 2)}</td><td class="mono cut">${fmt(q.vCut, 0)}</td><td class="mono fill">${fmt(q.vFill, 0)}</td></tr>`).join('') + '</tbody>';
   const noTN = list.filter((q) => !q.ok).length, noEnd = list.filter((q) => q.ok && (!q.endL || !q.endR)).length;
   $('#ptNote').textContent = (S.tn ? '' : 'Aucun MNT : talus et cubatures non calculés (onglet Terrain). ') + (noTN ? `${noTN} profil(s) hors du MNT. ` : '') + (noEnd ? `${noEnd} profil(s) : talus sans entrée en terre dans la demi-largeur de coupe. ` : '')
@@ -2978,7 +2987,7 @@ function bindPT() {
     const ac = ptAxisCtx();
     if (ac) {
       const c = (v, k = 2) => (v == null ? '' : v.toFixed(k).replace('.', ','));
-      const rows = ['Profil;s;X;Y;Z_axe;Z_TN;devers_%;deblai_m2;remblai_m2;V_deblai_m3;V_remblai_m3', ...ptAxisList(ac).list.map((q) => `${q.name};${c(q.s, 1)};${c(q.p.x, 3)};${c(q.p.y, 3)};${c(q.zAxe)};${c(q.zTN)};${c(q.dev.d * 100, 1)};${c(q.cut)};${c(q.fill)};${c(q.vCut, 1)};${c(q.vFill, 1)}`)];
+      const rows = ['Profil;s;X;Y;Z_axe;Z_TN;devers_%;pente_gauche_%;pente_droite_%;deblai_m2;remblai_m2;V_deblai_m3;V_remblai_m3', ...ptAxisList(ac).list.map((q) => `${q.name};${c(q.s, 1)};${c(q.p.x, 3)};${c(q.p.y, 3)};${c(q.zAxe)};${c(q.zTN)};${c(q.dev.d * 100, 1)};${c((q.dev.left ?? 0) * 100, 2)};${c((q.dev.right ?? 0) * 100, 2)};${c(q.cut)};${c(q.fill)};${c(q.vCut, 1)};${c(q.vFill, 1)}`)];
       download(fname('csv').replace(/\.csv$/, `_PT_${ac.ax.name}.csv`), '\ufeff' + rows.join('\r\n'), 'text/csv;charset=utf-8'); return;
     }
     const bd = ptBranch(); if (!bd) return;
@@ -2998,6 +3007,20 @@ function hyCfg() {
   return h;
 }
 // Axes proposés pour le calcul : autoroute et voies secondaires cochés par défaut, bretelles et branches à la demande.
+// Dévers d'une coupe : « toit 2,5 % », « 7,0 % ↺ » (courbe), ou pentes gauche / droite pendant la bascule sur la clothoïde.
+function devTxt(dv) {
+  if (!dv) return '';
+  if (dv.f > 0 && dv.f < 1 && dv.left != null) return `${fmt(dv.left * 100, 1)} / ${fmt(dv.right * 100, 1)} % (bascule)`;
+  return dv.inner ? `${fmt(dv.d * 100, 1)} % ↺` : `toit ${fmt(dv.d * 100, 1)} %`;
+}
+// Paramètre A appliqué à un sommet de l'autoroute (« hwy ») ou de la voie secondaire xk (« x<k> ») : texte indicatif.
+function aAuto(which, i) {
+  const road = which === 'hwy' ? S.D?.hwy : S.D?.crosses?.[+which.slice(1)], els = road?.al?.elems || [];
+  const P = road?.H?.axis?.[i]; if (!P || !els.length) return 'auto';
+  const arc = els.find((e) => e.kind === 'A' && e.pi === i);
+  const cl = arc ? els[els.indexOf(arc) - 1] : null;
+  return cl?.kind === 'C' ? `auto ${fmt(cl.A, 0)}` : 'auto';
+}
 function hyAxes() { return (S.prof?.axes || (S.D ? listAxes(S.prj, S.D) : [])); }
 function hyAxisChecked(h, ax) { return h.axes ? h.axes.includes(ax.key) : ax.key === 'hwy' || ax.key.startsWith('x:'); }
 // Bassins sur le plan : contours des bassins totaux, partition en trait fin, écoulements, étiquettes aux franchissements.

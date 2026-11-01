@@ -75,6 +75,21 @@ function clipPath(path, sa, sb) {
   if (sb > Lp + 1e-6) { const p = G.segEnd(path[path.length - 1]), t = pathTangentAt(path, Lp); out.push({ type: 'ligne', a: xy(p), b: [p.x + (sb - Lp) * t.x, p.y + (sb - Lp) * t.y] }); }
   return out;
 }
+// Portion [sa, sb] d'un alignement clotho.js (droites, clothoïdes, arcs exacts) en segments PSIDA ; prolongements droits.
+function clipAl(al, sa, sb) {
+  const out = [], Lp = al.length, a0 = Math.max(0, sa), b0 = Math.min(Lp, sb);
+  for (const e of al.elems) {
+    const lo = Math.max(a0, e.s0), hi = Math.min(b0, e.s0 + e.len);
+    if (!(hi - lo > 1e-6)) continue;
+    const u0 = lo - e.s0, u1 = hi - e.s0, A = e.pointAt(u0), B = e.pointAt(u1);
+    if (e.kind === 'L') out.push({ type: 'ligne', a: xy(A), b: xy(B) });
+    else if (e.kind === 'A') { const t0 = Math.atan2(A.y - e.C.y, A.x - e.C.x), t1 = t0 + (e.sg * (u1 - u0)) / e.R; out.push({ type: 'arc', c: xy(e.C), r: e.R, a0: t0, a1: t1, sens: e.sg, a: xy(A), b: xy(B) }); }
+    else out.push({ type: 'clothoide', a: xy(A), theta0: e.headAt(u0), k0: e.curvAt(u0), k1: e.curvAt(u1), long: u1 - u0, b: xy(B) });
+  }
+  if (sa < -1e-6) { const p = al.pointAt(0), h = al.headAt(0); out.unshift({ type: 'ligne', a: [p.x + sa * Math.cos(h), p.y + sa * Math.sin(h)], b: xy(p) }); }
+  if (sb > Lp + 1e-6) { const p = al.pointAt(Lp), h = al.headAt(Lp); out.push({ type: 'ligne', a: xy(p), b: [p.x + (sb - Lp) * Math.cos(h), p.y + (sb - Lp) * Math.sin(h)] }); }
+  return out;
+}
 // Abscisse d'un point sur un chemin, prolongements droits compris (pathProject borne l'abscisse à [0, L]).
 function stationOn(path, P) {
   const pr = pathProject(path, P), Lp = G.pathLen(path);
@@ -111,7 +126,7 @@ export function deckTrace(B) {
   let segments, ecart = 0;
   if (geo.path?.length) {
     const ss = P.map((p) => stationOn(geo.path, p));
-    segments = clipPath(geo.path, Math.min(...ss) - m, Math.max(...ss) + m);
+    segments = geo.al?.elems?.some((e) => e.kind === 'C') ? clipAl(geo.al, Math.min(...ss) - m, Math.max(...ss) + m) : clipPath(geo.path, Math.min(...ss) - m, Math.max(...ss) + m);
   } else if (geo.c && geo.r > 0) {
     const c = geo.c, r = geo.r, dir = Math.sign(cross(sub(ax[0], c), sub(ax[1], c))) || 1, th0 = Math.atan2(ax[0].y - c.y, ax[0].x - c.x);
     const us = P.map((p) => { const d = dir * (Math.atan2(p.y - c.y, p.x - c.x) - th0); return r * (((d % TAU) + TAU) % TAU); });
