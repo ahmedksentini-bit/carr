@@ -10,7 +10,7 @@ import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, 
 import { GAMMES, CATALOG } from './signs.js';
 import { signSVG, signOutline } from './signicons.js';
 import { rampParams, endFrame, normRamp, buildEchangeur, trumpet, deriveTrumpet, crossingWith, xref, cloverleaf, halfCloverleaf, diamond, gradeRoundabout, HWY_CAT, RAMP_CAT } from './echangeur.js';
-import { pathProject } from './clotho.js';
+import { pathProject, pathTangentAt } from './clotho.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
 import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF } from './pt.js';
@@ -647,6 +647,20 @@ function runTemplate(kind, w, k) {
 // Trompette paramétrique : la S-semi porte les paramètres (tp) ; toute modification (paramètres, voie secondaire, axe de
 // l'autoroute, longueur de la tige) reconstruit le bloc S-semi + tige + ouvrage + boucle + directes (identifiants conservés).
 const tpOpt = (tp) => ({ gap: +tp.gap || 0, tpc: +tp.tpc || 1, ...(+tp.R2 > 0 ? { R2: +tp.R2 } : {}), ...(tp.crossK != null ? { crossK: tp.crossK } : {}), ...(+tp.Ys > 0 ? { Ystem: +tp.Ys } : {}) });
+// La voie secondaire d'une trompette s'arrête peu après l'ouvrage côté boucle (la tige ne se prolonge pas au-delà de la
+// boucle) : on garde la plate-forme de l'autoroute + 30 m de ce côté, assez pour la culée et le recalcul du croisement.
+function trimCrossLoopSide(X, P0, u) {
+  if (!X?.axis?.length || !S.D?.hwy?.ok) return;
+  const hw = S.D.hwy, pr = pathProject(hw.path, P0), tH = pr ? G.norm(pathTangentAt(hw.path, pr.s)) : { x: 1, y: 0 };
+  const sinP = Math.max(0.3, Math.abs(G.cross(tH, u)));
+  const Dl = (hw.E2 + hw.H.berme) / sinP + 30, f = (p) => G.dot(G.sub(p, P0), u) + Dl;
+  const out = [];
+  X.axis.forEach((p, i) => {
+    if (i) { const q = X.axis[i - 1], a = f(q), b = f(p); if ((a < 0) !== (b < 0)) { const c = G.lerp(q, p, a / (a - b)); out.push({ x: +c.x.toFixed(3), y: +c.y.toFixed(3) }); } }
+    if (f(p) >= 0) out.push(p);
+  });
+  if (out.length >= 2 && (out.length !== X.axis.length || out.some((p, i) => p !== X.axis[i]))) X.axis = out;
+}
 function addTrumpetAt(w, crossK) {
   const tp = { crossK: crossK ?? null, click: { x: +w.x.toFixed(3), y: +w.y.toFixed(3) }, R2: parseNum(String(S.prj.hwy.trR2 ?? '')) || 62, gap: parseNum(String(S.prj.hwy.trGap ?? '')) || 0, tpc: parseNum(String(S.prj.hwy.trTpc ?? '')) || 1, Ys: '' };
   const T = trumpet(S.prj, S.D, w, uid, tpOpt(tp));
@@ -654,6 +668,7 @@ function addTrumpetAt(w, crossK) {
   const nOld = removeGenerated(T.P0);
   tp.P0 = { x: +T.P0.x.toFixed(3), y: +T.P0.y.toFixed(3) }; tp.u = { x: +T.bridge.dir.x.toFixed(6), y: +T.bridge.dir.y.toFixed(6) };
   S.prj.ramps.push(...T.ramps.map((r) => ({ ...r, gen: 'trompette', ...(r.role === 'semi' ? { tp } : {}) }))); S.rsel = S.prj.ramps.length - 3;
+  if (crossK != null) trimCrossLoopSide(S.prj.crosses[crossK], T.P0, T.bridge.dir);
   setTool('select'); update(); zoomAll();
   toast(`Trompette générée${crossK != null ? ` sur ${S.prj.crosses[crossK]?.name || 'la voie secondaire'}` : ''} : ${T.info}.${nOld ? ` ${nOld} bretelle(s) du gabarit précédent remplacée(s) (Ctrl+Z pour annuler).` : ''} Raccordez le haut de la tige au carrefour.` + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
 }
