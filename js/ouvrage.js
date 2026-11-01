@@ -242,7 +242,8 @@ function designDeck(prj, D, deck, O) {
   }
   const about = longueurAbout({ type, psi: psiR });
   for (const it of items) if (it.level === 'warn') issues.push({ lvl: 'warn', msg: `${deck.src} : ${it.text}` });
-  return { P0: X0.p, deck, axis, aOff, eL, eR, oL, oR, halfW, psi: psiR, sinPsi, central: sup2.some((q) => q.central), sup: sup2, spans, spansAuto, user: !!user, shift: +ov.shift || 0, hGuide, dom, type, ep, h, about, items, issues, sX, nH, yFace, yP, Wr, Wt, Ht, R, yToe, yCrest, side };
+  const supRel = sup2.map((q) => ({ kind: q.kind, d: q.a - a0 })); // abscisses des appuis depuis le croisement, le long de l'axe
+  return { supRel, P0: X0.p, deck, axis, aOff, eL, eR, oL, oR, halfW, psi: psiR, sinPsi, central: sup2.some((q) => q.central), sup: sup2, spans, spansAuto, user: !!user, shift: +ov.shift || 0, hGuide, dom, type, ep, h, about, items, issues, sX, nH, yFace, yP, Wr, Wt, Ht, R, yToe, yCrest, side };
 }
 
 // ---------------------------------------------------------------- dessin
@@ -385,7 +386,7 @@ export function buildOuvrages(prj, D, extra = {}) {
     let tr;
     const trace = () => { if (tr === undefined) { try { tr = deckTrace(B); } catch (e) { console.error(e); tr = null; } } return tr; };
     if (turn > 1e-3) B.items.push({ level: 'info', text: `Axe courbe (déviation ${fmt((turn * 200) / Math.PI, 1)} gr entre les culées) : le lien PSIDA transmet le tracé en plan (${B.deck.geo ? 'droites et arcs exacts' : 'droites, arcs et clothoïdes reconstitués'}) et le biais propre à chaque ligne d'appui ; tablier calculé en plaque (alertes éventuelles du tracé affichées à l'export).` });
-    out.list.push({ trace, curved: turn > 1e-3, poly: B.deckPoly || [], P: B.P0, sX: B.sX, nameAuto, key: B.deck.key, spansAuto: B.spansAuto, user: B.user, shift: B.shift, hGuide: B.hGuide, name, src: B.deck.src, psi: B.psi, spans: B.spans, central: B.central, type: B.type, h: B.h, hText: B.ep.text, width: 2 * B.halfW, about: B.about, items: B.items, yP: B.yP, yC: B.side, Ht: B.Ht, roadHalf: B.deck.halfW, gab: O.gab, fck: O.fck, ep: O.ep, nPiles: B.sup.filter((q) => q.kind === 'pile').length });
+    out.list.push({ supRel: B.supRel, trace, curved: turn > 1e-3, poly: B.deckPoly || [], P: B.P0, sX: B.sX, nameAuto, key: B.deck.key, spansAuto: B.spansAuto, user: B.user, shift: B.shift, hGuide: B.hGuide, name, src: B.deck.src, psi: B.psi, spans: B.spans, central: B.central, type: B.type, h: B.h, hText: B.ep.text, width: 2 * B.halfW, about: B.about, items: B.items, yP: B.yP, yC: B.side, Ht: B.Ht, roadHalf: B.deck.halfW, gab: O.gab, fck: O.fck, ep: O.ep, nPiles: B.sup.filter((q) => q.kind === 'pile').length });
   });
   return out;
 }

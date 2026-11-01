@@ -20,7 +20,7 @@ import { LAYERS } from './layers.js';
 import { buildOuvrages, W_CLASSES, psidaLink, psidaProject, psidaWarnings, PSIDA_URL } from './ouvrage.js';
 import { buildProfils, listAxes, nearestAxis, profParams, profilsCsv } from './profils.js';
 import { cadreGeoms, drawCadre, cadreChecks, cadreLink, cadreProject, CADRE_DEF } from './cadres.js';
-import { axisSections, axisType, typeParams, typeText } from './ptaxes.js';
+import { axisSections, axisType, typeParams, typeText, axisPlatform } from './ptaxes.js';
 import { demFromSRTM, demFromTIN } from './hydro/dem.js';
 import { delineate } from './hydro/watershed.js';
 import { computeAll as hydroComputeAll, defaultHypotheses, listMontanaStations, TC_FORMULAS, FRANCOU_RODIER_REGIONS, suggestCiehRegressions } from './hydro/hydrology.js';
@@ -2695,7 +2695,8 @@ function refreshPLAxis(c) {
     const k = store.pis.findIndex((q) => Math.abs(+q.s - nd.s) < 1e-6);
     return { fixed: k < 0, pi: k, label: `PI ${k + 1}` };
   };
-  $('#plChart').innerHTML = plChartSVG(PL, tnLine, ax.len, { ve, sel: S.plPi, nodeInfo: info, noRed: !A.defined, axisLabel: `s (m) le long de ${ax.name} · z (m)` });
+  const ov = plAxisOverlay(key, ax, PL);
+  $('#plChart').innerHTML = plChartSVG(PL, tnLine, ax.len, { ve, sel: S.plPi, nodeInfo: info, noRed: !A.defined, axisLabel: `s (m) le long de ${ax.name} · z (m)`, pxm: 1, overlay: ov.draw, zExtra: ov.z, plan: plPlanBand(ax), devers: plDeversBand(ax) });
   const lim = axisLimits(S.prj, key);
   $('#plTable').innerHTML = '<thead><tr><th>Point</th><th>s (m)</th><th>z (m)</th><th>R (m)</th><th>pente aval</th><th></th></tr></thead><tbody>' +
     A.tied.map((t) => `<tr><td>calé (${t.end ? 'fin' : 'début'})</td><td class="mono">${fmt(t.s, 2)}</td><td class="mono">${fmt(t.z, 3)}</td><td class="mono">—</td><td class="mono" colspan="2">${esc(t.why)}</td></tr>`).join('') +
@@ -2713,6 +2714,85 @@ function refreshPLAxis(c) {
     st.map((q) => `<tr><td>${fmt(q.s, 2)}</td><td>${q.p.x.toFixed(2)}</td><td>${q.p.y.toFixed(2)}</td><td>${q.zTN == null ? '—' : fmt(q.zTN)}</td><td>${q.zP == null ? '—' : fmt(q.zP)}</td>` +
       `<td class="${q.dz == null ? '' : q.dz >= 0 ? 'fill' : 'cut'}">${q.dz == null ? '—' : (q.dz >= 0 ? '+' : '−') + fmt(Math.abs(q.dz))}</td><td>${q.g == null ? '—' : fmt(q.g * 100, 2) + ' %'}</td></tr>`).join('') + '</tbody>';
   $('#plNote').textContent = S.tn ? '' : 'Aucun MNT : le terrain naturel n\'est pas tracé (onglet Terrain).';
+}
+// Diagramme des courbures du tracé en plan de l'axe (éléments exacts de l'alignement : droites, clothoïdes, arcs).
+function plPlanBand(ax) {
+  const els = ax.al?.elems;
+  if (!els?.length) return null;
+  return els.filter((e) => e.len > 1e-6).map((e) => ({ s0: e.s0, s1: e.s0 + e.len, k0: e.curvAt(0), k1: e.curvAt(e.len), R: e.kind === 'A' ? e.R : 0 }));
+}
+// Pentes transversales gauche / droite (% vers l'extérieur) le long de l'axe, au pas de len/300 (≥ 2 m) et aux limites
+// d'éléments (bascule du dévers sur les clothoïdes).
+function plDeversBand(ax) {
+  try {
+    const T = axisType(S.prj, S.D, ax.key), TP = typeParams(S.prj), ss = new Set();
+    const st = Math.max(2, ax.len / 300);
+    for (let s = 0; s <= ax.len + 1e-9; s += st) ss.add(+s.toFixed(3));
+    ss.add(+ax.len.toFixed(3));
+    for (const e of ax.al?.elems || []) for (const s of [e.s0 + 0.01, e.s0 + e.len - 0.01]) if (s > 0 && s < ax.len) ss.add(+s.toFixed(3));
+    return [...ss].sort((a, b) => a - b).map((s) => { const d = axisPlatform(S.prj, S.D, ax, T, s, 0, TP).dev; return { s, l: (d.left ?? -d.d) * 100, r: (d.right ?? -d.d) * 100 }; });
+  } catch (e) { console.error(e); return null; }
+}
+// Ouvrages sur le profil en long d'un axe : passages supérieurs (tablier sous la voie portée, appuis, gabarit au-dessus
+// de l'autoroute), gabarit et intrados vus depuis l'autoroute, cadres et buses sous la chaussée de l'axe.
+function plAxisOverlay(key, ax, PL) {
+  const items = [], zs = [];
+  const Hp = S.axpl?.get('hwy'), hwyZ = (sH) => (Hp?.defined ? Hp.PL.zAt(sH) : null);
+  const clr = (o) => (S.clear || []).find((q) => q.ouvr === o.name);
+  const halfHwy = S.D?.hwy?.E2 || 12;
+  for (const o of S.ouvr?.list || []) {
+    const sin = Math.max(0.3, Math.sin(((o.psi || 100) * Math.PI) / 200)), q = clr(o), bad = q?.lvl === 'err';
+    if (key === 'hwy') { // vu depuis l'autoroute : gabarit au-dessus de la chaussée, intrados du tablier
+      const zH = PL.zAt(o.sX), hw = o.width / 2 / sin;
+      items.push({ t: 'gab', s0: o.sX - hw, s1: o.sX + hw, z0: zH, z1: zH + o.gab, bad, label: `${o.name}${q ? ` · TA ${fmt(q.ta, 2)} m` : ''}` });
+      zs.push(zH + o.gab);
+      if (q) { const zS = zH + q.ta; items.push({ t: 'deck', s0: o.sX - hw, s1: o.sX + hw, z0: zS, z1: zS + o.h, bad }); zs.push(zS + o.h); }
+    } else if (o.key.startsWith(key + ':') && o.supRel?.length) { // voie portée : tablier et appuis
+      const sC = q?.key === key ? q.sX : ax.project(o.P)?.s;
+      if (sC == null) continue;
+      const ds = o.supRel.map((r) => r.d), a = Math.min(...ds) - (o.about || 0.5), b = Math.max(...ds) + (o.about || 0.5);
+      items.push({ t: 'span', s0: sC + a, s1: sC + b, h: o.h, sup: o.supRel.map((r) => ({ kind: r.kind, s: sC + r.d })), zH: hwyZ(o.sX), bad, label: `${o.name} · ${o.spans.map((v) => fmt(v, 1)).join(' + ')} m${q ? ` · TA ${fmt(q.ta, 2)} m` : ''}` });
+      const zH = hwyZ(o.sX);
+      if (zH != null) { const hw = halfHwy / sin; items.push({ t: 'gab', s0: sC - hw, s1: sC + hw, z0: zH, z1: zH + o.gab, bad }); zs.push(zH); }
+    }
+  }
+  for (const g of S.cadres || []) {
+    if (g.err || g.ax?.key !== key || !g.K) continue;
+    const K = g.K, zR = PL.zAt(g.s), zT = zR - K.Hr, zI = zT - K.et, zB = zI - K.H, hw = K.W / 2 / K.sinP;
+    items.push({ t: 'cad', s: g.s, hw, zT, zI, zB, zF: zB - (K.type === 'pipo' ? 0 : K.er), K, label: `${g.name} · ${K.type === 'buse' ? `buse Ø ${fmt(K.B, 2)}` : `${K.n > 1 ? `${K.n} × ` : ''}${fmt(K.B, 2)} × ${fmt(K.H, 2)}`} · fil d'eau ${fmt(zB, 2)}` });
+    zs.push(zB - K.er);
+  }
+  const draw = ({ X, Y, vis }) => {
+    let o = '';
+    for (const it of items) {
+      if (it.t === 'gab') {
+        o += `<rect class="pl-gab${it.bad ? ' err' : ''}" x="${X(it.s0)}" y="${vis(it.z1)}" width="${Math.max(2, X(it.s1) - X(it.s0))}" height="${Math.max(1, vis(it.z0) - vis(it.z1))}"/>`;
+        if (it.label) o += `<text class="pl-ovl" x="${X((it.s0 + it.s1) / 2)}" y="${vis(it.z1) - 4}" text-anchor="middle">${esc(it.label)}</text>`;
+      } else if (it.t === 'deck') {
+        o += `<rect class="pl-deck${it.bad ? ' err' : ''}" x="${X(it.s0)}" y="${vis(it.z1)}" width="${Math.max(2, X(it.s1) - X(it.s0))}" height="${Math.max(2, vis(it.z0) - vis(it.z1))}"/>`;
+      } else if (it.t === 'span') {
+        const n = 24, top = [], bot = [];
+        for (let i = 0; i <= n; i++) { const s = it.s0 + ((it.s1 - it.s0) * i) / n, z = PL.zAt(s); top.push(`${X(s).toFixed(1)},${vis(z).toFixed(1)}`); bot.unshift(`${X(s).toFixed(1)},${vis(z - it.h).toFixed(1)}`); }
+        o += `<path class="pl-deck${it.bad ? ' err' : ''}" d="M${top.join('L')}L${bot.join('L')}Z"/>`;
+        for (const q of it.sup) {
+          const zS = PL.zAt(q.s) - it.h, x = X(q.s);
+          if (q.kind === 'pile') o += `<line class="pl-sup" x1="${x}" y1="${vis(zS)}" x2="${x}" y2="${vis(it.zH ?? zS - 5)}"/>`;
+          else o += `<rect class="pl-cul" x="${x - 3}" y="${vis(zS)}" width="6" height="${Math.max(6, vis(zS - 1.5) - vis(zS))}"/>`;
+        }
+        o += `<text class="pl-ovl" x="${X((it.s0 + it.s1) / 2)}" y="${vis(PL.zAt((it.s0 + it.s1) / 2)) - 22}" text-anchor="middle">${esc(it.label)}</text>`;
+      } else if (it.t === 'cad') {
+        const x0 = X(it.s - it.hw), x1 = X(it.s + it.hw);
+        if (it.K.type === 'buse') o += `<ellipse class="pl-cad" cx="${X(it.s)}" cy="${vis((it.zI + it.zB) / 2)}" rx="${Math.max(2, (x1 - x0) / 2)}" ry="${Math.max(2, (vis(it.zB) - vis(it.zI)) / 2)}"/>`;
+        else {
+          o += `<rect class="pl-cad" x="${x0}" y="${vis(it.zT)}" width="${Math.max(3, x1 - x0)}" height="${Math.max(3, vis(it.zF) - vis(it.zT))}"/>`;
+          o += `<rect class="pl-cadi" x="${x0 + 1}" y="${vis(it.zI)}" width="${Math.max(1, x1 - x0 - 2)}" height="${Math.max(1, vis(it.zB) - vis(it.zI))}"/>`;
+        }
+        o += `<text class="pl-ovl" x="${X(it.s)}" y="${vis(it.zF) + 12}" text-anchor="middle">${esc(it.label)}</text>`;
+      }
+    }
+    return o;
+  };
+  return { draw: items.length ? draw : null, z: zs };
 }
 function plData() {
   const bd = plBranch();
@@ -2791,7 +2871,9 @@ function bindPL() {
   const pick = (e) => {
     const svg = chart.querySelector('svg'); if (!svg) return null;
     const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
-    return plChartPick(svg, ((e.clientX - r.left) / r.width) * vb.width, ((e.clientY - r.top) / r.height) * vb.height);
+    const py = ((e.clientY - r.top) / r.height) * vb.height;
+    if (!S.plDrag && py > +svg.dataset.hh - +svg.dataset.mb) return null; // clic dans les bandeaux plan / dévers
+    return plChartPick(svg, ((e.clientX - r.left) / r.width) * vb.width, py);
   };
   chart.addEventListener('pointerdown', (e) => {
     const h = e.target.closest('.pl-pi'); if (!h || h.classList.contains('fixed')) return;
