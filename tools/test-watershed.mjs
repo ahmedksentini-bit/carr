@@ -151,6 +151,21 @@ section('3. Écoulement coupé deux fois (lacet) : emboîtement + surface suppl�
 }
 
 // --------------------------------------------------------------------------- 4. Conservation et invariants (MNT bruité)
+section('3 bis. Lacet, bassins arrêtés au tracé sans emboîtement (GIRA : bassins amont saisis par l\'utilisateur)');
+{
+  const g = vGrid();
+  const r1 = 60, r2 = 140, cl = 160;
+  const trace = { key: 'AX', name: 'Axe en lacet', pts: [{ x: g.x0 + 0.1, y: Y(g, r1) }, { x: X(g, cl), y: Y(g, r1) }, { x: X(g, cl), y: Y(g, r2) }, { x: g.x0 + 0.1, y: Y(g, r2) }] };
+  const nest = delineate(g, [trace], { minAreaKm2: 0.05, clipTotalsToTrace: true });
+  const flat = delineate(g, [trace], { minAreaKm2: 0.05, clipTotalsToTrace: true, nestTotals: false });
+  const pick = (res, r) => res.crossings.find((c) => c.outlet.j === r && c.outlet.i === 100);
+  const upN = pick(nest, r1), dnN = pick(nest, r2), upF = pick(flat, r1), dnF = pick(flat, r2);
+  check('bassin amont identique dans les deux modes', upN && upF && near(upN.totalKm2, upF.totalKm2, 1e-12));
+  check('bassin aval arrêté au tracé = aval emboîté − amont', dnN && dnF && near(dnF.totalKm2, dnN.totalKm2 - upN.totalKm2, 1e-12), `${dnF?.totalKm2.toFixed(4)} km²`);
+  const setUp = new Set(flat.rasters.totalCells[upF.index]);
+  check('bassins disjoints (aucune cellule commune)', [...flat.rasters.totalCells[dnF.index]].every((i) => !setUp.has(i)));
+  check('amont hydrologique toujours signalé (contains), sans surface supplémentaire', dnF.contains.includes(upF.id) && dnF.incrementalKm2 == null);
+}
 section('4. MNT bruité avec cuvettes et trou sans donnée : conservation et invariants');
 function noisyGrid(nx, ny, cell, seed, holes = true) {
   const rnd = mulberry32(seed);
