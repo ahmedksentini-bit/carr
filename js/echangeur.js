@@ -1097,92 +1097,122 @@ function twoCurveExit({ yA, p, Lm, R1, A1, R2, A2, E, dE, Lapp }) {
 }
 const AminB50 = (R) => Math.ceil(Math.sqrt(cloMinLength(R, Math.abs(deversOfRadius(R - 1.75, RAMP_CAT.b50) - 2.5), 1) * R) / 5) * 5;
 const r3 = (q) => ({ x: +q.x.toFixed(3), y: +q.y.toFixed(3) });
-// Sortie (S) du sens 1 et son entrée symétrique (E) ; sens 2 par symétrie centrale (ROT[2]).
-function directRamps(g, E, s0, W, mkId, want, R) {
+// Sortie (S) du sens 1 (calcul gS, extrémité ES) et entrée du sens 1 (calcul gE dans le repère miroir x → −x,
+// extrémité EE) ; sens 2 par symétrie centrale (ROT[2]), la voie secondaire passant par le croisement.
+function directRamps(gS, ES, gE, EE, s0, W, mkId, want, R) {
   const M = (q) => ({ ...q, x: -q.x }), ramps = [], { R1, A1, R2, A2 } = R;
   for (const [k, sens, io] of want) {
     const Wk = (q) => W(ROT[k](q.x, q.y)), ref = 'hwy' + sens, st = (x) => +(s0 + (k ? -x : x)).toFixed(2);
-    if (io === 'S') ramps.push({ id: mkId(), name: `S${sens}`, cat: 'b50', lanes: 1, pente: '', from: { ref, s: st(g.xS), biseau: '', obl: '', tpl: '' }, to: { ref: 'free' },
-      pis: [{ ...Wk(g.PI1), R: R1, A: A1 }, { ...Wk(g.PI2), R: R2, A: A2 }, Wk(E)] });
-    else ramps.push({ id: mkId(), name: `E${sens}`, cat: 'b50', lanes: 1, pente: '', from: { ref: 'free' }, to: { ref, s: st(-g.xS), ins: '', biseau: '', obl: '', tpl: '' },
-      pis: [Wk(M(E)), { ...Wk(M(g.PI2)), R: R2, A: A2 }, { ...Wk(M(g.PI1)), R: R1, A: A1 }] });
+    if (io === 'S') ramps.push({ id: mkId(), name: `S${sens}`, cat: 'b50', lanes: 1, pente: '', from: { ref, s: st(gS.xS), biseau: '', obl: '', tpl: '' }, to: { ref: 'free' },
+      pis: [{ ...Wk(gS.PI1), R: R1, A: A1 }, { ...Wk(gS.PI2), R: R2, A: A2 }, Wk(ES)] });
+    else ramps.push({ id: mkId(), name: `E${sens}`, cat: 'b50', lanes: 1, pente: '', from: { ref: 'free' }, to: { ref, s: st(-gE.xS), ins: '', biseau: '', obl: '', tpl: '' },
+      pis: [Wk(M(EE)), { ...Wk(M(gE.PI2)), R: R2, A: A2 }, { ...Wk(M(gE.PI1)), R: R1, A: A1 }] });
   }
   return ramps;
 }
 const coverWarn = (hw, lo, hi) => (lo < 0 || hi > hw.sEnd ? `L'axe de l'autoroute doit couvrir les abscisses ${fmt(Math.max(0, lo), 0)} à ${fmt(hi, 0)} m (actuellement 0 à ${fmt(hw.sEnd, 0)} m).` : '');
+// Direction de la voie secondaire dans le repère local (x le long de l'autoroute, y vers la gauche), orientée y > 0 ;
+// biais ψ (grades) entre la voie secondaire et l'autoroute (100 gr : croisement droit).
+function crossDirLocal(F, dirW) {
+  if (!dirW) return { d: { x: 0, y: 1 }, psi: 100 };
+  let d = { x: G.dot(dirW, F.tL), y: G.dot(dirW, F.nL) };
+  if (d.y < 0) d = neg(d);
+  d = norm(d);
+  return { d, psi: (Math.atan2(d.y, Math.abs(d.x)) * 200) / Math.PI };
+}
+const PSI_MIN_TPL = 50; // biais minimal traité par les gabarits (gr)
 
 // Losange (diamant) et demi-échangeur : de chaque côté de l'autoroute, une sortie directe en amont du croisement et une
 // entrée directe en aval, raccordées à la route transversale par un carrefour plan (extrémités libres à compléter) ou
 // par un giratoire (guide § 8 : le giratoire est préférable, il dissuade les prises à contresens). Le demi-échangeur ne
 // garde que la sortie et l'entrée d'un même côté du croisement (desserte orientée vers l'origine ou la fin de l'axe).
-// Giratoires : centre sur la route transversale à Yj de l'axe de l'autoroute ; la route transversale est réduite au
-// tronçon entre les deux giratoires (ouvrage) et prolongée au-delà par une branche de chaque giratoire.
+// Giratoires : centre sur la route transversale à Yj de l'axe de l'autoroute (distance perpendiculaire) ; la route
+// transversale est réduite au tronçon entre les deux giratoires (ouvrage) et prolongée par une branche de chaque
+// giratoire. Biais : la voie secondaire garde sa direction au croisement (opt.dir) ; les bretelles arrivent parallèlement
+// à l'autoroute, la sortie et l'entrée d'un même côté étant calculées séparément (la sortie côté angle aigu est la plus
+// longue).
 export function diamond(prj, D, click, mkId, opt = {}) {
   const K = opt.crossK ?? 0, gir = !!opt.gir, part = opt.part || 'complet';
   if ((crossList(prj)[K]?.kind || 'route') === 'autoroute') return { err: 'Le losange et le demi-échangeur se raccordent à une route ordinaire : choisissez le type « Route ordinaire » pour la voie secondaire.' };
   const F = interchangeFrame(prj, D, click, opt.Lc || 800);
   if (F.err) return F;
   const { hw, s0, W } = F, half = 1.75, p = 0.03;
+  const { d, psi } = crossDirLocal(F, opt.dir);
+  if (psi < PSI_MIN_TPL) return { err: `Biais de la voie secondaire trop prononcé (${fmt(psi, 1)} gr < ${PSI_MIN_TPL} gr) pour ce gabarit.` };
+  const sinT = d.y, cot = d.x / d.y;
   const X = { ...crossParams(prj, K), on: true, kind: 'route' }, Hm = hwyParams(prj);
   const E2c = X.median / 2 + X.bdg + X.lanes * X.wLane + X.bau;
   const Lm = (Hm.bau + J14_W + 0.7 - 1) / p, yA = hw.E1 + 1 + half;
   const Rg = gir ? +opt.Rg || 20 : 0, BL = 60, Lb = 60, Lo = opt.Lo || 120;
   // Carrefours au-delà des remblais d'accès à l'ouvrage (≈ 6,5 m de dénivelée à 6 %) ; giratoires : la route transversale
   // conserve au moins 15 m au-delà de la plate-forme de l'autoroute entre les branches des deux giratoires.
-  const Yj = +opt.Yj > 0 ? +opt.Yj : Math.ceil(Math.max(hw.E2 + 100, gir ? hw.E2 + Hm.berme + 15 + Lb + Rg : 0) / 5) * 5;
-  if (gir && Yj - Rg - Lb < hw.E2 + 5) return { err: `Giratoires trop proches de l'autoroute : Yj = ${fmt(Yj, 0)} m, minimum ${fmt(hw.E2 + 5 + Rg + Lb, 0)} m.` };
+  const yMinG = hw.E2 + Hm.berme + 15 + (Rg + Lb) * sinT;
+  const Yj = +opt.Yj > 0 ? +opt.Yj : Math.ceil(Math.max(hw.E2 + 100, gir ? yMinG : 0) / 5) * 5;
+  if (gir && Yj < yMinG - 1e-6) return { err: `Giratoires trop proches de l'autoroute : Yj = ${fmt(Yj, 0)} m, minimum ${fmt(yMinG, 0)} m.` };
   if (!gir && Yj < yA + 40) return { err: `Carrefours trop proches de l'autoroute : Yj = ${fmt(Yj, 0)} m.` };
   const R = { R1: 110 + half, R2: 60 + half }; R.A1 = AminB50(R.R1); R.A2 = AminB50(R.R2); // R1 ≥ 100 m et R1 < 2 R2 (§ 3.2.2 b)
-  // Extrémité : carrefour plan à 25 m du bord de la route transversale (alignement d'approche ≥ 40 m) ; giratoire : la
-  // bretelle vise le centre, son extrémité est dans l'anneau (branche dessinée, bretelle arrêtée à Rg + 60 m, 25 m
-  // d'alignement au moins avant la branche).
-  const E = gir ? { x: -(Rg - 4), y: -Yj } : { x: -(E2c + X.berme + 25), y: -Yj };
-  const g = twoCurveExit({ yA, p, Lm, ...R, E, dE: { x: 1, y: 0 }, Lapp: gir ? 4 + BL + 25 : 40 });
-  if (!g) return { err: 'Losange impossible à loger : éloignez les carrefours (distance Yj).' };
+  // Extrémité (repère du sens 1 ou son miroir, ct = cotangente du biais dans ce repère) : carrefour plan à 25 m du bord
+  // de la route transversale (alignement d'approche ≥ 40 m) ; giratoire : la bretelle vise le centre, son extrémité est
+  // dans l'anneau (branche dessinée, bretelle arrêtée à Rg + 60 m, 25 m d'alignement au moins avant la branche).
+  const endAt = (ct) => (gir ? { x: -Yj * ct - (Rg - 4), y: -Yj } : { x: -Yj * ct - (E2c + X.berme) / sinT - 25, y: -Yj });
+  const solve = (E) => twoCurveExit({ yA, p, Lm, ...R, E, dE: { x: 1, y: 0 }, Lapp: gir ? 4 + BL + 25 : 40 });
+  const ES = endAt(cot), EE = endAt(-cot), gS = solve(ES), gE = solve(EE);
+  if (!gS || !gE) return { err: 'Losange impossible à loger : éloignez les carrefours (distance Yj).' };
   const want = { complet: [[0, 1, 'S'], [0, 1, 'E'], [2, 2, 'S'], [2, 2, 'E']], debut: [[0, 1, 'S'], [2, 2, 'E']], fin: [[0, 1, 'E'], [2, 2, 'S']] }[part];
-  const ramps = directRamps(g, E, s0, W, mkId, want, R);
+  const ramps = directRamps(gS, ES, gE, EE, s0, W, mkId, want, R);
   // Giratoires (un de chaque côté) : branches de la route transversale (vers l'ouvrage, longueur Lb ; vers l'extérieur,
   // longueur Lo) ; les branches des bretelles se dessinent d'elles-mêmes (extrémités dans l'anneau).
-  const juncs = [];
-  let crossAxis = F.crossAxis;
+  const at = (t) => W(mul(d, t)), tC = Yj / sinT, juncs = [];
+  let crossAxis = [at(-(opt.Lc || 800)), at(opt.Lc || 800)].map(r3);
   if (gir) {
-    for (const sg of [-1, 1]) juncs.push({ center: r3(W({ x: 0, y: sg * Yj })), Rg, side: sg, arms: [
-      { axis: [W({ x: 0, y: sg * (Yj - Rg - Lb) }), W({ x: 0, y: sg * (Yj - Rg - 6) })].map(r3), length: Lb },
-      { axis: [W({ x: 0, y: sg * (Yj + Rg + Lo + 30) }), W({ x: 0, y: sg * (Yj + Rg + 6) })].map(r3), length: Lo },
+    for (const sg of [-1, 1]) juncs.push({ center: r3(at(sg * tC)), Rg, side: sg, arms: [
+      { axis: [at(sg * (tC - Rg - Lb)), at(sg * (tC - Rg - 6))].map(r3), length: Lb },
+      { axis: [at(sg * (tC + Rg + Lo + 30)), at(sg * (tC + Rg + 6))].map(r3), length: Lo },
     ] });
-    crossAxis = [W({ x: 0, y: -(Yj - Rg - Lb) }), W({ x: 0, y: Yj - Rg - Lb })].map(r3);
+    crossAxis = [at(-(tC - Rg - Lb)), at(tC - Rg - Lb)].map(r3);
   }
-  return { ramps, crossAxis, juncs, Yj, warn: coverWarn(hw, s0 + g.xS - 275, s0 - g.xS + 275),
-    info: `carrefours à ${fmt(Yj, 0)} m de l'axe${gir ? ` (giratoires Rg ${fmt(Rg, 0)} m)` : ''}, bretelles R ${fmt(R.R1 - half, 0)} / ${fmt(R.R2 - half, 0)} m au bord intérieur, sorties à ${fmt(-g.xS, 0)} m du croisement` };
+  return { ramps, crossAxis, juncs, Yj, psi, warn: coverWarn(hw, s0 + Math.min(gS.xS, gE.xS) - 275, s0 - Math.min(gS.xS, gE.xS) + 275),
+    info: `carrefours à ${fmt(Yj, 0)} m de l'axe${gir ? ` (giratoires Rg ${fmt(Rg, 0)} m)` : ''}${psi < 99.5 ? `, biais ${fmt(psi, 1)} gr` : ''}, bretelles R ${fmt(R.R1 - half, 0)} / ${fmt(R.R2 - half, 0)} m au bord intérieur, sorties à ${fmt(-gS.xS, 0)} m${Math.abs(gS.xS - gE.xS) > 1 ? ` (entrées à ${fmt(-gE.xS, 0)} m)` : ''} du croisement` };
 }
 
 // Giratoire dénivelé (deux ouvrages) : anneau centré sur le croisement, franchissant l'autoroute sur deux ouvrages ; la
-// route transversale s'y raccorde par deux branches, les quatre bretelles directes par une branche chacune (sortie du
-// sens 1 au sud-ouest, entrée au sud-est, puis symétrie centrale pour le sens 2). La voie secondaire saisie est
-// désactivée (remplacée par les branches du giratoire).
+// route transversale s'y raccorde par deux branches (dans sa direction, biais compris), les quatre bretelles directes par
+// une branche chacune (sortie du sens 1 au sud-ouest, entrée au sud-est, puis symétrie centrale pour le sens 2), à 30° au
+// moins des branches de la route transversale. La voie secondaire saisie est désactivée (remplacée par les branches).
 export function gradeRoundabout(prj, D, click, mkId, opt = {}) {
   const K = opt.crossK ?? 0;
   if ((crossList(prj)[K]?.kind || 'route') === 'autoroute') return { err: 'Le giratoire dénivelé raccorde une route ordinaire : choisissez le type « Route ordinaire » pour la voie secondaire.' };
   const F = interchangeFrame(prj, D, click, opt.Lc || 800);
   if (F.err) return F;
   const { hw, s0, W } = F, half = 1.75, p = 0.03, Hm = hwyParams(prj);
+  const { d, psi } = crossDirLocal(F, opt.dir);
+  if (psi < PSI_MIN_TPL) return { err: `Biais de la voie secondaire trop prononcé (${fmt(psi, 1)} gr < ${PSI_MIN_TPL} gr) pour ce gabarit.` };
   const Lm = (Hm.bau + J14_W + 0.7 - 1) / p, yA = hw.E1 + 1 + half;
-  const Rg = +opt.Rg || Math.ceil(Math.max(60, (hw.E2 + Hm.berme + 20) * Math.SQRT2) / 5) * 5, BL = 60, Lo = opt.Lo || 120;
+  const Rg0 = +opt.Rg || Math.ceil(Math.max(60, (hw.E2 + Hm.berme + 20) * Math.SQRT2) / 5) * 5, BL = 60, Lo = opt.Lo || 120;
+  let Rg = Rg0;
   const R = { R1: 110 + half, R2: 60 + half }; R.A1 = AminB50(R.R1); R.A2 = AminB50(R.R2); // R1 ≥ 100 m et R1 < 2 R2 (§ 3.2.2 b)
-  // Branche des bretelles à l'angle α de l'axe de l'autoroute, le plus faible possible (au moins 15 m d'anneau entre la plate-forme de
-  // l'autoroute et l'axe de la branche).
-  let g = null, al = 0, E = null;
-  for (let deg = 30; deg <= 65 && !g; deg += 5) {
-    const a = (deg * Math.PI) / 180;
-    if (Rg * Math.sin(a) < hw.E2 + Hm.berme + 15) continue;
-    const dE = { x: Math.cos(a), y: Math.sin(a) };
-    E = mul(dE, -(Rg - 4));
-    g = twoCurveExit({ yA, p, Lm, ...R, E, dE, Lapp: 4 + BL + 25 });
-    al = deg;
-  }
-  if (!g) return { err: `Giratoire dénivelé impossible à loger avec Rg = ${fmt(Rg, 0)} m : augmentez le rayon.` };
-  const ramps = directRamps(g, E, s0, W, mkId, [[0, 1, 'S'], [0, 1, 'E'], [2, 2, 'S'], [2, 2, 'E']], R);
-  const juncs = [{ center: r3(F.P0), Rg, arms: [-1, 1].map((sg) => ({ axis: [W({ x: 0, y: sg * (Rg + Lo + 30) }), W({ x: 0, y: sg * (Rg + 6) })].map(r3), length: Lo })) }];
-  return { ramps, juncs, crossOff: true, warn: coverWarn(hw, s0 + g.xS - 275, s0 - g.xS + 275),
-    info: `anneau Rg ${fmt(Rg, 0)} m sur deux ouvrages, bretelles à ${al}° de l'autoroute, R ${fmt(R.R1 - half, 0)} / ${fmt(R.R2 - half, 0)} m au bord intérieur, sorties à ${fmt(-g.xS, 0)} m du croisement` };
+  const sep = (u) => Math.min(...[d, neg(d)].map((a) => Math.acos(G.clamp(G.dot(u, a), -1, 1)))) * 180 / Math.PI;
+  // Branche des bretelles à l'angle α de l'axe de l'autoroute, le plus faible possible (au moins 15 m d'anneau entre la
+  // plate-forme de l'autoroute et l'axe de la branche, 30° au moins des branches de la route transversale).
+  // Sortie (sud-ouest) et entrée (sud-est) du sens 1 : angles choisis séparément (biais).
+  const pick = (sx) => {
+    for (let deg = 20; deg <= 70; deg += 5) {
+      const a = (deg * Math.PI) / 180;
+      if (Rg * Math.sin(a) < hw.E2 + Hm.berme + 15 || sep({ x: sx * Math.cos(a), y: -Math.sin(a) }) < 30) continue;
+      const dE = { x: Math.cos(a), y: Math.sin(a) }, E = mul(dE, -(Rg - 4)); // repère du sens 1 (sortie) ou miroir (entrée)
+      const g = twoCurveExit({ yA, p, Lm, ...R, E, dE, Lapp: 4 + BL + 25 });
+      if (g) return { g, E, deg };
+    }
+    return null;
+  };
+  // Rayon automatique relevé (pas de 5 m, 100 m au plus) tant que les branches ne trouvent pas place (biais prononcé).
+  let S1 = pick(-1), E1 = pick(1);
+  while (!opt.Rg && !(S1 && E1) && Rg < 100) { Rg += 5; S1 = pick(-1); E1 = pick(1); }
+  const gS = S1?.g, gE = E1?.g, ES = S1?.E, EE = E1?.E, al = S1 && E1 ? (S1.deg === E1.deg ? `${S1.deg}°` : `${S1.deg}° (sorties) et ${E1.deg}° (entrées)`) : '';
+  if (!gS || !gE) return { err: `Giratoire dénivelé impossible à loger avec Rg = ${fmt(Rg, 0)} m${psi < 99.5 ? ` et un biais de ${fmt(psi, 1)} gr` : ''} : augmentez le rayon.` };
+  const ramps = directRamps(gS, ES, gE, EE, s0, W, mkId, [[0, 1, 'S'], [0, 1, 'E'], [2, 2, 'S'], [2, 2, 'E']], R);
+  const at = (t) => W(mul(d, t));
+  const juncs = [{ center: r3(F.P0), Rg, arms: [-1, 1].map((sg) => ({ axis: [at(sg * (Rg + Lo + 30)), at(sg * (Rg + 6))].map(r3), length: Lo })) }];
+  return { ramps, juncs, crossOff: true, psi, warn: coverWarn(hw, s0 + Math.min(gS.xS, gE.xS) - 275, s0 - Math.min(gS.xS, gE.xS) + 275),
+    info: `anneau Rg ${fmt(Rg, 0)} m sur deux ouvrages${psi < 99.5 ? `, voie secondaire biaise ${fmt(psi, 1)} gr` : ''}, bretelles à ${al} de l'autoroute, R ${fmt(R.R1 - half, 0)} / ${fmt(R.R2 - half, 0)} m au bord intérieur, sorties à ${fmt(-gS.xS, 0)} m du croisement` };
 }

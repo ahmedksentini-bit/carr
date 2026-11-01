@@ -195,6 +195,23 @@ ou sur un fond topographique DXF.
   l'axe de la branche. Les branches des bretelles se dessinent par le raccordement automatique ci-dessous ; un nouveau
   gabarit au même croisement remplace aussi les giratoires du précédent. Grands giratoires (Rg > 25 m, hors tableau
   ACI) : îlots séparateurs construits sur le triangle de Rg = 25 m.
+- **Biais de la voie secondaire** : le losange, le losange à giratoires, le demi-échangeur et le giratoire dénivelé
+  gardent la direction de la voie secondaire au croisement (jusqu'à 50 gr) ; giratoires centrés sur l'axe biais, sortie
+  et entrée d'un même côté calculées séparément (côté angle aigu plus long), branches de l'anneau du giratoire dénivelé
+  à 30° au moins des branches de la voie secondaire (rayon relevé automatiquement si nécessaire). Le trèfle et le
+  demi-trèfle redressent encore l'axe perpendiculairement à l'autoroute.
+- **Ouvrages (passages supérieurs)** : pour chaque voie secondaire qui croise l'autoroute, la tige d'une trompette et
+  les deux franchissements de l'anneau d'un giratoire dénivelé : lignes d'appui parallèles à l'autoroute (biais
+  géométrique ψ), portées le long de l'axe ; piles de rive au-delà de la BAU, du dispositif de retenue (face à une
+  distance réglable du bord de la BAU) et de sa largeur de fonctionnement W (NF EN 1317-2, W1 à W8, W4 par défaut) ;
+  pile centrale dans le TPC si la bande médiane atteint 3 m et que la pile tient entre les largeurs de fonctionnement
+  (W2 par défaut), sinon 3 travées ; culées en tête du talus 3/2 (hauteur = tirant d'air + 0,20 m) dont le pied passe
+  derrière la pile de rive, ligne d'appui à 0,50 m de la crête, quarts de cône aux angles, culée reculée si la travée
+  de rive est inférieure à 0,5 (0,6 en biais prononcé) fois la travée voisine. Travure, épaisseur (abaques PSI-DA /
+  PSI-DP), domaine d'emploi, rapports de travées, biais mécanique, coupe transversale, ouvertures et longueur d'about
+  vérifiés par les règles reprises du dépôt PSIDA (`js/psida.js`, guide SETRA « Ponts-dalles » 1989) ; fiche par
+  ouvrage dans l'onglet Échangeur, alertes dans les contrôles, calques Ouvrages / Dispositifs de retenue / Talus
+  exportés en DXF.
 - **Raccordement bretelle → giratoire** : une bretelle dont l'extrémité libre est placée dans l'anneau d'un giratoire du
   projet (actif ou non) dessine automatiquement une branche de ce giratoire dans l'axe de son dernier côté ; deux
   bretelles de sens contraires aux extrémités voisines (tige d'une trompette) forment une seule branche à double sens.
@@ -359,7 +376,7 @@ structure de l'HCM, d'après Troutbeck & Brilon, *Traffic Flow Theory*, chap. 8 
   entre deux boucles successives sur la collectrice reste très inférieur aux 275 m du § 7.3.3 (il est signalé), et sur
   une route ordinaire (tpl 4,70 m, Lm 74 m) les boucles passent à Ri ≈ 66 m pour que les musoirs ne se chevauchent pas ;
   les carrefours aux
-  extrémités du demi-trèfle et du losange simple ne sont pas générés ; le biais de la voie secondaire n'est pas traité (axe redressé) ; l'ouvrage de franchissement n'est pas dessiné ; la section courante est tracée en droites et arcs (sans
+  extrémités du demi-trèfle et du losange simple ne sont pas générés ; le biais de la voie secondaire n'est pas traité pour le trèfle et le demi-trèfle (axe redressé) ; les ouvrages sont dessinés en plan seulement (pas d'élévation ni de calcul de structure : voir PSIDA) ; la section courante est tracée en droites et arcs (sans
   clothoïdes) ; les bretelles n'ont pas encore de profil en long ni de profils en travers, ni de vue 3D, et leur
   extrémité n'est pas encore raccordée automatiquement au giratoire (branche à sens unique) : l'axe se termine sur la
   branche dessinée.
