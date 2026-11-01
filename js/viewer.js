@@ -30,6 +30,7 @@ export const THEMES = {
       SIGNALISATION: { stroke: '#f87171', w: 1.4, text: '#fca5a5' },
       IMPLANTATION: { stroke: '#e879f9', w: 1, text: '#f0abfc' },
       PROFILS: { stroke: '#4ade80', w: 1.1, text: '#86efac' },
+      BASSINS: { stroke: '#38bdf8', w: 1.2, text: '#7dd3fc', fill: { bv: 'rgba(56,189,248,0.07)' }, roles: { stream: { stroke: 'rgba(96,165,250,0.85)', w: 1 }, part: { stroke: 'rgba(56,189,248,0.45)', w: 0.8 } } },
     },
   },
   light: {
@@ -59,6 +60,7 @@ export const THEMES = {
       SIGNALISATION: { stroke: '#b91c1c', w: 1.4, text: '#991b1b' },
       IMPLANTATION: { stroke: '#a21caf', w: 1, text: '#86198f' },
       PROFILS: { stroke: '#15803d', w: 1.1, text: '#166534' },
+      BASSINS: { stroke: '#0369a1', w: 1.2, text: '#075985', fill: { bv: 'rgba(3,105,161,0.07)' }, roles: { stream: { stroke: 'rgba(37,99,235,0.8)', w: 1 }, part: { stroke: 'rgba(3,105,161,0.4)', w: 0.8 } } },
     },
   },
 };
@@ -165,7 +167,7 @@ function arrowHead(ctx, x0, y0, x1, y1, size) {
 export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
   if (!D) return;
   const T = THEMES[theme];
-  const order = ['MNT', 'CHAUSSEE', 'TALUS', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'RETENUE', 'OUVRAGE', 'PMR', 'VISIBILITE', 'EPURE', 'AXE', 'PROFILS', 'DEVERS', 'COTATION', 'SIGNALISATION'];
+  const order = ['MNT', 'BASSINS', 'CHAUSSEE', 'TALUS', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'RETENUE', 'OUVRAGE', 'PMR', 'VISIBILITE', 'EPURE', 'AXE', 'PROFILS', 'DEVERS', 'COTATION', 'SIGNALISATION'];
   ctx.lineCap = 'butt'; ctx.lineJoin = 'round';
   for (const layer of order) {
     if (vis[layer] === false) continue;

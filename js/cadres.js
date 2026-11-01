@@ -21,15 +21,17 @@ export const CADRE_DEF = { type: 'picf', n: 1, B: 3, H: 2.5, Hr: 1.5, biais: 100
 
 // Grandeurs calculées d'un cadre (épaisseurs, largeur extérieure, longueur, murs).
 export function cadreDims(c, half = 6) {
-  const n = Math.max(1, Math.round(num(c.n, 1))), B = Math.max(0.5, num(c.B, 3)), H = Math.max(0.5, num(c.H, 2.5)), Hr = Math.max(0, num(c.Hr, 1.5));
-  const eAuto = up5(0.15 + B / 20);
-  const ep = num(c.ep, eAuto), et = num(c.et, eAuto), ei = num(c.ei, eAuto), er = num(c.er, eAuto);
+  const buse = c.type === 'buse';
+  const n = Math.max(1, Math.round(num(c.n, 1))), B = Math.max(0.3, num(c.B, buse ? 1 : 3)), H = buse ? B : Math.max(0.5, num(c.H, 2.5)), Hr = Math.max(0, num(c.Hr, 1.5));
+  // buse : épaisseur de paroi ≈ D/12 + 0,08 m, entraxe libre entre buses ≥ max(0,40 m, D/3)
+  const eAuto = buse ? up5(0.08 + B / 12) : up5(0.15 + B / 20);
+  const ep = num(c.ep, eAuto), et = num(c.et, eAuto), ei = num(c.ei, buse ? Math.max(0.4, up5(B / 3)) : eAuto), er = num(c.er, eAuto);
   const psi = Math.max(30, Math.min(100, num(c.biais, 100))), sinP = Math.sin((psi * Math.PI) / 200);
   const W = n * B + (n - 1) * ei + 2 * ep;
   const Lauto = up50((2 * (half + 1.5 * Hr + 0.5)) / sinP);
   const L = Math.max(W, num(c.L, Lauto));
   const wingA = Math.max(0, Math.min(90, num(c.wingA, 30))), wingL = Math.max(0, num(c.wingL, up50(1.5 * (H + et))));
-  return { n, B, H, Hr, ep, et, ei, er, eAuto, psi, sinP, W, L, Lauto, wingA, wingL, type: c.type === 'pipo' ? 'pipo' : 'picf' };
+  return { n, B, H, Hr, ep, et, ei, er, eAuto, psi, sinP, W, L, Lauto, wingA, wingL, type: buse ? 'buse' : c.type === 'pipo' ? 'pipo' : 'picf' };
 }
 
 // Implantation : point et directions sur l'axe porteur, abscisse le long de l'autoroute (numérotation des ouvrages).
@@ -87,8 +89,9 @@ export function drawCadre(g, name, P, TH) {
   }
   // Axe de l'ouvrage et étiquette.
   path([G.add(p, G.mul(d, -K.L / 2 - 2)), G.add(p, G.mul(d, K.L / 2 + 2))], { role: 'axe', dash: [3, 1, 0.5, 1] });
-  const what = K.type === 'pipo' ? 'PIPO' : 'PICF';
-  const desc = `${name} : ${what} ${K.n > 1 ? `${K.n} × ` : ''}${fmt(K.B, 2)} × ${fmt(K.H, 2)} m, L = ${fmt(K.L, 2)} m, biais ${fmt(K.psi, 1)} gr`;
+  const what = K.type === 'pipo' ? 'PIPO' : K.type === 'buse' ? 'buse' : 'PICF';
+  const desc = K.type === 'buse' ? `${name} : ${K.n > 1 ? `${K.n} buses` : 'buse'} Ø ${fmt(K.B, 2)} m, L = ${fmt(K.L, 2)} m, biais ${fmt(K.psi, 1)} gr`
+    : `${name} : ${what} ${K.n > 1 ? `${K.n} × ` : ''}${fmt(K.B, 2)} × ${fmt(K.H, 2)} m, L = ${fmt(K.L, 2)} m, biais ${fmt(K.psi, 1)} gr`;
   text(G.add(E[1], G.add(G.mul(d, 2 + K.wingL * 0.3), G.mul(m, K.W / 2 + 1))), desc, Math.atan2(d.y, d.x));
   return { poly, desc };
 }

@@ -23,4 +23,5 @@ export const LAYERS = {
   SIGNALISATION: { label: 'Signalisation verticale (panneaux, balises)', dxf: 'GIRA_SIGNALISATION', aci: 1 },
   IMPLANTATION: { label: "Points d'implantation", dxf: 'GIRA_IMPLANTATION', aci: 6 },
   PROFILS: { label: 'Profils en travers (implantation)', dxf: 'GIRA_PROFILS', aci: 3 },
+  BASSINS: { label: 'Bassins versants et écoulements', dxf: 'GIRA_BASSINS', aci: 150 },
 };

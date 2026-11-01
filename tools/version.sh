@@ -5,14 +5,14 @@
 # js/ ou css/ :   bash tools/version.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
-v=$(cat js/*.js css/*.css | sha1sum | cut -c1-10)
+v=$(cat js/*.js js/hydro/*.js js/hydro/data/*.js css/*.css | sha1sum | cut -c1-10)
 {
   echo '  <!-- version:start (généré par tools/version.sh) -->'
   echo "  <link rel=\"stylesheet\" href=\"css/app.css?v=$v\">"
   echo '  <script data-cfasync="false" type="importmap">'
   echo '  { "imports": {'
-  n=$(ls js/*.js | wc -l); i=0
-  for f in js/*.js; do
+  n=$(ls js/*.js js/hydro/*.js js/hydro/data/*.js | wc -l); i=0
+  for f in js/*.js js/hydro/*.js js/hydro/data/*.js; do
     i=$((i + 1)); sep=','; [ "$i" -eq "$n" ] && sep=''
     echo "    \"./$f\": \"./$f?v=$v\"$sep"
   done
