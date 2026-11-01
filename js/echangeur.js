@@ -356,6 +356,9 @@ export function buildEchangeur(prj, D) {
     // Sommets : le premier est projeté sur la ligne d'obliquité du divergent, le dernier sur celle du convergent ;
     // les distances sont augmentées jusqu'à obtenir un alignement droit ≥ Lm (prolongement de l'obliquité, § 6.1).
     const up = rp.pis.map((p) => ({ x: +p.x, y: +p.y, R: num(p.R, 0), A: num(p.A, 0), loop: !!p.loop, link: !!p.link, semi: !!p.semi }));
+    // Extrémité libre raccordée à un giratoire (branche dessinée automatiquement) : l'axe s'arrête au bout de la branche.
+    const cut = rp.r?.cut;
+    if (cut && up.length) { const k = cut.end === 'from' && !Fs ? 0 : cut.end === 'to' && !Ft ? up.length - 1 : -1; if (k >= 0) up[k] = { ...up[k], x: cut.x, y: cut.y, R: 0, A: 0 }; }
     if (up.length < (Fs ? 0 : 1) + (Ft ? 0 : 1) || (!Fs && !Ft && up.length < 2)) { err('extrémité libre sans sommet : ajoutez des sommets.'); continue; }
     const both1 = Fs && Ft && up.length === 1;
     let lamS = Fs && up.length ? Math.max(10, G.dot(sub(up[0], Fs.A), Fs.dir)) : 0;
@@ -821,7 +824,9 @@ export function deriveTrumpet(prj, D, semi, prev, opt = {}) {
   const yM = Math.max(opt.yM || 240, G.dot(sub(PId, Rp), u) + TdS + 54 + 15), yME = Math.max(opt.yM || 240, G.dot(sub(PIe, Lp), u) + TdE + 54 + 15);
   const xSd = PId.x + Math.max(Ld, 140 + TdS + 25) - 10.5, xEd = PIe.x - Math.max(Ld, 140 + TdE + 25) + 10.5;
   const sdir = { ...base, ...prev.sdir, from: { ...(prev.sdir?.from || {}), ref: near, s: st(xSd) }, to: { ...(prev.sdir?.to || {}), ref: semi.id, s: +(alS.length - (Ys - yM)).toFixed(2) }, pis: [{ ...W(PId), R: Rd, A: Ad }] };
-  const edir = { ...base, ...prev.edir, from: { ...(prev.edir?.from || {}), ref: boucle.id, s: +(Ys - (yME + 5)).toFixed(2) }, to: { ...(prev.edir?.to || {}), ref: near, s: st(xEd) }, pis: [{ ...W(PIe), R: Rd, A: Ad }] };
+  // Tige raccourcie par une branche de giratoire (extrémité dans l'anneau) : la boucle commence plus bas sur la tige.
+  const cutB = prev.boucle?.cut, YsB = cutB && cutB.end === 'from' ? G.dot(Lc(cutB), u) : Ys;
+  const edir = { ...base, ...prev.edir, from: { ...(prev.edir?.from || {}), ref: boucle.id, s: +(YsB - (yME + 5)).toFixed(2) }, to: { ...(prev.edir?.to || {}), ref: near, s: st(xEd) }, pis: [{ ...W(PIe), R: Rd, A: Ad }] };
   const R1 = +pis[0].R || 0;
   return { boucle, sdir, edir, P0, info: `S-semi R1 ${fmt(R1)} / R2 ${fmt(R2)} m → boucle déduite R ${fmt(Rl)} m (Ri ${fmt(Rl - half)} m)` };
 }

@@ -171,6 +171,11 @@ ou sur un fond topographique DXF.
   surlargeur, Lc, Δ) ; l'étiquette d'une courbe d'axe est déplacée hors du croisement.
 - **Plusieurs carrefours** par projet (giratoires et carrefours plans nommés, onglet Projet) : tous sont dessinés et
   exportés ; les onglets portent sur le carrefour actif, qu'on choisit dans la liste ou d'un clic sur le plan.
+- **Raccordement bretelle → giratoire** : une bretelle dont l'extrémité libre est placée dans l'anneau d'un giratoire du
+  projet (actif ou non) dessine automatiquement une branche de ce giratoire dans l'axe de son dernier côté ; deux
+  bretelles de sens contraires aux extrémités voisines (tige d'une trompette) forment une seule branche à double sens.
+  La bretelle s'arrête au bout de la branche (60 m au-delà de l'anneau) ; la branche suit les déplacements ; la supprimer
+  détache la bretelle (rattachée de nouveau si son extrémité est déplacée).
 - **Sélection sur le plan** : chaque élément (giratoire ou carrefour, branche, bretelle, autoroute, route transversale)
   se met en surbrillance au survol ; un clic ouvre sa fenêtre (tous ses paramètres, modifiables, et un bouton Supprimer
   en tête ; Échap ferme, Suppr supprime, fenêtre déplaçable par son en-tête).
