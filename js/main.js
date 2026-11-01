@@ -17,7 +17,7 @@ import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF } from './pt.j
 import { plParams, plBuild, plStations, plTerrainLine, plFromTerrain, plChartSVG, plChartPick, plDXF, plChecks, axisLength } from './pl.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
-import { buildOuvrages, W_CLASSES, psidaLink, psidaProject } from './ouvrage.js';
+import { buildOuvrages, W_CLASSES, psidaLink, psidaProject, PSIDA_URL } from './ouvrage.js';
 import { buildProfils, listAxes, nearestAxis, profParams, profilsCsv } from './profils.js';
 import { cadreGeoms, drawCadre, cadreChecks, cadreLink, cadreProject, CADRE_DEF } from './cadres.js';
 import { axisSections, axisType, typeParams, typeText } from './ptaxes.js';
@@ -367,7 +367,7 @@ function renderOuvr() {
     ['Axe des piles de rive', `à ${fmt(o.yP, 2)} m de l'axe de l'autoroute`],
     ['Talus 3/2 sous culée', `hauteur ${fmt(o.Ht, 2)} m, emprise ${fmt(1.5 * o.Ht, 2)} m`],
     ...(() => { const q = (S.clear || []).find((c) => c.ouvr === o.name); return q ? [['Tirant d\'air (profils en long)', `${fmt(q.ta, 2)} m ${q.lvl === 'err' ? `< gabarit ${fmt(o.gab, 2)} m ✖` : `≥ ${fmt(o.gab, 2)} m ✔`}`]] : [['Tirant d\'air', 'profils en long de l\'autoroute et de la voie portée à saisir (onglet Profil en long)']]; })(),
-  ]) + (() => { const q = (S.clear || []).find((c) => c.ouvr === o.name); return q && q.lvl === 'err' ? `<div class="row"><button data-raise="${esc(o.name)}" title="Place un point d'inflexion sur la voie portée, au droit de l'ouvrage, à la cote assurant le gabarit + 0,10 m (les points à moins de 40 m sont remplacés)">Relever ${esc(S.axpl?.get(q.key)?.name || 'la voie portée')} au gabarit (z = ${fmt(q.zNeed, 2)} m)</button></div>` : ''; })() + `<div class="row"><a class="btn primary" href="${esc(psidaLink(o, S.prj))}" target="_blank" rel="noopener" title="Ouvre psida.ksr-infra.org (onglet Conception) avec la travure, la largeur, l'épaisseur, le biais, le tirant d'air et les appuis de cet ouvrage">Ouvrir dans PSIDA ↗</a><button class="mini" data-psidajson="${esc(o.name)}" title="Projet PSIDA (.json) à ouvrir avec le bouton Ouvrir de PSIDA">Exporter (.json)</button></div>` + `<p class="note">${esc(o.hText)}</p><ul class="ouvr-items">${o.items.map((it) => `<li class="${lvlCls[it.level] || ''}">${esc(it.text)}</li>`).join('')}</ul></div>`).join('');
+  ]) + (() => { const q = (S.clear || []).find((c) => c.ouvr === o.name); return q && q.lvl === 'err' ? `<div class="row"><button data-raise="${esc(o.name)}" title="Place un point d'inflexion sur la voie portée, au droit de l'ouvrage, à la cote assurant le gabarit + 0,10 m (les points à moins de 40 m sont remplacés)">Relever ${esc(S.axpl?.get(q.key)?.name || 'la voie portée')} au gabarit (z = ${fmt(q.zNeed, 2)} m)</button></div>` : ''; })() + `<div class="row"><a class="btn primary" data-psidalink="${esc(o.key)}" href="${esc(o.curved ? PSIDA_URL : psidaLink(o, S.prj))}" target="_blank" rel="noopener" title="Ouvre psida.ksr-infra.org (onglet Conception) avec la travure, la largeur, l'épaisseur, le biais, le tirant d'air et les appuis de cet ouvrage">Ouvrir dans PSIDA ↗</a><button class="mini" data-psidajson="${esc(o.name)}" title="Projet PSIDA (.json) à ouvrir avec le bouton Ouvrir de PSIDA">Exporter (.json)</button></div>` + `<p class="note">${esc(o.hText)}</p><ul class="ouvr-items">${o.items.map((it) => `<li class="${lvlCls[it.level] || ''}">${esc(it.text)}</li>`).join('')}</ul></div>`).join('');
 }
 // Fiche d'un cadre PICF / PIPO : paramètres modifiables (vides = valeurs automatiques), grandeurs, lien PSIDA.
 function renderCadreEdit(o) {
@@ -1175,6 +1175,9 @@ function bindEch() {
       }
       update(); toast(`Point d'inflexion placé sur ${S.axpl?.get(q.key)?.name || 'la voie portée'} au droit de ${q.ouvr} : vérifiez les pentes et les rayons dans l'onglet Profil en long.`); return;
     }
+    // ouvrage courbe : le tracé en plan (reconstitution éventuelle) n'est calculé qu'au clic, avant l'ouverture du lien
+    const lk = e.target.closest('a[data-psidalink]');
+    if (lk) { const o = (S.ouvr?.list || []).find((q) => q.key === lk.dataset.psidalink); if (o) lk.href = psidaLink(o, S.prj); return; }
     const bc = e.target.closest('[data-cadrejson]');
     if (bc) {
       const g = (S.cadres || []).find((q) => q.c.id === bc.dataset.cadrejson); if (!g?.K) return;
