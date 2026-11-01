@@ -195,6 +195,10 @@ ou sur un fond topographique DXF.
   l'axe de la branche. Les branches des bretelles se dessinent par le raccordement automatique ci-dessous ; un nouveau
   gabarit au même croisement remplace aussi les giratoires du précédent. Grands giratoires (Rg > 25 m, hors tableau
   ACI) : îlots séparateurs construits sur le triangle de Rg = 25 m.
+- **Axe de l'autoroute trop court pour un gabarit** : il est prolongé en ligne droite à ses extrémités (emprise des
+  biseaux et insertions + 50 m), les abscisses des raccordements existants et le PK origine sont décalés (PK
+  inchangés) ; un point S.1,00 / E.1,00 hors de l'axe est signalé en erreur (auparavant ramené en bout d'axe, d'où des
+  bretelles aberrantes).
 - **Voie secondaire d'une trompette** : elle s'arrête côté boucle à 30 m au-delà de la plate-forme de l'autoroute (la
   tige ne se prolonge pas au-delà de la boucle) et n'est dessinée qu'au-delà de l'extrémité de la tige (ou du giratoire
   où la tige se raccorde) : la tige et l'ouvrage la remplacent entre les deux.

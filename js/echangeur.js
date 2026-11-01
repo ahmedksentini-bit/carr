@@ -386,6 +386,7 @@ export function buildEchangeur(prj, D) {
     const hF = hostOf(rp.from), hT = hostOf(rp.to);
     const Fs = hF ? endFrame(hF, rp.from, rp.w) : null, Ft = hT ? endFrame(hT, rp.to, rp.w) : null;
     Object.assign(R, { hF, hT, Fs, Ft });
+    for (const [h, e] of [[hF, rp.from], [hT, rp.to]]) if (h?.kind === 'hwy' && (e.s < -0.5 || e.s > h.sEnd + 0.5)) err(`point ${e === rp.from ? 'S' : 'E'}.1,00 à l'abscisse ${fmt(e.s, 0)} m, hors de l'axe de ${h.name.replace(/ sens \d$/, '')} (0 à ${fmt(h.sEnd, 0)} m) : prolongez l'axe.`);
     for (const [h, F] of [[hF, Fs], [hT, Ft]]) {
       if (h?.kind !== 'hwy') continue;
       if (!h.C) continue;
@@ -820,7 +821,7 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
   const grp = ids[1], Bs = { ...B2, gen: 'trompette', grp, role: 'semi' };
   const dv = deriveTrumpet(prj, D, Bs, { boucle: { ...B1, gen: 'trompette', grp, role: 'boucle', ...(opt.boucleCut ? { cut: opt.boucleCut } : {}) }, sdir: { ...B3, gen: 'trompette', grp, role: 'sdir' }, edir: { ...B4, gen: 'trompette', grp, role: 'edir' } }, opt);
   if (dv.err) return { err: dv.err };
-  return { ramps: [dv.boucle, Bs, dv.sdir, dv.edir], warn, info: dv.info + (tigeW ? ` ; tige sur la voie secondaire${obl > 0.5 ? `, biais ${fmt(obl, 1)}°` : ''}` : ''), bridge: { p: P0, dir: add(mul(tL, u.x), mul(nL, u.y)) }, P0: dv.P0 };
+  return { ramps: [dv.boucle, Bs, dv.sdir, dv.edir], warn, cover: [lo, hi], info: dv.info + (tigeW ? ` ; tige sur la voie secondaire${obl > 0.5 ? `, biais ${fmt(obl, 1)}°` : ''}` : ''), bridge: { p: P0, dir: add(mul(tL, u.x), mul(nL, u.y)) }, P0: dv.P0 };
 }
 
 // Trompette déduite de sa S-semi (création et après toute modification de la S-semi) : la dernière branche de la S-semi
@@ -1051,7 +1052,7 @@ export function cloverleaf(prj, D, click, mkId, opt = {}) {
   const lo = Math.min(...mainNeed), hi = Math.max(...mainNeed);
   if (lo < 0 || hi > hw.sEnd) warn = `L'axe de l'autoroute doit couvrir les abscisses ${fmt(Math.max(0, lo), 0)} à ${fmt(hi, 0)} m (actuellement 0 à ${fmt(hw.sEnd, 0)} m).`;
   const loopR = quads.map((q) => q.loop.Rl), loopR1 = quads.map((q) => q.loop.R1), dirR = quads.map((q) => q.dir.Ro);
-  return { ramps, crossAxis: F.crossAxis, warn, info: `boucles R ${[...new Set(quads.map((q) => (q.loop.R1 > q.loop.Rl ? `${q.loop.R1}/${q.loop.Rl}` : q.loop.Rl)))].join(', ')} m, bretelles directes R ${[...new Set(dirR)].join(', ')} m` };
+  return { ramps, crossAxis: F.crossAxis, warn, cover: [lo, hi], info: `boucles R ${[...new Set(quads.map((q) => (q.loop.R1 > q.loop.Rl ? `${q.loop.R1}/${q.loop.Rl}` : q.loop.Rl)))].join(', ')} m, bretelles directes R ${[...new Set(dirR)].join(', ')} m` };
 }
 
 // Demi-trèfle (route transversale ordinaire) : de chaque côté de l'autoroute, une sortie directe et une entrée en
@@ -1105,7 +1106,7 @@ export function halfCloverleaf(prj, D, click, mkId, opt = {}) {
   function st0(x) { return s0 + x; }
   const lo = Math.min(...need), hi = Math.max(...need);
   const warn = lo < 0 || hi > hw.sEnd ? `L'axe de l'autoroute doit couvrir les abscisses ${fmt(Math.max(0, lo), 0)} à ${fmt(hi, 0)} m (actuellement 0 à ${fmt(hw.sEnd, 0)} m).` : '';
-  return { ramps, crossAxis: F.crossAxis, warn, info: `boucles R ${Rl} m, sorties R ${fmt(R1)} / ${fmt(R2)} m ; extrémités libres à ${fmt(-xJ, 0)} m de l'axe transversal` };
+  return { ramps, crossAxis: F.crossAxis, warn, cover: [lo, hi], info: `boucles R ${Rl} m, sorties R ${fmt(R1)} / ${fmt(R2)} m ; extrémités libres à ${fmt(-xJ, 0)} m de l'axe transversal` };
 }
 
 // Bretelle de sortie à deux courbes de sens contraires (losange, demi-échangeur, giratoire dénivelé), dans le repère
@@ -1204,7 +1205,7 @@ export function diamond(prj, D, click, mkId, opt = {}) {
     ] });
     crossAxis = [at(-(tC - Rg - Lb)), at(tC - Rg - Lb)].map(r3);
   }
-  return { ramps, crossAxis, juncs, Yj, psi, warn: coverWarn(hw, s0 + Math.min(gS.xS, gE.xS) - 275, s0 - Math.min(gS.xS, gE.xS) + 275),
+  return { ramps, crossAxis, juncs, Yj, psi, cover: [s0 + Math.min(gS.xS, gE.xS) - 275, s0 - Math.min(gS.xS, gE.xS) + 275], warn: coverWarn(hw, s0 + Math.min(gS.xS, gE.xS) - 275, s0 - Math.min(gS.xS, gE.xS) + 275),
     info: `carrefours à ${fmt(Yj, 0)} m de l'axe${gir ? ` (giratoires Rg ${fmt(Rg, 0)} m)` : ''}${psi < 99.5 ? `, biais ${fmt(psi, 1)} gr` : ''}, bretelles R ${fmt(R.R1 - half, 0)} / ${fmt(R.R2 - half, 0)} m au bord intérieur, sorties à ${fmt(-gS.xS, 0)} m${Math.abs(gS.xS - gE.xS) > 1 ? ` (entrées à ${fmt(-gE.xS, 0)} m)` : ''} du croisement` };
 }
 
@@ -1246,6 +1247,6 @@ export function gradeRoundabout(prj, D, click, mkId, opt = {}) {
   const ramps = directRamps(gS, ES, gE, EE, s0, W, mkId, [[0, 1, 'S'], [0, 1, 'E'], [2, 2, 'S'], [2, 2, 'E']], R);
   const at = (t) => W(mul(d, t));
   const juncs = [{ center: r3(F.P0), Rg, arms: [-1, 1].map((sg) => ({ axis: [at(sg * (Rg + Lo + 30)), at(sg * (Rg + 6))].map(r3), length: Lo })) }];
-  return { ramps, juncs, crossOff: true, psi, warn: coverWarn(hw, s0 + Math.min(gS.xS, gE.xS) - 275, s0 - Math.min(gS.xS, gE.xS) + 275),
+  return { ramps, juncs, crossOff: true, psi, cover: [s0 + Math.min(gS.xS, gE.xS) - 275, s0 - Math.min(gS.xS, gE.xS) + 275], warn: coverWarn(hw, s0 + Math.min(gS.xS, gE.xS) - 275, s0 - Math.min(gS.xS, gE.xS) + 275),
     info: `anneau Rg ${fmt(Rg, 0)} m sur deux ouvrages${psi < 99.5 ? `, voie secondaire biaise ${fmt(psi, 1)} gr` : ''}, bretelles à ${al} de l'autoroute, R ${fmt(R.R1 - half, 0)} / ${fmt(R.R2 - half, 0)} m au bord intérieur, sorties à ${fmt(-gS.xS, 0)} m du croisement` };
 }

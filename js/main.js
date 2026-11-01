@@ -661,16 +661,37 @@ function trimCrossLoopSide(X, P0, u) {
   });
   if (out.length >= 2 && (out.length !== X.axis.length || out.some((p, i) => p !== X.axis[i]))) X.axis = out;
 }
+// Gabarit plus long que l'axe de l'autoroute (abscisses cover = [lo, hi] hors de [0, longueur]) : l'axe est prolongé
+// en ligne droite à ses extrémités (+ 50 m), les abscisses des raccordements existants sont décalées et le PK origine
+// corrigé (PK inchangés aux points existants), puis le gabarit est recalculé.
+function withHwyCover(build) {
+  let T = build();
+  if (T.err || !T.cover || !S.D?.hwy?.ok) return T;
+  const [lo, hi] = T.cover, L = S.D.hwy.sEnd, H = S.prj.hwy, ax = H.axis;
+  const dA = lo < 0 ? Math.ceil(-lo + 50) : 0, dB = hi > L ? Math.ceil(hi - L + 50) : 0;
+  if (!(dA || dB) || ax.length < 2) return T;
+  const ext = (p, q, d) => { const u = G.norm(G.sub(p, q)); return { ...p, x: +(p.x + u.x * d).toFixed(3), y: +(p.y + u.y * d).toFixed(3) }; };
+  if (dA) ax[0] = ext(ax[0], ax[1], dA);
+  if (dB) ax[ax.length - 1] = ext(ax[ax.length - 1], ax[ax.length - 2], dB);
+  if (dA) {
+    for (const r of S.prj.ramps) for (const e of [r.from, r.to]) if (/^hwy[12]$/.test(e?.ref || '') && e.s !== '' && e.s != null) e.s = +(+e.s + dA).toFixed(2);
+    H.pk0 = String(+((parseNum(String(H.pk0 ?? '')) || 0) - dA).toFixed(3));
+  }
+  update({ commit: false });
+  T = build();
+  if (!T.err) T.extNote = `Axe de l'autoroute prolongé${dA ? ` de ${dA} m à l'origine` : ''}${dA && dB ? ' et' : ''}${dB ? ` de ${dB} m à la fin` : ''} pour loger le gabarit${dA ? ' (PK conservés)' : ''}.`;
+  return T;
+}
 function addTrumpetAt(w, crossK) {
   const tp = { crossK: crossK ?? null, click: { x: +w.x.toFixed(3), y: +w.y.toFixed(3) }, R2: parseNum(String(S.prj.hwy.trR2 ?? '')) || 62, gap: parseNum(String(S.prj.hwy.trGap ?? '')) || 0, tpc: parseNum(String(S.prj.hwy.trTpc ?? '')) || 1, Ys: '' };
-  const T = trumpet(S.prj, S.D, w, uid, tpOpt(tp));
+  const T = withHwyCover(() => trumpet(S.prj, S.D, w, uid, tpOpt(tp)));
   if (T.err) { toast(T.err, 'warn'); return; }
   const nOld = removeGenerated(T.P0);
   tp.P0 = { x: +T.P0.x.toFixed(3), y: +T.P0.y.toFixed(3) }; tp.u = { x: +T.bridge.dir.x.toFixed(6), y: +T.bridge.dir.y.toFixed(6) };
   S.prj.ramps.push(...T.ramps.map((r) => ({ ...r, gen: 'trompette', ...(r.role === 'semi' ? { tp } : {}) }))); S.rsel = S.prj.ramps.length - 3;
   if (crossK != null) trimCrossLoopSide(S.prj.crosses[crossK], T.P0, T.bridge.dir);
   setTool('select'); update(); zoomAll();
-  toast(`Trompette générée${crossK != null ? ` sur ${S.prj.crosses[crossK]?.name || 'la voie secondaire'}` : ''} : ${T.info}.${nOld ? ` ${nOld} bretelle(s) du gabarit précédent remplacée(s) (Ctrl+Z pour annuler).` : ''} Raccordez le haut de la tige au carrefour.` + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
+  toast(`Trompette générée${crossK != null ? ` sur ${S.prj.crosses[crossK]?.name || 'la voie secondaire'}` : ''} : ${T.info}.${nOld ? ` ${nOld} bretelle(s) du gabarit précédent remplacée(s) (Ctrl+Z pour annuler).` : ''} Raccordez le haut de la tige au carrefour.` + (T.extNote ? ' ' + T.extNote : '') + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
 }
 
 // Trèfle / demi-trèfle sur la voie secondaire k : construit au croisement avec l'autoroute ; l'axe de la voie est redressé
@@ -680,7 +701,7 @@ function addCloverAt(w, kind, k) {
   if (!X) return;
   if (kind === 'demitrefle' && X.kind === 'autoroute') { toast('Le demi-trèfle se raccorde à une route ordinaire : choisissez « Route ordinaire » pour cette voie secondaire.', 'warn'); return; }
   const C = crossingWith(S.D, w, k), P = C ? C.P0 : w;
-  const T = (kind === 'trefle' ? cloverleaf : halfCloverleaf)(S.prj, S.D, P, uid, { crossK: k });
+  const T = withHwyCover(() => (kind === 'trefle' ? cloverleaf : halfCloverleaf)(S.prj, S.D, P, uid, { crossK: k }));
   if (T.err) { toast(T.err, 'warn'); return; }
   const skew = C ? (Math.acos(Math.min(1, Math.abs(G.dot(C.dir, G.norm(G.sub(T.crossAxis[1], T.crossAxis[0])))))) * 180) / Math.PI : 0;
   X.on = true; X.axis = T.crossAxis;
@@ -690,7 +711,7 @@ function addCloverAt(w, kind, k) {
   S.prj.ramps.push(...T.ramps.map((r) => ({ ...r, gen: kind }))); S.rsel = n0;
   setTool('select'); update(); zoomAll();
   const what = (kind === 'trefle' ? (X.kind === 'autoroute' ? 'Trèfle (nœud autoroutier, collectrices sur les deux axes)' : 'Trèfle complet (collectrices sur l\'autoroute)') : 'Demi-trèfle (extrémités libres sur la voie secondaire)') + ` sur ${X.name}`;
-  toast(`${what} généré : ${T.info}.${nOld ? ` ${nOld} bretelle(s) du gabarit précédent remplacée(s) (Ctrl+Z pour annuler).` : ''}` + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
+  toast(`${what} généré : ${T.info}.${nOld ? ` ${nOld} bretelle(s) du gabarit précédent remplacée(s) (Ctrl+Z pour annuler).` : ''}` + (T.extNote ? ' ' + T.extNote : '') + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
 }
 
 // Losange, losange à giratoires, demi-échangeur, giratoire dénivelé sur la voie secondaire k. Les giratoires sont créés
@@ -717,8 +738,8 @@ function addDiamondAt(w, kind, k) {
   const nv = (v) => parseNum(String(v ?? '')) || 0;
   const C = crossingWith(S.D, w, k), P = C ? C.P0 : w, demi = kind === 'demiech';
   const gir = kind === 'losangegir' || (demi && H.dmGir !== 'libre');
-  const T = kind === 'girden' ? gradeRoundabout(S.prj, S.D, P, uid, { crossK: k, dir: C?.dir, Rg: nv(H.gdRg) })
-    : diamond(S.prj, S.D, P, uid, { crossK: k, dir: C?.dir, gir, part: demi ? (H.dmSide === 'fin' ? 'fin' : 'debut') : 'complet', Yj: nv(H.loY), Rg: nv(H.loRg) });
+  const T = withHwyCover(() => (kind === 'girden' ? gradeRoundabout(S.prj, S.D, P, uid, { crossK: k, dir: C?.dir, Rg: nv(H.gdRg) })
+    : diamond(S.prj, S.D, P, uid, { crossK: k, dir: C?.dir, gir, part: demi ? (H.dmSide === 'fin' ? 'fin' : 'debut') : 'complet', Yj: nv(H.loY), Rg: nv(H.loRg) })));
   if (T.err) { toast(T.err, 'warn'); return; }
   const nOld = removeGenerated(P, 1500), nJ = removeGenJunctions(P, 1500);
   if (T.crossOff) X.on = false; else { X.on = true; X.axis = T.crossAxis; }
@@ -739,6 +760,7 @@ function addDiamondAt(w, kind, k) {
   const msgs = [`${what} généré sur ${X.name} : ${T.info}.`];
   if (T.crossOff) msgs.push(`${X.name} est désactivée : le giratoire la remplace par deux branches.`);
   if (nOld || nJ) msgs.push(`Gabarit précédent remplacé (${nOld} bretelle(s)${nJ ? `, ${nJ} giratoire(s)` : ''}) — Ctrl+Z pour annuler.`);
+  if (T.extNote) msgs.push(T.extNote);
   if (T.warn) msgs.push(T.warn);
   toast(msgs.join(' '), T.warn ? 'warn' : 'info');
 }
