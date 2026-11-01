@@ -9,7 +9,7 @@ import { buildDesign, fmt, fmtGis } from './roundabout.js';
 import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan, SECTION, sectionParams, TAD, SIGNS, signParams } from './norms.js';
 import { GAMMES, CATALOG } from './signs.js';
 import { signSVG, signOutline } from './signicons.js';
-import { rampParams, endFrame, normRamp, buildEchangeur, trumpet, deriveTrumpet, crossingWith, xref, cloverleaf, halfCloverleaf, diamond, gradeRoundabout, HWY_CAT, RAMP_CAT, crossParams, roadAlignment } from './echangeur.js';
+import { rampParams, endFrame, normRamp, buildEchangeur, trumpet, deriveTrumpet, crossingWith, xref, cloverleaf, halfCloverleaf, diamond, gradeRoundabout, HWY_CAT, RAMP_CAT, crossParams, roadAlignment, parseXref } from './echangeur.js';
 import { pathProject, pathTangentAt, polySegs } from './clotho.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
@@ -336,8 +336,10 @@ function update({ commit = true, panels = true } = {}) {
 // Carrefours et leur cote zC (calage des extrémités de bretelles qui y aboutissent).
 function junctionsZ() {
   const out = [];
-  if (S.D?.O) out.push({ O: S.D.O, Rg: +S.prj.ring?.Rg || 20, zC: S.prj.ring?.zC === '' || S.prj.ring?.zC == null ? null : +S.prj.ring.zC, name: S.prj.jname || 'giratoire' });
-  for (const d of S.Do || []) { const o = S.prj.others.find((q) => q.id === d.id); if (d.D?.O && o) out.push({ O: d.D.O, Rg: +o.ring?.Rg || 20, zC: o.ring?.zC === '' || o.ring?.zC == null ? null : +o.ring.zC, name: o.name }); }
+  // cote zC d'un carrefour : ignorée si elle s'écarte de plus de 30 m du terrain naturel (valeur par défaut jamais réglée)
+  const zOk = (z, O) => { if (z == null || !Number.isFinite(z)) return null; const t = S.tn?.tin ? tinZ(S.tn.tin, O.x, O.y) : null; return t != null && Math.abs(z - t) > 30 ? null : z; };
+  if (S.D?.O) out.push({ O: S.D.O, Rg: +S.prj.ring?.Rg || 20, zC: zOk(S.prj.ring?.zC === '' || S.prj.ring?.zC == null ? null : +S.prj.ring.zC, S.D.O), name: S.prj.jname || 'giratoire' });
+  for (const d of S.Do || []) { const o = S.prj.others.find((q) => q.id === d.id); if (d.D?.O && o) out.push({ O: d.D.O, Rg: +o.ring?.Rg || 20, zC: zOk(o.ring?.zC === '' || o.ring?.zC == null ? null : +o.ring.zC, d.D.O), name: o.name }); }
   return out;
 }
 // Onglet Ouvrages : liste, travure modifiable de l'ouvrage choisi (réglages par ouvrage dans prj.ouvr.decks), fiche.
@@ -479,7 +481,8 @@ function renderCrossFields() {
     `<p class="note">${esc(catText(designCatOf(crossParams(S.prj, k))))}. Clothoïdes posées automatiquement aux sommets de rayon < 1,5 Rdn (longueur minimale de la catégorie ; colonne A des sommets pour l'imposer, 0 = aucune).</p>` +
     '<div class="row">' + fld(p + 'lanes', 'Voies par sens', '', { ph: '1 / 2' }) + fld(p + 'wLane', 'Largeur de voie', 'm', { ph: '3,50' }) + '</div>' +
     '<div class="row">' + fld(p + 'bau', 'BAU / BDD', 'm', { ph: '2,00 / 2,50' }) + fld(p + 'median', 'Bande médiane', 'm', { ph: '0 / 3,00' }) + '</div>' +
-    '<div class="row">' + fld(p + 'bdg', 'BDG', 'm', { ph: '0 / 1,00' }) + fld(p + 'berme', 'Berme', 'm', { ph: '0,75 / 1,00' }) + '</div>';
+    '<div class="row">' + fld(p + 'bdg', 'BDG', 'm', { ph: '0 / 1,00' }) + fld(p + 'berme', 'Berme', 'm', { ph: '0,75 / 1,00' }) + '</div>' +
+    `<div class="row"><button data-xconnect="${k}" title="Accroche les extrémités de la voie aux carrefours voisins (branche ajoutée) et crée un giratoire là où elle croise une autre voie secondaire">Raccorder aux carrefours et croisements</button></div>`;
 }
 function buildOuvrFields() {
   const Wopts = (d) => [['', `${d} (${fmt(W_CLASSES[d], 2)} m), par défaut`], ...Object.entries(W_CLASSES).filter(([k]) => k !== d).map(([k, v]) => [k, `${k} (${fmt(v, 2)} m)`])];
@@ -1108,6 +1111,7 @@ function hitEchHandle(px, py) {
 function bindEch() {
   $('#btnHwyAxis').addEventListener('click', () => { setTool('axis'); S.hwyDraw = 'hwy'; setPrompt(); });
   $('#btnCrossAxis').addEventListener('click', () => { setTool('axis'); S.hwyDraw = 'cross'; setPrompt(); });
+  $('#crossFields').addEventListener('click', (e) => { const b = e.target.closest('[data-xconnect]'); if (!b) return; const msg = connectCross(+b.dataset.xconnect); if (msg) { S.echSig = ''; update(); toast(msg); } else toast('Aucun carrefour ni croisement à raccorder pour cette voie.', 'warn'); });
   $('#crossList').addEventListener('click', (e) => { const li = e.target.closest('li[data-xi]'); if (!li) return; S.xsel = +li.dataset.xi; S.echSig = ''; refreshPanels(); viewer.invalidate(); });
   const place = (kind) => {
     if (!S.D?.hwy?.ok) { toast('Activez l\'autoroute et dessinez d\'abord son axe.', 'warn'); return; }
@@ -1591,6 +1595,127 @@ function startExtend(e) {
   renderBranchForm(); setPrompt(); viewer.invalidate();
 }
 
+// ---------------------------------------------------------------- raccordement des voies secondaires (PS)
+// Une voie secondaire dessinée (passage supérieur) reconnaît :
+//  • les carrefours existants (carrefour actif, autres carrefours, giratoires des gabarits) : une extrémité posée à moins
+//    de R + 100 m du centre s'y arrête à R + Lb (Lb = 60 m, comme les losanges à giratoires), dans l'alignement de son
+//    dernier côté, et le carrefour reçoit la branche correspondante (sauf s'il en a déjà une dans cette direction) ;
+//  • les autres voies secondaires qu'elle croise : un giratoire est créé au croisement (type modifiable ensuite dans
+//    l'onglet Carrefour), les deux voies y sont coupées à R + Lb de part et d'autre et y arrivent par quatre branches.
+// Les profils en long suivent (points d'inflexion reportés sur les tronçons, extrémités calées sur la cote du carrefour)
+// ainsi que les bretelles accrochées à une voie coupée (rattachées au tronçon qui les porte).
+const PS_LB = 60;
+function knownJunctions() {
+  const out = [];
+  const add = (id, J, D, name) => {
+    const fixed = J.center && !J.center.auto && J.center.x != null;
+    if (!(J.branches || []).length && !fixed) return;
+    const C = D?.O || (fixed ? { x: +J.center.x, y: +J.center.y } : null);
+    if (!C) return;
+    const plan = isPlan(J);
+    out.push({ id, J, C, R: plan ? 12 : +J.ring?.Rg || 20, plan, name });
+  };
+  add(S.prj.jid, S.prj, S.D, S.prj.jname || 'Carrefour 1');
+  for (const o of S.prj.others || []) add(o.id, o, (S.Do || []).find((d) => d.id === o.id)?.D, o.name);
+  return out;
+}
+const r3p = (q) => ({ x: Math.round(q.x * 1000) / 1000, y: Math.round(q.y * 1000) / 1000 });
+// Branche du carrefour j dans la direction u (depuis le centre), de longueur Lb, si aucune n'y est déjà.
+function addArm(j, u, Lb) {
+  const E = G.add(j.C, G.mul(u, j.R + Lb)), inner = G.add(j.C, G.mul(u, j.plan ? 0.5 : j.R + 6));
+  const exists = (j.J.branches || []).some((b) => { const a = b.axis || []; if (a.length < 2) return false; const far = G.dist(a[0], j.C) >= G.dist(a[a.length - 1], j.C) ? a[0] : a[a.length - 1]; return G.dot(G.norm(G.sub(far, j.C)), u) > Math.cos(Math.PI / 18); });
+  if (exists) return false;
+  j.J.branches.push({ ...newBranch(j.J, [r3p(E), r3p(inner)]), length: Lb });
+  return true;
+}
+// Polyligne : abscisses cumulées et point à l'abscisse s.
+const polyS = (pts) => { const L = [0]; for (let i = 1; i < pts.length; i++) L.push(L[i - 1] + G.dist(pts[i - 1], pts[i])); return L; };
+const polyAt = (pts, L, s) => { let i = 1; while (i < pts.length - 1 && L[i] < s) i++; return G.lerp(pts[i - 1], pts[i], (s - L[i - 1]) / (L[i] - L[i - 1] || 1)); };
+// Intersections des côtés de deux polylignes : [{ p, sA, sB }].
+function polyCross(A, B) {
+  const out = [], LA = polyS(A), LB = polyS(B);
+  for (let i = 1; i < A.length; i++) for (let j = 1; j < B.length; j++) {
+    const a = A[i - 1], b = A[i], c = B[j - 1], d = B[j], r = G.sub(b, a), q = G.sub(d, c), den = G.cross(r, q);
+    if (Math.abs(den) < 1e-9) continue;
+    const t = G.cross(G.sub(c, a), q) / den, u = G.cross(G.sub(c, a), r) / den;
+    if (t < 0 || t > 1 || u < 0 || u > 1) continue;
+    out.push({ p: G.add(a, G.mul(r, t)), sA: LA[i - 1] + t * Math.hypot(r.x, r.y), sB: LB[j - 1] + u * Math.hypot(q.x, q.y) });
+  }
+  return out;
+}
+// Coupe la voie secondaire m de part et d'autre de l'abscisse sP (polyligne des sommets) à ± d : le premier tronçon reste
+// la voie m, le second devient une nouvelle voie ; renvoie les extrémités créées [E1 | null, E2 | null] et le nouvel indice.
+function splitCross(m, sP, d) {
+  const X = S.prj.crosses[m], pts = X.axis.map((q) => ({ ...q })), L = polyS(pts), Ltot = L[L.length - 1];
+  const s1 = sP - d, s2 = sP + d;
+  const p1 = s1 > 20 ? [...pts.filter((q, i) => L[i] < s1 - 5), { ...r3p(polyAt(pts, L, s1)), r: '' }] : null;
+  const p2 = Ltot - s2 > 20 ? [{ ...r3p(polyAt(pts, L, s2)), r: '' }, ...pts.filter((q, i) => L[i] > s2 + 5)] : null;
+  if (p1) p1[0] = { ...p1[0], r: '' }; if (p2) p2[p2.length - 1] = { ...p2[p2.length - 1], r: '' };
+  // bretelles accrochées : point d'accroche avant la coupe, rattaché ensuite au tronçon le plus proche
+  const oldPath = S.D?.crosses?.[m]?.path, hooks = [];
+  if (oldPath) for (const r of S.prj.ramps || []) for (const e of [r.from, r.to]) { const x = parseXref(e?.ref); if (x && x.k === m && e.s !== '' && e.s != null) hooks.push({ e, sens: x.s, P: G.pathPointAt(oldPath, +e.s) }); }
+  const pis = S.prj.axpl?.[`x:${X.id}`]?.pis || [];
+  const piS1 = pis.filter((q) => +q.s < s1), piS2 = pis.filter((q) => +q.s > s2).map((q) => ({ ...q, s: Math.round((+q.s - s2) * 10) / 10 }));
+  // le tronçon qui franchit l'autoroute garde l'identité de la voie (réglages de son passage supérieur, profil en long)
+  const hw = (S.prj.hwy?.axis || []).length >= 2 ? S.prj.hwy.axis : null, overHwy = (q) => !!(q && hw && polyCross(q, hw).length);
+  const keep2 = p1 && p2 && overHwy(p2) && !overHwy(p1);
+  let nk = -1;
+  if (p1 && p2) {
+    nk = S.prj.crosses.length;
+    const [mine, other, piMine, piOther, tag] = keep2 ? [p2, p1, piS2, piS1, '(début)'] : [p1, p2, piS1, piS2, '(suite)'];
+    X.axis = mine;
+    const Y = { ...clone(X), id: uid(), name: `${X.name} ${tag}`, axis: other };
+    S.prj.crosses.push(Y);
+    if (pis.length) { S.prj.axpl[`x:${X.id}`].pis = piMine; S.prj.axpl[`x:${Y.id}`] = { pis: piOther }; }
+  } else if (p1) X.axis = p1;
+  else if (p2) { X.axis = p2; if (pis.length) S.prj.axpl[`x:${X.id}`].pis = piS2; }
+  const dn = Math.max(0, +(S.prj.pt?.dev ?? 2.5) || 2.5);
+  const paths = [[m, roadAlignment(crossParams(S.prj, m), dn).path], ...(nk >= 0 ? [[nk, roadAlignment(crossParams(S.prj, nk), dn).path]] : [])];
+  for (const h of hooks) {
+    let best = null;
+    for (const [k2, path] of paths) { const pr = pathProject(path, h.P); if (pr && (!best || pr.d < best.d)) best = { k2, pr }; }
+    if (best) { h.e.ref = xref(best.k2, h.sens); h.e.s = Math.round(best.pr.s * 100) / 100; }
+  }
+  return { E: [p1 ? p1[p1.length - 1] : null, p2 ? p2[0] : null], nk };
+}
+function connectCross(k) {
+  const msgs = [], X = S.prj.crosses[k];
+  if (!X || (X.axis || []).length < 2) return '';
+  const jl = knownJunctions();
+  // 1. extrémités sur un carrefour existant
+  for (const end of [0, 1]) {
+    const ax = X.axis, n = ax.length, iE = end ? n - 1 : 0, iQ = end ? n - 2 : 1, P = ax[iE], Q = ax[iQ];
+    let best = null;
+    for (const j of jl) { const d = G.dist(P, j.C); if (d < j.R + PS_LB + 40 && (!best || d < best.d)) best = { j, d }; }
+    if (!best) continue;
+    const j = best.j, u = G.norm(G.sub(Q, j.C)), Lb = Math.min(PS_LB, G.dist(Q, j.C) - j.R - 15);
+    if (Lb < 15) { msgs.push(`${X.name} : extrémité trop près de ${j.name} pour y loger une branche (déplacez le sommet voisin).`); continue; }
+    ax[iE] = { ...r3p(G.add(j.C, G.mul(u, j.R + Lb))), r: '' };
+    const added = addArm(j, u, Lb);
+    msgs.push(`${X.name} raccordée à ${j.name}${added ? ' (branche ajoutée)' : ''}`);
+  }
+  // 2. croisements avec les autres voies secondaires : giratoire créé au croisement
+  for (let m = 0; m < S.prj.crosses.length; m++) {
+    if (m === k) continue;
+    const Y = S.prj.crosses[m];
+    if (Y.on === false || (Y.axis || []).length < 2) continue;
+    const hits = polyCross(X.axis, Y.axis).filter((h) => !knownJunctions().some((j) => G.dist(j.C, h.p) < j.R + PS_LB + 20));
+    if (!hits.length) continue;
+    const h = hits[0], fresh = newProject(S.prj.context), Rg = +fresh.ring.Rg || 20, d = Rg + PS_LB;
+    const J = { id: uid(), name: `Giratoire ${X.name} × ${Y.name}`, ...clone(pickJ(fresh)) };
+    Object.assign(J, { kind: 'giratoire', center: { auto: false, x: r3p(h.p).x, y: r3p(h.p).y }, branches: [] });
+    const jj = { id: J.id, J, C: h.p, R: Rg, plan: false, name: J.name };
+    for (const [idx, sP] of [[k, h.sA], [m, h.sB]]) {
+      const r = splitCross(idx, sP, d);
+      for (const E of r.E) if (E) addArm(jj, G.norm(G.sub(E, h.p)), PS_LB);
+    }
+    S.prj.others.push(J); S.prj.jorder.push(J.id);
+    msgs.push(`giratoire créé au croisement de ${X.name} et ${Y.name} (Rg ${fmt(Rg, 0)} m, ${J.branches.length} branches ; type modifiable dans l'onglet Carrefour)`);
+    break; // un croisement à la fois : relancer pour les suivants
+  }
+  return msgs.length ? `${msgs.join(' ; ')}.` : '';
+}
+
 function finishAxis() {
   const pts = dedupe(S.draft);
   S.draft = [];
@@ -1603,6 +1728,7 @@ function finishAxis() {
       else { const k = S.prj.crosses.length; S.prj.crosses.push({ ...newCross(k), axis }); S.xsel = k; }
       S.echSig = ''; update();
       if (key === 'cross' && tpl) { runTemplate(tpl, pts[0], S.prj.crosses.length - 1); return; } // premier point : côté de la voirie ordinaire
+      if (key === 'cross') { const msg = connectCross(S.prj.crosses.length - 1); if (msg) { update(); toast(msg); } }
     }
     setTool('select'); return;
   }

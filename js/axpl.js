@@ -67,7 +67,19 @@ export function buildAxisProfiles(prj, D, axes, juncs = [], tin = null) {
     const PL = nodes.length >= 1 ? buildNodes(nodes) : null;
     out.set(ax.key, { key: ax.key, name: ax.name, len: ax.len, PL, user, tied, defined: !!PL && nodes.length >= 2, al: ax.al, cat: ax.cat });
   };
-  for (const ax of axes) if (ax.key === 'hwy' || ax.key.startsWith('x:')) { const u = sortPis(store[ax.key]?.pis); mk(ax, u, u, []); }
+  for (const ax of axes) {
+    if (ax.key === 'hwy') { const u = sortPis(store.hwy?.pis); mk(ax, u, u, []); }
+    else if (ax.key.startsWith('x:')) {
+      // voie secondaire raccordée à un carrefour : extrémité calée sur la cote zC de son centre
+      const tied = [];
+      for (const end of [0, 1]) {
+        const s = end ? ax.len : 0, p = ax.at(s).p, j = juncs.find((q) => q.zC != null && Number.isFinite(q.zC) && G.dist(q.O, p) < q.Rg + 85);
+        if (j) tied.push({ s, z: Math.round(j.zC * 1000) / 1000, R: 0, why: `${j.name || 'carrefour'} (zC)`, end });
+      }
+      const u = sortPis(store[ax.key]?.pis).filter((q) => !tied.some((t) => Math.abs(t.s - q.s) < 1));
+      mk(ax, tied.length ? [...tied, ...u].sort((a, b) => a.s - b.s) : u, u, tied);
+    }
+  }
   // Bretelles : extrémités calées sur l'hôte (dans l'ordre des dépendances : une collectrice avant ses bretelles).
   const zHost = (key, p) => {
     const H = out.get(key), ax = byKey[key];

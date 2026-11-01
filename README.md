@@ -259,7 +259,15 @@ ou sur un fond topographique DXF.
 - **Ouvrages numérotés** : passages supérieurs, tiges, anneaux de giratoire dénivelé et cadres sont numérotés OA1, OA2…
   dans l'ordre des abscisses de l'autoroute (numéro cerclé sur le plan) ; le nom de chaque ouvrage se modifie dans
   l'onglet Ouvrages. **+ Passage supérieur** : dessinez une voie secondaire qui franchit l'autoroute, l'ouvrage est
-  implanté à leur croisement (autant de passages supérieurs que de voies).
+  implanté à leur croisement (autant de passages supérieurs que de voies). La voie dessinée reconnaît les carrefours :
+  une extrémité posée à moins de R + 100 m du centre d'un carrefour existant (carrefour actif, autres carrefours,
+  giratoires des gabarits) s'y arrête à R + 60 m dans l'alignement de son dernier côté et le carrefour reçoit la branche
+  correspondante ; là où elle croise une autre voie secondaire, un giratoire (Rg par défaut, type modifiable dans
+  l'onglet Carrefour) est créé et les deux voies y sont coupées à Rg + 60 m, avec quatre branches ; le tronçon qui
+  franchit l'autoroute garde l'identité de la voie (réglages du passage supérieur, profil en long), les points
+  d'inflexion et les bretelles accrochées sont reportés sur les tronçons. Le profil en long d'une voie raccordée est
+  calé à son extrémité sur la cote zC du carrefour (ignorée si elle s'écarte de plus de 30 m du terrain naturel).
+  Bouton « Raccorder aux carrefours et croisements » dans la fiche de la voie pour une voie existante.
 - **Cadres PICF et portiques PIPO** (onglet Ouvrages, **+ PICF / PIPO**, un clic sur l'axe de la voie portée) : nombre
   de cellules, ouverture, hauteur intérieure, remblai sur traverse, biais (gr), longueur (automatique : plate-forme +
   talus 3/2 jusqu'à la traverse, divisée par le sinus du biais), épaisseurs (automatiques e ≈ 0,15 + B/20), murs en aile.
