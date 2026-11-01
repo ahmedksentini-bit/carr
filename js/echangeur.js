@@ -60,11 +60,16 @@ export function hwyParams(prj) {
 
 // Route transversale (second axe) : autoroute (catégories ICTAAL) ou route ordinaire (2×1 voies par défaut :
 // chaussée 7,00 m, BDD 2,00 m, berme 0,75 m — valeurs de départ à ajuster selon le parti d'aménagement).
-export function crossParams(prj) {
-  const h = prj.cross || {}, auto = h.kind === 'autoroute';
+// Voies secondaires (plusieurs échangeurs le long de l'autoroute) : prj.crosses ; ancien format prj.cross = une seule.
+export const crossList = (prj) => (Array.isArray(prj?.crosses) ? prj.crosses : prj?.cross ? [prj.cross] : []);
+// Référence d'une chaussée de la voie secondaire k, sens s : x1 / x2 pour la première (compatibilité), xk:s ensuite.
+export const xref = (k, s) => (k ? `x${k}:${s}` : `x${s}`);
+export const parseXref = (ref) => { let m = /^x([12])$/.exec(ref || ''); if (m) return { k: 0, s: +m[1] }; m = /^x(\d+):([12])$/.exec(ref || ''); return m ? { k: +m[1], s: +m[2] } : null; };
+export function crossParams(prj, k = 0) {
+  const h = crossList(prj)[k] || {}, auto = h.kind === 'autoroute';
   const cat = auto ? HWY_CAT[h.cat] || HWY_CAT.L2 : null;
   return {
-    on: !!h.on, kind: auto ? 'autoroute' : 'route', name: h.name || (auto ? 'Autoroute 2' : 'Route transversale'),
+    on: h.on !== false && !!(h.on || h.axis?.length), kind: auto ? 'autoroute' : 'route', name: h.name || (auto ? 'Autoroute 2' : `Voie secondaire ${k + 1}`), k,
     cat: auto ? (HWY_CAT[h.cat] ? h.cat : 'L2') : '', C: cat, V: num(h.V, auto ? cat.V : 90),
     lanes: Math.max(1, Math.round(num(h.lanes, auto ? 2 : 1))), wLane: num(h.wLane, 3.5), bau: num(h.bau, auto ? 2.5 : 2.0),
     bdg: num(h.bdg, auto ? 1.0 : 0), median: num(h.median, auto ? 3.0 : 0), berme: num(h.berme, auto ? 1.0 : 0.75), pk0: num(h.pk0, 0),
@@ -83,7 +88,7 @@ export function normRamp(r) {
   return out;
 }
 
-const isHwyRef = (ref) => /^(hwy|x)[12]$/.test(ref || ''); // chaussée d'un axe (autoroute ou route transversale)
+const isHwyRef = (ref) => /^(hwy[12]|x[12]|x\d+:[12])$/.test(ref || ''); // chaussée d'un axe (autoroute ou voie secondaire)
 
 export function rampParams(prj, r0) {
   const r = normRamp(r0);
@@ -94,8 +99,8 @@ export function rampParams(prj, r0) {
   const H = hwyParams(prj);
   const host = (ref) => {
     if (isHwyRef(ref)) {
-      const road = ref[0] === 'x' ? 'cross' : 'hwy', Q = road === 'cross' ? crossParams(prj) : H;
-      return { kind: 'hwy', ref, road, roadKind: road === 'cross' ? Q.kind : 'autoroute', sens: +ref[ref.length - 1], lanes: Q.lanes, bau: Q.bau, berme: Q.berme, V: Q.V, name: `${Q.name} sens ${ref[ref.length - 1]}` };
+      const X = parseXref(ref), road = X ? `cross${X.k}` : 'hwy', Q = X ? crossParams(prj, X.k) : H, sens = X ? X.s : +ref[ref.length - 1];
+      return { kind: 'hwy', ref, road, roadKind: X ? Q.kind : 'autoroute', sens, lanes: Q.lanes, bau: Q.bau, berme: Q.berme, V: Q.V, name: `${Q.name} sens ${sens}` };
     }
     const pr = (prj.ramps || []).find((q) => q.id === ref);
     if (!pr || pr.id === r.id) return null;
@@ -180,16 +185,17 @@ export function buildEchangeur(prj, D) {
   const fmtA = (rad) => (unitA === 'deg' ? `${fmt((rad * 180) / Math.PI, 4)}°` : `${fmt((rad * 200) / Math.PI, 4)} gr`);
 
   // --- Sections courantes (autoroute et route transversale) ----------------------------------
-  const XP0 = crossParams(prj), roads = ['hwy', 'cross'];
-  const axisPaths = { hwy: H.axis.length >= 2 ? G.roundPolylineFit(H.axis, H.axis.map((p) => p.r)).segs : null, cross: XP0.on && XP0.axis.length >= 2 ? G.roundPolylineFit(XP0.axis, XP0.axis.map((p) => p.r)).segs : null };
+  const XPs = crossList(prj).map((_, k) => crossParams(prj, k)), roads = ['hwy', ...XPs.map((_, k) => `cross${k}`)];
+  const axisPaths = { hwy: H.axis.length >= 2 ? G.roundPolylineFit(H.axis, H.axis.map((p) => p.r)).segs : null };
+  XPs.forEach((X, k) => { axisPaths[`cross${k}`] = X.on && X.axis.length >= 2 ? G.roundPolylineFit(X.axis, X.axis.map((p) => p.r)).segs : null; });
   const drawRoad = (key, H) => {
     const { segs: path, fit } = G.roundPolylineFit(H.axis, H.axis.map((p) => p.r));
     // Rayons saisis non applicables : tangentes plus longues que les côtés disponibles (partagés avec les sommets voisins).
     for (const f of fit) if (f.r < f.req - 0.005) issues.push({ lvl: 'warn', msg: `${H.name} : sommet ${f.i}, rayon saisi ${fmt(f.req)} m non applicable — tangente nécessaire ${fmt(f.Tneed)} m, disponible ${fmt(f.T)} m entre les sommets voisins ; rayon appliqué ${fmt(f.r)} m. Déplacez les sommets ${f.i - 1} / ${f.i + 1} ou réduisez le rayon d'un sommet voisin.` });
-    const sEnd = G.pathLen(path), isRoute = key === 'cross' && H.kind === 'route';
+    const sEnd = G.pathLen(path), isRoute = key !== 'hwy' && H.kind === 'route';
     const E0 = H.median / 2 + H.bdg, E1 = E0 + H.lanes * H.wLane, E2 = E1 + H.bau;
     const off = (delta) => G.offsetPath(path, delta);
-    const road = { key, H, path, sEnd, E0, E1, E2, ok: sEnd > 1, isRoute };
+    const road = { key, k: H.k, H, path, sEnd, E0, E1, E2, ok: sEnd > 1, isRoute };
     if (!road.ok) return road;
     // Rayons de la section courante [ICTAAL] tab. 3-1 (autoroutes).
     if (H.C) path.forEach((sg) => {
@@ -290,9 +296,8 @@ export function buildEchangeur(prj, D) {
   const hwy = drawRoad('hwy', H);
   D.hwy = hwy;
   if (!hwy.ok) return;
-  const XP = crossParams(prj);
-  const crossR = XP.on && XP.axis.length >= 2 ? drawRoad('cross', XP) : null;
-  D.cross = crossR?.ok ? crossR : null;
+  D.crosses = XPs.map((X, k) => { const r = X.on && X.axis.length >= 2 ? drawRoad(`cross${k}`, X) : null; return r?.ok ? r : null; });
+  D.cross = D.crosses[0] || null;
 
   // --- Bretelles ------------------------------------------------------------------------
   // Chaussées hôtes : stations le long de l'axe de l'autoroute (sens 1 : croissantes, sens 2 : décroissantes dans le sens
@@ -302,7 +307,7 @@ export function buildEchangeur(prj, D) {
   const hostRoad = (road, sens) => {
     const sd = sens === 1 ? 1 : -1, { path, sEnd, E1, H: Q } = road;
     return mkOff({
-      kind: 'hwy', road: road.key, roadKind: road.isRoute ? 'route' : 'autoroute', ref: (road.key === 'cross' ? 'x' : 'hwy') + sens, sens, sd, sEnd, name: `${Q.name} sens ${sens}`, lanes: Q.lanes, bau: Q.bau, berme: Q.berme, V: Q.V, C: Q.C, path,
+      kind: 'hwy', road: road.key, roadKind: road.isRoute ? 'route' : 'autoroute', ref: road.key === 'hwy' ? 'hwy' + sens : xref(road.k, sens), sens, sd, sEnd, name: `${Q.name} sens ${sens}`, lanes: Q.lanes, bau: Q.bau, berme: Q.berme, V: Q.V, C: Q.C, path,
       pointAt: (st) => G.pathPointAt(path, cl(st, 0, sEnd)),
       dirAt: (st) => { const t = pathTangentAt(path, cl(st, 0, sEnd)); return sd === 1 ? t : neg(t); },
       edgeOff: () => E1,
@@ -312,7 +317,8 @@ export function buildEchangeur(prj, D) {
     kind: 'ramp', ref: R.id, R, sd: 1, sEnd: R.al.length, name: R.name, lanes: R.rp.lanes, bau: R.rp.bdd, berme: R.rp.berme, V: R.C.V,
     pointAt: (s) => R.al.pointAt(cl(s, 0, R.al.length)), dirAt: (s) => unit(R.al.headAt(cl(s, 0, R.al.length))), edgeOff: (s) => -R.offR(cl(s, 0, R.al.length)),
   });
-  const hosts = { hwy1: hostRoad(hwy, 1), hwy2: hostRoad(hwy, 2), ...(D.cross ? { x1: hostRoad(D.cross, 1), x2: hostRoad(D.cross, 2) } : {}) };
+  const hosts = { hwy1: hostRoad(hwy, 1), hwy2: hostRoad(hwy, 2) };
+  D.crosses.forEach((c, k) => { if (c) { hosts[xref(k, 1)] = hostRoad(c, 1); hosts[xref(k, 2)] = hostRoad(c, 2); } });
   D.echHost = (ref) => { if (hosts[ref]) return hosts[ref]; const R = D.ramps.find((q) => q?.id === ref); return R?.al ? R.host || (R.host = hostRamp(R)) : null; };
   const along = (h, s0, s1, f, step = 2) => { const pts = [], n = Math.max(2, Math.ceil(Math.abs(s1 - s0) / step)); for (let i = 0; i <= n; i++) { const st = s0 + ((s1 - s0) * i) / n; pts.push(h.off(st, f(st))); } return pts; };
 
@@ -695,16 +701,9 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
   // Ouvrage : croisement avec la route transversale dessinée la plus proche du clic, sinon point cliqué (tige ⟂).
   let s0 = pr.s, P0 = pr.p, tigeW = null;
   const sgn = pr.off >= 0 ? 1 : -1;
-  if (D.cross?.ok) {
-    const pts = G.samplePath(D.cross.path, 2);
-    let best = null;
-    for (let i = 1; i < pts.length; i++) {
-      const a = pathProject(hw.path, pts[i - 1]), b = pathProject(hw.path, pts[i]);
-      if (!a || !b || Math.sign(a.off) === Math.sign(b.off)) continue;
-      const k = a.off / (a.off - b.off), X = G.lerp(pts[i - 1], pts[i], k), d = dist(X, click);
-      if (!best || d < best.d) best = { d, X, dir: norm(sub(pts[i], pts[i - 1])) };
-    }
-    if (best && best.d < 300) { const q = pathProject(hw.path, best.X); s0 = q.s; P0 = q.p; tigeW = best.dir; }
+  {
+    const X0 = crossingWith(D, click, opt.crossK);
+    if (X0 && (opt.crossK != null || X0.d < 300)) { s0 = X0.s; P0 = X0.P0; tigeW = X0.dir; }
   }
   const t = pathTangentAt(hw.path, s0), tL = sgn > 0 ? t : neg(t), nL = rot90(tL);
   const W = (q) => { const r = add(P0, add(mul(tL, q.x), mul(nL, q.y))); return { x: +r.x.toFixed(3), y: +r.y.toFixed(3) }; };
@@ -784,12 +783,12 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
   const lo = Math.min(...need), hi = Math.max(...need);
   const warn = lo < 0 || hi > hw.sEnd ? `L'axe de l'autoroute doit couvrir les abscisses ${fmt(Math.max(0, lo), 0)} à ${fmt(hi, 0)} m (actuellement 0 à ${fmt(hw.sEnd, 0)} m).` : '';
   const obl = Math.abs(90 - (phi * 180) / Math.PI);
-  const info = `S-semi R1 ${fmt(R1)} / R2 ${fmt(R2)} m → boucle déduite R ${fmt(Rl)} m (Ri ${fmt(Rl - half)} m)${tigeW ? ` ; tige sur la route transversale${obl > 0.5 ? `, biais ${fmt(obl, 1)}°` : ''}` : ''}`;
+  const info = `S-semi R1 ${fmt(R1)} / R2 ${fmt(R2)} m → boucle déduite R ${fmt(Rl)} m (Ri ${fmt(Rl - half)} m)${tigeW ? ` ; tige sur la voie secondaire${obl > 0.5 ? `, biais ${fmt(obl, 1)}°` : ''}` : ''}`;
   // La boucle, la tige et les directes définitives sont redéduites de la S-semi (même calcul qu'après une modification).
   const grp = ids[1], Bs = { ...B2, gen: 'trompette', grp, role: 'semi' };
   const dv = deriveTrumpet(prj, D, Bs, { boucle: { ...B1, gen: 'trompette', grp, role: 'boucle' }, sdir: { ...B3, gen: 'trompette', grp, role: 'sdir' }, edir: { ...B4, gen: 'trompette', grp, role: 'edir' } }, opt);
   if (dv.err) return { err: dv.err };
-  return { ramps: [dv.boucle, Bs, dv.sdir, dv.edir], warn, info: dv.info + (tigeW ? ` ; tige sur la route transversale${obl > 0.5 ? `, biais ${fmt(obl, 1)}°` : ''}` : ''), bridge: { p: P0, dir: add(mul(tL, u.x), mul(nL, u.y)) }, P0: dv.P0 };
+  return { ramps: [dv.boucle, Bs, dv.sdir, dv.edir], warn, info: dv.info + (tigeW ? ` ; tige sur la voie secondaire${obl > 0.5 ? `, biais ${fmt(obl, 1)}°` : ''}` : ''), bridge: { p: P0, dir: add(mul(tL, u.x), mul(nL, u.y)) }, P0: dv.P0 };
 }
 
 // Trompette déduite de sa S-semi (création et après toute modification de la S-semi) : la dernière branche de la S-semi
@@ -865,6 +864,23 @@ export function deriveTrumpet(prj, D, semi, prev, opt = {}) {
 // l'hôte B vers +Y (rive droite x = +eB) : la boucle va de A vers B, la bretelle directe de B vers A.
 const ROT = [(X, Y) => ({ x: X, y: Y }), (X, Y) => ({ x: -Y, y: X }), (X, Y) => ({ x: -X, y: -Y }), (X, Y) => ({ x: Y, y: -X })];
 
+// Croisement d'une voie secondaire (k, ou la plus proche du clic) avec l'axe de l'autoroute : point, abscisse, direction.
+export function crossingWith(D, click, k) {
+  const hw = D?.hwy; if (!hw?.ok) return null;
+  let best = null;
+  (D.crosses || []).forEach((c, kk) => {
+    if (!c?.ok || (k != null && kk !== k)) return;
+    const pts = G.samplePath(c.path, 2);
+    for (let i = 1; i < pts.length; i++) {
+      const a = pathProject(hw.path, pts[i - 1]), b = pathProject(hw.path, pts[i]);
+      if (!a || !b || Math.sign(a.off) === Math.sign(b.off)) continue;
+      const X = G.lerp(pts[i - 1], pts[i], a.off / (a.off - b.off)), d = dist(X, click);
+      if (!best || d < best.d) { const q = pathProject(hw.path, X); best = { d, k: kk, s: q.s, P0: q.p, dir: norm(sub(pts[i], pts[i - 1])) }; }
+    }
+  });
+  return best;
+}
+
 function interchangeFrame(prj, D, click, Lc) {
   const hw = D?.hwy;
   if (!hw?.ok) return { err: 'Dessinez d\'abord l\'axe de l\'autoroute.' };
@@ -876,16 +892,16 @@ function interchangeFrame(prj, D, click, Lc) {
 }
 
 export function cloverleaf(prj, D, click, mkId, opt = {}) {
-  const Lc = opt.Lc || 1500, F = interchangeFrame(prj, D, click, Lc);
+  const K = opt.crossK ?? 0, Lc = opt.Lc || 1500, F = interchangeFrame(prj, D, click, Lc);
   if (F.err) return F;
   const { hw, s0, W } = F, w = 3.5, half = w / 2;
-  const X = crossParams({ ...prj, cross: { ...prj.cross, on: true } }), Hm = hwyParams(prj);
+  const X = { ...crossParams(prj, K), on: true }, Hm = hwyParams(prj);
   const E1c = X.median / 2 + X.bdg + X.lanes * X.wLane, crossAuto = X.kind === 'autoroute';
   const cyc = [
     { ref: 'hwy1', base: s0, sg: 1, e: hw.E1, bau: Hm.bau, coll: true, name: 'C1' },
-    { ref: 'x1', base: Lc, sg: 1, e: E1c, bau: X.bau, coll: crossAuto, name: 'CX1', lanes: X.lanes },
+    { ref: xref(K, 1), base: Lc, sg: 1, e: E1c, bau: X.bau, coll: crossAuto, name: K ? `CX${K + 1}-1` : 'CX1', lanes: X.lanes },
     { ref: 'hwy2', base: s0, sg: -1, e: hw.E1, bau: Hm.bau, coll: true, name: 'C2' },
-    { ref: 'x2', base: Lc, sg: -1, e: E1c, bau: X.bau, coll: crossAuto, name: 'CX2', lanes: X.lanes },
+    { ref: xref(K, 2), base: Lc, sg: -1, e: E1c, bau: X.bau, coll: crossAuto, name: K ? `CX${K + 1}-2` : 'CX2', lanes: X.lanes },
   ];
   // Collectrice (§ 3.4.3, 6.2.3, 6.3.3) : bretelle sortant de la chaussée (biseau 150 m, 3 %) et y revenant (3 %),
   // parallèle au-delà du tpl ; ses propres sorties et entrées sont à 5 % (Lm = (1,00 + 2,00 + 0,70 − 1,00) / 0,05 = 54 m).
@@ -1000,11 +1016,12 @@ export function cloverleaf(prj, D, click, mkId, opt = {}) {
 // l'extrémité reste libre (carrefour plan ou giratoire à étudier, § 8). Côté sens 1 dans le quadrant sud-ouest,
 // côté sens 2 dans le quadrant nord-est (rotation de 180°). La sortie enveloppe la boucle (plates-formes tangentes).
 export function halfCloverleaf(prj, D, click, mkId, opt = {}) {
-  if ((prj.cross?.kind || 'route') === 'autoroute') return { err: 'Le demi-trèfle se raccorde à une route ordinaire (carrefours plans) : choisissez le type « Route ordinaire » pour la route transversale.' };
+  const K = opt.crossK ?? 0;
+  if ((crossList(prj)[K]?.kind || 'route') === 'autoroute') return { err: 'Le demi-trèfle se raccorde à une route ordinaire (carrefours plans) : choisissez le type « Route ordinaire » pour la route transversale.' };
   const Lc = opt.Lc || 800, F = interchangeFrame(prj, D, click, Lc);
   if (F.err) return F;
   const { hw, s0, W } = F, w = 3.5, half = w / 2, p = 0.03, n = Math.hypot(1, p);
-  const X = crossParams({ ...prj, cross: { ...prj.cross, on: true, kind: 'route' } }), Hm = hwyParams(prj);
+  const X = { ...crossParams(prj, K), on: true, kind: 'route' }, Hm = hwyParams(prj);
   const E2c = X.median / 2 + X.bdg + X.lanes * X.wLane + X.bau, Lm = (Hm.bau + J14_W + 0.7 - 1) / p;
   const Rl = opt.Rl || 56, Al = opt.Al || 45, yA = hw.E1 + 1 + half, xJ = -(E2c + X.berme + 25), xE = -(E2c + X.berme + 10);
   const [Tai, Tao] = tangentLengths(Rl, Al, 0, Math.PI / 2), [Tbi, Tbo] = tangentLengths(Rl, 0, Al, Math.PI / 2 - Math.atan(p));

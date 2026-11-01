@@ -172,6 +172,10 @@ ou sur un fond topographique DXF.
   surlargeur, Lc, Δ) ; l'étiquette d'une courbe d'axe est déplacée hors du croisement.
 - **Plusieurs carrefours** par projet (giratoires et carrefours plans nommés, onglet Projet) : tous sont dessinés et
   exportés ; les onglets portent sur le carrefour actif, qu'on choisit dans la liste ou d'un clic sur le plan.
+- **Plusieurs échangeurs** le long de l'autoroute : une voie secondaire par échangeur (liste « Voies secondaires »,
+  chacune nommée, route ordinaire ou autoroute). Les boutons Trompette, Trèfle et Demi-trèfle demandent la voie
+  secondaire : clic sur une voie existante au croisement, ou tracé d'une nouvelle voie (en partant de la voirie
+  ordinaire pour une trompette) ; le gabarit est construit à son croisement avec l'autoroute.
 - **Raccordement bretelle → giratoire** : une bretelle dont l'extrémité libre est placée dans l'anneau d'un giratoire du
   projet (actif ou non) dessine automatiquement une branche de ce giratoire dans l'axe de son dernier côté ; deux
   bretelles de sens contraires aux extrémités voisines (tige d'une trompette) forment une seule branche à double sens.
