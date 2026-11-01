@@ -653,7 +653,6 @@ export function buildEchangeur(prj, D) {
   // Tige des trompettes : les deux voies restent un bloc ; le terre-plein central (largeur constante) est dessiné entre
   // les plates-formes de la S-semi et de la boucle, sur leur alignement commun le long de la tige.
   {
-    const tpc = tigeTpc(prj);
     (prj.ramps || []).forEach((r, i) => {
       if (r.role !== 'semi' || !r.grp) return;
       const j = (prj.ramps || []).findIndex((q) => q.grp === r.grp && q.role === 'boucle');
@@ -669,7 +668,7 @@ export function buildEchangeur(prj, D) {
       const poly = [q(t0, inS), q(t1, inS), q(t1, inB), q(t0, inB)];
       P({ k: 'fill', L: 'ILOT_SEP', rings: [polySegs([...poly, poly[0]])], role: 'ilot' });
       P({ k: 'path', L: 'BORDURE', segs: polySegs([q(t0, inS), q(t1, inS)]) }); P({ k: 'path', L: 'BORDURE', segs: polySegs([q(t0, inB), q(t1, inB)]) });
-      text('COTATION', q((t0 + t1) / 2, (inS + inB) / 2), `tige : TPC ${fmt(tpc)} m`, eS.th0, 'center', TH * 0.8);
+      text('COTATION', q((t0 + t1) / 2, (inS + inB) / 2), `tige : TPC ${fmt(inB - inS + Rs.rp.bdg + Rb.rp.bdg)} m`, eS.th0, 'center', TH * 0.8);
     });
   }
 }
@@ -723,7 +722,7 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
   const tauS = G.dot(sub(PId, Rp), u), tauE = G.dot(sub(PIe, Lp), u);
   const yM = Math.max(opt.yM || 240, tauS + TdS + 54 + 15), yME = Math.max(opt.yM || 240, tauE + TdE + 54 + 15);
   // Tige : assez longue pour l'insertion de S-directe sur S-semi (100 + 75 m) et la sortie de E-directe.
-  const Ys = opt.Ystem || Math.max(450, yM + 175 + 30, yME + 120), p3 = 0.03, lam = 150, g = Math.max(0, opt.gap ?? 0);
+  const Ys = Math.max(+opt.Ystem || 450, yM + 175 + 30, yME + 120), p3 = 0.03, lam = 150, g = Math.max(0, opt.gap ?? 0);
   const ids = [mkId(), mkId(), mkId(), mkId()];
   const base = { cat: 'b50', lanes: 1, pente: '' };
   const Amin = (R) => Math.ceil(Math.sqrt(cloMinLength(R, Math.abs(deversOfRadius(R - half, RAMP_CAT.b50) - 2.5), 1) * R) / 5) * 5;
@@ -786,7 +785,7 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
   const info = `S-semi R1 ${fmt(R1)} / R2 ${fmt(R2)} m → boucle déduite R ${fmt(Rl)} m (Ri ${fmt(Rl - half)} m)${tigeW ? ` ; tige sur la voie secondaire${obl > 0.5 ? `, biais ${fmt(obl, 1)}°` : ''}` : ''}`;
   // La boucle, la tige et les directes définitives sont redéduites de la S-semi (même calcul qu'après une modification).
   const grp = ids[1], Bs = { ...B2, gen: 'trompette', grp, role: 'semi' };
-  const dv = deriveTrumpet(prj, D, Bs, { boucle: { ...B1, gen: 'trompette', grp, role: 'boucle' }, sdir: { ...B3, gen: 'trompette', grp, role: 'sdir' }, edir: { ...B4, gen: 'trompette', grp, role: 'edir' } }, opt);
+  const dv = deriveTrumpet(prj, D, Bs, { boucle: { ...B1, gen: 'trompette', grp, role: 'boucle', ...(opt.boucleCut ? { cut: opt.boucleCut } : {}) }, sdir: { ...B3, gen: 'trompette', grp, role: 'sdir' }, edir: { ...B4, gen: 'trompette', grp, role: 'edir' } }, opt);
   if (dv.err) return { err: dv.err };
   return { ramps: [dv.boucle, Bs, dv.sdir, dv.edir], warn, info: dv.info + (tigeW ? ` ; tige sur la voie secondaire${obl > 0.5 ? `, biais ${fmt(obl, 1)}°` : ''}` : ''), bridge: { p: P0, dir: add(mul(tL, u.x), mul(nL, u.y)) }, P0: dv.P0 };
 }
@@ -826,6 +825,7 @@ export function deriveTrumpet(prj, D, semi, prev, opt = {}) {
   // S-semi dans le repère local : centre de sa grande courbe.
   const xS = (num(semi.from?.s, 0) - s0) * sgn, El = Lc(Ew), Ys = G.dot(El, u);
   const alS = buildAlignment([{ x: xS, y: -yA }, ...pis.slice(0, -1).map((q) => ({ ...Lc(q), R: +q.R || 0, A: +q.A || 0, semi: !!q.semi })), El]);
+  if (alS.issues?.some((i) => i.lvl === 'err')) return { err: 'S-semi : ' + alS.issues.find((i) => i.lvl === 'err').msg.replace(/^[^:]*: /, '') };
   const arcs = alS.elems.filter((e) => e.kind === 'A'), big = arcs[arcs.length - 1];
   if (!big) return { err: 'S-semi sans grande courbe.' };
   const R2 = big.R, Cl = add(big.C, mul(r, g + surl(R2)));
@@ -835,13 +835,23 @@ export function deriveTrumpet(prj, D, semi, prev, opt = {}) {
   for (let i = 0; i < 8; i++) { Al = opt.Al || Amin(Rl); Rl = rhoL - shift(Al, Rl); }
   Rl = Math.round(Rl * 10) / 10;
   if (!(Rl > 30)) return { err: `Boucle déduite trop petite (R = ${fmt(Rl)} m) : agrandissez R2 de la S-semi.` };
-  const dc = norm({ x: 1, y: p3 }), nn = Math.hypot(1, p3);
-  const xE = Cl.x + (-yA - Cl.y - rhoL * nn) / p3;
-  const PIl = G.lineLine(Lp, u, { x: xE, y: -yA }, dc)?.p;
-  if (!PIl || -yA - Cl.y < rhoL * nn || xE < PIl.x + 60) return { err: 'La boucle déduite ne tient pas sous la chaussée : écartez la grande courbe de la S-semi de l\'autoroute.' };
+  // Contrôles de cohérence de la S-semi : grande courbe à gauche (vers la tige), achevée avant la chaussée éloignée.
+  if (!(big.sg > 0)) return { err: 'La grande courbe de la S-semi doit tourner à gauche, vers la tige.' };
+  const ST = alS.elems[alS.elems.length - 1]?.p0;
+  if (!ST || ST.y > -yA + 1e-6) return { err: 'La grande courbe de la S-semi doit s\'achever avant la chaussée qu\'elle quitte : la tige franchit l\'autoroute en alignement droit.' };
+  const dc = norm({ x: 1, y: p3 }), nn = Math.hypot(1, p3), LmE = (hw.H?.bau ?? 2.5) + J14_W + 0.7 - 1, Lconv = LmE / p3 + 10;
+  if (-yA - Cl.y < rhoL * nn + 0.5) return { err: 'La boucle déduite ne tient pas sous la chaussée : écartez la grande courbe de la S-semi de l\'autoroute.' };
   const base = { cat: 'b50', lanes: 1, pente: '' };
   const tStart = add(Lp, mul(u, Ys));
-  const boucle = { ...base, ...prev.boucle, from: { ref: 'free' }, to: { ...(prev.boucle?.to || {}), ref: far, s: st(xE) }, pis: [W(tStart), { ...W(PIl), R: Rl, A: Al, loop: true }] };
+  // Sortie de la boucle : son cercle est tangent à la ligne d'obliquité (3 %) du convergent, ce qui fixe E.1,00. Cette
+  // tangence est très sensible (1 m d'écart vertical déplace E.1,00 de 33 m) : la distance de la S-semi à l'autoroute
+  // n'est donc pas libre ; on n'accepte que 100 à 300 m entre l'ouvrage et E.1,00.
+  const xE = Cl.x + (-yA - Cl.y - rhoL * nn) / p3;
+  const PIl = G.lineLine(Lp, u, { x: xE, y: -yA }, dc)?.p;
+  if (!PIl || -yA - Cl.y < rhoL * nn + 0.5 || xE - PIl.x < 100) return { err: 'La boucle déduite ne tient pas sous la chaussée : la grande courbe de la S-semi est trop proche de l\'autoroute.' };
+  if (xE - PIl.x > 300) return { err: `Grande courbe de la S-semi trop éloignée de l'autoroute : la boucle, concentrique, ne rejoindrait la chaussée qu'à ${fmt(xE - PIl.x, 0)} m de l'ouvrage.` };
+  const loopPis = [W(tStart), { ...W(PIl), R: Rl, A: Al, loop: true }];
+  const boucle = { ...base, ...prev.boucle, from: { ref: 'free' }, to: { ...(prev.boucle?.to || {}), ref: far, s: st(xE) }, pis: loopPis };
   // Bretelles directes (mêmes règles qu'à la création).
   const Ld = opt.Ldir || 300, Rd = opt.Rd || 120, Ad = opt.Ad || 80;
   const PId = onTige(add(Rp, mul(r, 15)), yA + 10), PIe = onTige(add(Lp, mul(r, -15)), yA + 10);

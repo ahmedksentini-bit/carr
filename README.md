@@ -148,8 +148,12 @@ ou sur un fond topographique DXF.
   croisement de la route transversale (tige éventuellement biaise, jusqu'à 40°) ou sur l'axe à l'endroit de l'ouvrage ;
   la sortie semi-directe est construite d'abord (R2 saisi, R1 de sortie ≥ 100 m et < 2 R2) et fixe la tige et l'ouvrage,
   l'entrée en boucle (seule boucle) en est déduite, concentrique ; sortie et entrée directes raccordées à la tige
-  bidirectionnelle. Un gabarit régénéré remplace le précédent au même croisement. Quand on modifie la S-semi (sommets, rayons,
-  extrémité de la tige), la boucle, la tige, l'ouvrage et les directes suivent ; la boucle n'est pas déplaçable seule. La tige (et l'ouvrage) restent un bloc : séparation des deux voies constante
+  bidirectionnelle. Un gabarit régénéré remplace le précédent au même croisement. La trompette est paramétrique : ses paramètres
+  (R2 de la S-semi, TPC de la tige, écart, longueur de la tige) sont dans la fenêtre de la S-semi ; toute modification de
+  ces paramètres, de la voie secondaire ou de l'axe de l'autoroute reconstruit le bloc entier ; sur le plan, seule
+  l'extrémité de la tige se déplace. La boucle étant concentrique à la S-semi et tangente à la ligne d'obliquité de 3 %, la
+  distance de la S-semi à l'autoroute n'est pas libre (1 m d'écart déplacerait E.1,00 de 33 m) : une configuration qui
+  repousserait E.1,00 au-delà de 300 m est refusée et les derniers paramètres valides sont rétablis. La tige (et l'ouvrage) restent un bloc : séparation des deux voies constante
   (champ « TPC » de la tige, 1 m = voies accolées ; au-delà, terre-plein central dessiné et repris par la branche du giratoire). Les rayons saisis aux sommets des axes
   sont appliqués tels quels quand les tangentes tiennent (côtés partagés entre sommets voisins, plus petit rayon servi
   d'abord) ; sinon le rayon réduit est signalé. Surlargeur de 50/R par voie à l'intérieur des courbes de rayon
