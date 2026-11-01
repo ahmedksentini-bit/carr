@@ -208,6 +208,20 @@ ou sur un fond topographique DXF.
   courbe ; la boucle est déduite de la grande courbe réellement dessinée et tangente à l'obliquité réelle de son
   convergent : boucle et S-semi restent concentriques (plus de chevauchement). Le long de l'arc commun, les bords qui
   tomberaient dans l'autre plate-forme ne sont plus dessinés et un terre-plein sépare les deux voies, comme sur la tige.
+- **Ouvrages numérotés** : passages supérieurs, tiges, anneaux de giratoire dénivelé et cadres sont numérotés OA1, OA2…
+  dans l'ordre des abscisses de l'autoroute (numéro cerclé sur le plan) ; le nom de chaque ouvrage se modifie dans
+  l'onglet Ouvrages. **+ Passage supérieur** : dessinez une voie secondaire qui franchit l'autoroute, l'ouvrage est
+  implanté à leur croisement (autant de passages supérieurs que de voies).
+- **Cadres PICF et portiques PIPO** (onglet Ouvrages, **+ PICF / PIPO**, un clic sur l'axe de la voie portée) : nombre
+  de cellules, ouverture, hauteur intérieure, remblai sur traverse, biais (gr), longueur (automatique : plate-forme +
+  talus 3/2 jusqu'à la traverse, divisée par le sinus du biais), épaisseurs (automatiques e ≈ 0,15 + B/20), murs en aile.
+  Dessin en plan : têtes parallèles à la voie portée, faces cachées en tirets, semelles du PIPO, murs en aile, axe.
+  « Ouvrir dans PSIDA » remplit l'onglet Cadres et portiques de PSIDA (champs cf_*) ; export du projet PSIDA (.json).
+- **Profils en travers** (onglet Implantation) : en série entre deux points cliqués sur un même axe (autoroute, voie
+  secondaire, bretelle, branche) au pas choisi, avec en option les points de tangence compris entre eux (droite /
+  clothoïde / arc ; un point de tangence à moins de 0,50 m d'une station la remplace), ou profils isolés placés à la
+  main. Symbole à la manière de Macao : petit cercle sur l'axe et segment perpendiculaire, numéro P1, P2… par axe
+  (calque GIRA_PROFILS). Tableau (axe, abscisse, X, Y, gisement de la normale, origine) et export CSV.
 - **Aucune chaussée superposée hors ouvrage** : deux plates-formes (chaussée et accotements revêtus) ne se croisent
   qu'au droit d'un ouvrage. Chaque bretelle est contrôlée tous les 2 m contre l'autoroute, les voies secondaires et les
   autres bretelles ; un recouvrement de plates-formes hors tablier est une erreur. Sont exclus les zones de raccordement

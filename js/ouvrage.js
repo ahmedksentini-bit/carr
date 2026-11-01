@@ -338,6 +338,9 @@ function drawDeck(B, P, name, TH) {
     const dir = norm(sub(axis[Math.min(axis.length - 1, m.i + 1)], axis[m.i]));
     text('COTATION', add(mm.p, mul(norm(sub(mm.p, m.p)), 1.6)), `${fmt(B.spans[k - 1])} m`, Math.atan2(dir.y, dir.x), 'center', TH * 0.9);
   }
+  // Numéro de l'ouvrage cerclé, sur l'axe au-delà de la culée d'origine.
+  const c0 = cul[0], tg = at(axis, aOff, c0.s * (c0.y + B.R + 4 + TH * 2.2));
+  if (tg) { const r = TH * Math.max(2.2, 0.55 * name.length); P({ k: "circle", L: "OUVRAGE", c: tg.p, r }); text("OUVRAGE", G.add(tg.p, { x: 0, y: -TH * 0.55 }), name, 0, "center", TH * 1.4); }
   const cE = cul[1], lbl = at(axis, aOff, cE.s * (cE.y + B.R + 6));
   if (lbl) {
     const dir = norm(sub(axis[Math.min(axis.length - 1, lbl.i + 1)], axis[lbl.i]));
@@ -349,7 +352,17 @@ function drawDeck(B, P, name, TH) {
 // Point d'entrée : ajoute au dessin (D.prims) les ouvrages de l'échangeur et renvoie leurs fiches et contrôles.
 export function buildOuvrages(prj, D, extra = {}) {
   const O = ouvrParams(prj), out = { list: [], issues: [] };
-  if (!O.on || !prj.hwy?.on || !D?.hwy?.ok) return out;
+  // Numérotation commune OA1, OA2… le long de l'autoroute (passages supérieurs, tiges, anneaux et cadres PICF / PIPO) ;
+  // un nom saisi par l'utilisateur remplace le numéro automatique.
+  const cad = (extra.cadres || []).filter((g) => !g.err);
+  const nameAll = (designs) => {
+    const seq = [...designs.map((B) => ({ B, sX: B.sX })), ...cad.map((g) => ({ g, sX: g.sX }))].sort((a, b) => a.sX - b.sX), auto = new Map();
+    seq.forEach((q, i) => auto.set(q.B || q.g, `OA${i + 1}`));
+    out.cadreNames = new Map(cad.map((g) => [g.c.id, String(g.c.name || '').trim() || auto.get(g)]));
+    out.cadreAuto = new Map(cad.map((g) => [g.c.id, auto.get(g)]));
+    return auto;
+  };
+  if (!O.on || !prj.hwy?.on || !D?.hwy?.ok) { nameAll([]); return out; }
   const Hm = hwyParams(prj), TH = (prj.opts?.textH || 0.8) * 1.2;
   const decks = collectDecks(prj, D, extra).map((d) => ({ ...d, ep: O.ep, Wr: O.Wr, Wt: O.Wt }));
   const designs = [];
@@ -360,12 +373,13 @@ export function buildOuvrages(prj, D, extra = {}) {
     designs.push(B);
   }
   designs.sort((a, b) => a.sX - b.sX);
-  designs.forEach((B, i) => {
-    const name = `OA${i + 1}`;
+  const auto = nameAll(designs);
+  designs.forEach((B) => {
+    const nameAuto = auto.get(B), name = String(prj.ouvr?.decks?.[B.deck.key]?.name || '').trim() || nameAuto;
     B.name = name; B.hwPath = D.hwy.path; B.median = Hm.median;
     drawDeck(B, (o) => D.prims.push(o), name, TH);
     out.issues.push(...B.issues.map((q) => ({ ...q, msg: `${name} – ${q.msg}` })));
-    out.list.push({ poly: B.deckPoly || [], P: B.P0, key: B.deck.key, spansAuto: B.spansAuto, user: B.user, shift: B.shift, hGuide: B.hGuide, name, src: B.deck.src, psi: B.psi, spans: B.spans, central: B.central, type: B.type, h: B.h, hText: B.ep.text, width: 2 * B.halfW, about: B.about, items: B.items, yP: B.yP, yC: B.side, Ht: B.Ht, roadHalf: B.deck.halfW, gab: O.gab, fck: O.fck, ep: O.ep, nPiles: B.sup.filter((q) => q.kind === 'pile').length });
+    out.list.push({ poly: B.deckPoly || [], P: B.P0, sX: B.sX, nameAuto, key: B.deck.key, spansAuto: B.spansAuto, user: B.user, shift: B.shift, hGuide: B.hGuide, name, src: B.deck.src, psi: B.psi, spans: B.spans, central: B.central, type: B.type, h: B.h, hText: B.ep.text, width: 2 * B.halfW, about: B.about, items: B.items, yP: B.yP, yC: B.side, Ht: B.Ht, roadHalf: B.deck.halfW, gab: O.gab, fck: O.fck, ep: O.ep, nPiles: B.sup.filter((q) => q.kind === 'pile').length });
   });
   return out;
 }

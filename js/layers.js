@@ -22,4 +22,5 @@ export const LAYERS = {
   TALUS: { label: 'Talus et quarts de cône', dxf: 'GIRA_TALUS', aci: 34 },
   SIGNALISATION: { label: 'Signalisation verticale (panneaux, balises)', dxf: 'GIRA_SIGNALISATION', aci: 1 },
   IMPLANTATION: { label: "Points d'implantation", dxf: 'GIRA_IMPLANTATION', aci: 6 },
+  PROFILS: { label: 'Profils en travers (implantation)', dxf: 'GIRA_PROFILS', aci: 3 },
 };
