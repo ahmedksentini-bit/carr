@@ -250,6 +250,7 @@ function changeCRS(cfg) {
 function update({ commit = true, panels = true } = {}) {
   rebuildTerrain();
   try { syncTrumpets(); } catch (e) { console.error(e); }
+  try { syncRampBranches(); syncTrumpets(); } catch (e) { console.error(e); } // la tige peut avoir été raccourcie par une branche
   try { S.D = buildDesign(S.prj); } catch (e) { console.error(e); S.D = null; toast('Erreur de calcul : ' + e.message, 'err'); }
   if (S.prj.center.auto && S.D?.O) { S.prj.center.x = S.D.O.x; S.prj.center.y = S.D.O.y; }
   try { S.checks = checkDesign(S.prj, S.D); } catch (e) { console.error(e); S.checks = []; }
@@ -444,7 +445,7 @@ function syncTrumpets() {
   if (!S.D?.hwy?.ok) return;
   S.trSig = S.trSig || new Map();
   for (const semi of S.prj.ramps.filter((r) => r.role === 'semi' || (r.name === 'S-semi' && r.from?.ref?.startsWith('hwy')))) {
-    const sig = JSON.stringify([semi.from, semi.pis, S.prj.hwy.axis, S.prj.hwy.trGap, S.prj.hwy.E1]);
+    const sig = JSON.stringify([semi.from, semi.pis, semi.cut, trumpetGroup(semi).boucle?.cut, S.prj.hwy.axis, S.prj.hwy.trGap, S.prj.hwy.E1]);
     if (S.trSig.get(semi.id) === sig) continue;
     S.trSig.set(semi.id, sig);
     const grp = trumpetGroup(semi);
@@ -454,6 +455,60 @@ function syncTrumpets() {
     S.trErr = null;
     for (const k of ['boucle', 'sdir', 'edir']) { const j = grp[k] ? S.prj.ramps.findIndex((q) => q.id === grp[k].id) : -1; if (j >= 0) S.prj.ramps[j] = dv[k]; }
   }
+}
+// Bretelle dont l'extrémité libre est dans un giratoire : une branche du giratoire est dessinée automatiquement dans
+// l'axe de sa dernière (ou première) branche ; deux bretelles de sens contraires dont les extrémités sont voisines
+// (tige d'une trompette, bretelles accolées) forment une seule branche à double sens. La bretelle s'arrête au bout de la
+// branche (longueur dessinée AUTO_BL au-delà de l'anneau). Supprimer la branche détache la bretelle (noBranch).
+const AUTO_BL = 60;
+function syncRampBranches() {
+  const juncs = [{ j: S.prj, id: S.prj.jid, O: S.D?.O || (S.prj.center?.x != null ? { x: +S.prj.center.x, y: +S.prj.center.y } : null) },
+    ...(S.prj.others || []).map((o) => ({ j: o, id: o.id, O: (S.Do || []).find((d) => d.id === o.id)?.D?.O || (o.center?.x != null ? { x: +o.center.x, y: +o.center.y } : null) }))]
+    .filter((q) => q.O && (q.j.kind || 'giratoire') === 'giratoire');
+  // Extrémités libres : point, direction vers l'extrémité (dernier côté de la bretelle), sens de circulation.
+  const ends = [];
+  S.prj.ramps.forEach((r, i) => {
+    const R = S.D?.ramps?.[i], P = R?.pts || r.pis || [];
+    const pis = r.pis || [];
+    if (r.noBranch) { // détachée : rattachée de nouveau si l'extrémité est déplacée de plus de 5 m
+      const E = r.noBranch.end === 'from' ? pis[0] : pis[pis.length - 1];
+      if (E && G.dist(E, r.noBranch) < 5) return;
+      delete r.noBranch;
+    }
+    if (r.to?.ref === 'free' && pis.length) { const E = pis[pis.length - 1], V = P.length >= 2 ? P[P.length - 2] : null; if (V && G.dist(V, E) > 1) ends.push({ r, end: 'to', E, d: G.norm(G.sub(E, V)) }); }
+    if (r.from?.ref === 'free' && pis.length) { const E = pis[0], V = P.length >= 2 ? P[1] : null; if (V && G.dist(V, E) > 1) ends.push({ r, end: 'from', E, d: G.norm(G.sub(E, V)) }); }
+  });
+  const used = new Set();
+  for (const q of juncs) {
+    const Rg = +q.j.ring?.Rg || 20;
+    const inside = ends.filter((e) => G.dist(e.E, q.O) < Rg);
+    const groups = [];
+    for (const e of inside) {
+      if (used.has(e)) continue;
+      const mate = inside.find((f) => f !== e && !used.has(f) && f.end !== e.end && G.dist(f.E, e.E) < 15 && G.dot(f.d, e.d) > 0.9);
+      const g = mate ? [e, mate] : [e]; g.forEach((x) => used.add(x)); groups.push(g);
+    }
+    const keep = new Set();
+    for (const g of groups) {
+      const key = g.map((e) => e.r.id + ':' + e.end).sort().join('|');
+      const d = G.norm(g.reduce((a, e) => G.add(a, e.d), { x: 0, y: 0 }));
+      const mid = G.mul(g.reduce((a, e) => G.add(a, e.E), { x: 0, y: 0 }), 1 / g.length);
+      const Pc = G.add(mid, G.mul(d, G.dot(G.sub(q.O, mid), d))); // pied de la perpendiculaire du centre sur l'axe
+      const at = (dd) => { const p = G.sub(Pc, G.mul(d, dd)); return { x: +p.x.toFixed(3), y: +p.y.toFixed(3) }; };
+      const axis = [at(Rg + AUTO_BL + 30), at(Rg + 6)];
+      let b = q.j.branches.find((x) => x.rampLink === key);
+      if (!b) { b = { ...newBranch(q.j, axis), rampLink: key, length: AUTO_BL }; q.j.branches.push(b); }
+      else if (G.dist(b.axis[0], axis[0]) > 0.01 || G.dist(b.axis[b.axis.length - 1], axis[1]) > 0.01) b.axis = axis;
+      keep.add(key);
+      for (const e of g) {
+        const cut = G.sub(e.E, G.mul(e.d, G.dot(G.sub(e.E, Pc), d) + Rg + AUTO_BL));
+        const c = { x: +cut.x.toFixed(3), y: +cut.y.toFixed(3), end: e.end, j: q.id };
+        if (JSON.stringify(e.r.cut) !== JSON.stringify(c)) e.r.cut = c;
+      }
+    }
+    q.j.branches = q.j.branches.filter((b) => !b.rampLink || keep.has(b.rampLink));
+  }
+  for (const r of S.prj.ramps) if (r.cut && !ends.some((e) => used.has(e) && e.r === r)) delete r.cut;
 }
 function addTrumpetAt(w) {
   const R2 = parseNum(String(S.prj.hwy.trR2 ?? ''));
@@ -899,6 +954,7 @@ function finishAxis() {
 function deleteBranch(i) {
   const b = S.prj.branches[i];
   if (!b || !confirm(t(`Supprimer la branche ${b.name} ?`))) return;
+  if (b.rampLink) for (const part of b.rampLink.split('|')) { const [rid, end] = part.split(':'), r = S.prj.ramps.find((x) => x.id === rid); if (r) { const E = end === 'from' ? r.pis[0] : r.pis[r.pis.length - 1]; r.noBranch = { x: E.x, y: E.y, end }; delete r.cut; } }
   S.prj.branches.splice(i, 1);
   S.sel = -1; S.hover = -1;
   renderBranchForm(); update();
