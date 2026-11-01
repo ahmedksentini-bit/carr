@@ -12,6 +12,7 @@ export const AR = {
   '+ Sortie': '+ مخرج',
   '+ Entrée': '+ مدخل',
   '+ Trompette': '+ محوّل على شكل بوق',
+  'Trompette : rayon R2 de la S-semi': 'البوق : نصف القطر R2 للمخرج شبه المباشر',
   '+ Trèfle': '+ محوّل على شكل ورقة البرسيم',
   '+ Demi-trèfle': '+ نصف ورقة البرسيم',
   'Route transversale': 'الطريق المتقاطع',

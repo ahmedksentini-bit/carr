@@ -144,9 +144,13 @@ ou sur un fond topographique DXF.
   Chaque bretelle a deux extrémités, libres ou raccordées à l'autoroute ou à une autre bretelle (sortie depuis une
   bretelle, biseau 90 m à 5 %, § 4.3 ; entrée Eb11 sur bretelle, 100 + 75 m, § 5.3, avec les distances de 25 m).
   **Boucles** (sommet « boucle » : arc unique d'environ 270° encadré de clothoïdes, 40 à 60 m, § 3.2.1 ; sortie en
-  boucle signalée comme exceptionnelle, collectrice ≥ 60 m au-delà du tpl, § 6.2.4). **Gabarit de trompette** : un clic
-  sur l'axe à l'endroit de l'ouvrage génère l'entrée en boucle, la sortie semi-directe qui l'enveloppe, la sortie et
-  l'entrée directes raccordées à la tige bidirectionnelle. Surlargeur de 50/R par voie à l'intérieur des courbes de rayon
+  boucle signalée comme exceptionnelle, collectrice ≥ 60 m au-delà du tpl, § 6.2.4). **Gabarit de trompette** : un clic au
+  croisement de la route transversale (tige éventuellement biaise, jusqu'à 40°) ou sur l'axe à l'endroit de l'ouvrage ;
+  la sortie semi-directe est construite d'abord (R2 saisi, R1 de sortie ≥ 100 m et < 2 R2) et fixe la tige et l'ouvrage,
+  l'entrée en boucle (seule boucle) en est déduite, concentrique ; sortie et entrée directes raccordées à la tige
+  bidirectionnelle. Un gabarit régénéré remplace le précédent au même croisement. Les rayons saisis aux sommets des axes
+  sont appliqués tels quels quand les tangentes tiennent (côtés partagés entre sommets voisins, plus petit rayon servi
+  d'abord) ; sinon le rayon réduit est signalé. Surlargeur de 50/R par voie à l'intérieur des courbes de rayon
   < 100 m, introduite linéairement le long des clothoïdes (§ 3.4.2) ; rayons limites, dévers et vitesses contrôlés au
   bord intérieur de la chaussée (Ri = R axe − l/2, § 3.2.1). **Route transversale** (second axe : route ordinaire ou
   seconde autoroute) et **gabarits de trèfle** : un clic sur l'axe de l'autoroute au croisement crée l'axe transversal
