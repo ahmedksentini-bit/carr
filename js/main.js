@@ -9,7 +9,7 @@ import { buildDesign, fmt, fmtGis } from './roundabout.js';
 import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan, SECTION, sectionParams, TAD, SIGNS, signParams } from './norms.js';
 import { GAMMES, CATALOG } from './signs.js';
 import { signSVG, signOutline } from './signicons.js';
-import { rampParams, endFrame, normRamp, buildEchangeur, trumpet, deriveTrumpet, crossingWith, xref, cloverleaf, halfCloverleaf, HWY_CAT, RAMP_CAT } from './echangeur.js';
+import { rampParams, endFrame, normRamp, buildEchangeur, trumpet, deriveTrumpet, crossingWith, xref, cloverleaf, halfCloverleaf, diamond, gradeRoundabout, HWY_CAT, RAMP_CAT } from './echangeur.js';
 import { pathProject } from './clotho.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
@@ -318,7 +318,9 @@ function buildEchFields() {
     '';
   renderCrossFields();
   $('#hwyFields').innerHTML +=
-    '<div class="row">' + fld('hwy.trR2', 'Trompette : rayon R2 de la S-semi', 'm', { ph: '62', title: 'Grande courbe de la sortie semi-directe ; la boucle en est déduite (concentrique)' }) + fld('hwy.trGap', 'Trompette : écart boucle / S-semi', 'm', { ph: '0', title: 'Terre-plein entre la boucle et la sortie semi-directe, côté amont (0 : plates-formes tangentes)' }) + fld('hwy.trTpc', 'Trompette : séparation des voies de la tige (TPC)', 'm', { ph: '1', title: 'Entre les bords des deux voies de la tige, BDG comprises ; constante sur toute la tige et sur l\'ouvrage' }) + '</div>';
+    '<div class="row">' + fld('hwy.trR2', 'Trompette : rayon R2 de la S-semi', 'm', { ph: '62', title: 'Grande courbe de la sortie semi-directe ; la boucle en est déduite (concentrique)' }) + fld('hwy.trGap', 'Trompette : écart boucle / S-semi', 'm', { ph: '0', title: 'Terre-plein entre la boucle et la sortie semi-directe, côté amont (0 : plates-formes tangentes)' }) + fld('hwy.trTpc', 'Trompette : séparation des voies de la tige (TPC)', 'm', { ph: '1', title: 'Entre les bords des deux voies de la tige, BDG comprises ; constante sur toute la tige et sur l\'ouvrage' }) + '</div>' +
+    '<div class="row">' + fld('hwy.loY', 'Losange / demi-échangeur : distance des carrefours à l\'axe', 'm', { ph: 'auto', title: 'Centre des giratoires ou extrémité des bretelles, mesuré le long de la voie secondaire depuis l\'axe de l\'autoroute (auto : plate-forme + 100 m)' }) + fld('hwy.loRg', 'Losange : rayon Rg des giratoires', 'm', { ph: '20' }) + '</div>' +
+    '<div class="row">' + sel('hwy.dmSide', 'Demi-échangeur : bretelles côté', [['debut', 'origine de l\'axe'], ['fin', 'fin de l\'axe']], { branch: false }) + sel('hwy.dmGir', 'Demi-échangeur : raccordement', [['gir', 'giratoires'], ['libre', 'extrémités libres']], { branch: false }) + fld('hwy.gdRg', 'Giratoire dénivelé : rayon Rg', 'm', { ph: 'auto ≥ 60', title: 'Rive extérieure de l\'anneau ; l\'anneau franchit l\'autoroute sur deux ouvrages' }) + '</div>';
 }
 
 // Panneaux : liste des bretelles, formulaire de la bretelle sélectionnée, sommets de l'autoroute, résultats.
@@ -441,6 +443,7 @@ function addRampAt(w) {
 // Gabarits générés (trompette, trèfle, demi-trèfle) : un nouveau gabarit remplace ceux du même croisement (bretelles
 // marquées gen, ou portant un nom de gabarit pour les projets antérieurs, dont un sommet est à moins de R0 du point P0).
 const GEN_NAMES = /^(E-boucle|S-semi|S-directe|E-directe|[BD]-(SE|NE|NO|SO)|CX?[12]|S[12]-dir|E[12]-boucle)$/;
+const DIAMONDS = ['losange', 'losangegir', 'demiech', 'girden'];
 function removeGenerated(P0, R0 = 900) {
   const gone = new Set(S.prj.ramps.filter((r) => (r.gen || GEN_NAMES.test(r.name || '')) && (r.pis || []).some((q) => Math.hypot(q.x - P0.x, q.y - P0.y) < R0)).map((r) => r.id));
   if (!gone.size) return 0;
@@ -600,7 +603,7 @@ function pickSecondary(w, px, py) {
 }
 function runTemplate(kind, w, k) {
   S.pendingTpl = null; S.xsel = k;
-  if (kind === 'trompette') addTrumpetAt(w, k); else addCloverAt(w, kind, k);
+  if (kind === 'trompette') addTrumpetAt(w, k); else if (DIAMONDS.includes(kind)) addDiamondAt(w, kind, k); else addCloverAt(w, kind, k);
   setTool('select');
 }
 // Trompette paramétrique : la S-semi porte les paramètres (tp) ; toute modification (paramètres, voie secondaire, axe de
@@ -626,7 +629,7 @@ function addCloverAt(w, kind, k) {
   const C = crossingWith(S.D, w, k), P = C ? C.P0 : w;
   const T = (kind === 'trefle' ? cloverleaf : halfCloverleaf)(S.prj, S.D, P, uid, { crossK: k });
   if (T.err) { toast(T.err, 'warn'); return; }
-  const skew = C ? Math.abs(90 - (Math.acos(Math.min(1, Math.abs(G.dot(C.dir, G.norm(G.sub(T.crossAxis[1], T.crossAxis[0])))))) * 180) / Math.PI) : 0;
+  const skew = C ? (Math.acos(Math.min(1, Math.abs(G.dot(C.dir, G.norm(G.sub(T.crossAxis[1], T.crossAxis[0])))))) * 180) / Math.PI : 0;
   X.on = true; X.axis = T.crossAxis;
   if (skew > 0.5) toast(t(`${X.name} : axe redressé perpendiculairement à l'autoroute (biais de ${fmt(skew, 1)}° non traité pour ce gabarit).`), 'warn');
   const nOld = removeGenerated(G.lerp(T.crossAxis[0], T.crossAxis[1], 0.5), 1500);
@@ -635,6 +638,59 @@ function addCloverAt(w, kind, k) {
   setTool('select'); update(); zoomAll();
   const what = (kind === 'trefle' ? (X.kind === 'autoroute' ? 'Trèfle (nœud autoroutier, collectrices sur les deux axes)' : 'Trèfle complet (collectrices sur l\'autoroute)') : 'Demi-trèfle (extrémités libres sur la voie secondaire)') + ` sur ${X.name}`;
   toast(`${what} généré : ${T.info}.${nOld ? ` ${nOld} bretelle(s) du gabarit précédent remplacée(s) (Ctrl+Z pour annuler).` : ''}` + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
+}
+
+// Losange, losange à giratoires, demi-échangeur, giratoire dénivelé sur la voie secondaire k. Les giratoires sont créés
+// comme carrefours du projet (liste des carrefours), marqués dans genJ pour être remplacés avec le gabarit ; les bretelles
+// dont l'extrémité est dans l'anneau y dessinent leur branche.
+function removeGenJunctions(P0, R0) {
+  const G0 = S.prj.genJ || {};
+  const gone = new Set(Object.keys(G0).filter((id) => Math.hypot(G0[id].x - P0.x, G0[id].y - P0.y) < R0));
+  for (const id of Object.keys(G0)) if (!S.prj.jorder.includes(id)) delete G0[id];
+  if (!gone.size) return 0;
+  if (gone.has(S.prj.jid)) {
+    const next = S.prj.jorder.find((id) => !gone.has(id));
+    if (next) switchJunction(next, { zoom: false });
+    else Object.assign(S.prj, clone(pickJ(newProject(S.prj.context))), { jid: uid(), jname: 'Carrefour 1' }), S.prj.jorder.push(S.prj.jid);
+  }
+  S.prj.others = S.prj.others.filter((o) => !gone.has(o.id));
+  S.prj.jorder = S.prj.jorder.filter((id) => !gone.has(id));
+  for (const id of gone) delete G0[id];
+  return gone.size;
+}
+function addDiamondAt(w, kind, k) {
+  const X = S.prj.crosses[k], H = S.prj.hwy;
+  if (!X) return;
+  const nv = (v) => parseNum(String(v ?? '')) || 0;
+  const C = crossingWith(S.D, w, k), P = C ? C.P0 : w, demi = kind === 'demiech';
+  const gir = kind === 'losangegir' || (demi && H.dmGir !== 'libre');
+  const T = kind === 'girden' ? gradeRoundabout(S.prj, S.D, P, uid, { crossK: k, Rg: nv(H.gdRg) })
+    : diamond(S.prj, S.D, P, uid, { crossK: k, gir, part: demi ? (H.dmSide === 'fin' ? 'fin' : 'debut') : 'complet', Yj: nv(H.loY), Rg: nv(H.loRg) });
+  if (T.err) { toast(T.err, 'warn'); return; }
+  const ax = T.crossAxis || [];
+  const skew = C && ax.length ? (Math.acos(Math.min(1, Math.abs(G.dot(C.dir, G.norm(G.sub(ax[1], ax[0])))))) * 180) / Math.PI : 0;
+  const nOld = removeGenerated(P, 1500), nJ = removeGenJunctions(P, 1500);
+  if (T.crossOff) X.on = false; else { X.on = true; X.axis = T.crossAxis; }
+  const n0 = S.prj.ramps.length;
+  S.prj.ramps.push(...T.ramps.map((r) => ({ ...r, name: `${r.name}-X${k + 1}`, gen: kind }))); S.rsel = n0; // S1-X2 : sortie du sens 1 sur la voie secondaire 2
+  S.prj.genJ = S.prj.genJ || {};
+  (T.juncs || []).forEach((J, i) => {
+    const j = { id: uid(), name: T.juncs.length > 1 ? `${X.name} – giratoire côté sens ${J.side < 0 ? 1 : 2}` : `${X.name} – giratoire dénivelé`, ...clone(pickJ(newProject(S.prj.context))) };
+    Object.assign(j, { kind: 'giratoire', center: { auto: false, x: J.center.x, y: J.center.y }, branches: [] });
+    j.ring = { ...j.ring, Rg: J.Rg };
+    for (const a of J.arms) j.branches.push({ ...newBranch(j, a.axis), length: a.length });
+    S.prj.others.push(j); S.prj.jorder.push(j.id);
+    S.prj.genJ[j.id] = { kind, x: +P.x.toFixed(3), y: +P.y.toFixed(3) };
+  });
+  if (S.D) S.D.ramps = []; // indices des bretelles modifiés
+  setTool('select'); update({ commit: false }); update(); zoomAll();
+  const what = { losange: 'Losange (carrefours plans à compléter aux extrémités libres)', losangegir: 'Losange à deux giratoires', demiech: `Demi-échangeur (bretelles côté ${H.dmSide === 'fin' ? 'fin' : 'origine'} de l'axe${gir ? ', giratoires' : ', extrémités libres'})`, girden: 'Giratoire dénivelé à deux ouvrages' }[kind];
+  const msgs = [`${what} généré sur ${X.name} : ${T.info}.`];
+  if (skew > 0.5) msgs.push(`Axe de ${X.name} redressé perpendiculairement à l'autoroute (biais de ${fmt(skew, 1)}° non traité).`);
+  if (T.crossOff) msgs.push(`${X.name} est désactivée : le giratoire la remplace par deux branches.`);
+  if (nOld || nJ) msgs.push(`Gabarit précédent remplacé (${nOld} bretelle(s)${nJ ? `, ${nJ} giratoire(s)` : ''}) — Ctrl+Z pour annuler.`);
+  if (T.warn) msgs.push(T.warn);
+  toast(msgs.join(' '), T.warn ? 'warn' : 'info');
 }
 
 // Axe de l'autoroute et polygones des bretelles (sommets déplaçables).
@@ -682,7 +738,7 @@ function bindEch() {
   $('#crossList').addEventListener('click', (e) => { const li = e.target.closest('li[data-xi]'); if (!li) return; S.xsel = +li.dataset.xi; S.echSig = ''; refreshPanels(); viewer.invalidate(); });
   const place = (kind) => {
     if (!S.D?.hwy?.ok) { toast('Activez l\'autoroute et dessinez d\'abord son axe.', 'warn'); return; }
-    if (['trompette', 'trefle', 'demitrefle'].includes(kind)) { setTool('pickx'); S.pendingTpl = kind; setPrompt(); return; } // l'échangeur se construit sur une voie secondaire
+    if (['trompette', 'trefle', 'demitrefle', ...DIAMONDS].includes(kind)) { setTool('pickx'); S.pendingTpl = kind; setPrompt(); return; } // l'échangeur se construit sur une voie secondaire
     setTool('ramp'); S.rampKind = kind; setPrompt();
   };
   $('#btnRampOut').addEventListener('click', () => place('sortie'));
@@ -690,6 +746,10 @@ function bindEch() {
   $('#btnTrumpet').addEventListener('click', () => place('trompette'));
   $('#btnTrefle').addEventListener('click', () => place('trefle'));
   $('#btnDemiTrefle').addEventListener('click', () => place('demitrefle'));
+  $('#btnLosange').addEventListener('click', () => place('losange'));
+  $('#btnLosangeGir').addEventListener('click', () => place('losangegir'));
+  $('#btnDemiEch').addEventListener('click', () => place('demiech'));
+  $('#btnGirDen').addEventListener('click', () => place('girden'));
   $('#btnRampDel').addEventListener('click', () => {
     const r = S.prj.ramps[S.rsel];
     if (!r || !confirm(t(`Supprimer la bretelle ${r.name} ?`))) return;

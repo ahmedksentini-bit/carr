@@ -177,9 +177,24 @@ ou sur un fond topographique DXF.
 - **Plusieurs carrefours** par projet (giratoires et carrefours plans nommés, onglet Projet) : tous sont dessinés et
   exportés ; les onglets portent sur le carrefour actif, qu'on choisit dans la liste ou d'un clic sur le plan.
 - **Plusieurs échangeurs** le long de l'autoroute : une voie secondaire par échangeur (liste « Voies secondaires »,
-  chacune nommée, route ordinaire ou autoroute). Les boutons Trompette, Trèfle et Demi-trèfle demandent la voie
-  secondaire : clic sur une voie existante au croisement, ou tracé d'une nouvelle voie (en partant de la voirie
-  ordinaire pour une trompette) ; le gabarit est construit à son croisement avec l'autoroute.
+  chacune nommée, route ordinaire ou autoroute). Les boutons Trompette, Trèfle, Demi-trèfle, Losange, Losange à
+  giratoires, Demi-échangeur et Giratoire dénivelé demandent la voie secondaire : clic sur une voie existante au
+  croisement, ou tracé d'une nouvelle voie (en partant de la voirie ordinaire pour une trompette) ; le gabarit est
+  construit à son croisement avec l'autoroute.
+- **Losange, demi-échangeur, giratoire dénivelé** (diffuseurs sur route ordinaire) : bretelles directes à deux courbes de
+  sens contraires (divergent / convergent à 3 %, premier rayon de sortie 110 m au bord intérieur ≥ 100 m, seconde courbe
+  60 m, R1 < 2 R2 et clothoïdes minimales, § 3.2.2–3.2.3), l'entrée étant le symétrique de la sortie ; bretelles nommées
+  S1-X2, E2-X2… (sens, voie secondaire). *Losange* : quatre bretelles, extrémités libres à 25 m du bord de la route
+  transversale (carrefours plans à compléter) ; *losange à giratoires* : deux giratoires créés dans la liste des
+  carrefours, centrés sur la route transversale à la distance réglable de l'axe (auto : plate-forme + 100 m), la route
+  transversale réduite au tronçon de l'ouvrage et prolongée par les branches des giratoires (le guide § 8 préfère le
+  giratoire, qui dissuade les prises à contresens) ; *demi-échangeur* : une sortie et une entrée du même côté du
+  croisement (côté origine ou fin de l'axe), avec giratoires ou extrémités libres ; *giratoire dénivelé* : anneau
+  (Rg ≥ 60 m) centré sur le croisement et franchissant l'autoroute sur deux ouvrages, branches de la route transversale
+  (qui est désactivée) et des quatre bretelles, raccordées à l'angle le plus faible laissant 15 m entre la plate-forme et
+  l'axe de la branche. Les branches des bretelles se dessinent par le raccordement automatique ci-dessous ; un nouveau
+  gabarit au même croisement remplace aussi les giratoires du précédent. Grands giratoires (Rg > 25 m, hors tableau
+  ACI) : îlots séparateurs construits sur le triangle de Rg = 25 m.
 - **Raccordement bretelle → giratoire** : une bretelle dont l'extrémité libre est placée dans l'anneau d'un giratoire du
   projet (actif ou non) dessine automatiquement une branche de ce giratoire dans l'axe de son dernier côté ; deux
   bretelles de sens contraires aux extrémités voisines (tige d'une trompette) forment une seule branche à double sens.
@@ -339,12 +354,12 @@ structure de l'HCM, d'après Troutbeck & Brilon, *Traffic Flow Theory*, chap. 8 
 ## Limites connues
 
 - Échangeur : seules les sorties en déboîtement et les entrées en insertion à une voie sont dessinées (pas
-  d'affectation Sa, d'adjonction Ea / Eb21 ni d'entrecroisement) ; la trompette, le trèfle et le demi-trèfle sont des gabarits de principe
+  d'affectation Sa, d'adjonction Ea / Eb21 ni d'entrecroisement) ; la trompette, le trèfle, le demi-trèfle, les losanges, le demi-échangeur et le giratoire dénivelé sont des gabarits de principe
   (rayons, emprise de l'ordre de 1,5 km le long de l'autoroute) à ajuster ; avec des boucles de 40 à 60 m, l'entrecroisement
   entre deux boucles successives sur la collectrice reste très inférieur aux 275 m du § 7.3.3 (il est signalé), et sur
   une route ordinaire (tpl 4,70 m, Lm 74 m) les boucles passent à Ri ≈ 66 m pour que les musoirs ne se chevauchent pas ;
   les carrefours aux
-  extrémités du demi-trèfle ne sont pas générés ; l'ouvrage de franchissement n'est pas dessiné ; la section courante est tracée en droites et arcs (sans
+  extrémités du demi-trèfle et du losange simple ne sont pas générés ; le biais de la voie secondaire n'est pas traité (axe redressé) ; l'ouvrage de franchissement n'est pas dessiné ; la section courante est tracée en droites et arcs (sans
   clothoïdes) ; les bretelles n'ont pas encore de profil en long ni de profils en travers, ni de vue 3D, et leur
   extrémité n'est pas encore raccordée automatiquement au giratoire (branche à sens unique) : l'axe se termine sur la
   branche dessinée.
