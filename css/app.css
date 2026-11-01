@@ -284,3 +284,9 @@ button.mini { padding: 1px 6px; font-size: 11px; }
 .elpop-body { overflow: auto; padding: 8px 12px 12px; }
 .moved-note { opacity: .7; font-style: italic; }
 #jList li { grid-template-columns: 12px minmax(90px, auto) 1fr auto; }
+/* Ouvrages : fiche de travure */
+details.ouvr { margin: 6px 0; border: 1px solid var(--line, rgba(127,127,127,0.3)); border-radius: 6px; padding: 4px 8px; }
+details.ouvr summary { cursor: pointer; }
+ul.ouvr-items { margin: 4px 0 2px 16px; padding: 0; font-size: 12px; }
+ul.ouvr-items li.ok { color: var(--ok, #16a34a); }
+ul.ouvr-items li.warn { color: var(--warn); }

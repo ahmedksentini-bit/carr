@@ -24,6 +24,9 @@ export const THEMES = {
       LIMITE: { stroke: '#94a3b8', w: 1, dash: [6, 4] },
       COTATION: { stroke: '#38bdf8', w: 0.9, text: '#7dd3fc' },
       DEVERS: { stroke: '#fb923c', w: 1.2, text: '#fdba74' },
+      OUVRAGE: { stroke: '#e2e8f0', w: 1.4, text: '#e2e8f0', fill: { tablier: 'rgba(203,213,225,0.16)', pile: 'rgba(148,163,184,0.45)', culee: 'rgba(148,163,184,0.55)' }, roles: { axe: { stroke: '#94a3b8', w: 0.8 }, cache: { stroke: '#cbd5e1', w: 1 } } },
+      RETENUE: { stroke: '#fbbf24', w: 1.2, text: '#fcd34d', roles: { W: { stroke: 'rgba(251,191,36,0.75)', w: 0.9 } } },
+      TALUS: { stroke: '#a8a29e', w: 1, roles: { crete: { stroke: '#d6d3d1', w: 1.3 } } },
       SIGNALISATION: { stroke: '#f87171', w: 1.4, text: '#fca5a5' },
       IMPLANTATION: { stroke: '#e879f9', w: 1, text: '#f0abfc' },
     },
@@ -49,6 +52,9 @@ export const THEMES = {
       LIMITE: { stroke: '#64748b', w: 1, dash: [6, 4] },
       COTATION: { stroke: '#0369a1', w: 0.9, text: '#0c4a6e' },
       DEVERS: { stroke: '#c2410c', w: 1.2, text: '#9a3412' },
+      OUVRAGE: { stroke: '#334155', w: 1.4, text: '#1e293b', fill: { tablier: 'rgba(100,116,139,0.14)', pile: 'rgba(71,85,105,0.4)', culee: 'rgba(71,85,105,0.5)' }, roles: { axe: { stroke: '#64748b', w: 0.8 }, cache: { stroke: '#475569', w: 1 } } },
+      RETENUE: { stroke: '#b45309', w: 1.2, text: '#92400e', roles: { W: { stroke: 'rgba(180,83,9,0.7)', w: 0.9 } } },
+      TALUS: { stroke: '#78716c', w: 1, roles: { crete: { stroke: '#57534e', w: 1.3 } } },
       SIGNALISATION: { stroke: '#b91c1c', w: 1.4, text: '#991b1b' },
       IMPLANTATION: { stroke: '#a21caf', w: 1, text: '#86198f' },
     },
@@ -157,7 +163,7 @@ function arrowHead(ctx, x0, y0, x1, y1, size) {
 export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
   if (!D) return;
   const T = THEMES[theme];
-  const order = ['MNT', 'CHAUSSEE', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'PMR', 'VISIBILITE', 'EPURE', 'AXE', 'DEVERS', 'COTATION', 'SIGNALISATION'];
+  const order = ['MNT', 'CHAUSSEE', 'TALUS', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'RETENUE', 'OUVRAGE', 'PMR', 'VISIBILITE', 'EPURE', 'AXE', 'DEVERS', 'COTATION', 'SIGNALISATION'];
   ctx.lineCap = 'butt'; ctx.lineJoin = 'round';
   for (const layer of order) {
     if (vis[layer] === false) continue;

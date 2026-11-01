@@ -17,6 +17,7 @@ import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF } from './pt.j
 import { plParams, plBuild, plStations, plTerrainLine, plFromTerrain, plChartSVG, plChartPick, plDXF, plChecks, axisLength } from './pl.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
+import { buildOuvrages, W_CLASSES } from './ouvrage.js';
 import { analyse, SITES } from './capacity.js';
 import { initLang, getLang, t } from './i18n.js';
 import { analysePlan, gapParams, GAPS } from './capacity-plan.js';
@@ -259,11 +260,29 @@ function update({ commit = true, panels = true } = {}) {
   if (S.prj.center.auto && S.D?.O) { S.prj.center.x = S.D.O.x; S.prj.center.y = S.D.O.y; }
   try { S.checks = checkDesign(S.prj, S.D); } catch (e) { console.error(e); S.checks = []; }
   S.Do = otherDesigns();
+  S.ouvr = null;
+  if (S.D) try { // ouvrages de franchissement de l'autoroute (passages supérieurs)
+    S.ouvr = buildOuvrages(S.prj, S.D, { girden: girdenList() });
+    for (const q of S.ouvr.issues) S.checks.push({ lvl: q.lvl, group: 'Ouvrages', msg: q.msg });
+  } catch (e) { console.error(e); }
   for (const [id, msg] of S.trBad || []) { const r = S.prj.ramps.find((q) => q.id === id); if (r) S.checks.push({ lvl: 'err', group: 'Échangeur', msg: `Trompette (${r.name}) : boucle non déduite de la S-semi — ${msg}` }); else S.trBad.delete(id); }
   if (panels) refreshPanels();
   viewer.invalidate();
   if (commit) commitHistory();
   autosave();
+}
+
+// Giratoires dénivelés générés (anneau franchissant l'autoroute) : centre, rayons, nom.
+function girdenList() {
+  const out = [];
+  for (const [id, g] of Object.entries(S.prj.genJ || {})) {
+    if (g.kind !== 'girden') continue;
+    const j = id === S.prj.jid ? S.prj : S.prj.others.find((o) => o.id === id);
+    if (!j || j.center?.x == null) continue;
+    const O = id === S.prj.jid ? S.D?.O : (S.Do || []).find((d) => d.id === id)?.D?.O;
+    out.push({ name: id === S.prj.jid ? S.prj.jname : j.name, O: O || { x: +j.center.x, y: +j.center.y }, Rg: +j.ring.Rg, la: +j.ring.la || 8 });
+  }
+  return out;
 }
 
 function commitHistory() {
@@ -308,6 +327,14 @@ function renderCrossFields() {
     '<div class="row">' + fld(p + 'bau', 'BAU / BDD', 'm', { ph: '2,00 / 2,50' }) + fld(p + 'median', 'Bande médiane', 'm', { ph: '0 / 3,00' }) + '</div>' +
     '<div class="row">' + fld(p + 'bdg', 'BDG', 'm', { ph: '0 / 1,00' }) + fld(p + 'berme', 'Berme', 'm', { ph: '0,75 / 1,00' }) + '</div>';
 }
+function buildOuvrFields() {
+  const Wopts = Object.entries(W_CLASSES).map(([k, v]) => [k, `${k} (${fmt(v, 2)} m)`]);
+  $('#ouvrFields').innerHTML =
+    '<div class="row">' + sel('ouvr.on', 'Ouvrages', [['', 'dessinés'], ['non', 'non dessinés']], { branch: false }) + sel('ouvr.nTrav', 'Travure', [['auto', 'automatique (4 travées si TPC ≥ 3 m)'], ['4', '4 travées (pile centrale)'], ['3', '3 travées (sans pile centrale)']], { branch: false }) + '</div>' +
+    '<div class="row">' + fld('ouvr.gab', 'Tirant d\'air', 'm', { ph: '4,75' }) + fld('ouvr.ep', 'Épaisseur des piles voiles', 'm', { ph: '0,80' }) + '</div>' +
+    '<div class="row">' + fld('ouvr.dRet', 'Bord de BAU → face du dispositif de retenue', 'm', { ph: '0' }) + sel('ouvr.Wr', 'Largeur de fonctionnement en rive', Wopts, { branch: false }) + sel('ouvr.Wt', 'Largeur de fonctionnement dans le TPC', Wopts, { branch: false }) + '</div>' +
+    '<div class="row">' + fld('ouvr.corn', 'Largeur hors chaussée de chaque côté (corniche, longrine)', 'm', { ph: '0,50' }) + fld('ouvr.fck', 'Béton de la dalle fck', 'MPa', { ph: '30' }) + '</div>';
+}
 function buildEchFields() {
   $('#hwyFields').innerHTML =
     '<div class="row">' + fld('hwy.name', 'Nom', '', { text: true }) + sel('hwy.cat', 'Catégorie', Object.entries(HWY_CAT).map(([k, c]) => [k, c.label]), { branch: false }) + '</div>' +
@@ -317,6 +344,7 @@ function buildEchFields() {
     '<div class="row">' + fld('hwy.berme', 'Berme', 'm', { ph: '1,00' }) + fld('hwy.pk0', 'PK origine', 'm', { ph: '0' }) + '</div>' +
     '';
   renderCrossFields();
+  buildOuvrFields();
   $('#hwyFields').innerHTML +=
     '<div class="row">' + fld('hwy.trR2', 'Trompette : rayon R2 de la S-semi', 'm', { ph: '62', title: 'Grande courbe de la sortie semi-directe ; la boucle en est déduite (concentrique)' }) + fld('hwy.trGap', 'Trompette : écart boucle / S-semi', 'm', { ph: '0', title: 'Terre-plein entre la boucle et la sortie semi-directe, côté amont (0 : plates-formes tangentes)' }) + fld('hwy.trTpc', 'Trompette : séparation des voies de la tige (TPC)', 'm', { ph: '1', title: 'Entre les bords des deux voies de la tige, BDG comprises ; constante sur toute la tige et sur l\'ouvrage' }) + '</div>' +
     '<div class="row">' + fld('hwy.loY', 'Losange / demi-échangeur : distance des carrefours à l\'axe', 'm', { ph: 'auto', title: 'Centre des giratoires ou extrémité des bretelles, mesuré le long de la voie secondaire depuis l\'axe de l\'autoroute (auto : plate-forme + 100 m)' }) + fld('hwy.loRg', 'Losange : rayon Rg des giratoires', 'm', { ph: '20' }) + '</div>' +
@@ -381,6 +409,16 @@ function refreshEch() {
     ['Plate-forme', fmt(2 * (hw.E2 + hw.H.berme)) + ' m'],
     ['Rm / Rdn (ICTAAL tab. 3-1)', `${hw.H.C.Rm} / ${hw.H.C.Rdn} m`],
   ]) : '<p class="note">Activez l\'autoroute et dessinez son axe (milieu du terre-plein central).</p>';
+  const OV = S.ouvr?.list || [], lvlCls = { ok: 'ok', info: '', warn: 'warn', err: 'err' };
+  $('#ouvrOut').innerHTML = OV.length ? OV.map((o) => `<details class="ouvr"${OV.length === 1 ? ' open' : ''}><summary><b>${esc(o.name)}</b> — ${esc(o.src)} : ${o.spans.length} travées ${o.spans.map((v) => fmt(v, 2)).join(' + ')} m</summary>` + kv([
+    ['Biais géométrique ψ', `${fmt(o.psi, 1)} gr`],
+    ['Travure', `${o.spans.map((v) => fmt(v, 2)).join(' + ')} = ${fmt(o.spans.reduce((a, b) => a + b, 0), 2)} m${o.central ? ' (pile centrale dans le TPC)' : ' (sans appui central)'}`],
+    ['Largeur du tablier', `${fmt(o.width, 2)} m`],
+    ['Dalle', `PSI-${o.type}, h ≈ ${fmt(o.h, 2)} m ; about ≥ ${fmt(o.about, 2)} m`],
+    ['Axe des piles de rive', `à ${fmt(o.yP, 2)} m de l'axe de l'autoroute`],
+    ['Talus 3/2 sous culée', `hauteur ${fmt(o.Ht, 2)} m, emprise ${fmt(1.5 * o.Ht, 2)} m`],
+  ]) + `<p class="note">${esc(o.hText)}</p><ul class="ouvr-items">${o.items.map((it) => `<li class="${lvlCls[it.level] || ''}">${esc(it.text)}</li>`).join('')}</ul></details>`).join('')
+    : '<p class="note">Aucun ouvrage : une voie secondaire, la tige d\'une trompette ou l\'anneau d\'un giratoire dénivelé doit croiser l\'autoroute.</p>';
   const xr = D?.crosses?.[S.xsel];
   $('#crossOut').innerHTML = xr?.ok ? kv([
     ['Longueur de l\'axe', fmt(xr.sEnd) + ' m'],
@@ -664,11 +702,9 @@ function addDiamondAt(w, kind, k) {
   const nv = (v) => parseNum(String(v ?? '')) || 0;
   const C = crossingWith(S.D, w, k), P = C ? C.P0 : w, demi = kind === 'demiech';
   const gir = kind === 'losangegir' || (demi && H.dmGir !== 'libre');
-  const T = kind === 'girden' ? gradeRoundabout(S.prj, S.D, P, uid, { crossK: k, Rg: nv(H.gdRg) })
-    : diamond(S.prj, S.D, P, uid, { crossK: k, gir, part: demi ? (H.dmSide === 'fin' ? 'fin' : 'debut') : 'complet', Yj: nv(H.loY), Rg: nv(H.loRg) });
+  const T = kind === 'girden' ? gradeRoundabout(S.prj, S.D, P, uid, { crossK: k, dir: C?.dir, Rg: nv(H.gdRg) })
+    : diamond(S.prj, S.D, P, uid, { crossK: k, dir: C?.dir, gir, part: demi ? (H.dmSide === 'fin' ? 'fin' : 'debut') : 'complet', Yj: nv(H.loY), Rg: nv(H.loRg) });
   if (T.err) { toast(T.err, 'warn'); return; }
-  const ax = T.crossAxis || [];
-  const skew = C && ax.length ? (Math.acos(Math.min(1, Math.abs(G.dot(C.dir, G.norm(G.sub(ax[1], ax[0])))))) * 180) / Math.PI : 0;
   const nOld = removeGenerated(P, 1500), nJ = removeGenJunctions(P, 1500);
   if (T.crossOff) X.on = false; else { X.on = true; X.axis = T.crossAxis; }
   const n0 = S.prj.ramps.length;
@@ -686,7 +722,6 @@ function addDiamondAt(w, kind, k) {
   setTool('select'); update({ commit: false }); update(); zoomAll();
   const what = { losange: 'Losange (carrefours plans à compléter aux extrémités libres)', losangegir: 'Losange à deux giratoires', demiech: `Demi-échangeur (bretelles côté ${H.dmSide === 'fin' ? 'fin' : 'origine'} de l'axe${gir ? ', giratoires' : ', extrémités libres'})`, girden: 'Giratoire dénivelé à deux ouvrages' }[kind];
   const msgs = [`${what} généré sur ${X.name} : ${T.info}.`];
-  if (skew > 0.5) msgs.push(`Axe de ${X.name} redressé perpendiculairement à l'autoroute (biais de ${fmt(skew, 1)}° non traité).`);
   if (T.crossOff) msgs.push(`${X.name} est désactivée : le giratoire la remplace par deux branches.`);
   if (nOld || nJ) msgs.push(`Gabarit précédent remplacé (${nOld} bretelle(s)${nJ ? `, ${nJ} giratoire(s)` : ''}) — Ctrl+Z pour annuler.`);
   if (T.warn) msgs.push(T.warn);

@@ -17,6 +17,9 @@ export const LAYERS = {
   LIMITE: { label: 'Limites de projet', dxf: 'GIRA_LIMITE', aci: 8, ltype: 'TIRETS' },
   COTATION: { label: 'Cotations', dxf: 'GIRA_COTATION', aci: 4 },
   DEVERS: { label: 'Dévers', dxf: 'GIRA_DEVERS', aci: 30 },
+  OUVRAGE: { label: 'Ouvrages (tabliers, piles, culées)', dxf: 'GIRA_OUVRAGE', aci: 5 },
+  RETENUE: { label: 'Dispositifs de retenue (largeur de fonctionnement)', dxf: 'GIRA_RETENUE', aci: 40 },
+  TALUS: { label: 'Talus et quarts de cône', dxf: 'GIRA_TALUS', aci: 34 },
   SIGNALISATION: { label: 'Signalisation verticale (panneaux, balises)', dxf: 'GIRA_SIGNALISATION', aci: 1 },
   IMPLANTATION: { label: "Points d'implantation", dxf: 'GIRA_IMPLANTATION', aci: 6 },
 };
