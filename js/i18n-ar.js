@@ -13,6 +13,8 @@ export const AR = {
   '+ Entrée': '+ مدخل',
   '+ Trompette': '+ محوّل على شكل بوق',
   'Trompette : rayon R2 de la S-semi': 'البوق : نصف القطر R2 للمخرج شبه المباشر',
+  'Affiché dans la fenêtre de l\'élément sur le plan.': 'معروض في نافذة العنصر على المخطط.',
+  'Supprimer le carrefour et toutes ses branches ?': 'حذف المفترق وكل فروعه؟',
   '+ Trèfle': '+ محوّل على شكل ورقة البرسيم',
   '+ Demi-trèfle': '+ نصف ورقة البرسيم',
   'Route transversale': 'الطريق المتقاطع',
