@@ -222,6 +222,19 @@ ou sur un fond topographique DXF.
   l'intérieur de 2,5 à 7 % (linéaire en 1/R, guide des échangeurs § 3.5 ; route ordinaire : Rdn ≈ 900 m, Rm ≈ 240 m,
   ordre de grandeur à ajuster) ; bermes à 8 % ; talus et fossé de l'onglet. Épaisseur de chaussée : cubatures au fond
   de forme. Volumes par la méthode des aires moyennes, récapitulatif par axe, exports DXF et CSV.
+- **Hydrologie et hydraulique (onglet Hydrologie, moteur de BVTrace porté en JavaScript, js/hydro/)** :
+  - bassins versants dont l'écoulement coupe les axes cochés (autoroute, voies secondaires, bretelles, branches), sur
+    un MNT SRTM élargi autour des axes (marge doublée automatiquement tant qu'un bassin touche le bord, jusqu'à 24 km)
+    ou sur le MNT du projet : Priority-Flood + ε, D8, rasterisation 4-connexe des tracés, partition sans vide aux PK
+    médians, bassins totaux emboîtés (double franchissement), morphométrie (L, dénivelée, Ieq, Hmoy, ΔH…) ;
+  - débits : jeu tunisien (rationnelle avec station Montana — la plus proche par défaut —, abaque C selon le couvert
+    végétal, SOGREAH, Ghorbel, Kallel, Fersi, Frigui, Francou-Rodier, note DGPC 1054) ou FAO 54 (CIEH, Orstom),
+    temps de concentration Kirpich, Ventura, Passini, Giandotti (une formule retenue et affichée) ;
+  - dimensionnement des dalots ou des buses (contrôle à l'entrée HDS-5 et par l'aval, abaques BCEOM, vitesses, taux
+    de remplissage, HW admissible déduit de la cote de chaussée du profil en long et de la revanche) ;
+  - « Créer les ouvrages sur le plan » : un PICF (ou une buse) par franchissement, biais tiré de la direction de
+    l'écoulement, remblai sur traverse tiré du profil en long ; numérotation OA, export PSIDA des dalots ;
+  - tests : `node tools/test-watershed.mjs`, `node tools/test-hydrology.mjs`, `node tools/test-culvert.mjs`.
 - **Ouvrages numérotés** : passages supérieurs, tiges, anneaux de giratoire dénivelé et cadres sont numérotés OA1, OA2…
   dans l'ordre des abscisses de l'autoroute (numéro cerclé sur le plan) ; le nom de chaque ouvrage se modifie dans
   l'onglet Ouvrages. **+ Passage supérieur** : dessinez une voie secondaire qui franchit l'autoroute, l'ouvrage est

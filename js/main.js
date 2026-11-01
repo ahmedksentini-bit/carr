@@ -10,7 +10,7 @@ import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, 
 import { GAMMES, CATALOG } from './signs.js';
 import { signSVG, signOutline } from './signicons.js';
 import { rampParams, endFrame, normRamp, buildEchangeur, trumpet, deriveTrumpet, crossingWith, xref, cloverleaf, halfCloverleaf, diamond, gradeRoundabout, HWY_CAT, RAMP_CAT } from './echangeur.js';
-import { pathProject, pathTangentAt } from './clotho.js';
+import { pathProject, pathTangentAt, polySegs } from './clotho.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
 import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF } from './pt.js';
@@ -21,6 +21,10 @@ import { buildOuvrages, W_CLASSES, psidaLink, psidaProject } from './ouvrage.js'
 import { buildProfils, listAxes, nearestAxis, profParams, profilsCsv } from './profils.js';
 import { cadreGeoms, drawCadre, cadreChecks, cadreLink, cadreProject, CADRE_DEF } from './cadres.js';
 import { axisSections, axisType, typeParams, typeText } from './ptaxes.js';
+import { demFromSRTM, demFromTIN } from './hydro/dem.js';
+import { delineate } from './hydro/watershed.js';
+import { computeAll as hydroComputeAll, defaultHypotheses, listMontanaStations, TC_FORMULAS, FRANCOU_RODIER_REGIONS, suggestCiehRegressions } from './hydro/hydrology.js';
+import { sizeCulvert, inletsForShape, defaultInletFor } from './hydro/culvert.js';
 import { buildAxisProfiles, axisPlChecks, clearanceChecks, axisTerrainLine, axisFromTerrain, buildNodes, axisLimits } from './axpl.js';
 import { chausseeOverlaps } from './overlap.js';
 import { analyse, SITES } from './capacity.js';
@@ -302,6 +306,7 @@ function update({ commit = true, panels = true } = {}) {
   }
   S.prof = null;
   if (S.D) try { S.prof = buildProfils(S.prj, S.D, (S.prj.opts?.textH || 0.8) * 1.2); for (const q of S.prof.issues) S.checks.push({ ...q, group: 'Profils' }); } catch (e) { console.error(e); }
+  if (S.D && S.prj.hydro?.res) try { drawHydro(); } catch (e) { console.error(e); }
   S.axpl = null; S.clear = [];
   if (S.D?.hwy?.ok) try { // profils en long de l'autoroute, des voies secondaires et des bretelles ; tirant d'air
     const axes = (S.prof?.axes || listAxes(S.prj, S.D)).filter((a) => !a.key.startsWith('b:'));
@@ -331,7 +336,7 @@ function junctionsZ() {
 }
 // Onglet Ouvrages : liste, travure modifiable de l'ouvrage choisi (réglages par ouvrage dans prj.ouvr.decks), fiche.
 const parseSpans = (t) => String(t || '').split(/;|\s+|,(?=\s)/).map((x) => parseNum(x.trim())).filter((v) => Number.isFinite(v) && v > 0);
-const cadreItem = (g) => ({ key: `c:${g.c.id}`, cadre: true, g, name: g.name, src: `${g.K?.type === 'pipo' ? 'PIPO' : 'PICF'} sous ${g.ax?.name || g.c.axisName || '?'}`, sX: g.sX ?? 0, P: g.p });
+const cadreItem = (g) => ({ key: `c:${g.c.id}`, cadre: true, g, name: g.name, src: `${g.K?.type === 'pipo' ? 'PIPO' : g.K?.type === 'buse' ? 'Buse' : 'PICF'} sous ${g.ax?.name || g.c.axisName || '?'}`, sX: g.sX ?? 0, P: g.p });
 function renderOuvr() {
   const OV = [...(S.ouvr?.list || []), ...(S.cadres || []).map(cadreItem)].sort((a, b) => (a.sX ?? 0) - (b.sX ?? 0));
   if (!OV.some((q) => q.key === S.osel)) S.osel = OV[0]?.key ?? null;
@@ -373,7 +378,7 @@ function renderCadreEdit(o) {
     const sel = (k, label, opts) => `<label class="fld">${label}<select data-cf="${k}">${opts.map(([v, t]) => `<option value="${v}"${(c[k] || opts[0][0]) === v ? ' selected' : ''}>${t}</option>`).join('')}</select></label>`;
     ed.innerHTML = `<h3>${esc(o.name)} — ${esc(o.src)}</h3>` +
       `<div class="row"><label class="fld">Nom de l'ouvrage<input data-cf="name" type="text" autocomplete="off" value="${esc(c.name || '')}" placeholder="${esc(g.nameAuto || o.name)} (automatique)"></label>` +
-      sel('type', 'Type', [['picf', 'cadre fermé (PICF, dalot)'], ['pipo', 'portique ouvert (PIPO)']]) + sel('usage', 'Voie franchie', [['eau', 'écoulement (ouvrage hydraulique)'], ['route', 'route (passage inférieur)'], ['rail', 'voie ferrée']]) + `</div>` +
+      sel('type', 'Type', [['picf', 'cadre fermé (PICF, dalot)'], ['pipo', 'portique ouvert (PIPO)'], ['buse', 'buse (B = diamètre)']]) + sel('usage', 'Voie franchie', [['eau', 'écoulement (ouvrage hydraulique)'], ['route', 'route (passage inférieur)'], ['rail', 'voie ferrée']]) + `</div>` +
       `<div class="row">${inp('n', 'Cellules', '1', '')}${inp('B', 'Ouverture B', '3,00')}${inp('H', 'Hauteur intérieure H', '2,50')}${inp('Hr', 'Remblai sur traverse', '1,50')}</div>` +
       `<div class="row">${inp('biais', 'Biais', '100 (droit)', 'gr')}${inp('L', 'Longueur L', `${fmt(K?.Lauto ?? 0, 2)} (auto)`)}${inp('s', 'Abscisse sur l\'axe porteur', '')}</div>` +
       `<div class="row">${inp('ep', 'Piédroits', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('et', 'Traverse', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('er', 'Radier', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('ei', 'Voiles intermédiaires', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}</div>` +
@@ -382,14 +387,15 @@ function renderCadreEdit(o) {
       `<p class="note">Biais : angle entre l'axe de l'ouvrage et l'axe de la voie portée (100 gr = ouvrage perpendiculaire) ; les têtes restent parallèles à la voie portée. Épaisseurs automatiques : e ≈ 0,15 + B/20 (ordre de grandeur des cadres Sétra PICF), à confirmer dans PSIDA. Longueur automatique : plate-forme + talus 3/2 jusqu'au niveau de la traverse, divisée par le sinus du biais.</p>`;
   }
   $('#ouvrOut').innerHTML = !K ? `<p class="note">${esc(g.err || '')}</p>` : `<div class="ouvr">` + kv([
-    ['Type', `${K.type === 'pipo' ? 'Portique ouvert PIPO' : 'Cadre fermé PICF'}, ${K.n} cellule${K.n > 1 ? 's' : ''} de ${fmt(K.B, 2)} × ${fmt(K.H, 2)} m`],
+    ['Type', K.type === 'buse' ? `${K.n} buse${K.n > 1 ? 's' : ''} Ø ${fmt(K.B, 2)} m` : `${K.type === 'pipo' ? 'Portique ouvert PIPO' : 'Cadre fermé PICF'}, ${K.n} cellule${K.n > 1 ? 's' : ''} de ${fmt(K.B, 2)} × ${fmt(K.H, 2)} m`],
+    ...(c.hydro ? [['Hydraulique', `${esc(c.hydro.id)} : Q${c.hydro.T} = ${fmt(c.hydro.Q, 2)} m³/s, HW ${fmt(c.hydro.hw, 2)} m, V ${fmt(c.hydro.v, 2)} m/s (onglet Hydrologie)`]] : []),
     ['Largeur extérieure', `${fmt(K.W, 2)} m (piédroits ${fmt(K.ep, 2)}${K.n > 1 ? `, voiles ${fmt(K.ei, 2)}` : ''} m)`],
     ['Traverse / radier', `${fmt(K.et, 2)} / ${K.type === 'pipo' ? 'semelles' : `${fmt(K.er, 2)} m`}`],
     ['Longueur', `${fmt(K.L, 2)} m${+c.L ? '' : ' (automatique)'} ; biais ${fmt(K.psi, 1)} gr`],
     ['Remblai sur traverse', `${fmt(K.Hr, 2)} m`],
     ['Murs en aile', K.wingL > 0.1 ? `${fmt(K.wingL, 2)} m à ${fmt(K.wingA, 0)}°` : 'sans'],
     ['Voie portée', `${esc(g.ax?.name || '')}, abscisse ${fmt(g.s, 2)} m`],
-  ]) + `<div class="row"><a class="btn primary" href="${esc(cadreLink(g, o.name, S.prj))}" target="_blank" rel="noopener" title="Ouvre psida.ksr-infra.org (onglet Cadres et portiques) avec le type, les dimensions, le biais, la longueur et le remblai de cet ouvrage">Ouvrir dans PSIDA ↗</a><button class="mini" data-cadrejson="${esc(c.id)}" title="Projet PSIDA (.json) à ouvrir avec le bouton Ouvrir de PSIDA">Exporter (.json)</button></div></div>`;
+  ]) + (K.type === 'buse' ? '' : `<div class="row"><a class="btn primary" href="${esc(cadreLink(g, o.name, S.prj))}" target="_blank" rel="noopener" title="Ouvre psida.ksr-infra.org (onglet Cadres et portiques) avec le type, les dimensions, le biais, la longueur et le remblai de cet ouvrage">Ouvrir dans PSIDA ↗</a><button class="mini" data-cadrejson="${esc(c.id)}" title="Projet PSIDA (.json) à ouvrir avec le bouton Ouvrir de PSIDA">Exporter (.json)</button></div>`) + `</div>`;
 }
 function setCadre(id, patch) {
   const c = (S.prj.cadres || []).find((q) => q.id === id); if (!c) return;
@@ -2049,6 +2055,7 @@ function refreshPanels() {
   refreshTerrain();
   refreshPL();
   refreshPT();
+  try { renderHydro(); } catch (e) { console.error(e); }
   setPrompt();
 }
 
@@ -2899,6 +2906,215 @@ function bindPT() {
   });
 }
 
+
+// --------------------------------------------------------- Hydrologie et hydraulique (moteur BVTrace)
+const HY_T = [2, 5, 10, 20, 50, 100];
+function hyCfg() {
+  const h = (S.prj.hydro = S.prj.hydro || {});
+  h.hyp = { ...defaultHypotheses(h.hyp?.methodSet === 'fao54' ? 'fao54' : 'tunisie'), returnPeriod: 100, ...(h.hyp || {}) };
+  h.hyd = { shape: 'box', StricklerK: 70, minFreeboard: 0.5, maxHeadwaterRatio: 1.2, coverPct: 30, ...(h.hyd || {}) };
+  return h;
+}
+// Axes proposés pour le calcul : autoroute et voies secondaires cochés par défaut, bretelles et branches à la demande.
+function hyAxes() { return (S.prof?.axes || (S.D ? listAxes(S.prj, S.D) : [])); }
+function hyAxisChecked(h, ax) { return h.axes ? h.axes.includes(ax.key) : ax.key === 'hwy' || ax.key.startsWith('x:'); }
+// Bassins sur le plan : contours des bassins totaux, partition en trait fin, écoulements, étiquettes aux franchissements.
+function drawHydro() {
+  const R = S.prj.hydro.res, TH = (S.prj.opts?.textH || 0.8) * 1.2, P = (o) => S.D.prims.push(o), segs = (pts) => polySegs(pts);
+  for (const st of R.streams || []) if (st.pts.length > 1) P({ k: 'path', L: 'BASSINS', segs: segs(st.pts), role: 'stream' });
+  for (const c of R.crossings || []) {
+    for (const ring of c.ring || []) { P({ k: 'fill', L: 'BASSINS', rings: [segs([...ring, ring[0]])], role: 'bv' }); P({ k: 'path', L: 'BASSINS', segs: segs([...ring, ring[0]]) }); }
+    for (const ring of c.part || []) P({ k: 'path', L: 'BASSINS', segs: segs([...ring, ring[0]]), role: 'part', dash: [2, 1.5] });
+    const r = S.hyRes?.byId?.[c.id];
+    P({ k: 'circle', L: 'BASSINS', c: { x: c.x, y: c.y }, r: TH * 0.8 });
+    P({ k: 'text', L: 'BASSINS', p: { x: c.x + TH * 1.2, y: c.y + TH * 1.2 }, s: `${c.id} · ${fmt(c.totalKm2, 2)} km²${r?.Q ? ` · Q${r.T} ${fmt(r.Q, 2)} m³/s` : ''}${r?.size ? ` · ${r.size}` : ''}`, rot: 0, align: 'left', h: TH * 1.1 });
+  }
+}
+// Simplification (pas d'échantillonnage) d'un anneau pour l'enregistrement.
+const hyThin = (ring, max = 300) => { if (ring.length <= max) return ring.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 })); const k = Math.ceil(ring.length / max); return ring.filter((_, i) => i % k === 0).map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 })); };
+async function runHydro() {
+  const h = hyCfg(), axes = hyAxes().filter((ax) => hyAxisChecked(h, ax));
+  if (!axes.length) { toast('Cochez au moins un axe.', 'warn'); return; }
+  const dem = $('#hyDem').value, cell = parseNum($('#hyCell').value) || (dem === 'tin' ? 10 : 30), minKm2 = parseNum($('#hyMin').value) || 0.05;
+  let margin = parseNum($('#hyMargin').value) || 3000;
+  if (dem === 'srtm' && !S.crs.geo) { toast('Le SRTM demande un système de coordonnées géoréférencé (onglet Projet) ; sinon choisissez le MNT du projet.', 'warn'); return; }
+  if (dem === 'tin' && !S.tn) { toast('Aucun MNT du projet (onglet Terrain).', 'warn'); return; }
+  const traces = axes.map((ax) => { const pts = [], st = Math.max(1, Math.min(cell / 3, 10)); for (let s = 0; s <= ax.len + 1e-9; s += st) pts.push(ax.at(s).p); pts.push(ax.at(ax.len).p); return { key: ax.key, name: ax.name, pts }; });
+  const bb = G.bboxOf(traces.flatMap((t) => t.pts));
+  const info = (t) => { $('#hyInfo').textContent = t; };
+  const btn = $('#btnHyRun'); btn.disabled = true;
+  try {
+    let R = null, grid = null;
+    for (let pass = 0; pass < 4; pass++) {
+      info(dem === 'srtm' ? `MNT SRTM (marge ${fmt(margin / 1000, 1)} km)…` : 'MNT du projet…');
+      grid = dem === 'srtm' ? await demFromSRTM(S.crs, bb, { margin, cell, onProgress: (d, n, w) => info(`${w === 'tuiles' ? 'Tuiles' : 'Grille'} ${d} / ${n}…`) }) : demFromTIN(S.tn.tin, { cell });
+      info(`Délimitation sur ${grid.nx} × ${grid.ny} cellules…`); await new Promise((r) => setTimeout(r, 30));
+      R = delineate(grid, traces, { minAreaKm2: minKm2, onProgress: (m) => info(m) });
+      // un bassin qui touche le bord du MNT est tronqué : on élargit l'emprise (SRTM) jusqu'à fermeture
+      if (dem !== 'srtm' || !R.crossings.some((c) => c.touchesEdge) || margin >= 24000) break;
+      margin *= 2;
+    }
+    h.res = {
+      date: new Date().toISOString(), dem: grid.source, cell: grid.cell, margin, minKm2,
+      crossings: R.crossings.map((c) => {
+        const m = c.metrics || {}, ll = S.crs.geo ? S.crs.toLL(c.x, c.y) : null;
+        return { id: c.id, key: c.key, traceName: c.traceName, pk: Math.round(c.pk * 100) / 100, x: c.x, y: c.y, flowDir: c.flowDir, totalKm2: c.totalKm2, partitionKm2: c.partitionKm2, incrementalKm2: c.incrementalKm2, contains: c.contains, touchesEdge: c.touchesEdge,
+          lon: ll?.lon ?? null, lat: ll?.lat ?? null,
+          m: { perimeterKm: m.perimeterKm, lengthM: m.lengthM, dropM: m.dropM, slopePct: m.slopeTcPct ?? m.slopeEqPct ?? m.slopePct, hMax: m.hMax, hMin: m.hMin, hMean: m.hMean, hMedian: m.hMedian, meanReliefM: m.meanReliefM, deltaHM: m.deltaHM, zOutlet: m.zOutlet, gravelius: m.gravelius, igMPerKm: m.globalSlope },
+          ring: (c.polygonTotal || []).map((poly) => hyThin(poly[0])).filter((r) => r.length > 2),
+          part: (c.polygonPartition || []).map((poly) => hyThin(poly[0], 200)).filter((r) => r.length > 2) };
+      }),
+      streams: (R.streams || []).filter((st) => st.accKm2 >= Math.max(minKm2, 0.2)).map((st) => ({ pts: hyThin(st.pts, 200), accKm2: st.accKm2 })),
+      warnings: R.warnings,
+    };
+    S.hySig = null; update();
+    info(`${h.res.crossings.length} franchissement(s) — ${grid.source}.`);
+    toast(`${h.res.crossings.length} bassins versants délimités${R.warnings.length ? ` (${R.warnings.length} avertissement(s))` : ''}.`);
+  } catch (e) { console.error(e); info(''); toast(`Hydrologie : ${e.message}`, 'err'); }
+  finally { btn.disabled = false; }
+}
+// Débits et ouvrages (mis en cache tant que les bassins, les hypothèses et les profils en long ne changent pas).
+function computeHydro() {
+  const h = hyCfg(), R = h.res;
+  if (!R?.crossings?.length) { S.hyRes = null; return null; }
+  const zRoad = (c) => { const A = S.axpl?.get(c.key); return A?.defined ? A.PL.zAt(c.pk) : null; };
+  const sig = JSON.stringify([R.date, h.hyp, h.hyd, R.crossings.map((c) => [c.id, zRoad(c)])]);
+  if (S.hyRes && S.hySig === sig) return S.hyRes;
+  const hyp = { ...h.hyp };
+  const basins = R.crossings.map((c) => ({ uid: c.id, name: c.id, areaKm2: c.totalKm2, ...c.m, slopePct: c.m.slopePct, zOutletM: c.m.zOutlet, lon: c.lon, lat: c.lat, vegetationCoverPct: h.hyd.coverPct }));
+  const res = hydroComputeAll(basins, hyp);
+  const out = { list: [], byId: {} };
+  R.crossings.forEach((c, i) => {
+    const r = res[i], Q = r.retained?.Q, ax = hyAxes().find((a) => a.key === c.key);
+    let biais = 100;
+    if (ax && c.flowDir) { const t = ax.at(Math.max(0, Math.min(ax.len, c.pk))).t, a = Math.acos(Math.min(1, Math.abs(G.dot(G.norm(c.flowDir), t)))); biais = Math.round(Math.max(50, Math.min(100, (a * 200) / Math.PI))); }
+    const zr = zRoad(c), zt = c.m.zOutlet;
+    const half = (ax?.half || 6) + 1, L = Math.ceil(((2 * (half + 1.5 * 1.0 + 0.5)) / Math.sin((biais * Math.PI) / 200)) * 2) / 2;
+    let sz = null;
+    if (Q > 0) {
+      const params = { length: L, StricklerK: h.hyd.StricklerK, ...(h.hyd.inlet ? { inlet: h.hyd.inlet } : {}), ...(Number.isFinite(zt) ? { upstreamInvert: zt } : {}), ...(zr != null && Number.isFinite(zt) ? { roadLevel: zr, minFreeboard: h.hyd.minFreeboard } : {}) };
+      try { sz = sizeCulvert(Q, { shape: h.hyd.shape, maxHeadwaterRatio: h.hyd.maxHeadwaterRatio, ...(zr != null && Number.isFinite(zt) ? { maxHeadwater: Math.max(0.5, zr - h.hyd.minFreeboard - zt) } : {}) }, params); } catch (e) { sz = { error: e.message }; }
+    }
+    const ret = sz?.retained, rr = ret?.result;
+    const size = ret ? (h.hyd.shape === 'circular' ? `${ret.cells > 1 ? `${ret.cells} × ` : ''}Ø ${fmt(ret.width ?? ret.diameter ?? ret.section?.diameter, 2)}` : `${ret.cells > 1 ? `${ret.cells} × ` : ''}${fmt(ret.width, 2)} × ${fmt(ret.height, 2)}`) : null;
+    const o = { c, r, Q, T: r.values?.returnPeriod ?? hyp.returnPeriod, biais, L, zr, zt, sz, ret, rr, size, hw: rr?.headwater, v: rr?.velocities?.outlet ?? rr?.velocities?.full ?? null };
+    out.list.push(o); out.byId[c.id] = o;
+  });
+  S.hyRes = out; S.hySig = sig;
+  return out;
+}
+function renderHydro() {
+  const tab = $('#tab-hydro'); if (!tab) return;
+  const h = hyCfg();
+  // réglages du MNT
+  for (const [id, v] of [['hyMargin', h.margin], ['hyCell', h.cell], ['hyMin', h.minKm2]]) { const el = $('#' + id); if (el && document.activeElement !== el && v != null) el.value = v === '' ? '' : String(v).replace('.', ','); }
+  if (h.dem) $('#hyDem').value = h.dem; else if (!S.crs.geo) $('#hyDem').value = 'tin';
+  const axes = hyAxes(), asig = JSON.stringify([axes.map((a) => a.key), h.axes]);
+  if ($('#hyAxes').dataset.sig !== asig) { $('#hyAxes').dataset.sig = asig; $('#hyAxes').innerHTML = axes.length ? axes.map((a) => `<label class="chk"><input type="checkbox" data-hyax="${esc(a.key)}"${hyAxisChecked(h, a) ? ' checked' : ''}> ${esc(a.name)}</label>`).join('') : '<span class="note">Dessinez d\'abord les axes (autoroute, voies secondaires, bretelles, branches).</span>'; }
+  // hypothèses
+  const hy = h.hyp, tn = hy.methodSet !== 'fao54';
+  const LL = (() => { const c = h.res?.crossings?.[0]; if (c?.lat != null) return { lat: c.lat, lon: c.lon }; const bb = designBBox(); return bb && S.crs.geo ? (() => { const q = S.crs.toLL((bb.x0 + bb.x1) / 2, (bb.y0 + bb.y1) / 2); return { lat: q.lat, lon: q.lon }; })() : null; })();
+  const stations = listMontanaStations().tunisie.map((st) => ({ ...st, d: LL ? Math.hypot((st.lat - LL.lat) * 111, (st.lon - LL.lon) * 111 * Math.cos((LL.lat * Math.PI) / 180)) : null })).sort((a, b) => (a.d ?? 0) - (b.d ?? 0) || a.name.localeCompare(b.name));
+  // station Montana : la plus proche du projet par défaut (projet géoréférencé)
+  if (tn && hy.montanaStationCode == null && !h.montanaAsked && LL && stations[0]?.d != null) { hy.montanaStationCode = stations[0].code; h.montanaAsked = true; S.hySig = null; }
+  const hsig = JSON.stringify([hy, h.hyd, stations.length ? stations[0].code : '']);
+  if ($('#hyHyp').dataset.sig !== hsig && !$('#hyHyp').contains(document.activeElement) && !$('#hyHyd').contains(document.activeElement)) {
+    $('#hyHyp').dataset.sig = hsig;
+    const opt = (v, t, cur) => `<option value="${esc(String(v))}"${String(cur) === String(v) ? ' selected' : ''}>${esc(t)}</option>`;
+    $('#hyHyp').innerHTML =
+      `<div class="row"><label class="fld"><span class="lb">Jeu de méthodes</span><select data-hy="methodSet">${opt('tunisie', 'Tunisie (rationnelle, SOGREAH, Ghorbel, Kallel, Fersi, Frigui, Francou-Rodier)', hy.methodSet)}${opt('fao54', 'FAO 54 (CIEH, Orstom) — Afrique de l\'Ouest', hy.methodSet)}</select></label>` +
+      `<label class="fld"><span class="lb">Période de retour</span><select data-hy="returnPeriod">${HY_T.map((T) => opt(T, `${T} ans`, hy.returnPeriod)).join('')}</select></label>` +
+      `<label class="fld"><span class="lb">tc retenu</span><select data-hy="tcFormula">${TC_FORMULAS.map((f) => opt(f.id, `${f.id} (${f.unit})`, hy.tcFormula)).join('')}</select></label></div>` +
+      (tn ? `<div class="row"><label class="fld"><span class="lb">Station Montana</span><select data-hy="montanaStationCode">${opt('', 'aucune (intensité non calculée)', hy.montanaStationCode ?? '')}${stations.map((st) => opt(st.code, `${st.name}${st.d != null ? ` — ${fmt(st.d, 0)} km` : ''}`, hy.montanaStationCode ?? '')).join('')}</select></label>` +
+        `<label class="fld"><span class="lb">Couvert végétal</span><input data-hyd="coverPct" type="text" inputmode="decimal" value="${esc(String(h.hyd.coverPct).replace('.', ','))}"><span class="un">%</span></label>` +
+        `<label class="fld"><span class="lb">Francou-Rodier</span><select data-hy="francouRodierRegion">${opt('', 'non appliquée', hy.francouRodierRegion ?? '')}${FRANCOU_RODIER_REGIONS.map((r) => opt(r.id, `${r.label} (K ≈ ${r.suggestedK})`, hy.francouRodierRegion ?? '')).join('')}</select></label>` +
+        `<label class="chk"><input type="checkbox" data-hy="dgpc1054"${hy.dgpc1054 ? ' checked' : ''}> Note DGPC 1054 (période de retour)</label></div>`
+        : `<div class="row"><label class="fld"><span class="lb">Pluie annuelle Pan</span><input data-hy="pan" type="text" inputmode="decimal" value="${esc(String(hy.pan))}"><span class="un">mm</span></label>` +
+        `<label class="fld"><span class="lb">Pluie journalière décennale P10</span><input data-hy="p10" type="text" inputmode="decimal" value="${esc(String(hy.p10))}"><span class="un">mm</span></label>` +
+        `<label class="fld"><span class="lb">Régressions CIEH (n°)</span><input data-hy="ciehRegressionIds" type="text" value="${esc((hy.ciehRegressionIds || []).join(' ; '))}" placeholder="vide : proposées selon Pan et la longitude"></label></div>`);
+    const inl = inletsForShape(h.hyd.shape === 'circular' ? 'circular' : 'box');
+    $('#hyHyd').innerHTML = `<div class="row"><label class="fld"><span class="lb">Type</span><select data-hyd="shape">${opt('box', 'dalots (n × B × H)', h.hyd.shape)}${opt('circular', 'buses (n × Ø)', h.hyd.shape)}</select></label>` +
+      `<label class="fld"><span class="lb">Tête d'entrée</span><select data-hyd="inlet">${inl.map((q) => opt(q.key, q.label, h.hyd.inlet ?? defaultInletFor(h.hyd.shape === 'circular' ? 'circular' : 'box'))).join('')}</select></label>` +
+      `<label class="fld"><span class="lb">Strickler K</span><input data-hyd="StricklerK" type="text" inputmode="decimal" value="${esc(String(h.hyd.StricklerK))}"></label>` +
+      `<label class="fld"><span class="lb">Revanche minimale</span><input data-hyd="minFreeboard" type="text" inputmode="decimal" value="${esc(String(h.hyd.minFreeboard).replace('.', ','))}"><span class="un">m</span></label>` +
+      `<label class="fld"><span class="lb">HW / D maximal</span><input data-hyd="maxHeadwaterRatio" type="text" inputmode="decimal" value="${esc(String(h.hyd.maxHeadwaterRatio).replace('.', ','))}"></label></div>` +
+      `<p class="note">Longueur de l'ouvrage : plate-forme + talus 3/2 sur 1 m de remblai, divisée par le sinus du biais (angle entre l'écoulement au franchissement et l'axe). Avec le profil en long de l'axe, la cote de chaussée fixe le HW admissible (chaussée − revanche − fil d'eau au TN).</p>`;
+  }
+  // résultats
+  const HR = computeHydro();
+  if (!HR) { $('#hyTable').innerHTML = '<tbody><tr><td class="note">Aucun bassin : cochez les axes et lancez « Délimiter les bassins versants ».</td></tr></tbody>'; $('#hyDetail').innerHTML = ''; $('#hyNote').textContent = ''; return; }
+  const T = HR.list[0]?.T;
+  $('#hyTable').innerHTML = `<thead><tr><th>BV</th><th>Axe</th><th>PK</th><th>S km²</th><th>L km</th><th>I %</th><th>tc min</th><th>Q${T} m³/s</th><th>Ouvrage</th><th>HW m</th><th>V m/s</th><th></th></tr></thead><tbody>` +
+    HR.list.map((o) => { const c = o.c, v = o.r.values || {}; const warn = (o.r.warnings || []).length + (o.rr?.warnings || []).length; return `<tr data-hy="${esc(c.id)}" class="${S.hySel === c.id ? 'on' : ''}"><td>${esc(c.id)}${c.touchesEdge ? ' ⚠' : ''}</td><td>${esc(c.traceName)}</td><td class="mono">${fmt(c.pk, 0)}</td><td class="mono">${fmt(c.totalKm2, 3)}</td><td class="mono">${fmt((c.m.lengthM || 0) / 1000, 2)}</td><td class="mono">${fmt(c.m.slopePct, 2)}</td><td class="mono">${v.tcRetained ? fmt(v.tcRetained.minutes, 1) : '—'}</td><td class="mono"><b>${o.Q > 0 ? fmt(o.Q, 2) : '—'}</b></td><td>${o.size ? `${esc(o.size)} m` : o.sz?.error ? 'erreur' : '—'}</td><td class="mono">${o.hw != null ? fmt(o.hw, 2) : '—'}</td><td class="mono">${o.v != null ? fmt(o.v, 2) : '—'}</td><td>${warn ? `<span title="avertissements">!${warn}</span>` : ''}</td></tr>`; }).join('') + '</tbody>';
+  const sel = HR.byId[S.hySel];
+  $('#hyDetail').innerHTML = sel ? (() => {
+    const v = sel.r.values || {}, d = v.discharges || {};
+    return `<h3>${esc(sel.c.id)} — ${esc(sel.c.traceName)}, PK ${fmt(sel.c.pk, 0)}</h3>` + kv([
+      ['Surface (totale / propre)', `${fmt(sel.c.totalKm2, 3)} / ${fmt(sel.c.partitionKm2, 3)} km²${sel.c.incrementalKm2 != null ? ` ; supplément ${fmt(sel.c.incrementalKm2, 3)} km² (bassins inclus : ${esc((sel.c.contains || []).join(', '))})` : ''}`],
+      ['Plus long chemin, dénivelée', `${fmt((sel.c.m.lengthM || 0) / 1000, 2)} km, ${fmt(sel.c.m.dropM, 1)} m ; Hmax ${fmt(sel.c.m.hMax, 1)}, Hmin ${fmt(sel.c.m.hMin, 1)} m`],
+      ['Temps de concentration', v.tc ? Object.entries(v.tc).map(([k, q]) => `${k} ${q?.value != null ? fmt(q.value, 2) : '—'} ${q?.unit || ''}`).join(' · ') + (v.tcRetained ? ` — retenu ${v.tcRetained.formula} ${fmt(v.tcRetained.minutes, 1)} min` : '') : '—'],
+      ['Intensité', v.intensityMmH != null ? `${fmt(v.intensityMmH, 2)} mm/h (${esc(v.intensitySource || '')})` : '—'],
+      ['Débits', Object.entries(d).filter(([, q]) => q != null).map(([k, q]) => `${k} ${fmt(q, 2)}`).join(' · ') || '—'],
+      ['Débit retenu', sel.Q > 0 ? `${fmt(sel.Q, 2)} m³/s (${esc(sel.r.retained.method || '')})` : '—'],
+      ['Ouvrage', sel.size ? `${esc(sel.size)} m, L ${fmt(sel.L, 1)} m, biais ${sel.biais} gr — ${esc(sel.sz?.message || '')}` : esc(sel.sz?.message || sel.sz?.error || '—')],
+      ['Cotes', `chaussée ${sel.zr != null ? fmt(sel.zr, 2) : 'à définir (profil en long)'} · TN au franchissement ${fmt(sel.zt, 2)} m${sel.zr != null && Number.isFinite(sel.zt) && sel.zr - sel.zt < 2 ? ` — chaussée à ${fmt(sel.zr - sel.zt, 2)} m seulement au-dessus du fil d'eau : relevez le profil en long pour loger l'ouvrage (hauteur + traverse + remblai + revanche)` : ''}`],
+    ]) + `<ul class="checks">${[...(sel.r.warnings || []), ...(sel.rr?.warnings || [])].map((w) => `<li class="warn"><span class="ic">!</span><span>${esc(w)}</span></li>`).join('')}</ul><div class="row"><button data-hyzoom="${esc(sel.c.id)}">Voir sur le plan</button></div>`;
+  })() : '';
+  const R = h.res;
+  $('#hyNote').textContent = `${R.dem}, marge ${fmt(R.margin / 1000, 1)} km, bassin minimal ${fmt(R.minKm2, 2)} km². ${R.crossings.some((c) => c.touchesEdge) ? 'Des bassins (⚠) touchent le bord du MNT : élargissez la marge. ' : ''}${(R.warnings || []).join(' ')}`;
+}
+function hySet(path, v) {
+  const h = hyCfg(), [grp, k] = path;
+  if (v === '' || v == null || (typeof v === 'number' && !Number.isFinite(v))) delete h[grp][k]; else h[grp][k] = v;
+  if (grp === 'hyp' && k === 'methodSet') h.hyp = { ...defaultHypotheses(v), returnPeriod: v === 'fao54' ? 10 : h.hyp.returnPeriod };
+  if (grp === 'hyp' && k === 'francouRodierRegion') { const rg = FRANCOU_RODIER_REGIONS.find((r) => r.id === v); h.hyp.francouRodierK = rg ? rg.suggestedK : 0; }
+  if (grp === 'hyd' && k === 'shape') delete h.hyd.inlet;
+  S.hySig = null; $('#hyHyp').dataset.sig = ''; update();
+}
+function bindHydro() {
+  $('#btnHyRun').addEventListener('click', runHydro);
+  for (const id of ['hyDem', 'hyMargin', 'hyCell', 'hyMin']) $('#' + id).addEventListener('change', (e) => { const h = hyCfg(), k = { hyDem: 'dem', hyMargin: 'margin', hyCell: 'cell', hyMin: 'minKm2' }[id]; h[k] = id === 'hyDem' ? e.target.value : parseNum(e.target.value) || undefined; });
+  $('#hyAxes').addEventListener('change', (e) => { const k = e.target.dataset.hyax; if (!k) return; const h = hyCfg(); const cur = new Set(h.axes || hyAxes().filter((a) => hyAxisChecked(h, a)).map((a) => a.key)); if (e.target.checked) cur.add(k); else cur.delete(k); h.axes = [...cur]; });
+  $('#hyHyp').addEventListener('change', (e) => {
+    const k = e.target.dataset.hy, kd = e.target.dataset.hyd; if (!k && !kd) return;
+    if (kd) { hySet(['hyd', kd], parseNum(e.target.value)); return; }
+    let v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+    if (['returnPeriod', 'pan', 'p10'].includes(k)) v = parseNum(v);
+    if (k === 'ciehRegressionIds') v = String(v).split(/[;,\s]+/).map((x) => parseInt(x, 10)).filter((x) => x > 0);
+    if (k === 'montanaStationCode' && !v) v = null;
+    hySet(['hyp', k], v);
+  });
+  $('#hyHyd').addEventListener('change', (e) => { const kd = e.target.dataset.hyd; if (!kd) return; hySet(['hyd', kd], ['shape', 'inlet'].includes(kd) ? (kd === 'inlet' && /^\d+$/.test(e.target.value) ? +e.target.value : e.target.value) : parseNum(e.target.value)); });
+  $('#hyTable').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-hy]'); if (!tr) return; S.hySel = tr.dataset.hy; renderHydro(); });
+  $('#hyDetail').addEventListener('click', (e) => { const b = e.target.closest('[data-hyzoom]'); const o = b && S.hyRes?.byId?.[b.dataset.hyzoom]; if (!o) return; viewer.cx = o.c.x; viewer.cy = o.c.y; viewer.s = Math.max(viewer.s, 1.5); viewer.invalidate(); });
+  $('#btnHyClear').addEventListener('click', () => { if (S.prj.hydro) delete S.prj.hydro.res; S.hyRes = null; update(); });
+  $('#btnHyCsv').addEventListener('click', () => {
+    const HR = computeHydro(); if (!HR) { toast('Aucun bassin.', 'warn'); return; }
+    const c = (v, k = 2) => (v == null || !Number.isFinite(+v) ? '' : (+v).toFixed(k).replace('.', ','));
+    const rows = ['BV;Axe;PK;X;Y;S_totale_km2;S_propre_km2;L_km;I_%;tc_min;formule_tc;I_mm_h;Q_m3_s;methode;T_ans;ouvrage;L_ouvrage_m;biais_gr;HW_m;V_m_s'];
+    for (const o of HR.list) { const v = o.r.values || {}; rows.push([o.c.id, o.c.traceName, c(o.c.pk, 1), c(o.c.x, 2), c(o.c.y, 2), c(o.c.totalKm2, 4), c(o.c.partitionKm2, 4), c((o.c.m.lengthM || 0) / 1000, 3), c(o.c.m.slopePct), c(v.tcRetained?.minutes, 1), v.tcRetained?.formula || '', c(v.intensityMmH), c(o.Q), o.r.retained?.method || '', o.T, o.size || '', c(o.L, 1), o.biais, c(o.hw), c(o.v)].join(';')); }
+    download(fname('csv').replace(/\.csv$/, '_hydrologie.csv'), '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
+  });
+  $('#btnHyOH').addEventListener('click', () => {
+    const HR = computeHydro(); if (!HR) { toast('Aucun bassin.', 'warn'); return; }
+    let n = 0;
+    S.prj.cadres = S.prj.cadres || [];
+    for (const o of HR.list) {
+      if (!o.ret) continue;
+      const buse = (hyCfg().hyd.shape === 'circular');
+      const B = buse ? (o.ret.width ?? o.ret.diameter ?? o.ret.section?.diameter) : o.ret.width, H = buse ? B : o.ret.height;
+      const ax = hyAxes().find((a) => a.key === o.c.key);
+      const et = buse ? 0.08 + B / 12 : 0.15 + B / 20;
+      const Hr = o.zr != null && Number.isFinite(o.zt) ? Math.max(0.3, Math.round((o.zr - o.zt - H - et) * 100) / 100) : 1;
+      const data = { type: buse ? 'buse' : 'picf', usage: 'eau', axis: o.c.key, axisName: ax?.name || o.c.traceName, s: o.c.pk, n: o.ret.cells || 1, B, H, biais: o.biais, Hr, hydro: { id: o.c.id, Q: o.Q, T: o.T, hw: o.hw, v: o.v } };
+      const ex = S.prj.cadres.find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key);
+      if (ex) Object.assign(ex, data); else S.prj.cadres.push({ id: uid(), ...data });
+      n++;
+    }
+    update(); toast(`${n} ouvrage(s) hydraulique(s) créé(s) ou mis à jour : onglet Ouvrages (numérotation OA, export PSIDA des dalots).`);
+  });
+}
+
 // --------------------------------------------------------- Vue 3D
 let v3d = null;
 async function open3D() {
@@ -3206,6 +3422,7 @@ function bindUI() {
   bindTerrain();
   bindPL();
   bindPT();
+  bindHydro();
   bind3D();
   bindEch();
   $('#btnImportDxf').addEventListener('click', () => $('#fileDxf').click());
