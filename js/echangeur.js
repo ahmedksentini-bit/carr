@@ -574,22 +574,62 @@ export function buildEchangeur(prj, D) {
     }
     return cuts;
   };
+  // Bretelles accolées d'une trompette (S-semi et boucle concentriques, voies de la tige) : là où le bord d'une plate-forme
+  // tombe dans l'autre, ses lignes de bord et d'accotement ne sont pas dessinées (pas de chevauchement de bords) et un
+  // terre-plein est dessiné entre les rives des deux voies, comme sur la tige.
+  const overlap = new Map(); // idx → { L: [{a,b}], R: [{a,b}], isl: [{a,b,side}] }
+  (prj.ramps || []).forEach((r, i) => {
+    if (r.role !== 'semi' || !r.grp) return;
+    const j = (prj.ramps || []).findIndex((q) => q.grp === r.grp && q.role === 'boucle');
+    const pair = [[i, j], [j, i]];
+    for (const [a, b] of pair) {
+      const Ra = D.ramps[a], Rb = D.ramps[b];
+      if (!Ra?.al || !Rb?.al || !Ra.offL || !Rb.offL) continue;
+      const pts = G.samplePath(Rb.al.path, 0.5);
+      const near = (P) => { let d = Infinity; for (const p of pts) { const e = (p.x - P.x) ** 2 + (p.y - P.y) ** 2; if (e < d) d = e; } return Math.sqrt(d); };
+      const lim = Rb.rp.w / 2 + Math.max(Rb.rp.bdd, Rb.rp.bdg) + 0.3, limB = lim + Rb.rp.berme;
+      const o = { L: [], R: [], isl: [] };
+      for (const [side, off] of [['L', (x) => Ra.offL(x) + Ra.rp.bdg], ['R', (x) => Ra.offR(x) - Ra.rp.bdd]]) {
+        let start = null;
+        const La = Ra.al.length;
+        for (let x = 0; x <= La + 1e-6; x += 1) {
+          const P = add(Ra.al.pointAt(Math.min(x, La)), mul(rot90(unit(Ra.al.headAt(Math.min(x, La)))), off(Math.min(x, La))));
+          const inside = near(P) < limB;
+          if (inside && start == null) start = x;
+          if ((!inside || x + 1 > La + 1e-6) && start != null) { const e = inside ? La : x; if (e - start > 2) o[side].push({ a: Math.max(0, start - 1), b: Math.min(La, e + 1) }); start = null; }
+        }
+      }
+      overlap.set(a, o);
+    }
+  });
   for (const q of order) {
     const R = D.ramps[q.idx];
     if (!R?.al || !(R.al.length > 1)) continue;
     const { rp, al, Fs, Ft, hF, hT, name, C } = R, L = al.length, half = rp.w / 2, stp = 1;
     const { offL, offR } = R;
     const lft = (s) => offL(s) + rp.bdg, rgt = (s) => offR(s) - rp.bdd;
+    const ov = overlap.get(q.idx) || { L: [], R: [] };
     // Plate-forme de la bretelle (chaussée + BDG + BDD), revêtue.
     const body = [...offsetPolyline(al, rgt, stp), ...offsetPolyline(al, lft, stp).reverse()];
     P({ k: 'fill', L: 'CHAUSSEE', rings: [polySegs([...body, body[0]])], role: 'chaussee', rule: 'nonzero' });
     P({ k: 'path', L: 'BORDURE', segs: polySegs(offsetPolyline(al, offL, stp)), role: 'principale' });
     const sA = R.sTplS, sB = L - R.sTplE;
-    if (sB - sA > 0.5) {
-      P({ k: 'path', L: 'BORDURE', segs: polySegs(offsetPolyline(al, lft, stp, sA, sB)) });
-      P({ k: 'path', L: 'ACCOTEMENT', segs: polySegs(offsetPolyline(al, (s) => lft(s) + rp.berme, stp, sA, sB)) });
+    if (sB - sA > 0.5) for (const [a, b] of cutRanges(L, [{ a: 0, b: sA }, { a: sB, b: L }, ...ov.L])) {
+      P({ k: 'path', L: 'BORDURE', segs: polySegs(offsetPolyline(al, lft, stp, a, b)) });
+      P({ k: 'path', L: 'ACCOTEMENT', segs: polySegs(offsetPolyline(al, (s) => lft(s) + rp.berme, stp, a, b)) });
     }
-    for (const [a, b] of cutRanges(L, R.children)) {
+    // Terre-plein entre les rives de deux bretelles accolées (S-semi / boucle) : entre la rive de cette bretelle et la
+    // rive la plus proche de l'autre (dessiné depuis la S-semi seulement).
+    if (prj.ramps?.[q.idx]?.role === 'semi') for (const side of ['L', 'R']) for (const { a, b } of ov[side]) {
+      const j = (prj.ramps || []).findIndex((r) => r.grp === prj.ramps[q.idx].grp && r.role === 'boucle'), Rb = D.ramps[j];
+      if (!Rb?.al) continue;
+      const myRive = offsetPolyline(al, side === 'L' ? offL : offR, 1, a, b);
+      const other = [...offsetPolyline(Rb.al, Rb.offL, 1), ...offsetPolyline(Rb.al, Rb.offR, 1)];
+      const nearest = (P) => other.reduce((m, p) => ((p.x - P.x) ** 2 + (p.y - P.y) ** 2 < (m.x - P.x) ** 2 + (m.y - P.y) ** 2 ? p : m), other[0]);
+      const back = myRive.map(nearest).reverse();
+      if (myRive.length >= 2 && back.length >= 2) P({ k: 'fill', L: 'ILOT_SEP', rings: [polySegs([...myRive, ...back, myRive[0]])], role: 'ilot' });
+    }
+    for (const [a, b] of cutRanges(L, [...R.children, ...ov.R])) {
       P({ k: 'path', L: 'BORDURE', segs: polySegs(offsetPolyline(al, offR, stp, a, b)), role: 'principale' });
       P({ k: 'path', L: 'BORDURE', segs: polySegs(offsetPolyline(al, rgt, stp, a, b)) });
       P({ k: 'path', L: 'ACCOTEMENT', segs: polySegs(offsetPolyline(al, (s) => rgt(s) - rp.berme, stp, a, b)) });
@@ -735,6 +775,14 @@ export const tigeTpc = (prj, opt = {}) => Math.max(1, num(opt.tpc, num(prj?.hwy?
 // l'ouvrage. Chaussée proche (y > 0, circulation −x) : sortie directe (S-directe) insérée sur S-semi (Eb11) et entrée
 // directe (E-directe) qui se détache de la boucle (sortie depuis bretelle). La tige est bidirectionnelle (deux bretelles
 // à sens unique accolées) ; son extrémité reste libre (giratoire ou carrefour du projet).
+// Premier sommet de la S-semi reporté sur la ligne d'obliquité réelle de son divergent (autoroute en courbe) : c'est ce
+// que fait le calcul des bretelles ; le faire dès la construction garde la grande courbe, donc la boucle concentrique,
+// telles qu'elles seront dessinées.
+function onRealDiv(hw, s, sgn, yA, p3, Pw) {
+  const sx = Math.max(0, Math.min(hw.sEnd, s)), tw = pathTangentAt(hw.path, sx), tLs = sgn > 0 ? tw : neg(tw), nLs = rot90(tLs);
+  const S1 = add(G.pathPointAt(hw.path, sx), mul(nLs, -yA)), d = norm(sub(tLs, mul(nLs, p3)));
+  return add(S1, mul(d, G.dot(sub(Pw, S1), d)));
+}
 export function trumpet(prj, D, click, mkId, opt = {}) {
   const hw = D?.hwy;
   if (!hw?.ok) return { err: 'Dessinez d\'abord l\'axe de l\'autoroute.' };
@@ -807,9 +855,30 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
     const lam1 = 140 + T1 + 10, P1y = -yA - p3 * lam1;
     if (P1y <= Tp.y) continue;
     const P1 = add(Tp, mul(uf, (P1y - Tp.y) / uf.y));
-    if (dist(P1, P2) >= T1 + T2 + (opt.semiMargin ?? 5) && (!best || P1.x - lam1 > best.xS)) best = { P1, P2, xS: P1.x - lam1, deg };
+    if (dist(P1, P2) >= T1 + T2 + (opt.semiMargin ?? 5) && (!best || P1.x - lam1 > best.xS)) best = { P1, P2, xS: P1.x - lam1, deg, Tp, uf, T2 };
   }
   if (!best) return { err: 'Gabarit impossible avec ces rayons.' };
+  // Autoroute en courbe : le premier sommet est placé sur la ligne d'obliquité réelle (chaussée courbe) et S.1,00 m est
+  // déplacé pour garder l'alignement ≥ Lm ; la droite tangente à la grande courbe ne bouge pas, donc la grande courbe
+  // (et la boucle concentrique) restent exactement celles qui seront dessinées.
+  {
+    const Lc0 = (q) => { const v = sub(q, P0); return { x: G.dot(v, tL), y: G.dot(v, nL) }; };
+    let xS = best.xS, P1 = best.P1;
+    for (let k = 0; k < 12; k++) {
+      const sx = Math.max(0, Math.min(hw.sEnd, st(xS))), tw = pathTangentAt(hw.path, sx), tLs = sgn > 0 ? tw : neg(tw), nLs = rot90(tLs);
+      const S1 = Lc0(add(G.pathPointAt(hw.path, sx), mul(nLs, -yA))), dw = norm(sub(tLs, mul(nLs, p3))), d = { x: G.dot(dw, tL), y: G.dot(dw, nL) };
+      const I = G.lineLine(S1, d, best.Tp, best.uf);
+      if (!I) break;
+      P1 = I.p;
+      // alignement réel S.1,00 → début du raccordement R1 (même construction que le calcul des bretelles), ≥ Lm + 2 m
+      const LmS = ((hw.H?.bau ?? 2.5) + J14_W + 0.7 - 1) / p3;
+      const alT = buildAlignment([S1, { ...P1, R: R1, A: A1 }, { ...best.P2, R: R2, A: A2 }, add(Rp, mul(u, Ys))]);
+      const l0 = alT.elems[0]?.kind === 'L' ? alT.elems[0].len : 0, need = LmS + 2 + 10;
+      if (Math.abs(need - l0) < 0.05) break;
+      xS -= need - l0;
+    }
+    if (dist(P1, best.P2) >= best.T2 + 5) { best.P1 = P1; best.xS = xS; }
+  }
   const sEnd = add(Rp, mul(u, Ys));
   const B2 = { ...base, id: ids[1], name: 'S-semi', from: { ref: far, s: st(best.xS), biseau: '', obl: '', tpl: '' }, to: { ref: 'free' },
     pis: [{ ...W(best.P1), R: R1, A: A1 }, { ...W(best.P2), R: R2, A: A2, semi: true }, W(sEnd)] };
@@ -867,11 +936,22 @@ export function deriveTrumpet(prj, D, semi, prev, opt = {}) {
   const surl = (R) => (R - half < 100 ? 50 / (R - half) : 0);
   // S-semi dans le repère local : centre de sa grande courbe.
   const xS = (num(semi.from?.s, 0) - s0) * sgn, El = Lc(Ew), Ys = G.dot(El, u);
-  const alS = buildAlignment([{ x: xS, y: -yA }, ...pis.slice(0, -1).map((q) => ({ ...Lc(q), R: +q.R || 0, A: +q.A || 0, semi: !!q.semi })), El]);
+  const pisR = pis.map((q, i) => (i === 0 ? { ...q, ...onRealDiv(hw, num(semi.from?.s, 0), sgn, yA, p3, q) } : q));
+  const alS = buildAlignment([{ x: xS, y: -yA }, ...pisR.slice(0, -1).map((q) => ({ ...Lc(q), R: +q.R || 0, A: +q.A || 0, semi: !!q.semi })), El]);
   if (alS.issues?.some((i) => i.lvl === 'err')) return { err: 'S-semi : ' + alS.issues.find((i) => i.lvl === 'err').msg.replace(/^[^:]*: /, '') };
   const arcs = alS.elems.filter((e) => e.kind === 'A'), big = arcs[arcs.length - 1];
   if (!big) return { err: 'S-semi sans grande courbe.' };
-  const R2 = big.R, Cl = add(big.C, mul(r, g + surl(R2)));
+  // Grande courbe telle qu'elle sera réellement dessinée : le calcul des bretelles recale le premier sommet sur la ligne
+  // d'obliquité réelle et allonge au besoin l'alignement (autoroute en courbe), ce qui déplace la grande courbe ; la
+  // boucle doit être concentrique à celle-là, pas à celle du repère droit.
+  let bigC = big.C;
+  try {
+    const D2 = { prims: [], points: [] };
+    buildEchangeur({ ...prj, ramps: [{ ...semi, pis: semi.pis.map((q) => ({ ...q })) }] }, D2);
+    const arcsW = (D2.ramps?.[0]?.al?.elems || []).filter((e) => e.kind === 'A'), bw = arcsW[arcsW.length - 1];
+    if (bw && Math.abs(bw.R - big.R) < 1e-6) bigC = Lc(bw.C);
+  } catch (e) { /* repère droit */ }
+  const R2 = big.R, Cl = add(bigC, mul(r, g + surl(R2)));
   // Boucle : tangente à la voie gauche de la tige (rayon effectif) et à la ligne d'obliquité de son convergent.
   const rhoL = -G.dot(sub(Cl, Lp), r);
   let Rl = rhoL - 1, Al = 45;
@@ -889,8 +969,21 @@ export function deriveTrumpet(prj, D, semi, prev, opt = {}) {
   // Sortie de la boucle : son cercle est tangent à la ligne d'obliquité (3 %) du convergent, ce qui fixe E.1,00. Cette
   // tangence est très sensible (1 m d'écart vertical déplace E.1,00 de 33 m) : la distance de la S-semi à l'autoroute
   // n'est donc pas libre ; on n'accepte que 100 à 300 m entre l'ouvrage et E.1,00.
-  const xE = Cl.x + (-yA - Cl.y - rhoL * nn) / p3;
-  const PIl = G.lineLine(Lp, u, { x: xE, y: -yA }, dc)?.p;
+  // Autoroute en courbe : la ligne d'obliquité réelle part du point E.1,00 de la chaussée courbe (et non du repère
+  // droit de l'ouvrage) ; xE est recherché pour que cette ligne réelle reste tangente au cercle de la boucle (sinon la
+  // boucle, recalée sur l'obliquité réelle, ne serait plus concentrique et chevaucherait la S-semi).
+  const convAt = (x) => {
+    const sx = Math.max(0, Math.min(hw.sEnd, s0 + x * sgn)), tw = pathTangentAt(hw.path, sx), tLs = sgn > 0 ? tw : neg(tw), nLs = rot90(tLs);
+    const Ew = add(G.pathPointAt(hw.path, sx), mul(nLs, -yA)), dw = norm(add(tLs, mul(nLs, p3)));
+    return { E: Lc(Ew), d: { x: G.dot(dw, tL), y: G.dot(dw, nL) } };
+  };
+  const gap0 = (x) => { const { E, d } = convAt(x); return G.cross(d, sub(Cl, E)) + rhoL; };
+  let xE = Cl.x + (-yA - Cl.y - rhoL * nn) / p3;
+  { let x0 = xE, x1 = xE + 10, f0 = gap0(x0), f1 = gap0(x1);
+    for (let k = 0; k < 30 && Math.abs(f1) > 1e-4 && Math.abs(f1 - f0) > 1e-12; k++) { const x2 = x1 - (f1 * (x1 - x0)) / (f1 - f0); x0 = x1; f0 = f1; x1 = x2; f1 = gap0(x1); }
+    if (Number.isFinite(x1) && Math.abs(f1) < 0.01) xE = x1; }
+  const CV = convAt(xE);
+  const PIl = G.lineLine(Lp, u, CV.E, CV.d)?.p;
   if (!PIl || -yA - Cl.y < rhoL * nn + 0.5 || xE - PIl.x < 100) return { err: 'La boucle déduite ne tient pas sous la chaussée : la grande courbe de la S-semi est trop proche de l\'autoroute.' };
   if (xE - PIl.x > 300) return { err: `Grande courbe de la S-semi trop éloignée de l'autoroute : la boucle, concentrique, ne rejoindrait la chaussée qu'à ${fmt(xE - PIl.x, 0)} m de l'ouvrage.` };
   const loopPis = [W(tStart), { ...W(PIl), R: Rl, A: Al, loop: true }];
@@ -1140,6 +1233,7 @@ function twoCurveExit({ yA, p, Lm, R1, A1, R2, A2, E, dE, Lapp }) {
 }
 const AminB50 = (R) => Math.ceil(Math.sqrt(cloMinLength(R, Math.abs(deversOfRadius(R - 1.75, RAMP_CAT.b50) - 2.5), 1) * R) / 5) * 5;
 const r3 = (q) => ({ x: +q.x.toFixed(3), y: +q.y.toFixed(3) });
+const r3e = r3;
 // Sortie (S) du sens 1 (calcul gS, extrémité ES) et entrée du sens 1 (calcul gE dans le repère miroir x → −x,
 // extrémité EE) ; sens 2 par symétrie centrale (ROT[2]), la voie secondaire passant par le croisement.
 function directRamps(gS, ES, gE, EE, s0, W, mkId, want, R) {
