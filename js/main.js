@@ -386,7 +386,7 @@ function renderCadreEdit(o) {
       `<div class="row"><label class="fld">Nom de l'ouvrage<input data-cf="name" type="text" autocomplete="off" value="${esc(c.name || '')}" placeholder="${esc(g.nameAuto || o.name)} (automatique)"></label>` +
       sel('type', 'Type', [['picf', 'cadre fermé (PICF, dalot)'], ['pipo', 'portique ouvert (PIPO)'], ['buse', 'buse (B = diamètre)']]) + sel('usage', 'Voie franchie', [['eau', 'écoulement (ouvrage hydraulique)'], ['route', 'route (passage inférieur)'], ['rail', 'voie ferrée']]) + `</div>` +
       `<div class="row">${inp('n', 'Cellules', '1', '')}${inp('B', 'Ouverture B', '3,00')}${inp('H', 'Hauteur intérieure H', '2,50')}${inp('Hr', 'Remblai sur traverse', '1,50')}</div>` +
-      `<div class="row">${inp('biais', 'Orientation (20 à 180, 100 = droit)', '100', 'gr')}${inp('L', 'Longueur L', `${fmt(K?.Lauto ?? 0, 2)} (auto)`)}${inp('s', 'Abscisse sur l\'axe porteur', '')}</div>` +
+      `<div class="row">${inp('biais', 'Orientation (20 à 180, 100 = droit)', '100', 'gr')}${inp('Lg', 'Demi-longueur côté gauche', `${fmt((+c.L || K?.Lauto || 0) / 2, 2)} (auto)`)}${inp('Ld', 'côté droit', `${fmt((+c.L || K?.Lauto || 0) / 2, 2)} (auto)`)}${inp('s', 'Abscisse sur l\'axe porteur', '')}</div>` +
       `<div class="row">${inp('ep', 'Piédroits', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('et', 'Traverse', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('er', 'Radier', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('ei', 'Voiles intermédiaires', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}</div>` +
       `<div class="row">${inp('wingA', 'Murs en aile : angle', '30', '°')}${inp('wingL', 'longueur', `${fmt(K?.wingL ?? 0, 2)} (auto)`)}</div>` +
       `<div class="row"><button id="cdZoom">Voir sur le plan</button><button id="cdDel">Supprimer l'ouvrage</button></div>` +
@@ -397,7 +397,7 @@ function renderCadreEdit(o) {
     ...(c.hydro ? [['Hydraulique', `${esc(c.hydro.id)} : Q${c.hydro.T} = ${fmt(c.hydro.Q, 2)} m³/s, HW ${fmt(c.hydro.hw, 2)} m, V ${fmt(c.hydro.v, 2)} m/s (onglet Hydrologie)`]] : []),
     ['Largeur extérieure', `${fmt(K.W, 2)} m (piédroits ${fmt(K.ep, 2)}${K.n > 1 ? `, voiles ${fmt(K.ei, 2)}` : ''} m)`],
     ['Traverse / radier', `${fmt(K.et, 2)} / ${K.type === 'pipo' ? 'semelles' : `${fmt(K.er, 2)} m`}`],
-    ['Longueur', `${fmt(K.L, 2)} m${+c.L ? '' : ' (automatique)'} ; orientation ${fmt(K.ang, 0)} gr, biais ψ ${fmt(K.psi, 1)} gr`],
+    ['Longueur', `${fmt(K.L, 2)} m = ${fmt(K.Lg, 2)} (côté gauche de la voie) + ${fmt(K.Ld, 2)} (côté droit)${+c.L || c.Lg != null || c.Ld != null ? '' : ' (automatique)'} ; orientation ${fmt(K.ang, 0)} gr, biais ψ ${fmt(K.psi, 1)} gr`],
     ['Remblai sur traverse', `${fmt(K.Hr, 2)} m`],
     ['Murs en aile', K.wingL > 0.1 ? `${fmt(K.wingL, 2)} m à ${fmt(K.wingA, 0)}°` : 'sans'],
     ['Voie portée', `${esc(g.ax?.name || '')}, abscisse ${fmt(g.s, 2)} m`],
@@ -1030,23 +1030,24 @@ function addDiamondAt(w, kind, k) {
 }
 
 // Poignées des cadres (outil sélection) : centre (déplacement le long de l'axe porteur), rotation (orientation / biais)
-// au-delà d'une tête, longueur sur l'autre tête.
+// au-delà d'une tête, et une poignée de longueur sur chaque tête : chacune prolonge ou raccourcit son seul
+// demi-ouvrage (côté gauche ou droit de la voie), l'autre tête ne bouge pas.
 function cadreHandles(g) {
   if (!g?.p || !g.d || !g.K) return null;
-  return { c: g.p, rot: G.add(g.p, G.mul(g.d, g.K.L / 2 + 6)), len: G.sub(g.p, G.mul(g.d, g.K.L / 2)) };
+  return { c: g.p, rot: G.add(g.p, G.mul(g.d, g.K.Lp + 6)), lenP: G.add(g.p, G.mul(g.d, g.K.Lp)), lenM: G.sub(g.p, G.mul(g.d, g.K.Lm)) };
 }
 function drawCadreHandles(ctx, v, T) {
   if (S.tool !== 'select' || !S.cadres?.length) return;
   for (const g of S.cadres) {
     const h = cadreHandles(g); if (!h) continue;
-    const [cx, cy] = v.w2s(h.c.x, h.c.y), [rx, ry] = v.w2s(h.rot.x, h.rot.y), [lx, ly] = v.w2s(h.len.x, h.len.y);
+    const [cx, cy] = v.w2s(h.c.x, h.c.y), [rx, ry] = v.w2s(h.rot.x, h.rot.y);
     if (Math.hypot(rx - cx, ry - cy) < 14) continue; // trop petit à cette échelle
     const on = S.osel === `c:${g.c.id}`;
     ctx.strokeStyle = on ? T.sel : '#38bdf8'; ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth = 1.2;
     ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(rx, ry); ctx.stroke(); ctx.setLineDash([]);
     ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.stroke();
     ctx.beginPath(); ctx.arc(rx, ry, 5, 0, Math.PI * 2); ctx.fill();
-    ctx.fillRect(lx - 3.5, ly - 3.5, 7, 7);
+    for (const q of [h.lenM, h.lenP]) { const [lx, ly] = v.w2s(q.x, q.y); ctx.fillRect(lx - 3.5, ly - 3.5, 7, 7); }
   }
 }
 function hitCadreHandle(px, py) {
@@ -1057,7 +1058,8 @@ function hitCadreHandle(px, py) {
     const [cx, cy] = viewer.w2s(h.c.x, h.c.y), [rx, ry] = viewer.w2s(h.rot.x, h.rot.y);
     if (Math.hypot(rx - cx, ry - cy) < 14) continue;
     if (near(h.rot)) return { kind: 'cadr', id: g.c.id };
-    if (near(h.len)) return { kind: 'cadl', id: g.c.id };
+    if (near(h.lenM)) return { kind: 'cadl', id: g.c.id, side: -1 };
+    if (near(h.lenP)) return { kind: 'cadl', id: g.c.id, side: 1 };
     if (near(h.c)) return { kind: 'cadm', id: g.c.id };
   }
   return null;
@@ -1795,7 +1797,12 @@ function onMove(px, py) {
     if (c && g?.ax) {
       if (d.kind === 'cadm') { const pr = g.ax.project(w); if (pr) c.s = Math.round(Math.max(0, Math.min(g.ax.len, pr.s)) * 100) / 100; }
       else if (d.kind === 'cadr') c.biais = orientGr(g.t, G.sub(w, g.p));
-      else { const L = Math.round(2 * Math.abs(G.dot(G.sub(w, g.p), g.d)) * 2) / 2; c.L = Math.max(g.K.W, L); }
+      else { // demi-ouvrage du côté de la poignée seulement
+        const Lh = Math.max(g.K.W / 2, Math.round(Math.max(0, d.side * G.dot(G.sub(w, g.p), g.d)) * 4) / 4);
+        if (c.Lg == null && c.Ld == null) { c.Lg = g.K.Lg; c.Ld = g.K.Ld; } // figer l'autre tête
+        const left = d.side > 0 ? g.K.leftP : !g.K.leftP;
+        c[left ? 'Lg' : 'Ld'] = Lh; delete c.L;
+      }
       S.osel = `c:${c.id}`; $('#ouvrEdit').dataset.key = ''; d.moved = true; update({ commit: false, panels: false });
     }
   }
@@ -2879,9 +2886,21 @@ function plAddPi(s, z, R) {
   S.plPi = br.pl.pis.findIndex((q) => Math.abs(+q.s - Math.round(s * 10) / 10) < 1e-6);
   update();
 }
+// Grande fenêtre du profil en long : le bloc graphique (axe, échelle, graphique, points, contrôles) y est déplacé tel
+// quel (mêmes écouteurs), puis remis à sa place à la fermeture ; il s'ouvre au clic sur l'onglet Profil long.
+function plPopOpen() {
+  const dlg = $('#dlgPL'); if (!dlg || dlg.open) return;
+  $('#plPopBody').appendChild($('#plGraph')); dlg.showModal();
+  refreshPL();
+}
+function plPopBack() { const home = $('#plGraphHome'); if (home && $('#plGraph').parentNode !== home.parentNode) home.after($('#plGraph')); }
 function bindPL() {
   $('#plBranch').addEventListener('change', (e) => { S.plSel = e.target.value; S.plPi = -1; refreshPL(); });
   $('#plVe').addEventListener('change', refreshPL);
+  $('#btnPlPop').addEventListener('click', plPopOpen);
+  $('#plPopClose').addEventListener('click', () => $('#dlgPL').close());
+  $('#dlgPL').addEventListener('close', () => { plPopBack(); refreshPL(); });
+  $('#dlgPL').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); }); // clic sur le fond
   $('#plStep').addEventListener('change', refreshPL);
   const chart = $('#plChart');
   const pick = (e) => {
@@ -3356,7 +3375,7 @@ function bindHydro() {
     const data = { type: buse ? 'buse' : 'picf', usage: 'eau', axis: o.c.key, axisName: ax?.name || o.c.traceName, s: o.c.pk, n: Math.max(1, Math.round(+(over.n ?? o.ret?.cells ?? 1))), B, H, biais: +(over.biais ?? o.biais), Hr, hydro: { id: o.c.id, Q: o.Q, T: o.T, hw: o.hw, v: o.v } };
     S.prj.cadres = S.prj.cadres || [];
     const ex = S.prj.cadres.find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key);
-    if (ex) { const keep = { s: ex.s, L: ex.L, name: ex.name }; Object.assign(ex, data, over.keepPos === false ? {} : { s: keep.s }); if (keep.L != null && over.keepL !== false) ex.L = keep.L; } else S.prj.cadres.push({ id: uid(), ...data });
+    if (ex) { const keep = { s: ex.s, L: ex.L, Lg: ex.Lg, Ld: ex.Ld, name: ex.name }; Object.assign(ex, data, over.keepPos === false ? {} : { s: keep.s }); if (over.keepL !== false) for (const f of ['L', 'Lg', 'Ld']) if (keep[f] != null) ex[f] = keep[f]; } else S.prj.cadres.push({ id: uid(), ...data });
   };
   $('#hyDetail').addEventListener('click', (e) => {
     const ap = e.target.closest('[data-hyohapply]'), rs = e.target.closest('[data-hyohreset]'), go = e.target.closest('[data-hyohgo]');
@@ -3658,7 +3677,7 @@ function bindUI() {
       if (q) { viewer.cx = q.p.x; viewer.cy = q.p.y; viewer.s = Math.max(viewer.s, 6); S.snap = { ...q.p, kind: `point ${q.n}` }; viewer.invalidate(); }
     }
   });
-  $$('.tabs [data-tab]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+  $$('.tabs [data-tab]').forEach((b) => b.addEventListener('click', () => { showTab(b.dataset.tab); if (b.dataset.tab === 'pl') plPopOpen(); }));
   $$('.tools [data-tool]').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
   $$('.tools [data-act]').forEach((b) => b.addEventListener('click', () => (b.dataset.act === 'zoomGira' ? zoomGira() : zoomAll())));
   $$('.tog').forEach((b) => { b.classList.toggle('on', !!S.tog[b.dataset.tog]); b.addEventListener('click', () => toggle(b.dataset.tog)); });

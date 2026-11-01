@@ -32,9 +32,12 @@ export function cadreDims(c, half = 6) {
   const ang = Math.max(20, Math.min(180, num(c.biais, 100))), psi = ang <= 100 ? ang : 200 - ang, sinP = Math.sin((psi * Math.PI) / 200);
   const W = n * B + (n - 1) * ei + 2 * ep;
   const Lauto = up50((2 * (half + 1.5 * Hr + 0.5)) / sinP);
-  const L = Math.max(W, num(c.L, Lauto));
+  // longueur par demi-ouvrage, mesurée le long de l'axe de l'ouvrage depuis l'axe de la voie portée : Lg côté gauche de
+  // la voie, Ld côté droit (saisies ou tirées par les poignées) ; à défaut, la moitié de L saisie ou de Lauto
+  const Lh = Math.max(W / 2, num(c.L, Lauto) / 2), Lg = Math.max(W / 2, num(c.Lg, Lh)), Ld = Math.max(W / 2, num(c.Ld, Lh));
+  const L = Lg + Ld;
   const wingA = Math.max(0, Math.min(90, num(c.wingA, 30))), wingL = Math.max(0, num(c.wingL, up50(1.5 * (H + et))));
-  return { n, B, H, Hr, ep, et, ei, er, eAuto, ang, psi, sinP, W, L, Lauto, wingA, wingL, type: buse ? 'buse' : c.type === 'pipo' ? 'pipo' : 'picf' };
+  return { n, B, H, Hr, ep, et, ei, er, eAuto, ang, psi, sinP, W, L, Lg, Ld, Lauto, wingA, wingL, type: buse ? 'buse' : c.type === 'pipo' ? 'pipo' : 'picf' };
 }
 
 // Implantation : point et directions sur l'axe porteur, abscisse le long de l'autoroute (numérotation des ouvrages).
@@ -46,6 +49,9 @@ export function cadreGeoms(prj, D) {
     const s = Math.max(0, Math.min(ax.len, num(c.s, 0))), { p, t } = ax.at(s), n = G.rot90(t);
     const K = cadreDims(c, (ax.half || 6) + 1);
     const th = (K.ang * Math.PI) / 200, d = G.norm(G.add(G.mul(t, Math.cos(th)), G.mul(n, Math.sin(th))));
+    // demi-longueurs de part et d'autre de la voie : +d pointe à gauche (orientation 20 à 180 gr mesurée à gauche)
+    const left = G.cross(t, d) > 0;
+    K.Lp = left ? K.Lg : K.Ld; K.Lm = left ? K.Ld : K.Lg; K.leftP = left;
     const sX = D?.hwy?.ok ? (pathProject(D.hwy.path, p)?.s ?? s) : s;
     out.push({ c, ax, s, p, t, n, d, K, sX });
   }
@@ -61,7 +67,7 @@ export function drawCadre(g, name, P, TH) {
   const path = (pts, extra = {}) => P({ k: 'path', L: 'OUVRAGE', segs: polySegs(pts), ...extra });
   const text = (q, s, rot, align = 'left', h = TH) => P({ k: 'text', L: 'OUVRAGE', p: q, s, rot: upright(rot), align, h });
   // Têtes : droites parallèles à l'axe porteur à ± L/2 le long de l'axe de l'ouvrage.
-  const E = [G.add(p, G.mul(d, -K.L / 2)), G.add(p, G.mul(d, K.L / 2))];
+  const E = [G.add(p, G.mul(d, -K.Lm)), G.add(p, G.mul(d, K.Lp))];
   const side = (w, k) => meet(G.add(p, G.mul(m, w)), d, E[k], t);
   const corner = (w) => [side(w, 0), side(w, 1)];
   const cL = corner(K.W / 2), cR = corner(-K.W / 2);
@@ -91,7 +97,7 @@ export function drawCadre(g, name, P, TH) {
     }
   }
   // Axe de l'ouvrage et étiquette.
-  path([G.add(p, G.mul(d, -K.L / 2 - 2)), G.add(p, G.mul(d, K.L / 2 + 2))], { role: 'axe', dash: [3, 1, 0.5, 1] });
+  path([G.add(p, G.mul(d, -K.Lm - 2)), G.add(p, G.mul(d, K.Lp + 2))], { role: 'axe', dash: [3, 1, 0.5, 1] });
   const what = K.type === 'pipo' ? 'PIPO' : K.type === 'buse' ? 'buse' : 'PICF';
   const desc = K.type === 'buse' ? `${name} : ${K.n > 1 ? `${K.n} buses` : 'buse'} Ø ${fmt(K.B, 2)} m, L = ${fmt(K.L, 2)} m, biais ${fmt(K.psi, 1)} gr`
     : `${name} : ${what} ${K.n > 1 ? `${K.n} × ` : ''}${fmt(K.B, 2)} × ${fmt(K.H, 2)} m, L = ${fmt(K.L, 2)} m, biais ${fmt(K.psi, 1)} gr`;
@@ -102,7 +108,8 @@ export function drawCadre(g, name, P, TH) {
 // Contrôles d'un cadre.
 export function cadreChecks(g, name) {
   const out = [], K = g.K, c = g.c;
-  if (num(c.L, 0) && num(c.L, 0) < K.Lauto - 0.05) out.push({ lvl: 'warn', msg: `${name} : longueur ${fmt(K.L, 2)} m < ${fmt(K.Lauto, 2)} m nécessaires pour porter la plate-forme et le talus 3/2 jusqu'au niveau de la traverse (biais compris).` });
+  for (const [v, side] of [[K.Lg, 'gauche'], [K.Ld, 'droit']]) if (v < K.Lauto / 2 - 0.05 && (c.Lg != null || c.Ld != null) && c[side === 'gauche' ? 'Lg' : 'Ld'] !== '' && c[side === 'gauche' ? 'Lg' : 'Ld'] != null) out.push({ lvl: 'warn', msg: `${name} : demi-longueur côté ${side} de la voie ${fmt(v, 2)} m < ${fmt(K.Lauto / 2, 2)} m nécessaires pour porter la demi-plate-forme et le talus 3/2 jusqu'au niveau de la traverse (biais compris).` });
+  if (c.Lg == null && c.Ld == null && num(c.L, 0) && num(c.L, 0) < K.Lauto - 0.05) out.push({ lvl: 'warn', msg: `${name} : longueur ${fmt(K.L, 2)} m < ${fmt(K.Lauto, 2)} m nécessaires pour porter la plate-forme et le talus 3/2 jusqu'au niveau de la traverse (biais compris).` });
   if (K.psi < 50) out.push({ lvl: 'warn', msg: `${name} : biais ${fmt(K.psi, 1)} gr < 50 gr — biais prononcé (domaine des cadres Sétra PICF : 50 à 100 gr).` });
   if (c.usage === 'route' && K.H < 4.3) out.push({ lvl: 'warn', msg: `${name} : passage inférieur routier de hauteur libre ${fmt(K.H, 2)} m < 4,30 m (gabarit normal ; 4,75 m sous autoroute).` });
   if (K.Hr < 0.3 && K.type === 'picf') out.push({ lvl: 'info', msg: `${name} : remblai sur traverse ${fmt(K.Hr, 2)} m < 0,30 m — la traverse reçoit directement les charges de roue (vérifier le poinçonnement dans PSIDA).` });

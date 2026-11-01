@@ -132,7 +132,9 @@ ou sur un fond topographique DXF.
   comparaison) : N° profil, distance partielle (cotée entre deux profils), distance cumulée, cote TN, cote projet
   (valeurs écrites à la verticale, stations éclaircies si elles se touchent), alignements droits (i, L) et
   raccordements paraboliques (R, L, i → i) en cellules fusionnées ; stations = profils en travers implantés sur l'axe,
-  sinon pas régulier (10 à 100 m selon la longueur), pente ≤ 2 % sur les 20 derniers mètres (ACI), PI hors de l'axe.
+  sinon pas régulier (10 à 100 m selon la longueur). Le graphique s'ouvre dans une grande fenêtre (clic sur l'onglet
+  Profil long ou bouton « Ouvrir le profil en grand », échelle × 1,5 ; Échap pour revenir au panneau), avec l'axe,
+  l'échelle, le tableau des points et les contrôles, pente ≤ 2 % sur les 20 derniers mètres (ACI), PI hors de l'axe.
 - **Profils en travers** (onglet Profils travers) : coupes perpendiculaires à l'axe projet aux stations régulières
   (pas réglable) : plateforme issue du modèle (îlot séparateur ou TPC en saillie, voies avec leur dévers, BDD et berme
   en interurbain, caniveau, bordure, trottoir et contre-bordure en urbain — onglet Profil), talus de remblai (3/2) et
@@ -246,7 +248,9 @@ ou sur un fond topographique DXF.
   - ouvrages modifiables : dans la fiche du bassin (type, nombre, B, H ou Ø, orientation), « Placer / Mettre à jour
     l'ouvrage » ; un ouvrage placé n'est plus redimensionné mais vérifié (HW, vitesse ≤ 3 m/s, revanche : ✔ / ✖) ;
     « Revenir à la proposition » ; sur le plan, poignées de rotation (orientation 20 à 180 gr, 100 = droit, biais
-    ψ = min(angle, 200 − angle)), de déplacement le long de l'axe et de longueur ;
+    ψ = min(angle, 200 − angle)), de déplacement le long de l'axe et une poignée de longueur sur chaque tête : elle
+    prolonge ou raccourcit son seul demi-ouvrage (côté gauche ou droit de la voie, champs Lg / Ld de la fiche),
+    l'autre tête reste en place ;
   - un clic sur un ouvrage du plan (tablier, cadre, buse) le met en surbrillance et ouvre sa fiche modifiable dans une
     fenêtre (bouton Supprimer pour un cadre) ;
   - « Créer les ouvrages sur le plan » : un PICF (ou une buse) par franchissement, biais tiré de la direction de

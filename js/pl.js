@@ -220,7 +220,7 @@ export function plChartSVG(PL, tnLine, sEnd, opts = {}) {
   const sz = sx * ve, zc = (zmin + zmax) / 2;
   const X = (s) => m.l + s * sx, Y = (z) => m.t + (h - m.t - m.b) / 2 - (z - zc) * sz;
   const vis = (z) => Math.max(m.t, Math.min(h - m.b, Y(z)));
-  let out = `<svg viewBox="0 0 ${w} ${h}"${w > 600 ? ` style="width:${((w / 600) * 100).toFixed(1)}%;max-width:none"` : ''} class="plsvg" data-l="${m.l}" data-t="${m.t}" data-sx="${sx}" data-sz="${sz}" data-zc="${zc}" data-hh="${h}" data-mt="${m.t}" data-mb="${m.b}">`;
+  let out = `<svg viewBox="0 0 ${w} ${h}" style="--w:${w}px;${w > 600 ? `width:${((w / 600) * 100).toFixed(1)}%;max-width:none` : ''}" class="plsvg" data-l="${m.l}" data-t="${m.t}" data-sx="${sx}" data-sz="${sz}" data-zc="${zc}" data-hh="${h}" data-mt="${m.t}" data-mb="${m.b}">`;
   // Grille et axes
   const gs = niceStep(sMax / 8), gz = niceStep((zmax - zmin) / 5);
   for (let s = 0; s <= sMax + 1e-9; s += gs) out += `<line class="gl" x1="${X(s)}" y1="${m.t}" x2="${X(s)}" y2="${h - m.b}"/>${cart ? '' : `<text class="tk" x="${X(s)}" y="${h - m.b + 14}" text-anchor="middle">${fmt(s, 0)}</text>`}`;
