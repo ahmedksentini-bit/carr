@@ -14,7 +14,7 @@ import { pathProject, pathTangentAt, polySegs } from './clotho.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
 import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF } from './pt.js';
-import { plParams, plBuild, plStations, plTerrainLine, plFromTerrain, plChartSVG, plChartPick, plDXF, plChecks, axisLength } from './pl.js';
+import { plParams, plBuild, plStations, plTerrainLine, plFromTerrain, plChartSVG, plChartPick, plDXF, plChecks, axisLength, axisPointAt } from './pl.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
 import { buildOuvrages, W_CLASSES, psidaLink, psidaProject, psidaWarnings, PSIDA_URL } from './ouvrage.js';
@@ -2696,7 +2696,7 @@ function refreshPLAxis(c) {
     return { fixed: k < 0, pi: k, label: `PI ${k + 1}` };
   };
   const ov = plAxisOverlay(key, ax, PL);
-  $('#plChart').innerHTML = plChartSVG(PL, tnLine, ax.len, { ve, sel: S.plPi, nodeInfo: info, noRed: !A.defined, axisLabel: `s (m) le long de ${ax.name} · z (m)`, pxm: 1, overlay: ov.draw, zExtra: ov.z, plan: plPlanBand(ax), devers: plDeversBand(ax) });
+  $('#plChart').innerHTML = plChartSVG(PL, tnLine, ax.len, { ve, sel: S.plPi, nodeInfo: info, noRed: !A.defined, axisLabel: `s (m) le long de ${ax.name} · z (m)`, pxm: 1, cart: A.defined ? { stations: plCartStations(key, ax, PL) } : null, overlay: ov.draw, zExtra: ov.z, plan: plPlanBand(ax), devers: plDeversBand(ax) });
   const lim = axisLimits(S.prj, key);
   $('#plTable').innerHTML = '<thead><tr><th>Point</th><th>s (m)</th><th>z (m)</th><th>R (m)</th><th>pente aval</th><th></th></tr></thead><tbody>' +
     A.tied.map((t) => `<tr><td>calé (${t.end ? 'fin' : 'début'})</td><td class="mono">${fmt(t.s, 2)}</td><td class="mono">${fmt(t.z, 3)}</td><td class="mono">—</td><td class="mono" colspan="2">${esc(t.why)}</td></tr>`).join('') +
@@ -2714,6 +2714,18 @@ function refreshPLAxis(c) {
     st.map((q) => `<tr><td>${fmt(q.s, 2)}</td><td>${q.p.x.toFixed(2)}</td><td>${q.p.y.toFixed(2)}</td><td>${q.zTN == null ? '—' : fmt(q.zTN)}</td><td>${q.zP == null ? '—' : fmt(q.zP)}</td>` +
       `<td class="${q.dz == null ? '' : q.dz >= 0 ? 'fill' : 'cut'}">${q.dz == null ? '—' : (q.dz >= 0 ? '+' : '−') + fmt(Math.abs(q.dz))}</td><td>${q.g == null ? '—' : fmt(q.g * 100, 2) + ' %'}</td></tr>`).join('') + '</tbody>';
   $('#plNote').textContent = S.tn ? '' : 'Aucun MNT : le terrain naturel n\'est pas tracé (onglet Terrain).';
+}
+// Stations du cartouche (comme BVTrace) : profils en travers implantés sur l'axe, sinon pas régulier (10, 20, 25, 50 ou
+// 100 m selon la longueur) ; cote TN lue sur le MNT.
+function plCartStations(key, ax, PL) {
+  const tin = S.tn?.tin || null, zTN = (s) => { if (!tin) return null; const { p } = ax.at(s); return tinZ(tin, p.x, p.y); };
+  const imp = (S.prof?.list || []).filter((q) => q.axis === key).sort((a, b) => a.s - b.s);
+  if (imp.length >= 2) return imp.map((q) => ({ num: q.name, s: q.s, z: zTN(q.s) }));
+  const step = [10, 20, 25, 50, 100, 200, 500].find((v) => ax.len / v <= 120) || 1000, out = [];
+  let n = 1;
+  for (let s = 0; s <= ax.len + 1e-9; s += step) out.push({ num: n++, s, z: zTN(s) });
+  if (ax.len - out[out.length - 1].s > 0.5) out.push({ num: n, s: ax.len, z: zTN(ax.len) });
+  return out;
 }
 // Diagramme des courbures du tracé en plan de l'axe (éléments exacts de l'alignement : droites, clothoïdes, arcs).
 function plPlanBand(ax) {
@@ -2821,7 +2833,11 @@ function refreshPL() {
   const { bd, PL, sEnd, br } = d;
   const tnLine = S.tn ? plTerrainLine(bd, S.tn.tin, Math.max(sEnd, PL.sEnd)) : [];
   const ve = +($('#plVe').value || 0);
-  $('#plChart').innerHTML = plChartSVG(PL, tnLine, sEnd, { ve, sel: S.plPi });
+  // cartouche (BVTrace) : profils en travers implantés sur la branche, sinon tous les 10 m
+  const impB = (S.prof?.list || []).filter((q) => q.axis === `b:${bd.id}`).sort((a, b) => a.s - b.s);
+  const cartSt = impB.length >= 2 ? impB.map((q) => { const { p } = axisPointAt(bd, q.s); return { num: q.name, s: q.s, z: S.tn ? tinZ(S.tn.tin, p.x, p.y) : null }; })
+    : plStations(bd, PL, S.tn?.tin, sEnd, 10).filter((q) => Math.abs(q.s / 10 - Math.round(q.s / 10)) < 1e-6 || Math.abs(q.s - sEnd) < 1e-6).map((q, i) => ({ num: i + 1, s: q.s, z: q.zTN }));
+  $('#plChart').innerHTML = plChartSVG(PL, tnLine, sEnd, { ve, sel: S.plPi, cart: d.defined ? { stations: cartSt } : null });
   // Tableau des PI
   const pis = br.pl?.pis || [];
   $('#plTable').innerHTML = '<thead><tr><th>PI</th><th>s (m)</th><th>z (m)</th><th>R (m)</th><th>pente aval</th><th></th></tr></thead><tbody>' +
@@ -2920,7 +2936,7 @@ function bindPL() {
     const ac = plAxisCtx();
     if (ac) {
       if (!ac.A.defined) { toast('Aucun profil saisi pour cet axe.', 'warn'); return; }
-      const tnLine = axisTerrainLine(ac.ax, S.tn?.tin || null), st = axStations(ac.ax, ac.A.PL, S.tn?.tin, parseNum($('#plStep').value) || 25, true).map((q) => ({ ...q, zP: q.zP }));
+      const tnLine = axisTerrainLine(ac.ax, S.tn?.tin || null), st = plCartStations(ac.key, ac.ax, ac.A.PL).map((q) => ({ ...q, zTN: q.z, zP: ac.A.PL.zAt(q.s) })); // stations du cartouche (profils implantés, sinon pas régulier)
       const ve = +($('#plVe').value || 0) || 10;
       download(fname('dxf').replace(/\.dxf$/, `_PL_${ac.ax.name}.dxf`), plDXF(ac.A.PL, tnLine, st, `Profil en long ${ac.ax.name} — ${S.prj.name}`, ve), 'application/dxf');
       toast(`Profil en long ${ac.ax.name} exporté (exagération × ${ve}).`); return;
