@@ -168,6 +168,8 @@ ou sur un fond topographique DXF.
   de la route transversale (R, développement Lc, angle au centre Δ dans l'unité choisie, tangente T, repères TC / CT avec
   PK / PR, centres dans la liste des points ; longueur des alignements) et des arcs des bretelles (R, Ri, A, dévers,
   surlargeur, Lc, Δ) ; l'étiquette d'une courbe d'axe est déplacée hors du croisement.
+- **Plusieurs carrefours** par projet (giratoires et carrefours plans nommés, onglet Projet) : tous sont dessinés et
+  exportés ; les onglets portent sur le carrefour actif, qu'on choisit dans la liste ou d'un clic sur le plan.
 - **Sélection sur le plan** : chaque élément (giratoire ou carrefour, branche, bretelle, autoroute, route transversale)
   se met en surbrillance au survol ; un clic ouvre sa fenêtre (tous ses paramètres, modifiables, et un bouton Supprimer
   en tête ; Échap ferme, Suppr supprime, fenêtre déplaçable par son en-tête).

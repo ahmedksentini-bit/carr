@@ -61,7 +61,7 @@ function newBranch(prj, axis) {
 }
 
 function newProject(context = 'interurbain') {
-  const R = PRESETS[context].ring;
+  const R = PRESETS[context].ring, jid = uid();
   return {
     app: 'GIRA', version: 1, name: 'Giratoire sans titre', context, kind: 'giratoire',
     crs: { id: 'utm', zone: 32, south: false, def: '' },
@@ -79,10 +79,11 @@ function newProject(context = 'interurbain') {
     traffic: { period: 'HPM', site: context === 'urbain' ? 'urbain' : 'rase', uvpPL: 2, od: {}, pl: {}, qp: {}, tad: {} },
     branches: [],
     opts: { angleUnit: 'gon', textH: 0.8, theme: 'dark', vis: {}, dxfOpacity: 0.9 },
+    jid, jname: 'Carrefour 1', others: [], jorder: [jid], // carrefours du projet (le premier est actif)
   };
 }
 
-function migrate(p) {
+function migrate(p, opt = {}) {
   const base = newProject(p.context === 'urbain' ? 'urbain' : 'interurbain');
   const out = {
     ...base, ...p,
@@ -102,6 +103,67 @@ function migrate(p) {
     if (!Array.isArray(b.axis) || b.axis.length < 2) continue;
     const t = newBranch(out, b.axis.map((q) => ({ x: +q.x, y: +q.y })));
     out.branches.push({ ...t, ...b, axis: t.axis, island: { ...t.island, ...b.island }, tpc: { ...t.tpc, ...b.tpc } });
+  }
+  // Plusieurs carrefours : le carrefour actif est au niveau du projet (jid, jname et les clés JKEYS), les autres sont
+  // rangés dans others ; jorder donne l'ordre de la liste.
+  out.jid = p.jid || uid(); out.jname = p.jname || 'Carrefour 1';
+  if (!opt.inner) {
+    out.others = (Array.isArray(p.others) ? p.others : []).map((sn) => ({ id: sn.id || uid(), name: sn.name || 'Carrefour', ...pickJ(migrate({ ...p, ...sn, others: [] }, { inner: true })) }));
+    const ids = [out.jid, ...out.others.map((o) => o.id)];
+    out.jorder = (Array.isArray(p.jorder) ? p.jorder.filter((id) => ids.includes(id)) : []).concat(ids.filter((id) => !(p.jorder || []).includes(id)));
+  }
+  return out;
+}
+
+// ================================================================ Carrefours multiples
+const JKEYS = ['context', 'kind', 'center', 'ring', 'plan', 'section', 'signs', 'pt', 'traffic', 'branches'];
+const pickJ = (o) => Object.fromEntries(JKEYS.map((k) => [k, o[k]]));
+const clone = (o) => JSON.parse(JSON.stringify(o));
+function junctionList() {
+  const all = [{ id: S.prj.jid, name: S.prj.jname, active: true, kind: S.prj.kind, n: S.prj.branches.length }, ...S.prj.others.map((o) => ({ id: o.id, name: o.name, active: false, kind: o.kind, n: o.branches.length }))];
+  return S.prj.jorder.map((id) => all.find((j) => j.id === id)).filter(Boolean);
+}
+// Rend actif le carrefour id : l'actif courant est rangé dans others, celui-ci remonte au niveau du projet.
+function switchJunction(id, { zoom = true } = {}) {
+  if (id === S.prj.jid) return;
+  const k = S.prj.others.findIndex((o) => o.id === id);
+  if (k < 0) return;
+  closePop(false);
+  const sn = S.prj.others[k];
+  S.prj.others[k] = { id: S.prj.jid, name: S.prj.jname, ...clone(pickJ(S.prj)) };
+  Object.assign(S.prj, clone(pickJ(sn)), { jid: sn.id, jname: sn.name });
+  S.sel = -1; S.hover = -1; S.formRole = undefined; S.plSel = -1; S.ptSel = -1;
+  syncCtxUI(); renderBranchForm(); update();
+  if (zoom && S.prj.branches.length) zoomGira();
+}
+function addJunction() {
+  const n = S.prj.jorder.length + 1, fresh = newProject(S.prj.context), id = uid();
+  S.prj.others.push({ id: S.prj.jid, name: S.prj.jname, ...clone(pickJ(S.prj)) });
+  Object.assign(S.prj, clone(pickJ(fresh)), { jid: id, jname: `Carrefour ${n}` });
+  S.prj.jorder.push(id);
+  S.sel = -1; S.formRole = undefined;
+  syncCtxUI(); renderBranchForm(); update();
+  toast(t(`Carrefour ${n} créé : choisissez son type, puis dessinez ses branches (outil Axe).`));
+}
+// Supprime le carrefour actif ; un autre devient actif (s'il n'en reste qu'un, ses branches sont effacées).
+function deleteJunction() {
+  if (!S.prj.others.length) { S.prj.branches = []; S.sel = -1; S.prj.center = { ...S.prj.center, auto: true }; renderBranchForm(); update(); return; }
+  const gone = S.prj.jid, next = S.prj.jorder.find((id) => id !== gone);
+  switchJunction(next, { zoom: false });
+  S.prj.others = S.prj.others.filter((o) => o.id !== gone);
+  S.prj.jorder = S.prj.jorder.filter((id) => id !== gone);
+  update();
+}
+// Projets dérivés des carrefours inactifs (dessin, sélection, export), recalculés seulement s'ils changent.
+const junctionCache = new Map();
+function otherDesigns() {
+  const out = [];
+  for (const o of S.prj.others || []) {
+    const sub = { ...S.prj, ...pickJ(o), hwy: { ...S.prj.hwy, on: false }, ramps: [], cross: { ...S.prj.cross, on: false } };
+    const sig = JSON.stringify(pickJ(o)) + S.prj.opts.textH + S.prj.opts.angleUnit;
+    let c = junctionCache.get(o.id);
+    if (!c || c.sig !== sig) { let D = null; try { D = buildDesign(sub); } catch (e) { console.warn(e); } c = { sig, D }; junctionCache.set(o.id, c); }
+    if (c.D) out.push({ id: o.id, name: o.name, D: c.D });
   }
   return out;
 }
@@ -135,6 +197,7 @@ function init() {
   buildStaticPanels();
   bindUI();
   bindPop();
+  bindJunctions();
   bindCanvas();
   bindKeys();
   update({ commit: false });
@@ -189,6 +252,7 @@ function update({ commit = true, panels = true } = {}) {
   try { S.D = buildDesign(S.prj); } catch (e) { console.error(e); S.D = null; toast('Erreur de calcul : ' + e.message, 'err'); }
   if (S.prj.center.auto && S.D?.O) { S.prj.center.x = S.D.O.x; S.prj.center.y = S.D.O.y; }
   try { S.checks = checkDesign(S.prj, S.D); } catch (e) { console.error(e); S.checks = []; }
+  S.Do = otherDesigns();
   if (panels) refreshPanels();
   viewer.invalidate();
   if (commit) commitHistory();
@@ -495,7 +559,14 @@ function renderScene(ctx, v, exp = null) {
   if (S.tog.grid) drawGrid(ctx, v, theme);
   if (S.dxf) { drawDxf(ctx, v, S.dxf, S.dxfCache, theme, +S.prj.opts.dxfOpacity || 1); ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0); }
   if (S.tn) drawDesign(ctx, v, { prims: S.tn.prims }, theme, S.prj.opts.vis, {});
+  for (const o of S.Do || []) drawDesign(ctx, v, o.D, theme, S.prj.opts.vis, { onImagery: imagery && S.prj.bg.provider === 'esri', onImage: () => viewer.invalidate() });
   drawDesign(ctx, v, S.D, theme, S.prj.opts.vis, { onImagery: imagery && S.prj.bg.provider === 'esri', onImage: () => viewer.invalidate() });
+  if (!exp) for (const o of [{ D: S.D, name: S.prj.jname, active: true }, ...(S.Do || [])]) { // nom des carrefours
+    if (!o.D?.O || (S.Do || []).length === 0) continue;
+    const [x, y] = v.w2s(o.D.O.x, o.D.O.y);
+    ctx.font = `${o.active ? 600 : 500} 13px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.fillStyle = o.active ? T.sel : T.L.COTATION?.stroke || '#9cf';
+    ctx.fillText(o.name || '', x, y - Math.max(18, ((o.D.Rpo || 20) + 6) * v.s));
+  }
   drawAxes(ctx, v, T, !!exp);
   drawEch(ctx, v, T, !!exp);
   if (!exp) drawOverlay(ctx, v, T);
@@ -606,6 +677,12 @@ function elGeom(el) {
     const pts = b?.axis?.length >= 2 ? b.axis : q ? [q.W({ x: q.x0, y: q.a }), q.W({ x: q.xEnd, y: q.a })] : null;
     return pts ? { lines: [pts], half: 5 } : null;
   }
+  if (el.type === 'junction') {
+    const o = (S.Do || []).find((x) => x.id === el.i); if (!o?.D?.O) return null;
+    const R = o.D.kind === 'giratoire' ? o.D.Rg : 14, pts = [];
+    for (let k = 0; k <= 64; k++) pts.push(G.polar(o.D.O, R, (k / 64) * 2 * Math.PI));
+    return { lines: [pts], half: o.D.kind === 'giratoire' ? (o.D.la || 8) / 2 : 10 };
+  }
   if (el.type === 'ring' && D?.O) {
     const R = D.kind === 'giratoire' ? D.Rg - (D.la || 8) / 2 : 12, pts = [];
     for (let k = 0; k <= 64; k++) pts.push(G.polar(D.O, R, (k / 64) * 2 * Math.PI));
@@ -621,6 +698,11 @@ function hitElement(px, py) {
   if (bi >= 0) cands.push({ type: 'branch', i: bi, sc: -100 });
   (D?.ramps || []).forEach((R, i) => { if (!R?.al?.path) return; const tol = Math.max(7, (R.rp.w / 2 + 1) * viewer.s), d = polyDist(R.samp || (R.samp = G.samplePath(R.al.path, 3))); if (d < tol) cands.push({ type: 'ramp', i, sc: d - tol }); });
   if (D?.O) { const [x, y] = viewer.w2s(D.O.x, D.O.y), R = (D.kind === 'giratoire' ? D.Rpo || D.Rg : 15) * viewer.s; const d = Math.hypot(px - x, py - y); if (d < Math.max(10, R)) cands.push({ type: 'ring', i: 0, sc: d < R ? -200 : -50 }); } // dans l'anneau : prioritaire sur l'axe des branches
+  for (const o of S.Do || []) { // autres carrefours : un clic dans leur emprise les rend actifs
+    if (!o.D?.O) continue;
+    const [x, y] = viewer.w2s(o.D.O.x, o.D.O.y), R = Math.max(18, (o.D.kind === 'giratoire' ? o.D.Rpo : 20) * viewer.s), d = Math.hypot(px - x, py - y);
+    if (d < R) cands.push({ type: 'junction', i: o.id, sc: -150 + d / R });
+  }
   for (const type of ['hwy', 'cross']) {
     const r = type === 'hwy' ? D?.hwy : D?.cross;
     if (!r?.ok) continue;
@@ -637,10 +719,11 @@ function popTitle(el) {
   if (el.type === 'hwy') return `Autoroute ${S.prj.hwy.name || ''}`;
   if (el.type === 'cross') return `Route transversale ${S.prj.cross.name || ''}`;
   if (el.type === 'branch') return `Branche ${S.prj.branches[el.i]?.name || ''}`;
-  return S.D?.kind === 'giratoire' ? 'Giratoire' : 'Carrefour';
+  return `${S.D?.kind === 'giratoire' ? 'Giratoire' : 'Carrefour'} — ${S.prj.jname || ''}`;
 }
 function openPop(el, px, py) {
   closePop(false);
+  if (el.type === 'junction') { switchJunction(el.i, { zoom: false }); el = { type: 'ring', i: 0 }; }
   if (el.type === 'ramp') { S.rsel = el.i; refreshPanels(); }
   if (el.type === 'branch') selectBranch(el.i);
   const pop = $('#elPop'), node = $(POP_GROUP[el.type]);
@@ -675,10 +758,13 @@ function popDelete() {
     closePop(); update(); return;
   }
   if (el.type === 'ring') {
-    if (!confirm(t('Supprimer le carrefour et toutes ses branches ?'))) return;
-    S.prj.branches = []; S.sel = -1; S.prj.center = { ...S.prj.center, auto: true };
-    closePop(); renderBranchForm(); update();
+    if (!confirm(t(`Supprimer le carrefour ${S.prj.jname || ''} et toutes ses branches ?`))) return;
+    closePop(); deleteJunction();
   }
+}
+function bindJunctions() {
+  $('#jList').addEventListener('click', (e) => { const li = e.target.closest('li[data-jid]'); if (!li) return; if (li.dataset.jid === S.prj.jid) zoomGira(); else switchJunction(li.dataset.jid); });
+  $('#btnJAdd').addEventListener('click', addJunction);
 }
 function bindPop() {
   $('#popClose').addEventListener('click', () => closePop());
@@ -1066,6 +1152,7 @@ function designBBox() {
     for (const bd of S.D.branches) pts.push(bd.entry.F, bd.exit.F, bd.W({ x: bd.xEnd + 8, y: bd.a }));
   }
   S.prj.branches.forEach((b) => pts.push(...b.axis));
+  for (const o of S.prj.others || []) for (const b of o.branches || []) pts.push(...b.axis);
   if (S.prj.hwy?.on) { pts.push(...(S.prj.hwy.axis || [])); for (const R of S.D?.ramps || []) if (R?.pts) pts.push(...R.pts); }
   return pts.length ? G.bboxOf(pts) : null;
 }
@@ -1233,6 +1320,7 @@ function syncInputs() {
 }
 
 function refreshPanels() {
+  $('#jList').innerHTML = junctionList().map((j) => `<li data-jid="${j.id}" class="${j.active ? 'on' : ''}"><span class="dot"></span><b>${esc(j.name)}</b><span>${j.kind === 'giratoire' ? 'Giratoire' : `Carrefour en ${j.kind}`} · ${j.n} branche(s)</span><span>${j.active ? t('actif') : ''}</span></li>`).join('');
   if (S.pop) $('#elPop .ttl').textContent = popTitle(S.pop);
   refreshMainSelects();
   refreshEch();
@@ -2451,7 +2539,7 @@ function buildDxfText() {
   for (const l of Object.values(LAYERS)) if (l.dxf) w.layer(l.dxf, l.aci, l.ltype || 'CONTINUOUS');
   const lay = (k) => LAYERS[k]?.dxf;
   const TH = +S.prj.opts.textH || 0.8;
-  for (const pr of [...(S.tn && S.prj.opts.vis.MNT !== false ? S.tn.prims : []), ...D.prims]) {
+  for (const pr of [...(S.tn && S.prj.opts.vis.MNT !== false ? S.tn.prims : []), ...(S.Do || []).flatMap((o) => o.D.prims || []), ...D.prims]) {
     const L = lay(pr.L);
     if (!L || S.prj.opts.vis[pr.L] === false) continue;
     const ex = pr.lt ? { ltype: pr.lt } : undefined;
