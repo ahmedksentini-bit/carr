@@ -19,6 +19,7 @@ export const AR = {
   'Nom du carrefour actif': 'اسم المفترق النشط',
   '+ Carrefour': '+ مفترق',
   'actif': 'نشط',
+  'Trompette : séparation des voies de la tige (TPC)': 'البوق : الفاصل بين مسلكي الساق (TPC)',
   '+ Trèfle': '+ محوّل على شكل ورقة البرسيم',
   '+ Demi-trèfle': '+ نصف ورقة البرسيم',
   'Route transversale': 'الطريق المتقاطع',

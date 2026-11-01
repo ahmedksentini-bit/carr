@@ -149,7 +149,8 @@ ou sur un fond topographique DXF.
   la sortie semi-directe est construite d'abord (R2 saisi, R1 de sortie ≥ 100 m et < 2 R2) et fixe la tige et l'ouvrage,
   l'entrée en boucle (seule boucle) en est déduite, concentrique ; sortie et entrée directes raccordées à la tige
   bidirectionnelle. Un gabarit régénéré remplace le précédent au même croisement. Quand on modifie la S-semi (sommets, rayons,
-  extrémité de la tige), la boucle, la tige, l'ouvrage et les directes suivent ; la boucle n'est pas déplaçable seule. Les rayons saisis aux sommets des axes
+  extrémité de la tige), la boucle, la tige, l'ouvrage et les directes suivent ; la boucle n'est pas déplaçable seule. La tige (et l'ouvrage) restent un bloc : séparation des deux voies constante
+  (champ « TPC » de la tige, 1 m = voies accolées ; au-delà, terre-plein central dessiné et repris par la branche du giratoire). Les rayons saisis aux sommets des axes
   sont appliqués tels quels quand les tangentes tiennent (côtés partagés entre sommets voisins, plus petit rayon servi
   d'abord) ; sinon le rayon réduit est signalé. Surlargeur de 50/R par voie à l'intérieur des courbes de rayon
   < 100 m, introduite linéairement le long des clothoïdes (§ 3.4.2) ; rayons limites, dévers et vitesses contrôlés au
