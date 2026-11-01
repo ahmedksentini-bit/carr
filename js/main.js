@@ -755,17 +755,26 @@ function syncRampBranches() {
       const mid = G.mul(g.reduce((a, e) => G.add(a, e.E), { x: 0, y: 0 }), 1 / g.length);
       const Pc = G.add(mid, G.mul(d, G.dot(G.sub(q.O, mid), d))); // pied de la perpendiculaire du centre sur l'axe
       const at = (dd) => { const p = G.sub(Pc, G.mul(d, dd)); return { x: +p.x.toFixed(3), y: +p.y.toFixed(3) }; };
-      const axis = [at(Rg + AUTO_BL + 30), at(Rg + 6)];
+      // longueur de branche : AUTO_BL, réduite si l'alignement final de la bretelle est trop court pour que la coupure
+      // tombe sur lui (anneau posé après coup près d'une extrémité libre de losange) ; figée à la première coupure
+      let BL = AUTO_BL;
+      for (const e of g) {
+        if (e.r.cut?.bl) { BL = Math.min(BL, e.r.cut.bl); continue; }
+        const R = S.D?.ramps?.[S.prj.ramps.indexOf(e.r)], els = R?.al?.elems || [], last = e.end === 'to' ? els[els.length - 1] : els[0];
+        if (last?.kind === 'L') BL = Math.min(BL, Math.max(15, last.len - G.dot(G.sub(Pc, e.E), d) - Rg - 5));
+      }
+      BL = Math.round(BL);
+      const axis = [at(Rg + BL + 30), at(Rg + 6)];
       let b = q.j.branches.find((x) => x.rampLink === key);
-      if (!b) { b = { ...newBranch(q.j, axis), rampLink: key, length: AUTO_BL }; q.j.branches.push(b); }
+      if (!b) { b = { ...newBranch(q.j, axis), rampLink: key, length: BL }; q.j.branches.push(b); }
       // Tige de trompette (deux bretelles d'un même groupe) : la branche reprend la séparation des voies de la tige.
       const tpc = parseNum(String(S.prj.hwy.trTpc ?? '')) || 1;
       if (g.length === 2 && g[0].r.grp && g[0].r.grp === g[1].r.grp && tpc > 1.001 && (!b.tpc?.on || Math.abs(+b.tpc.width - tpc) > 1e-3)) b.tpc = { ...b.tpc, on: true, width: tpc };
       else if (G.dist(b.axis[0], axis[0]) > 0.01 || G.dist(b.axis[b.axis.length - 1], axis[1]) > 0.01) b.axis = axis;
       keep.add(key);
       for (const e of g) {
-        const cut = G.sub(e.E, G.mul(e.d, G.dot(G.sub(e.E, Pc), d) + Rg + AUTO_BL));
-        const c = { x: +cut.x.toFixed(3), y: +cut.y.toFixed(3), end: e.end, j: q.id };
+        const cut = G.sub(e.E, G.mul(e.d, G.dot(G.sub(e.E, Pc), d) + Rg + BL));
+        const c = { x: +cut.x.toFixed(3), y: +cut.y.toFixed(3), end: e.end, j: q.id, ...(BL < AUTO_BL ? { bl: BL } : {}) };
         if (JSON.stringify(e.r.cut) !== JSON.stringify(c)) e.r.cut = c;
       }
     }
@@ -1678,6 +1687,54 @@ function splitCross(m, sP, d) {
   }
   return { E: [p1 ? p1[p1.length - 1] : null, p2 ? p2[0] : null], nk };
 }
+// Carrefour posé (ou déplacé) sur une voie secondaire : la voie est coupée à R + Lb de part et d'autre du centre et y
+// arrive par ses branches ; les extrémités libres des bretelles voisines (losange, demi-échangeur à extrémités libres)
+// sont reportées dans l'anneau, où elles dessinent leur branche, ou au centre d'un carrefour plan.
+function connectJunctionToRoads(j) {
+  const msgs = [];
+  for (let m = 0; m < S.prj.crosses.length; m++) {
+    const X = S.prj.crosses[m];
+    if (X.on === false || (X.axis || []).length < 2) continue;
+    const pts = X.axis, L = polyS(pts);
+    let best = null;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i], ab = G.sub(b, a), ll = G.dot(ab, ab) || 1, t = Math.max(0, Math.min(1, G.dot(G.sub(j.C, a), ab) / ll)), q = G.add(a, G.mul(ab, t)), d = G.dist(q, j.C);
+      if (!best || d < best.d) best = { d, s: L[i - 1] + t * Math.sqrt(ll) };
+    }
+    if (!best || best.d > j.R + 15) continue;
+    // déjà raccordée (extrémité à R + Lb du centre) : rien à couper
+    if (G.dist(pts[0], j.C) < j.R + PS_LB + 5 && best.s < 1) continue;
+    if (G.dist(pts[pts.length - 1], j.C) < j.R + PS_LB + 5 && best.s > L[L.length - 1] - 1) continue;
+    const r = splitCross(m, best.s, j.R + PS_LB);
+    let nArm = 0;
+    for (const E of r.E) if (E && addArm(j, G.norm(G.sub(E, j.C)), PS_LB)) nArm++;
+    msgs.push(`${X.name} coupée au droit de ${j.name} (${nArm} branche${nArm > 1 ? 's' : ''} ajoutée${nArm > 1 ? 's' : ''})`);
+  }
+  let nR = 0;
+  for (const r of S.prj.ramps || []) for (const [end, e] of [[0, r.from], [1, r.to]]) {
+    if (!e || (e.ref && e.ref !== 'free') || !(r.pis?.length >= 2)) continue;
+    const iE = end ? r.pis.length - 1 : 0, iQ = end ? r.pis.length - 2 : 1, P = r.pis[iE];
+    if (G.dist(P, j.C) > j.R + 60) continue;
+    // prolongement dans l'alignement final de la bretelle jusqu'à l'anneau (la déviation au dernier sommet ne change pas) ;
+    // à défaut (alignement qui manque l'anneau), extrémité visant le centre
+    const Rin = j.plan ? 3 : Math.max(2, j.R - 4), v = G.norm(G.sub(P, r.pis[iQ])), w = G.sub(P, j.C);
+    const bq = G.dot(w, v), cq = G.dot(w, w) - Rin * Rin, disc = bq * bq - cq;
+    let E = null;
+    if (cq <= 0) continue; // déjà dans l'anneau
+    if (disc >= 0) { const t = -bq - Math.sqrt(disc); if (t > 0) E = G.add(P, G.mul(v, t)); }
+    if (!E) E = G.add(j.C, G.mul(G.norm(G.sub(r.pis[iQ], j.C)), Rin));
+    r.pis[iE] = { ...r.pis[iE], ...r3p(E) }; nR++;
+  }
+  if (nR) msgs.push(`${nR} extrémité${nR > 1 ? 's' : ''} de bretelle reportée${nR > 1 ? 's' : ''} dans ${j.plan ? 'le carrefour' : "l'anneau"}`);
+  return msgs;
+}
+function centerPlaced() {
+  const j = knownJunctions().find((q) => q.id === S.prj.jid);
+  if (!j) return;
+  j.C = { x: +S.prj.center.x, y: +S.prj.center.y };
+  const msgs = connectJunctionToRoads(j);
+  if (msgs.length) { S.echSig = ''; update(); toast(`${msgs.join(' ; ')}.`); }
+}
 function connectCross(k) {
   const msgs = [], X = S.prj.crosses[k];
   if (!X || (X.axis || []).length < 2) return '';
@@ -1693,6 +1750,13 @@ function connectCross(k) {
     ax[iE] = { ...r3p(G.add(j.C, G.mul(u, j.R + Lb))), r: '' };
     const added = addArm(j, u, Lb);
     msgs.push(`${X.name} raccordée à ${j.name}${added ? ' (branche ajoutée)' : ''}`);
+  }
+  // 1 bis. carrefours posés sur la voie (hors extrémités)
+  for (const j of jl) {
+    const pts = X.axis;
+    if (G.dist(pts[0], j.C) < j.R + PS_LB + 5 || G.dist(pts[pts.length - 1], j.C) < j.R + PS_LB + 5) continue;
+    const before = S.prj.crosses.length, got = connectJunctionToRoads(j).filter((t) => t.startsWith(X.name) || !t.includes('coupée'));
+    if (got.length || S.prj.crosses.length !== before) msgs.push(...got);
   }
   // 2. croisements avec les autres voies secondaires : giratoire créé au croisement
   for (let m = 0; m < S.prj.crosses.length; m++) {
@@ -1864,7 +1928,7 @@ function bindCanvas() {
     if (e.button !== 0) return;
     const w = pickPoint(px, py);
     if (S.tool === 'axis') { S.draft.push(w); setPrompt(); }
-    else if (S.tool === 'center') { S.prj.center = { auto: false, x: w.x, y: w.y }; syncInputs(); update(); setTool('select'); }
+    else if (S.tool === 'center') { S.prj.center = { auto: false, x: w.x, y: w.y }; syncInputs(); update(); setTool('select'); centerPlaced(); }
     else if (S.tool === 'ramp') addRampAt(w);
     else if (S.tool === 'pickx') pickSecondary(w, px, py);
     else if (['profser', 'profone', 'cadre'].includes(S.tool)) pickOnAxis(w);
@@ -1886,7 +1950,7 @@ function bindCanvas() {
     const d = S.drag;
     S.drag = null; updateCursor();
     if (!d) return;
-    if (['vertex', 'seg', 'center', 'rpi', 'hvx', 'cvx', 'tige', 'cadm', 'cadr', 'cadl'].includes(d.kind) && d.moved) { syncInputs(); update(); }
+    if (['vertex', 'seg', 'center', 'rpi', 'hvx', 'cvx', 'tige', 'cadm', 'cadr', 'cadl'].includes(d.kind) && d.moved) { syncInputs(); update(); if (d.kind === 'center') centerPlaced(); }
     else if (['cadm', 'cadr', 'cadl'].includes(d.kind) && !d.moved) { const [px, py] = viewer.w2s(d.start.x, d.start.y); openPop({ type: 'ouvr', i: `c:${d.id}` }, px, py); } // simple clic sur une poignée : fiche de l'ouvrage
     else if (d.kind === 'pan') {
       if (!d.moved && d.clickEl) openPop(d.clickEl, d.cpx, d.cpy);
@@ -2016,7 +2080,7 @@ function runCmd(str) {
   if (!p) { toast('Saisie non reconnue : ' + s, 'warn'); return; }
   if (S.tool === 'axis') { S.draft.push(p); setPrompt(); }
   else if (S.tool === 'measure') { S.meas.push(p); if (S.meas.length > 2) S.meas = [p]; showMeasure(); }
-  else if (S.tool === 'center') { S.prj.center = { auto: false, x: p.x, y: p.y }; syncInputs(); update(); setTool('select'); }
+  else if (S.tool === 'center') { S.prj.center = { auto: false, x: p.x, y: p.y }; syncInputs(); update(); setTool('select'); centerPlaced(); }
   else { viewer.cx = p.x; viewer.cy = p.y; }
   viewer.invalidate();
 }
