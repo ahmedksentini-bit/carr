@@ -1034,13 +1034,20 @@ function interchangeFrame(prj, D, click, Lc) {
   if (!pr) return { err: 'Point non reconnu.' };
   const s0 = pr.s, P0 = pr.p, tL = pathTangentAt(hw.path, s0), nL = rot90(tL);
   const W = (q) => { const r = add(P0, add(mul(tL, q.x), mul(nL, q.y))); return { x: +r.x.toFixed(3), y: +r.y.toFixed(3) }; };
-  return { hw, s0, P0, tL, nL, W, Lc, crossAxis: [W({ x: 0, y: -Lc }), W({ x: 0, y: Lc })] };
+  // Repère curviligne : x = abscisse le long de l'axe de l'autoroute (à partir du croisement), y = décalage normal au
+  // point d'abscisse s0 + x. Sur un axe en courbe, collectrices et boucles suivent la chaussée au lieu de la tangente.
+  const Wc = (q) => {
+    const s = s0 + q.x, sc = Math.max(0, Math.min(hw.sEnd, s)), t = pathTangentAt(hw.path, sc), n = rot90(t);
+    const r = add(add(G.pathPointAt(hw.path, sc), mul(t, s - sc)), mul(n, q.y));
+    return { x: +r.x.toFixed(3), y: +r.y.toFixed(3) };
+  };
+  return { hw, s0, P0, tL, nL, W, Wc, Lc, crossAxis: [W({ x: 0, y: -Lc }), W({ x: 0, y: Lc })] };
 }
 
 export function cloverleaf(prj, D, click, mkId, opt = {}) {
   const K = opt.crossK ?? 0, Lc = opt.Lc || 1500, F = interchangeFrame(prj, D, click, Lc);
   if (F.err) return F;
-  const { hw, s0, W } = F, w = 3.5, half = w / 2;
+  const { hw, s0 } = F, W = F.Wc, w = 3.5, half = w / 2;
   const X = { ...crossParams(prj, K), on: true }, Hm = hwyParams(prj);
   const E1c = X.median / 2 + X.bdg + X.lanes * X.wLane, crossAuto = X.kind === 'autoroute';
   const cyc = [
@@ -1078,18 +1085,33 @@ export function cloverleaf(prj, D, click, mkId, opt = {}) {
     // Boucle de 270° sur trois sommets (arc continu) : rayon Rl (54 m conseillé au bord intérieur, § 3.2.1) ; si les
     // nez ne peuvent être dégagés des plates-formes croisées, premier arc de rayon R1 > Rl (courbe composée,
     // R1 < 2 R2, § 3.2.2) qui éloigne la boucle de la chaussée A.
+    // Contrôle en coordonnées réelles (repère curviligne sur un axe en courbe) : les raccordements de la boucle doivent
+    // tenir entre ses sommets ; sinon on allonge les côtés de « sl » m (court alignement entre arcs, tangence conservée).
+    const Wq = (p) => W(ROT[k](p.x, p.y));
+    const fits = (g) => {
+      const Pw = [Wq({ x: g.x1, y: ys0 }), Wq(g.PI1), Wq(g.PI2), Wq(g.PI3), Wq({ x: xe0, y: g.yE })];
+      const df = (j) => { const a = sub(Pw[j], Pw[j - 1]), b = sub(Pw[j + 1], Pw[j]); return Math.abs(Math.atan2(a.x * b.y - a.y * b.x, a.x * b.x + a.y * b.y)); };
+      const t1 = tangentLengths(g.R1, g.A1, 0, df(1)), t2 = tangentLengths(g.Rl, 0, 0, df(2)), t3 = tangentLengths(g.Rl, 0, g.Al, df(3));
+      // axe droit : tolérance des sommets liés ; axe courbe : 1,5 m de réserve (recalage des extrémités par le calcul)
+      const curved = [g.PI1, g.PI2, g.PI3].some((q) => dist(Wq(q), F.W(ROT[k](q.x, q.y))) > 0.05), tol = curved ? -1.5 : 0.04;
+      return t1[1] + t2[0] <= dist(Pw[1], Pw[2]) + tol && t2[1] + t3[0] <= dist(Pw[2], Pw[3]) + tol;
+    };
     let g = null;
+    for (const sl of [0, 1, 2, 3, 5, 8].map((v) => v + (opt.loopSlack || 0))) {
+    g = null;
     for (let Rl = Rb; Rl <= Rb + 24 && !g; Rl += 2) {
       const Al = Amin(Rl);
       for (let R1 = Rl; R1 - half < 2 * (Rl - half) - 2; R1 += 2) {
         const A1 = Amin(R1), d1 = Math.PI / 2 - Math.atan(ps), d3 = Math.PI / 2 - Math.atan(pe);
         const [T1i, T1o] = tangentLengths(R1, A1, 0, d1), T2 = Rl, [T3i, T3o] = tangentLengths(Rl, 0, Al, d3);
         const lam1 = A.Lm + T1i + 3, lam3 = B.Lm + T3o + 3;
-        const X3 = xe0 + (pe * lam3) / ne, X1 = X3 + T2 + T3i, Y1 = ys0 - (ps * lam1) / ns, Y3 = Y1 - (T1o + T2);
+        const X3 = xe0 + (pe * lam3) / ne, X1 = X3 + T2 + T3i + sl, Y1 = ys0 - (ps * lam1) / ns, Y3 = Y1 - (T1o + T2 + sl);
         const yE = Y3 + lam3, x1 = X1 - lam1 / ns;
         // Nez (tpl) d'entrée sur B en deçà de la plate-forme de A, nez de sortie de A au-delà de celle de B (4 m).
         if (yE - B.Lm <= ys0 - 4 && x1 + A.Lm >= xe0 + 4) { g = { Rl, Al, R1, A1, PI1: { x: X1, y: Y1 }, PI2: { x: X1, y: Y3 }, PI3: { x: X3, y: Y3 }, x1: X1 - lam1 / ns, yE }; break; }
       }
+    }
+    if (!g || fits(g)) break;
     }
     if (!g) return { err: `Boucle impossible à loger avec un rayon ≤ ${Rb + 24} m.` };
     const alL = buildAlignment([{ x: g.x1, y: ys0 }, { ...g.PI1, R: g.R1, A: g.A1 }, { ...g.PI2, R: g.Rl, A: g.Al, link: true }, { ...g.PI3, R: g.Rl, A: g.Al, link: true }, { x: xe0, y: g.yE }]);
@@ -1131,8 +1153,15 @@ export function cloverleaf(prj, D, click, mkId, opt = {}) {
     const P1 = { x: u0 + h.lamC / nR, y: yl }, P2 = { x: u1 - h.lamC / nR, y: yl };
     h.alC = buildAlignment([{ x: u0, y: -(h.e + 1 + half) }, { ...P1, R: 1000, A: 0 }, { ...P2, R: 1000, A: 0 }, { x: u1, y: -(h.e + 1 + half) }]);
     const Wk = (q) => W(ROT[i](q.x, q.y));
-    ramps.push({ id: h.id, name: h.name, cat: 'b90', lanes: 1, pente: '', from: { ref: h.ref, s: station(h, u0), biseau: '', obl: '', tpl: '' }, to: { ref: h.ref, s: station(h, u1), ins: '', biseau: '', obl: '', tpl: '' },
-      pis: [{ ...Wk(P1), R: 1000, A: 0 }, { ...Wk(P2), R: 1000, A: 0 }] });
+    // Sur un axe en courbe, la collectrice suit la chaussée : sommets intermédiaires tous les ~100 m sur la parallèle,
+    // rayon déduit de la déviation locale (≤ 1000 m). Sur un axe droit, deux sommets seulement (inchangé).
+    const nI = Math.max(1, Math.round((P2.x - P1.x) / 100)), raw = [];
+    for (let j = 0; j <= nI; j++) raw.push(Wk({ x: P1.x + ((P2.x - P1.x) * j) / nI, y: yl }));
+    const defl = (j) => { const a = sub(raw[j], raw[j - 1]), b = sub(raw[j + 1], raw[j]); return Math.abs(Math.atan2(a.x * b.y - a.y * b.x, a.x * b.x + a.y * b.y)); };
+    const sp = (P2.x - P1.x) / nI, pis = [{ ...raw[0], R: 1000, A: 0 }];
+    for (let j = 1; j < nI; j++) { const d = defl(j); if (d > 1e-4 && j * sp >= 150 && (nI - j) * sp >= 150) pis.push({ ...raw[j], R: Math.round(Math.min(1000, Math.max(150, (0.45 * sp) / Math.tan(d / 2)))), A: 0 }); }
+    pis.push({ ...raw[nI], R: 1000, A: 0 });
+    ramps.push({ id: h.id, name: h.name, cat: 'b90', lanes: 1, pente: '', from: { ref: h.ref, s: station(h, u0), biseau: '', obl: '', tpl: '' }, to: { ref: h.ref, s: station(h, u1), ins: '', biseau: '', obl: '', tpl: '' }, pis });
   }
   // Raccordement sur un hôte : référence et abscisse (collectrice : abscisse curviligne du point projeté).
   const attach = (h, u, role) => {
