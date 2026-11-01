@@ -208,6 +208,18 @@ ou sur un fond topographique DXF.
   courbe ; la boucle est déduite de la grande courbe réellement dessinée et tangente à l'obliquité réelle de son
   convergent : boucle et S-semi restent concentriques (plus de chevauchement). Le long de l'arc commun, les bords qui
   tomberaient dans l'autre plate-forme ne sont plus dessinés et un terre-plein sépare les deux voies, comme sur la tige.
+- **Aucune chaussée superposée hors ouvrage** : deux plates-formes (chaussée et accotements revêtus) ne se croisent
+  qu'au droit d'un ouvrage. Chaque bretelle est contrôlée tous les 2 m contre l'autoroute, les voies secondaires et les
+  autres bretelles ; un recouvrement de plates-formes hors tablier est une erreur. Sont exclus les zones de raccordement
+  à la chaussée hôte (biseau, Lm, insertion), les deux voies accolées d'une trompette, les abords des giratoires et les
+  extrémités voisines de deux bretelles aboutissant au même carrefour plan.
+- **Tangence imposée à l'arrivée sur un giratoire** : une bretelle qui débouche sur un giratoire doit y arriver par un
+  alignement droit (≥ 5 m) dans l'axe de sa branche. Un déplacement de sommet qui casserait cette tangence (ou ferait
+  chevaucher ses raccordements) est refusé : la bretelle reste à sa dernière position correcte et rien d'autre n'est
+  redessiné.
+- **Trèfle sur autoroute en courbe** : le gabarit est posé dans un repère qui suit l'axe de l'autoroute ; les
+  collectrices épousent la courbe (sommets intermédiaires) et, si une boucle ne tient plus entre ses sommets, ses côtés
+  sont allongés de quelques mètres (contrôle par un calcul d'essai).
 - **Tablier de la tige** : son axe et sa largeur suivent les deux voies de la tige (S-semi et boucle) ; un tablier
   allongé suit les bretelles là où elles s'écartent ; l'axe réel des voies secondaires est suivi sur ± 400 m.
 - **Onglet Ouvrages** : réglages communs (tirant d'air, piles, dispositifs de retenue et classes W, travure), liste des

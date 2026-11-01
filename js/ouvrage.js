@@ -258,6 +258,7 @@ function drawDeck(B, P, name, TH) {
   if (!L0 || !L1 || !R0 || !R1) return;
   const left = slice(eL, L0, L1), right = slice(eR, R0, R1).reverse();
   const deckPoly = [...left, ...right];
+  B.deckPoly = deckPoly;
   P({ k: 'fill', L: 'OUVRAGE', rings: [ring(deckPoly)], role: 'tablier' });
   path('OUVRAGE', [...deckPoly, deckPoly[0]], { wm: 0.25 });
   // Appuis : axes des lignes d'appui, piles voiles (cachées sous le tablier), sommiers des culées.
@@ -364,7 +365,7 @@ export function buildOuvrages(prj, D, extra = {}) {
     B.name = name; B.hwPath = D.hwy.path; B.median = Hm.median;
     drawDeck(B, (o) => D.prims.push(o), name, TH);
     out.issues.push(...B.issues.map((q) => ({ ...q, msg: `${name} – ${q.msg}` })));
-    out.list.push({ P: B.P0, key: B.deck.key, spansAuto: B.spansAuto, user: B.user, shift: B.shift, hGuide: B.hGuide, name, src: B.deck.src, psi: B.psi, spans: B.spans, central: B.central, type: B.type, h: B.h, hText: B.ep.text, width: 2 * B.halfW, about: B.about, items: B.items, yP: B.yP, yC: B.side, Ht: B.Ht, roadHalf: B.deck.halfW, gab: O.gab, fck: O.fck, ep: O.ep, nPiles: B.sup.filter((q) => q.kind === 'pile').length });
+    out.list.push({ poly: B.deckPoly || [], P: B.P0, key: B.deck.key, spansAuto: B.spansAuto, user: B.user, shift: B.shift, hGuide: B.hGuide, name, src: B.deck.src, psi: B.psi, spans: B.spans, central: B.central, type: B.type, h: B.h, hText: B.ep.text, width: 2 * B.halfW, about: B.about, items: B.items, yP: B.yP, yC: B.side, Ht: B.Ht, roadHalf: B.deck.halfW, gab: O.gab, fck: O.fck, ep: O.ep, nPiles: B.sup.filter((q) => q.kind === 'pile').length });
   });
   return out;
 }

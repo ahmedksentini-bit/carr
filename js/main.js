@@ -18,6 +18,7 @@ import { plParams, plBuild, plStations, plTerrainLine, plFromTerrain, plChartSVG
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
 import { buildOuvrages, W_CLASSES, psidaLink, psidaProject } from './ouvrage.js';
+import { chausseeOverlaps } from './overlap.js';
 import { analyse, SITES } from './capacity.js';
 import { initLang, getLang, t } from './i18n.js';
 import { analysePlan, gapParams, GAPS } from './capacity-plan.js';
@@ -258,6 +259,22 @@ function update({ commit = true, panels = true } = {}) {
   try { syncTrumpets(); } catch (e) { console.error(e); }
   try { syncRampBranches(); syncTrumpets(); } catch (e) { console.error(e); } // la tige peut avoir été raccourcie par une branche
   try { S.D = buildDesign(S.prj); } catch (e) { console.error(e); S.D = null; toast('Erreur de calcul : ' + e.message, 'err'); }
+  // Bretelle raccordée à un giratoire : elle doit y arriver en alignement droit dans l'axe de sa branche (tangence).
+  // Un déplacement qui ferait arriver la courbe dans la branche (cassure) est refusé : les sommets reprennent leur
+  // dernière position valide et le dessin ne change pas.
+  {
+    const kinks = rampKinks();
+    const fixed = [];
+    for (const r of kinks) { const g = S.rampGood?.[r.id]; if (g && g !== JSON.stringify(r.pis)) { r.pis = JSON.parse(g); fixed.push(r.name); } }
+    if (fixed.length) {
+      try { syncRampBranches(); S.D = buildDesign(S.prj); } catch (e) { console.error(e); }
+      toast(`Déplacement refusé : ${fixed.join(', ')} doit arriver au giratoire en alignement droit, dans l'axe de sa branche (tangence) ; le dessin n'est pas modifié.`, 'warn');
+    }
+    S.rampGood = S.rampGood || {};
+    const bad = new Set(rampKinks().map((r) => r.id));
+    for (const r of S.prj.ramps) if (r.cut && !bad.has(r.id)) S.rampGood[r.id] = JSON.stringify(r.pis);
+    S.rampKinks = [...bad];
+  }
   if (S.prj.center.auto && S.D?.O) { S.prj.center.x = S.D.O.x; S.prj.center.y = S.D.O.y; }
   try { S.checks = checkDesign(S.prj, S.D); } catch (e) { console.error(e); S.checks = []; }
   S.Do = otherDesigns();
@@ -265,6 +282,11 @@ function update({ commit = true, panels = true } = {}) {
   if (S.D) try { // ouvrages de franchissement de l'autoroute (passages supérieurs)
     S.ouvr = buildOuvrages(S.prj, S.D, { girden: girdenList() });
     for (const q of S.ouvr.issues) S.checks.push({ lvl: q.lvl, group: 'Ouvrages', msg: q.msg });
+  } catch (e) { console.error(e); }
+  for (const id of S.rampKinks || []) { const r = S.prj.ramps.find((q) => q.id === id); if (r) S.checks.push({ lvl: 'err', group: 'Échangeur', msg: `${r.name} : arrivée au giratoire non tangente (la courbe se termine dans la branche) — allongez le dernier alignement ou déplacez le dernier sommet dans l'axe de la branche.` }); }
+  if (S.D?.hwy?.ok) try { // chaussées superposées hors ouvrage
+    const juncs = [{ O: S.D.O, Rg: +S.prj.ring.Rg, kind: S.prj.kind }, ...(S.Do || []).map((d) => { const o = S.prj.others.find((q) => q.id === d.id); return { O: d.D.O, Rg: +o?.ring?.Rg || 20, kind: o?.kind }; })].filter((j) => j.O && (j.kind || 'giratoire') === 'giratoire');
+    for (const q of chausseeOverlaps(S.prj, S.D, { decks: (S.ouvr?.list || []).map((o) => o.poly).filter((p) => p?.length > 2), juncs })) S.checks.push({ lvl: q.lvl, group: 'Échangeur', msg: q.msg });
   } catch (e) { console.error(e); }
   for (const [id, msg] of S.trBad || []) { const r = S.prj.ramps.find((q) => q.id === id); if (r) S.checks.push({ lvl: 'err', group: 'Échangeur', msg: `Trompette (${r.name}) : boucle non déduite de la S-semi — ${msg}` }); else S.trBad.delete(id); }
   if (panels) refreshPanels();
@@ -309,6 +331,16 @@ function setOuvrDeck(key, patch) {
   for (const k of Object.keys(d)) if (d[k] == null || d[k] === '') delete d[k];
   if (Object.keys(d).length) S.prj.ouvr.decks[key] = d; else delete S.prj.ouvr.decks[key];
   update();
+}
+// Bretelles raccordées à un giratoire dont l'extrémité n'est pas un alignement droit d'au moins 5 m (courbe coupée par
+// la branche : cassure) ; les trompettes paramétriques sont contrôlées par leur propre reconstruction.
+function rampKinks() {
+  return S.prj.ramps.filter((r, i) => {
+    if (!r.cut || isParamTrumpet(r)) return false;
+    const R = S.D?.ramps?.[i], els = R?.al?.elems || [];
+    const el = r.cut.end === 'from' ? els[0] : els[els.length - 1];
+    return !el || el.kind !== 'L' || el.len < 5 || (R.issues || []).some((q) => q.lvl === 'err' && /chevauchent|alignement|raccordement dépasse/.test(q.msg));
+  });
 }
 // Giratoires dénivelés générés (anneau franchissant l'autoroute) : centre, rayons, nom.
 function girdenList() {
@@ -787,12 +819,26 @@ function rectifyCross(k, P0, dirIn, Lneed, ramps, Lc) {
   }
   return { kept: before.length + after.length, L: Math.round(2 * Lneed + SA.J + SB.J) };
 }
+// Trèfle contrôlé par un calcul d'essai (voie secondaire supposée rectiligne, comme après rectification) : sur une
+// autoroute en courbe, si une boucle ne tient pas entre ses sommets, on lui donne un peu de marge (alignements courts).
+function cloverChecked(kind, P, k) {
+  let T = null;
+  for (const sl of [0, 2, 4, 7, 11]) {
+    T = (kind === 'trefle' ? cloverleaf : halfCloverleaf)(S.prj, S.D, P, uid, { crossK: k, loopSlack: sl });
+    if (T.err || kind !== 'trefle') return T;
+    const names = new Set(T.ramps.map((r) => r.name)), D2 = { prims: [], points: [] };
+    const crosses = (S.prj.crosses || []).map((c, i) => (i === k ? { ...c, axis: T.crossAxis } : c));
+    try { buildEchangeur({ ...S.prj, crosses, ramps: T.ramps }, D2); } catch (e) { console.error(e); return T; }
+    if (!(D2.echIssues || []).some((i) => i.lvl === 'err' && [...names].some((nm) => i.msg.startsWith(nm + ' :')))) return T;
+  }
+  return T;
+}
 function addCloverAt(w, kind, k) {
   const X = S.prj.crosses[k];
   if (!X) return;
   if (kind === 'demitrefle' && X.kind === 'autoroute') { toast('Le demi-trèfle se raccorde à une route ordinaire : choisissez « Route ordinaire » pour cette voie secondaire.', 'warn'); return; }
   const C = crossingWith(S.D, w, k), P = C ? C.P0 : w;
-  const T = withHwyCover(() => (kind === 'trefle' ? cloverleaf : halfCloverleaf)(S.prj, S.D, P, uid, { crossK: k }));
+  const T = withHwyCover(() => cloverChecked(kind, P, k));
   if (T.err) { toast(T.err, 'warn'); return; }
   const skew = C ? (Math.acos(Math.min(1, Math.abs(G.dot(C.dir, G.norm(G.sub(T.crossAxis[1], T.crossAxis[0])))))) * 180) / Math.PI : 0;
   const nOld = removeGenerated(G.lerp(T.crossAxis[0], T.crossAxis[1], 0.5), 1500);
