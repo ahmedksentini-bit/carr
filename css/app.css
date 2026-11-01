@@ -275,3 +275,11 @@ td.pict svg { display: block; }
 .rissues li.warn { border-left-color: var(--warn); }
 #tab-echangeur table.pts input { width: 100%; min-width: 0; }
 button.mini { padding: 1px 6px; font-size: 11px; }
+
+/* Fenêtre d'un élément sélectionné sur le plan */
+.elpop { position: absolute; z-index: 30; width: 440px; max-width: calc(100% - 24px); max-height: calc(100% - 24px); display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line2); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+.elpop-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); cursor: move; user-select: none; }
+.elpop-head .ttl { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.elpop-body { overflow: auto; padding: 8px 12px 12px; }
+.moved-note { opacity: .7; font-style: italic; }

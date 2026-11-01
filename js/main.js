@@ -110,7 +110,7 @@ function migrate(p) {
 const S = {
   prj: null, D: null, checks: [], crs: null,
   dxf: null, dxfCache: null, dxfName: '', dxfRaw: null,
-  tool: 'select', sel: -1, hover: -1,
+  tool: 'select', sel: -1, hover: -1, hoverEl: null, pop: null, // élément survolé / fenêtre ouverte { type, i }
   rsel: -1, hwyDraw: false, rampKind: null, echSig: '', // échangeur : bretelle sélectionnée, saisie de l'axe autoroutier, type de bretelle à placer
   draft: [], meas: [], drag: null, mouse: null, cursorW: null, snap: null,
   tog: { snap: true, ortho: false, grid: false }, space: false,
@@ -134,6 +134,7 @@ function init() {
   rebuildTerrain();
   buildStaticPanels();
   bindUI();
+  bindPop();
   bindCanvas();
   bindKeys();
   update({ commit: false });
@@ -204,6 +205,7 @@ function commitHistory() {
 function undo() { if (S.hist.length < 2) return; S.fut.push(S.hist.pop()); restore(S.hist[S.hist.length - 1]); }
 function redo() { if (!S.fut.length) return; const js = S.fut.pop(); S.hist.push(js); restore(js); }
 function restore(js) {
+  closePop(false);
   S.prj = JSON.parse(js);
   if (S.sel >= S.prj.branches.length) S.sel = -1;
   applyCRS(); syncCrsUI(); syncCtxUI(); renderBranchForm();
@@ -582,11 +584,119 @@ function drawOverlay(ctx, v, T) {
     const [x, y] = v.w2s(S.snap.x, S.snap.y);
     ctx.strokeStyle = T.snap; ctx.lineWidth = 2; ctx.strokeRect(x - 6, y - 6, 12, 12);
   }
+  // Surbrillance de l'élément survolé et de celui dont la fenêtre est ouverte.
+  for (const [el, a] of [[S.pop, 0.28], [S.hoverEl, 0.4]]) {
+    const g = el && elGeom(el);
+    if (!g) continue;
+    ctx.save(); ctx.globalAlpha = a; ctx.strokeStyle = T.sel; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.setLineDash([]);
+    ctx.lineWidth = Math.max(8, 2 * g.half * v.s);
+    for (const pts of g.lines) { ctx.beginPath(); pts.forEach((p, k) => { const [x, y] = v.w2s(p.x, p.y); if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); ctx.stroke(); }
+    ctx.restore();
+  }
+}
+
+// ================================================================ Éléments cliquables (survol, fenêtre)
+// Géométrie de surbrillance d'un élément : polylignes (monde) et demi-largeur (m).
+function elGeom(el) {
+  const D = S.D;
+  if (el.type === 'ramp') { const R = D?.ramps?.[el.i]; return R?.al?.path ? { lines: [G.samplePath(R.al.path, 2)], half: R.rp.w / 2 + R.rp.bdd } : null; }
+  if (el.type === 'hwy' || el.type === 'cross') { const r = el.type === 'hwy' ? D?.hwy : D?.cross; return r?.ok ? { lines: [G.samplePath(r.path, 4)], half: r.E2 + r.H.berme } : null; }
+  if (el.type === 'branch') {
+    const b = S.prj.branches[el.i], q = D?.branches?.find((x) => x.idx === el.i);
+    const pts = b?.axis?.length >= 2 ? b.axis : q ? [q.W({ x: q.x0, y: q.a }), q.W({ x: q.xEnd, y: q.a })] : null;
+    return pts ? { lines: [pts], half: 5 } : null;
+  }
+  if (el.type === 'ring' && D?.O) {
+    const R = D.kind === 'giratoire' ? D.Rg - (D.la || 8) / 2 : 12, pts = [];
+    for (let k = 0; k <= 64; k++) pts.push(G.polar(D.O, R, (k / 64) * 2 * Math.PI));
+    return { lines: [pts], half: D.kind === 'giratoire' ? (D.la || 8) / 2 : 12 };
+  }
+  return null;
+}
+// Élément sous le curseur : branches et bretelles avant les axes de section courante, puis l'anneau.
+function hitElement(px, py) {
+  const D = S.D, P = { x: px, y: py }, cands = [];
+  const polyDist = (pts) => { let d = Infinity; for (let k = 1; k < pts.length; k++) { const a = viewer.w2s(pts[k - 1].x, pts[k - 1].y), b = viewer.w2s(pts[k].x, pts[k].y); d = Math.min(d, G.distToSeg(P, { x: a[0], y: a[1] }, { x: b[0], y: b[1] })); } return d; };
+  const bi = hitAxis(px, py);
+  if (bi >= 0) cands.push({ type: 'branch', i: bi, sc: -100 });
+  (D?.ramps || []).forEach((R, i) => { if (!R?.al?.path) return; const tol = Math.max(7, (R.rp.w / 2 + 1) * viewer.s), d = polyDist(R.samp || (R.samp = G.samplePath(R.al.path, 3))); if (d < tol) cands.push({ type: 'ramp', i, sc: d - tol }); });
+  if (D?.O) { const [x, y] = viewer.w2s(D.O.x, D.O.y), R = (D.kind === 'giratoire' ? D.Rpo || D.Rg : 15) * viewer.s; const d = Math.hypot(px - x, py - y); if (d < Math.max(10, R)) cands.push({ type: 'ring', i: 0, sc: d < R ? -200 : -50 }); } // dans l'anneau : prioritaire sur l'axe des branches
+  for (const type of ['hwy', 'cross']) {
+    const r = type === 'hwy' ? D?.hwy : D?.cross;
+    if (!r?.ok) continue;
+    const tol = Math.max(7, (r.E2 + r.H.berme) * viewer.s), d = polyDist(G.samplePath(r.path, Math.max(2, 6 / viewer.s)));
+    if (d < tol) cands.push({ type, i: 0, sc: d - tol + 1000 }); // les bretelles et branches posées dessus restent prioritaires
+  }
+  cands.sort((a, b) => a.sc - b.sc);
+  return cands[0] ? { type: cands[0].type, i: cands[0].i } : null;
+}
+// Groupes de champs de la barre latérale affichés dans la fenêtre.
+const POP_GROUP = { ramp: '#grpRamp', hwy: '#grpHwy', cross: '#grpCross', branch: '#branchForm', ring: '#grpRing' };
+function popTitle(el) {
+  if (el.type === 'ramp') { const r = S.prj.ramps[el.i]; return `Bretelle ${r?.name || ''} — ${S.D?.ramps?.[el.i]?.label || ''}`; }
+  if (el.type === 'hwy') return `Autoroute ${S.prj.hwy.name || ''}`;
+  if (el.type === 'cross') return `Route transversale ${S.prj.cross.name || ''}`;
+  if (el.type === 'branch') return `Branche ${S.prj.branches[el.i]?.name || ''}`;
+  return S.D?.kind === 'giratoire' ? 'Giratoire' : 'Carrefour';
+}
+function openPop(el, px, py) {
+  closePop(false);
+  if (el.type === 'ramp') { S.rsel = el.i; refreshPanels(); }
+  if (el.type === 'branch') selectBranch(el.i);
+  const pop = $('#elPop'), node = $(POP_GROUP[el.type]);
+  if (!node) return;
+  const ph = document.createElement('p'); ph.className = 'note moved-note'; ph.textContent = t('Affiché dans la fenêtre de l\'élément sur le plan.');
+  node.parentNode.insertBefore(ph, node);
+  pop.querySelector('.elpop-body').appendChild(node);
+  pop.querySelector('.ttl').textContent = popTitle(el);
+  S.pop = el; S.popHome = ph;
+  pop.hidden = false;
+  const st = $('.stage').getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+  pop.style.left = Math.max(12, Math.min(st.width - w - 12, px + 24)) + 'px';
+  pop.style.top = Math.max(12, Math.min(st.height - h - 12, py - 40)) + 'px';
+  viewer.invalidate();
+}
+function closePop(redraw = true) {
+  if (!S.pop) return;
+  const pop = $('#elPop'), node = $(POP_GROUP[S.pop.type]);
+  if (node && S.popHome?.parentNode) S.popHome.parentNode.replaceChild(node, S.popHome);
+  else S.popHome?.remove();
+  S.pop = null; S.popHome = null; pop.hidden = true;
+  if (redraw) viewer.invalidate();
+}
+function popDelete() {
+  const el = S.pop; if (!el) return;
+  if (el.type === 'ramp') { S.rsel = el.i; closePop(); $('#btnRampDel').click(); return; }
+  if (el.type === 'branch') { const n = S.prj.branches.length; deleteBranch(el.i); if (S.prj.branches.length < n) closePop(); return; }
+  if (el.type === 'hwy' || el.type === 'cross') {
+    const H = S.prj[el.type], what = el.type === 'hwy' ? `l'axe de l'autoroute ${H.name || ''}` : `la route transversale ${H.name || ''}`;
+    if (!confirm(t(`Supprimer ${what} ? Les bretelles qui s'y raccordent restent à supprimer ou à raccorder.`))) return;
+    H.axis = []; if (el.type === 'cross') H.on = false;
+    closePop(); update(); return;
+  }
+  if (el.type === 'ring') {
+    if (!confirm(t('Supprimer le carrefour et toutes ses branches ?'))) return;
+    S.prj.branches = []; S.sel = -1; S.prj.center = { ...S.prj.center, auto: true };
+    closePop(); renderBranchForm(); update();
+  }
+}
+function bindPop() {
+  $('#popClose').addEventListener('click', () => closePop());
+  $('#popDel').addEventListener('click', popDelete);
+  // Déplacement de la fenêtre par son en-tête.
+  const head = $('#elPop .elpop-head');
+  head.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    const pop = $('#elPop'), x0 = e.clientX - pop.offsetLeft, y0 = e.clientY - pop.offsetTop;
+    const mv = (ev) => { pop.style.left = ev.clientX - x0 + 'px'; pop.style.top = ev.clientY - y0 + 'px'; };
+    const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+  });
 }
 
 // ================================================================ Outils
 const PROMPTS = {
-  select: 'Sélection : cliquez un axe pour le modifier ; glissez ses sommets ou le centre.',
+  select: 'Sélection : survolez un élément (branche, giratoire, bretelle, autoroute) et cliquez-le pour ouvrir sa fenêtre ; glissez ses sommets ou le centre.',
   pan: 'Panoramique : glissez pour déplacer la vue.',
   axis0: 'Axe : cliquez le 1er point, côté extérieur (ou saisissez X,Y).',
   axis1: 'Axe : point suivant vers le carrefour — Entrée / clic droit pour terminer, Retour arrière pour annuler.',
@@ -791,9 +901,9 @@ function bindCanvas() {
       const h = hitHandle(px, py);
       if (h?.kind === 'plus') { startExtend(h.e); return; }
       if (h) { S.drag = { ...h, start: w, moved: false }; if (h.bi != null) selectBranch(h.bi); return; }
-      const bi = hitAxis(px, py);
-      if (bi >= 0) selectBranch(bi);
-      S.drag = { kind: 'pan', px, py, moved: false, deselect: bi < 0 };
+      const el = hitElement(px, py);
+      if (el?.type === 'branch') selectBranch(el.i);
+      S.drag = { kind: 'pan', px, py, moved: false, deselect: !el, clickEl: el, cpx: px, cpy: py };
     }
     viewer.invalidate();
   });
@@ -805,10 +915,14 @@ function bindCanvas() {
     S.drag = null; updateCursor();
     if (!d) return;
     if (['vertex', 'seg', 'center', 'rpi', 'hvx', 'cvx'].includes(d.kind) && d.moved) { syncInputs(); update(); }
-    else if (d.kind === 'pan') { if (!d.moved && d.deselect && S.sel >= 0) selectBranch(-1); autosave(); }
+    else if (d.kind === 'pan') {
+      if (!d.moved && d.clickEl) openPop(d.clickEl, d.cpx, d.cpy);
+      else if (!d.moved && d.deselect) { if (S.sel >= 0) selectBranch(-1); closePop(); }
+      autosave();
+    }
   });
   cv.addEventListener('dblclick', () => { if (S.tool === 'axis') finishAxis(); });
-  cv.addEventListener('pointerleave', () => { S.mouse = null; S.cursorW = null; S.snap = null; $('#tip').hidden = true; viewer.invalidate(); });
+  cv.addEventListener('pointerleave', () => { S.hoverEl = null; S.mouse = null; S.cursorW = null; S.snap = null; $('#tip').hidden = true; viewer.invalidate(); });
 }
 
 function onMove(px, py) {
@@ -834,9 +948,10 @@ function onMove(px, py) {
   else if (!d && S.tool === 'select') {
     const h = hitAxis(px, py);
     if (h !== S.hover) S.hover = h;
-    const hh = hitHandle(px, py);
-    $('#cv').style.cursor = hh ? (hh.kind === 'plus' ? 'copy' : 'move') : h >= 0 ? 'pointer' : 'default';
-  }
+    const hh = hitHandle(px, py), el = hh ? null : hitElement(px, py);
+    S.hoverEl = el;
+    $('#cv').style.cursor = hh ? (hh.kind === 'plus' ? 'copy' : 'move') : el ? 'pointer' : 'default';
+  } else S.hoverEl = null;
   // Barre d'état
   const zTn = S.tn ? tinZ(S.tn.tin, w.x, w.y) : null;
   $('#stXY').textContent = `X ${w.x.toFixed(3)}   Y ${w.y.toFixed(3)}` + (zTn != null ? `   Z TN ${zTn.toFixed(2)}` : '');
@@ -876,10 +991,10 @@ function bindKeys() {
     if (typing) return;
     if ($('#dlgHelp').open) return;
     switch (e.key) {
-      case 'Escape': cancelTool(); return;
+      case 'Escape': if (S.pop) { closePop(); return; } cancelTool(); return;
       case 'Enter': if (S.tool === 'axis') finishAxis(); return;
       case 'Backspace': if (S.tool === 'axis' && S.draft.length) { e.preventDefault(); S.draft.pop(); setPrompt(); viewer.invalidate(); } return;
-      case 'Delete': if (S.sel >= 0) deleteBranch(S.sel); return;
+      case 'Delete': if (S.pop) { popDelete(); return; } if (S.sel >= 0) deleteBranch(S.sel); return;
       case 'F3': e.preventDefault(); toggle('snap'); return;
       case 'F7': e.preventDefault(); toggle('grid'); return;
       case 'F8': e.preventDefault(); toggle('ortho'); return;
@@ -1118,6 +1233,7 @@ function syncInputs() {
 }
 
 function refreshPanels() {
+  if (S.pop) $('#elPop .ttl').textContent = popTitle(S.pop);
   refreshMainSelects();
   refreshEch();
   syncInputs();
@@ -2057,7 +2173,8 @@ function readInput(t) {
 }
 
 function bindUI() {
-  const panel = $('.panel');
+  // Les champs de la fenêtre d'élément (déplacés depuis la barre latérale) partagent les mêmes gestionnaires délégués.
+  const panel = { addEventListener: (ty, f, o) => { $('.panel').addEventListener(ty, f, o); $('#elPop').addEventListener(ty, f, o); } };
   panel.addEventListener('input', (e) => {
     const t = e.target;
     if (t.dataset.k) {
@@ -2432,4 +2549,4 @@ function toast(msg, lvl = 'info') {
 
 init();
 // Poignée de débogage (console du navigateur).
-window.GIRA = { S, update, get viewer() { return viewer; }, zoomGira, newBranch, finishAxis, setTool, buildDxfText, parseDXF, buildDxfGeometry, setTerrainPoints, tinZ };
+window.GIRA = { S, update, get viewer() { return viewer; }, zoomGira, newBranch, finishAxis, setTool, buildDxfText, parseDXF, buildDxfGeometry, setTerrainPoints, tinZ, hitElement, openPop, closePop };
