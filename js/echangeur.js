@@ -136,6 +136,35 @@ export function endFrame(host, e, w) {
 }
 
 
+// Voies d'entrecroisement ([ECH] § 3.4.3, 7.3.2, 7.3.3) : sur une même chaussée hôte, une entrée suivie d'une sortie
+// dont le point S.1,00 est à Z ≥ 0 du point E.1,00, avec une voie d'insertion (+ biseau) qui atteindrait le biseau de la
+// sortie, ou Z ≤ 750 m sur une autoroute : les deux accès sont reliés par une voie continue de 3,50 m contiguë à la
+// chaussée, avec une BDD de 1,00 m. Rend id de l'entrée → { sid, sE, sS, Z } et id de la sortie → id de l'entrée.
+export function weavePairs(prj) {
+  const out = { byE: new Map(), byS: new Map() }, ev = new Map();
+  for (const r of prj.ramps || []) {
+    const rp = rampParams(prj, r);
+    for (const e of [rp.from, rp.to]) {
+      if (!e) continue;
+      const sd = e.isHwy ? (e.host.sens === 1 ? 1 : -1) : 1;
+      if (!ev.has(e.ref)) ev.set(e.ref, []);
+      ev.get(e.ref).push({ id: r.id, e, u: e.s * sd, kind: e.role === 'div' ? 'S' : 'E' });
+    }
+  }
+  for (const list of ev.values()) for (const E of list) {
+    if (E.kind !== 'E') continue;
+    const S = list.filter((q) => q.kind === 'S' && q.id !== E.id && q.u > E.u - E.e.Lm).sort((a, b) => a.u - b.u)[0];
+    if (!S) continue;
+    const Z = S.u - E.u, auto = E.e.isHwy && E.e.host.roadKind === 'autoroute';
+    if (Z < 0 || out.byS.has(S.id)) continue;
+    if (Z <= E.e.ins + E.e.biseau + S.e.biseau + 1e-6 || (auto && Z <= 750)) {
+      out.byE.set(E.id, { sid: S.id, sE: E.e.s, sS: S.e.s, Z, pS: S.e.p });
+      out.byS.set(S.id, E.id);
+    }
+  }
+  return out;
+}
+
 // Construit l'échangeur ; ajoute prims, points, issues au projet dérivé D.
 export function buildEchangeur(prj, D) {
   const H = hwyParams(prj);
@@ -145,6 +174,8 @@ export function buildEchangeur(prj, D) {
   const P = (o) => prims.push(o);
   const pt = (name, p, extra = {}) => D.points.push({ n: D.points.length + 1, name, p, bi: null, kind: 'echangeur', ...extra });
   const text = (lay, p, s, rot = 0, align = 'center', h = TH) => P({ k: 'text', L: lay, p, s, rot: upright(rot), align, h });
+  const WV = weavePairs(prj);
+  D.weaves = WV;
 
   // --- Sections courantes (autoroute et route transversale) ----------------------------------
   const drawRoad = (key, H) => {
@@ -167,8 +198,9 @@ export function buildEchangeur(prj, D) {
       for (const e of [rp.from, rp.to]) {
         if (!e?.isHwy || e.host.road !== key) continue;
         const s0 = Math.max(0, Math.min(sEnd, e.s)), sg = e.host.sens === 1 ? -1 : 1, sd = e.host.sens === 1 ? 1 : -1;
-        if (e.role === 'div') { gaps[sg].rive.push(I(s0 - sd * e.biseau, s0)); gaps[sg].bord.push(I(s0 - sd * e.biseau, s0 + sd * e.Lm)); }
-        else { const sFin = s0 + sd * (e.ins + e.biseau); gaps[sg].rive.push(I(s0, sFin)); gaps[sg].bord.push(I(s0 - sd * e.Lm, sFin)); }
+        const bis = e.role === 'div' && WV.byS.has(r.id) ? 0 : e.biseau, wv = e.role === 'conv' ? WV.byE.get(r.id) : null;
+        if (e.role === 'div') { gaps[sg].rive.push(I(s0 - sd * bis, s0)); gaps[sg].bord.push(I(s0 - sd * bis, s0 + sd * e.Lm)); }
+        else { const sFin = wv ? wv.sS : s0 + sd * (e.ins + e.biseau); gaps[sg].rive.push(I(s0, sFin)); gaps[sg].bord.push(I(s0 - sd * e.Lm, sFin)); }
       }
     }
     // Ligne décalée de delta, échantillonnée le long de l'axe, coupée par les intervalles g : liste de morceaux.
@@ -391,7 +423,7 @@ export function buildEchangeur(prj, D) {
       if (first && Ld > R.Ldisp + 1e-6) err(`zone de décélération ${fmt(R.Ldisp)} m < Ld = ${fmt(Ld)} m (${vS} → ${fmt(VR * 3.6)} km/h, Ri = ${fmt(rIn(first.R))} m, p = ${fmt(rp.pente, 1)} %, § 3.2.5).`);
       if (rp.from.isHwy && ![150, 110, 90].includes(rp.from.biseau)) info(`biseau de ${fmt(rp.from.biseau)} m : 150 m en règle générale, 110 m en relief difficile, 90 m si une seule voie (§ 4.1.3.1).`);
       if (!rp.from.isHwy) {
-        const Pr = hF.R, st0 = Fs.s - rp.from.biseau;
+        const Pr = hF.R, st0 = Fs.s - (WV.byS.has(R.id) ? 0 : rp.from.biseau);
         if (st0 < 0) warn(`le biseau commence avant l'origine de ${Pr.name} (${fmt(st0)} m).`);
         if (Pr.Fs && st0 - Pr.sTplS < 25 - 1e-6) warn(`${fmt(st0 - Pr.sTplS)} m entre le tpl de ${Pr.name} et le début du biseau : 25 m minimum (§ 4.3).`);
         Pr.children.push({ a: st0, b: Fs.s + rp.from.Lm });
@@ -406,7 +438,7 @@ export function buildEchangeur(prj, D) {
         R.La = La; R.Ladisp = R.ladE + (last?.L || 0); R.VRe = VR * 3.6;
         if (last && La > R.Ladisp + 1e-6) err(`zone d'accélération ${fmt(R.Ladisp)} m < La = ${fmt(La)} m (${fmt(VR * 3.6)} → 55 km/h, Ri = ${fmt(rIn(last.R))} m, rampe ${fmt(rp.pente, 1)} %, § 3.2.5).`);
       } else {
-        const Pr = hT.R, sFin = Ft.s + rp.to.ins + rp.to.biseau;
+        const Pr = hT.R, sFin = WV.byE.get(R.id)?.sS ?? Ft.s + rp.to.ins + rp.to.biseau;
         if (sFin > Pr.al.length) warn(`la voie d'insertion dépasse l'extrémité de ${Pr.name} (${fmt(sFin - Pr.al.length)} m).`);
         if (Pr.Ft && Pr.al.length - Pr.sTplE - sFin < 25 - 1e-6) warn(`${fmt(Pr.al.length - Pr.sTplE - sFin)} m entre la fin de l'insertion et le tpl de ${Pr.name} : 25 m minimum (§ 5.3).`);
         Pr.children.push({ a: Ft.s - rp.to.Lm, b: sFin });
@@ -422,8 +454,8 @@ export function buildEchangeur(prj, D) {
     const ev = new Map(), push = (h, o) => { if (!ev.has(h.ref)) ev.set(h.ref, { h, list: [] }); ev.get(h.ref).list.push(o); };
     for (const R of D.ramps) {
       if (!R?.al) continue;
-      if (R.Fs) push(R.hF, { u: R.Fs.s * R.hF.sd, kind: 'S', name: R.name, p: R.rp.from.p });
-      if (R.Ft) push(R.hT, { u: R.Ft.s * R.hT.sd, kind: 'E', name: R.name, Lm: R.rp.to.Lm });
+      if (R.Fs) push(R.hF, { u: R.Fs.s * R.hF.sd, kind: 'S', name: R.name, p: R.rp.from.p, id: R.id });
+      if (R.Ft) push(R.hT, { u: R.Ft.s * R.hT.sd, kind: 'E', name: R.name, Lm: R.rp.to.Lm, id: R.id });
     }
     for (const { h, list } of ev.values()) {
       list.sort((a, b) => a.u - b.u);
@@ -434,6 +466,8 @@ export function buildEchangeur(prj, D) {
         if (!x) return;
         const Z = x.u - e.u, Z15 = Z - 0.5 / x.p, tag = `${h.name} : ${e.name} (E.1,00) → ${x.name} (S.1,00)${Z < 0 ? ' — S.1,00 en amont de E.1,00 : voie auxiliaire continue' : ''}`;
         const say = (lvl, msg) => issues.push({ lvl, msg: `${tag} : ${msg}` });
+        if (Z < 0) say('err', `zones de musoir superposées (S.1,00 à ${fmt(-Z)} m en amont de E.1,00) : pas d'entrecroisement possible, éloigner les accès (§ 6.1, 7.3).`);
+        else if (WV.byE.get(e.id)?.sid === x.id) say('info', `voie d'entrecroisement de 3,50 m + BDD 1,00 m dessinée de E.1,00 à S.1,00 (Z = ${fmt(Z)} m, § 3.4.3).`);
         if (h.kind === 'ramp') { if (Z < 275 - 1e-6) say('warn', `entrecroisement sur bretelle / collectrice Z = ${fmt(Z)} m < 275 m (§ 7.3.3).`); }
         else if (h.roadKind === 'route') say('info', `entrecroisement Z = ${fmt(Z)} m sur route ordinaire (hors du champ du guide échangeurs : à vérifier selon le guide de la route).`);
         else if (Z15 >= 1200) return;
@@ -478,16 +512,20 @@ export function buildEchangeur(prj, D) {
     // Divergent (§ 4.1.3.1, 4.3, 6.1, 6.2 ; schémas 4-1, 4-8, 6-1, 6-2) : la voie de sortie se forme sur l'accotement de la
     // chaussée émettrice (BAU ou BDD), qui est interrompu et hachuré de S.1,00 m au tpl, puis rétabli après le nez.
     if (Fs) {
-      const h = hF, e = rp.from, sd = h.sd, st0 = Fs.s - sd * e.biseau, sNose = Fs.s + sd * R.sTplS;
+      // Sortie précédée d'une voie d'entrecroisement : pas de biseau, la voie arrive à pleine largeur (dessinée avec l'entrée).
+      const woven = WV.byS.has(R.id);
+      const h = hF, e = rp.from, sd = h.sd, st0 = Fs.s - sd * (woven ? 0 : e.biseau), sNose = Fs.s + sd * R.sTplS;
       const k = (st) => cl((st - st0) / (Fs.s - st0), 0, 1), lane = (st) => (1 + rp.w) * k(st);
-      const outer = along(h, st0, Fs.s, (st) => Math.max(h.bau, lane(st) + rp.bdd));
+      const outer = woven ? [] : along(h, st0, Fs.s, (st) => Math.max(h.bau, lane(st) + rp.bdd));
       const berm = along(h, st0, Fs.s, (st) => Math.max(h.bau + h.berme, lane(st) + rp.bdd + rp.berme));
       const edgeN = offsetPolyline(al, offL, 2, 0, R.sTplS);
       const poly = [...along(h, st0, sNose, () => 0), ...edgeN.slice().reverse(), ...outer.slice().reverse()];
       P({ k: 'fill', L: 'CHAUSSEE', rings: [polySegs([...poly, poly[0]])], role: 'chaussee', rule: 'nonzero' });
-      P({ k: 'path', L: 'BORDURE', segs: polySegs(along(h, st0, Fs.s, lane)), role: 'principale' });
-      P({ k: 'path', L: 'BORDURE', segs: polySegs(outer) }); P({ k: 'path', L: 'ACCOTEMENT', segs: polySegs(berm) });
-      P({ k: 'path', L: 'MARQUAGE', segs: polySegs(along(h, st0, Fs.s, () => 0)), dash: [3, 3.5], wm: 0.15 }); // T2 3u
+      if (!woven) {
+        P({ k: 'path', L: 'BORDURE', segs: polySegs(along(h, st0, Fs.s, lane)), role: 'principale' });
+        P({ k: 'path', L: 'BORDURE', segs: polySegs(outer) }); P({ k: 'path', L: 'ACCOTEMENT', segs: polySegs(berm) });
+        P({ k: 'path', L: 'MARQUAGE', segs: polySegs(along(h, st0, Fs.s, () => 0)), dash: [3, 3.5], wm: 0.15 }); // T2 3u
+      }
       const mus = [...along(h, Fs.s, sNose, () => 0), ...edgeN.slice().reverse()];
       P({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(mus, ang(Fs.d) + Math.PI / 4, 1.0), wm: 0.12 });
       P({ k: 'path', L: 'MARQUAGE', segs: polySegs(mus), wm: 0.15 });
@@ -495,9 +533,10 @@ export function buildEchangeur(prj, D) {
       const pJ14 = h.off(sNose + sd * 1.5, h.bau + J14_W / 2); // balise J14 sur le nez (assimilée au point S.5,00 m, § 2.3.1)
       P({ k: 'circle', L: 'SIGNALISATION', c: pJ14, r: 0.5 });
       text('SIGNALISATION', h.off(sNose + sd * 6, h.bau + J14_W / 2), 'J14', ang(Fs.d), 'center', TH * 0.8);
-      pt(`${name} · origine du biseau (${fmt(e.biseau)} m)`, h.off(st0, 0)); pt(`${name} · S.1,00 m`, Fs.S1);
+      if (!woven) pt(`${name} · origine du biseau (${fmt(e.biseau)} m)`, h.off(st0, 0));
+      pt(`${name} · S.1,00 m`, Fs.S1);
       pt(`${name} · tpl (${fmt(e.tpl)} m)`, h.off(sNose, e.tpl / 2)); pt(`${name} · balise J14`, pJ14);
-      text('COTATION', h.off(st0, -1.5), `origine du biseau ${fmt(e.biseau)} m`, ang(Fs.d), 'center', TH * 0.8);
+      if (!woven) text('COTATION', h.off(st0, -1.5), `origine du biseau ${fmt(e.biseau)} m`, ang(Fs.d), 'center', TH * 0.8);
       text('COTATION', h.off(Fs.s, -1.5), 'S.1,00', ang(Fs.d), 'center', TH * 0.8);
       text('COTATION', h.off(sNose, -1.5), `tpl ${fmt(e.tpl)} m · Lm ${fmt(e.Lm)} m`, ang(Fs.d), 'center', TH * 0.8);
       // Signalisation de direction (schémas 4-1, 4-8, tab. 4-2) : D30 au point S.1,50 m ; D40 et D50 en amont (autoroute).
@@ -515,12 +554,17 @@ export function buildEchangeur(prj, D) {
     // Convergent (schémas 5-1, 5-6) : voie d'insertion parallèle puis biseau de rabattement ; l'accotement de la chaussée
     // réceptrice est reporté à l'extérieur de la voie d'insertion (raccord de principe sur 50 m).
     if (Ft) {
-      const h = hT, e = rp.to, sd = h.sd, sNoseE = Ft.s - sd * R.sTplE, sIns = Ft.s + sd * e.ins, sFin = sIns + sd * e.biseau;
+      // Voie d'entrecroisement (§ 3.4.3) : la voie d'insertion se prolonge jusqu'au point S.1,00 de la sortie suivante,
+      // 3,50 m contiguë à la chaussée + BDD de 1,00 m ; le mètre de séparation se referme / se rouvre à l'obliquité.
+      const wv = WV.byE.get(R.id);
+      const h = hT, e = rp.to, sd = h.sd, sNoseE = Ft.s - sd * R.sTplE;
+      const insL = wv ? wv.Z : e.ins, bisL = wv ? 0 : e.biseau, sIns = Ft.s + sd * insL, sFin = sIns + sd * bisL;
       const u = (st) => (st - Ft.s) * sd;
-      const lane = (st) => (u(st) <= e.ins ? rp.w + Math.max(0, 1 - u(st) * e.p) : rp.w * Math.max(0, 1 - (u(st) - e.ins) / e.biseau));
-      const sh = (st) => (u(st) <= e.ins ? rp.bdd + (h.bau - rp.bdd) * Math.min(1, u(st) / 50) : h.bau);
+      const lane = wv ? (st) => rp.w + Math.max(0, 1 - u(st) * e.p, 1 - (insL - u(st)) * wv.pS)
+        : (st) => (u(st) <= e.ins ? rp.w + Math.max(0, 1 - u(st) * e.p) : rp.w * Math.max(0, 1 - (u(st) - e.ins) / e.biseau));
+      const sh = wv ? () => 1.0 : (st) => (u(st) <= e.ins ? rp.bdd + (h.bau - rp.bdd) * Math.min(1, u(st) / 50) : h.bau);
       const outer = along(h, Ft.s, sFin, (st) => lane(st) + sh(st));
-      const berm = along(h, Ft.s, sFin, (st) => lane(st) + sh(st) + (u(st) <= 50 ? rp.berme + ((h.berme - rp.berme) * u(st)) / 50 : h.berme));
+      const berm = along(h, Ft.s, sFin, (st) => lane(st) + sh(st) + (wv ? h.berme : u(st) <= 50 ? rp.berme + ((h.berme - rp.berme) * u(st)) / 50 : h.berme));
       const edgeN = offsetPolyline(al, offL, 2, L - R.sTplE, L);
       const poly = [...along(h, sNoseE, sFin, () => 0), ...outer.slice().reverse(), ...edgeN.slice().reverse()];
       P({ k: 'fill', L: 'CHAUSSEE', rings: [polySegs([...poly, poly[0]])], role: 'chaussee', rule: 'nonzero' });
@@ -532,10 +576,11 @@ export function buildEchangeur(prj, D) {
       P({ k: 'path', L: 'MARQUAGE', segs: polySegs(mus), wm: 0.15 });
       P({ k: 'path', L: 'BORDURE', segs: polySegs([h.off(sNoseE, h.bau), accLAt(L - R.sTplE)]) });
       pt(`${name} · tpl (${fmt(e.tpl)} m)`, h.off(sNoseE, e.tpl / 2)); pt(`${name} · E.1,00 m`, Ft.S1);
-      pt(`${name} · fin de la voie d'insertion (${fmt(e.ins)} m)`, h.off(sIns, rp.w)); pt(`${name} · fin du biseau (${fmt(e.biseau)} m)`, h.off(sFin, 0));
+      if (!wv) { pt(`${name} · fin de la voie d'insertion (${fmt(e.ins)} m)`, h.off(sIns, rp.w)); pt(`${name} · fin du biseau (${fmt(e.biseau)} m)`, h.off(sFin, 0)); }
       text('COTATION', h.off(Ft.s, -1.5), 'E.1,00', ang(Ft.d), 'center', TH * 0.8);
       text('COTATION', h.off(sNoseE, -1.5), `tpl ${fmt(e.tpl)} m · Lm ${fmt(e.Lm)} m`, ang(Ft.d), 'center', TH * 0.8);
-      text('COTATION', h.off(sIns, rp.w + h.bau + 2), `insertion ${fmt(e.ins)} m + biseau ${fmt(e.biseau)} m`, ang(Ft.d), 'center', TH * 0.8);
+      if (wv) text('COTATION', h.off(Ft.s + sd * insL / 2, rp.w + 1 + 2), `voie d'entrecroisement Z = ${fmt(wv.Z)} m (3,50 m + BDD 1,00 m)`, ang(Ft.d), 'center', TH * 0.8);
+      else text('COTATION', h.off(sIns, rp.w + h.bau + 2), `insertion ${fmt(e.ins)} m + biseau ${fmt(e.biseau)} m`, ang(Ft.d), 'center', TH * 0.8);
     }
     for (const qq of al.points) pt(`${name} · ${qq.name}`, qq.p);
     if (!Fs) pt(`${name} · origine`, al.pointAt(0));
@@ -681,8 +726,13 @@ export function cloverleaf(prj, D, click, mkId, opt = {}) {
   const Rl0 = opt.Rl || Math.ceil(RAMP_CAT[catL].Rm + half + (crossAuto ? 0 : 14.25)), Ro0 = Math.ceil(Math.max(RAMP_CAT[catD].Rm, 100) + half + (crossAuto ? 0 : 18.25));
   const AminC = (R, cat) => Math.ceil(Math.sqrt(cloMinLength(R, Math.abs(deversOfRadius(R - half, RAMP_CAT[cat]) - 2.5), 1) * R) / 5) * 5;
   const Amin = (R) => AminC(R, catL);
-  const quads = [], label = ['SE', 'NE', 'NO', 'SO'], Ao0 = opt.Ao || 0;
+  const label = ['SE', 'NE', 'NO', 'SO'], Ao0 = opt.Ao || 0, Zmin = opt.Zmin ?? 0;
+  let quads = [];
   const ux = { x: 1, y: 1 }, nD = norm({ x: 1, y: -1 }), uD = norm(ux);
+  // Rayon des boucles relevé si nécessaire pour que, sur chaque chaussée, le point S.1,00 de la boucle sortante reste en
+  // aval du point E.1,00 de la boucle entrante (Z ≥ 0 : voie d'entrecroisement entre musoirs distincts, § 3.4.3, 7.3).
+  for (let Rb = Rl0; ; Rb += 2) {
+  quads = [];
   for (let k = 0; k < 4; k++) {
     const A = cyc[k], B = cyc[(k + 1) % 4], ps = A.p, pe = B.p, ns = Math.hypot(1, ps), ne = Math.hypot(1, pe);
     const ys0 = -(A.edge + 1 + half), xe0 = B.edge + 1 + half;
@@ -690,7 +740,7 @@ export function cloverleaf(prj, D, click, mkId, opt = {}) {
     // nez ne peuvent être dégagés des plates-formes croisées, premier arc de rayon R1 > Rl (courbe composée,
     // R1 < 2 R2, § 3.2.2) qui éloigne la boucle de la chaussée A.
     let g = null;
-    for (let Rl = Rl0; Rl <= Rl0 + 24 && !g; Rl += 2) {
+    for (let Rl = Rb; Rl <= Rb + 24 && !g; Rl += 2) {
       const Al = Amin(Rl);
       for (let R1 = Rl; R1 - half < 2 * (Rl - half) - 2; R1 += 2) {
         const A1 = Amin(R1), d1 = Math.PI / 2 - Math.atan(ps), d3 = Math.PI / 2 - Math.atan(pe);
@@ -702,7 +752,7 @@ export function cloverleaf(prj, D, click, mkId, opt = {}) {
         if (yE - B.Lm <= ys0 - 4 && x1 + A.Lm >= xe0 + 4) { g = { Rl, Al, R1, A1, PI1: { x: X1, y: Y1 }, PI2: { x: X1, y: Y3 }, PI3: { x: X3, y: Y3 }, x1: X1 - lam1 / ns, yE }; break; }
       }
     }
-    if (!g) return { err: `Boucle impossible à loger avec un rayon ≤ ${Rl0 + 24} m.` };
+    if (!g) return { err: `Boucle impossible à loger avec un rayon ≤ ${Rb + 24} m.` };
     const alL = buildAlignment([{ x: g.x1, y: ys0 }, { ...g.PI1, R: g.R1, A: g.A1 }, { ...g.PI2, R: g.Rl, A: g.Al, link: true }, { ...g.PI3, R: g.Rl, A: g.Al, link: true }, { x: xe0, y: g.yE }]);
     const Cl = alL.elems.filter((e) => e.kind === 'A').pop().C;
     // Bretelle directe (B → A) qui contourne la boucle : deux courbes à droite (Ro ≥ 100 m au bord intérieur, premier
@@ -726,6 +776,9 @@ export function cloverleaf(prj, D, click, mkId, opt = {}) {
     }
     if (!dg) return { err: 'Bretelle directe impossible à loger.' };
     quads.push({ k, A, B, loop: g, dir: dg, name: label[k] });
+  }
+  const Zs = quads.map((q, i) => q.loop.x1 - quads[(i + 3) % 4].loop.yE);
+  if (Math.min(...Zs) >= Zmin - 1e-6 || Rb >= Rl0 + 40) break;
   }
   // Collectrices : étendues pour encadrer leurs raccordements (biseau 90 m, insertion 100 + 75 m, 25 m de § 4.3 / 5.3).
   const ramps = [];
