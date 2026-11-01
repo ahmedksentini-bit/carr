@@ -1118,7 +1118,7 @@ function bindEch() {
     for (const q of S.prj.ramps) for (const e of [q.from, q.to]) if (e?.ref === r.id) e.ref = 'free'; // les raccordements à cette bretelle deviennent libres
     S.prj.ramps.splice(S.rsel, 1); S.rsel = -1; update();
   });
-  $('#ouvrList').addEventListener('click', (e) => { const li = e.target.closest('[data-okey]'); if (!li) return; S.osel = li.dataset.okey; $('#ouvrEdit').dataset.key = ''; renderOuvr(); });
+  $('#ouvrList').addEventListener('click', (e) => { const li = e.target.closest('[data-okey]'); if (!li) return; S.osel = li.dataset.okey; $('#ouvrEdit').dataset.key = ''; renderOuvr(); viewer.invalidate(); });
   $('#btnOuvrPS').addEventListener('click', () => { setTool('axis'); S.hwyDraw = 'cross'; setPrompt(); toast('Dessinez la voie secondaire en traversant l\'autoroute (Entrée ou clic droit pour terminer) : le passage supérieur est implanté à leur croisement.'); });
   $('#btnOuvrCadre').addEventListener('click', () => setTool('cadre'));
   $('#ouvrEdit').addEventListener('change', (e) => {
@@ -1341,7 +1341,7 @@ function drawOverlay(ctx, v, T) {
     ctx.strokeStyle = T.snap; ctx.lineWidth = 2; ctx.strokeRect(x - 6, y - 6, 12, 12);
   }
   // Surbrillance de l'élément survolé et de celui dont la fenêtre est ouverte.
-  for (const [el, a] of [[S.pop, 0.28], [S.hoverEl, 0.4]]) {
+  for (const [el, a] of [[S.pop, 0.28], [S.hoverEl, 0.4], [S.osel && !S.pop && !$('#tab-ouvrages').hidden ? { type: 'ouvr', i: S.osel } : null, 0.3]]) {
     const g = el && elGeom(el);
     if (!g) continue;
     ctx.save(); ctx.globalAlpha = a; ctx.strokeStyle = T.sel; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.setLineDash([]);
@@ -1355,6 +1355,7 @@ function drawOverlay(ctx, v, T) {
 // Géométrie de surbrillance d'un élément : polylignes (monde) et demi-largeur (m).
 function elGeom(el) {
   const D = S.D;
+  if (el.type === 'ouvr') { const p = ouvrPoly(el.i); return p?.length > 2 ? { lines: [[...p, p[0]]], half: 0.6 } : null; }
   if (el.type === 'ramp') { const R = D?.ramps?.[el.i]; return R?.al?.path ? { lines: [G.samplePath(R.al.path, 2)], half: R.rp.w / 2 + R.rp.bdd } : null; }
   if (el.type === 'hwy' || el.type === 'cross') { const r = el.type === 'hwy' ? D?.hwy : D?.crosses?.[el.i]; return r?.ok ? { lines: [G.samplePath(r.path, 4)], half: r.E2 + r.H.berme } : null; }
   if (el.type === 'branch') {
@@ -1393,16 +1394,31 @@ function hitElement(px, py) {
     const tol = Math.max(7, (r.E2 + r.H.berme) * viewer.s), d = polyDist(G.samplePath(r.path, Math.max(2, 6 / viewer.s)));
     if (d < tol) cands.push({ type, i, sc: d - tol + 1000 }); // les bretelles et branches posées dessus restent prioritaires
   }
+  // ouvrages (tabliers et cadres) : un clic dans leur emprise les sélectionne, en priorité sur les chaussées
+  const inPolyW = (w, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a.y > w.y) !== (b.y > w.y) && w.x < ((b.x - a.x) * (w.y - a.y)) / (b.y - a.y) + a.x) c = !c; } return c; };
+  const wq = { x: viewer.s2w(px, py)[0], y: viewer.s2w(px, py)[1] };
+  for (const o of S.ouvr?.list || []) if (o.poly?.length > 2 && (inPolyW(wq, o.poly) || polyDist([...o.poly, o.poly[0]]) < 6)) cands.push({ type: 'ouvr', i: o.key, sc: -300 });
+  for (const g of S.cadres || []) if (g.poly?.length > 2 && (inPolyW(wq, g.poly) || polyDist([...g.poly, g.poly[0]]) < 6)) cands.push({ type: 'ouvr', i: `c:${g.c.id}`, sc: -310 });
   cands.sort((a, b) => a.sc - b.sc);
   return cands[0] ? { type: cands[0].type, i: cands[0].i } : null;
 }
+// Contour (monde) d'un ouvrage du plan : tablier ou cadre.
+function ouvrPoly(key) {
+  if (String(key).startsWith('c:')) return (S.cadres || []).find((g) => `c:${g.c.id}` === key)?.poly || null;
+  return (S.ouvr?.list || []).find((o) => o.key === key)?.poly || null;
+}
+function ouvrName(key) {
+  if (String(key).startsWith('c:')) { const g = (S.cadres || []).find((q) => `c:${q.c.id}` === key); return g ? `${g.name} — ${g.K?.type === 'buse' ? 'buse' : g.K?.type === 'pipo' ? 'PIPO' : 'PICF'} sous ${g.ax?.name || ''}` : 'Ouvrage'; }
+  const o = (S.ouvr?.list || []).find((q) => q.key === key); return o ? `${o.name} — ${o.src}` : 'Ouvrage';
+}
 // Groupes de champs de la barre latérale affichés dans la fenêtre.
-const POP_GROUP = { ramp: '#grpRamp', hwy: '#grpHwy', cross: '#grpCross', branch: '#branchForm', ring: '#grpRing' };
+const POP_GROUP = { ramp: '#grpRamp', hwy: '#grpHwy', cross: '#grpCross', branch: '#branchForm', ring: '#grpRing', ouvr: '#grpOuvr' };
 function popTitle(el) {
   if (el.type === 'ramp') { const r = S.prj.ramps[el.i]; return `Bretelle ${r?.name || ''} — ${S.D?.ramps?.[el.i]?.label || ''}`; }
   if (el.type === 'hwy') return `Autoroute ${S.prj.hwy.name || ''}`;
   if (el.type === 'cross') return `Voie secondaire ${S.prj.crosses[el.i]?.name || ''}`;
   if (el.type === 'branch') return `Branche ${S.prj.branches[el.i]?.name || ''}`;
+  if (el.type === 'ouvr') return `Ouvrage ${ouvrName(el.i)}`;
   return `${S.D?.kind === 'giratoire' ? 'Giratoire' : 'Carrefour'} — ${S.prj.jname || ''}`;
 }
 function openPop(el, px, py) {
@@ -1411,6 +1427,7 @@ function openPop(el, px, py) {
   if (el.type === 'ramp') { S.rsel = el.i; refreshPanels(); }
   if (el.type === 'branch') selectBranch(el.i);
   if (el.type === 'cross') { S.xsel = el.i; S.echSig = ''; refreshPanels(); }
+  if (el.type === 'ouvr') { S.osel = el.i; $('#ouvrEdit').dataset.key = ''; renderOuvr(); }
   const pop = $('#elPop'), node = $(POP_GROUP[el.type]);
   if (!node) return;
   const ph = document.createElement('p'); ph.className = 'note moved-note'; ph.textContent = t('Affiché dans la fenêtre de l\'élément sur le plan.');
@@ -1434,6 +1451,10 @@ function closePop(redraw = true) {
 }
 function popDelete() {
   const el = S.pop; if (!el) return;
+  if (el.type === 'ouvr') {
+    if (String(el.i).startsWith('c:')) { const id = String(el.i).slice(2), c = (S.prj.cadres || []).find((q) => q.id === id); if (!c || !confirm(t(`Supprimer l'ouvrage ${ouvrName(el.i)} ?`))) return; S.prj.cadres = S.prj.cadres.filter((q) => q !== c); S.osel = null; closePop(); update(); return; }
+    toast('Un passage supérieur suit sa voie secondaire : supprimez la voie ou modifiez sa travure dans la fiche.', 'warn'); return;
+  }
   if (el.type === 'ramp') { S.rsel = el.i; closePop(); $('#btnRampDel').click(); return; }
   if (el.type === 'branch') { const n = S.prj.branches.length; deleteBranch(el.i); if (S.prj.branches.length < n) closePop(); return; }
   if (el.type === 'hwy') {
@@ -1716,6 +1737,7 @@ function bindCanvas() {
     S.drag = null; updateCursor();
     if (!d) return;
     if (['vertex', 'seg', 'center', 'rpi', 'hvx', 'cvx', 'tige', 'cadm', 'cadr', 'cadl'].includes(d.kind) && d.moved) { syncInputs(); update(); }
+    else if (['cadm', 'cadr', 'cadl'].includes(d.kind) && !d.moved) { const [px, py] = viewer.w2s(d.start.x, d.start.y); openPop({ type: 'ouvr', i: `c:${d.id}` }, px, py); } // simple clic sur une poignée : fiche de l'ouvrage
     else if (d.kind === 'pan') {
       if (!d.moved && d.clickEl) openPop(d.clickEl, d.cpx, d.cpy);
       else if (!d.moved && d.deselect) { if (S.sel >= 0) selectBranch(-1); closePop(); }
