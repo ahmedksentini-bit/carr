@@ -20,6 +20,7 @@ import { LAYERS } from './layers.js';
 import { buildOuvrages, W_CLASSES, psidaLink, psidaProject } from './ouvrage.js';
 import { buildProfils, listAxes, nearestAxis, profParams, profilsCsv } from './profils.js';
 import { cadreGeoms, drawCadre, cadreChecks, cadreLink, cadreProject, CADRE_DEF } from './cadres.js';
+import { axisSections, axisType, typeParams, typeText } from './ptaxes.js';
 import { buildAxisProfiles, axisPlChecks, clearanceChecks, axisTerrainLine, axisFromTerrain, buildNodes, axisLimits } from './axpl.js';
 import { chausseeOverlaps } from './overlap.js';
 import { analyse, SITES } from './capacity.js';
@@ -2771,7 +2772,32 @@ function bindPL() {
 function ptBranch() {
   const cands = (S.D?.branches || []).filter((bd) => bd.role !== 'principale' && bd.zAt);
   if (!cands.length) return null;
-  return cands.find((q) => q.idx === S.ptSel) || cands.find((q) => q.idx === S.sel) || cands[0];
+  const idx = typeof S.ptSel === 'string' ? (S.ptSel.startsWith('b:') ? +S.ptSel.slice(2) : null) : S.ptSel;
+  return cands.find((q) => q.idx === idx) || cands.find((q) => q.idx === S.sel) || cands[0];
+}
+// Axe de l'échangeur choisi dans l'onglet Profils en travers : coupes aux profils implantés.
+function ptAxisCtx() {
+  const hasBr = (S.D?.branches || []).some((bd) => bd.role !== 'principale' && bd.zAt);
+  const key = typeof S.ptSel === 'string' && !S.ptSel.startsWith('b:') ? S.ptSel : !hasBr && S.axpl?.size ? [...S.axpl.keys()][0] : null;
+  if (!key || !S.axpl?.has(key)) return null;
+  const ax = (S.prof?.axes || listAxes(S.prj, S.D)).find((a) => a.key === key); if (!ax) return null;
+  return { key, ax, A: S.axpl.get(key) };
+}
+function ptAxisList(c) {
+  const profs = (S.prof?.list || []).filter((q) => q.axis === c.key);
+  return axisSections(S.prj, S.D, c.ax, c.A, profs, S.tn?.tin || null);
+}
+// Récapitulatif des cubatures de tous les axes de l'échangeur ayant un profil en long et des profils implantés.
+function ptRecap() {
+  const rows = [];
+  for (const A of S.axpl?.values() || []) {
+    const ax = (S.prof?.axes || []).find((a) => a.key === A.key), profs = (S.prof?.list || []).filter((q) => q.axis === A.key);
+    if (!ax || !profs.length) continue;
+    if (!A.defined) { rows.push({ name: A.name, n: profs.length, note: 'profil en long à définir' }); continue; }
+    const R = axisSections(S.prj, S.D, ax, A, profs, S.tn?.tin || null);
+    rows.push({ name: A.name, n: profs.length, L: profs.length > 1 ? profs[profs.length - 1].s - profs[0].s : 0, vCut: R.vCut, vFill: R.vFill, out: R.list.filter((c) => !c.ok).length });
+  }
+  return rows;
 }
 function ptList() {
   const bd = ptBranch();
@@ -2779,11 +2805,27 @@ function ptList() {
 }
 function refreshPT() {
   const sel = $('#ptBranch'), cands = (S.D?.branches || []).filter((bd) => bd.role !== 'principale');
-  const sig = JSON.stringify(cands.map((b) => [b.idx, b.name]));
-  if (sel.dataset.sig !== sig) { sel.dataset.sig = sig; sel.innerHTML = cands.map((b) => `<option value="${b.idx}">${esc(b.name)}</option>`).join(''); }
+  const axs = [...(S.axpl?.values() || [])], nP = (k) => (S.prof?.list || []).filter((q) => q.axis === k).length;
+  const sig = JSON.stringify([cands.map((b) => [b.idx, b.name]), axs.map((a) => [a.key, a.name, nP(a.key)])]);
+  if (sel.dataset.sig !== sig) {
+    sel.dataset.sig = sig;
+    sel.innerHTML = (cands.length ? `<optgroup label="Branches du carrefour">${cands.map((b) => `<option value="b:${b.idx}">${esc(b.name)}</option>`).join('')}</optgroup>` : '')
+      + (axs.length ? `<optgroup label="Échangeur (profils implantés)">${axs.map((a) => `<option value="${esc(a.key)}">${esc(a.name)} (${nP(a.key)})</option>`).join('')}</optgroup>` : '');
+  }
+  // récapitulatif
+  try {
+    const rc = ptRecap();
+    $('#ptRecap').innerHTML = rc.length ? '<thead><tr><th>Axe</th><th>Profils</th><th>Longueur</th><th>Déblai m³</th><th>Remblai m³</th><th></th></tr></thead><tbody>' +
+      rc.map((r) => `<tr><td>${esc(r.name)}</td><td class="mono">${r.n}</td><td class="mono">${r.L != null ? fmt(r.L, 0) : '—'}</td><td class="mono cut">${r.vCut != null ? fmt(r.vCut, 0) : '—'}</td><td class="mono fill">${r.vFill != null ? fmt(r.vFill, 0) : '—'}</td><td>${r.note || (r.out ? `${r.out} hors MNT` : '')}</td></tr>`).join('') +
+      (() => { const t = rc.filter((r) => r.vCut != null); return t.length > 1 ? `<tr><td><b>Total</b></td><td></td><td></td><td class="mono cut"><b>${fmt(t.reduce((a, r) => a + r.vCut, 0), 0)}</b></td><td class="mono fill"><b>${fmt(t.reduce((a, r) => a + r.vFill, 0), 0)}</b></td><td></td></tr>` : ''; })() + '</tbody>'
+      : '<tbody><tr><td class="note">Implantez des profils sur les axes de l\'échangeur (onglet Implantation) et définissez leur profil en long.</td></tr></tbody>';
+  } catch (e) { console.error(e); }
+  const ac = ptAxisCtx();
+  if (ac) { sel.value = ac.key; refreshPTAxis(ac); return; }
   const bd = ptBranch();
   if (!bd) { $('#ptChart').innerHTML = '<p class="note">Dessinez les branches pour afficher leurs profils en travers.</p>'; $('#ptTable').innerHTML = ''; $('#ptStation').innerHTML = ''; return; }
-  sel.value = String(bd.idx);
+  sel.value = `b:${bd.idx}`;
+  $('#ptType').textContent = '';
   let list;
   try { list = ptList(); } catch (e) { console.error(e); $('#ptChart').innerHTML = `<p class="note">Profils en travers : ${esc(e.message)}</p>`; return; }
   if (S.ptSt >= list.length) S.ptSt = list.length - 1;
@@ -2802,20 +2844,54 @@ function refreshPT() {
     + (noTN ? `${noTN} station(s) hors du MNT. ` : '') + (noEnd ? `${noEnd} station(s) : talus sans entrée en terre dans la demi-largeur de coupe (élargir la coupe). ` : '')
     + (last ? `Total ${bd.name} : déblai ${fmt(last.vCut, 0)} m³, remblai ${fmt(last.vFill, 0)} m³ (aires moyennes, sans décapage ni foisonnement).` : '');
 }
+function refreshPTAxis(c) {
+  const R = ptAxisList(c), list = R.list;
+  $('#ptType').textContent = `Profil type de ${c.ax.name} — ${typeText(R.T, typeParams(S.prj))}.`;
+  if (!c.A.defined || !list.length) {
+    $('#ptChart').innerHTML = `<p class="note">${!c.A.defined ? `Définissez d'abord le profil en long de ${esc(c.ax.name)} (onglet Profil en long).` : `Aucun profil implanté sur ${esc(c.ax.name)} : onglet Implantation, « Série entre deux points » ou « Profil isolé ».`}</p>`;
+    $('#ptTable').innerHTML = ''; $('#ptStation').innerHTML = ''; $('#ptStation').dataset.sig = ''; $('#ptNote').textContent = ''; return;
+  }
+  if (S.ptSt >= list.length) S.ptSt = list.length - 1;
+  if (S.ptSt < 0) S.ptSt = 0;
+  const st = $('#ptStation'), ssig = JSON.stringify(list.map((q) => [q.name, q.s]));
+  if (st.dataset.sig !== ssig) { st.dataset.sig = ssig; st.innerHTML = list.map((q, i) => `<option value="${i}">${esc(q.name)} — s = ${fmt(q.s, 1)} m</option>`).join(''); }
+  st.value = String(S.ptSt);
+  const cs = list[S.ptSt];
+  $('#ptChart').innerHTML = cs ? ptChartSVG(cs, { ve: +($('#ptVe').value || 0) }) : '';
+  $('#ptTable').innerHTML = '<thead><tr><th>Profil</th><th>s (m)</th><th>z axe</th><th>z TN</th><th>dévers</th><th>déblai m²</th><th>remblai m²</th><th>V déblai m³</th><th>V remblai m³</th></tr></thead><tbody>' +
+    list.map((q, i) => `<tr class="${i === S.ptSt ? 'on' : ''}" data-pts="${i}"><td>${esc(q.name)}</td><td class="mono">${fmt(q.s, 1)}</td><td class="mono">${fmt(q.zAxe)}</td><td class="mono">${q.zTN == null ? '—' : fmt(q.zTN)}</td><td class="mono">${fmt(q.dev.d * 100, 1)} %${q.dev.inner ? ' ↺' : ''}</td>` +
+      `<td class="mono cut">${fmt(q.cut, 2)}</td><td class="mono fill">${fmt(q.fill, 2)}</td><td class="mono cut">${fmt(q.vCut, 0)}</td><td class="mono fill">${fmt(q.vFill, 0)}</td></tr>`).join('') + '</tbody>';
+  const noTN = list.filter((q) => !q.ok).length, noEnd = list.filter((q) => q.ok && (!q.endL || !q.endR)).length;
+  $('#ptNote').textContent = (S.tn ? '' : 'Aucun MNT : talus et cubatures non calculés (onglet Terrain). ') + (noTN ? `${noTN} profil(s) hors du MNT. ` : '') + (noEnd ? `${noEnd} profil(s) : talus sans entrée en terre dans la demi-largeur de coupe. ` : '')
+    + `Total ${c.ax.name} : déblai ${fmt(R.vCut, 0)} m³, remblai ${fmt(R.vFill, 0)} m³ entre ${list[0].name} et ${list[list.length - 1].name} (aires moyennes${typeParams(S.prj).ech > 0 ? ', au fond de forme' : ''}, sans décapage ni foisonnement).`;
+}
 function bindPT() {
-  $('#ptBranch').addEventListener('change', (e) => { S.ptSel = +e.target.value; S.ptSt = 0; refreshPT(); });
+  $('#ptBranch').addEventListener('change', (e) => { S.ptSel = e.target.value; S.ptSt = 0; refreshPT(); });
   $('#ptVe').addEventListener('change', refreshPT);
   $('#ptStation').addEventListener('change', (e) => { S.ptSt = +e.target.value; refreshPT(); });
   $('#btnPtPrev').addEventListener('click', () => { S.ptSt = Math.max(0, S.ptSt - 1); refreshPT(); });
   $('#btnPtNext').addEventListener('click', () => { S.ptSt += 1; refreshPT(); });
   $('#ptTable').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-pts]'); if (tr) { S.ptSt = +tr.dataset.pts; refreshPT(); } });
   $('#btnPtDxf').addEventListener('click', () => {
+    const ac = ptAxisCtx();
+    if (ac) {
+      const list = ptAxisList(ac).list.filter((q) => q.ok); if (!list.length) { toast('Aucun profil calculable sur cet axe.', 'warn'); return; }
+      const ve = +($('#ptVe').value || 0) || 2;
+      download(fname('dxf').replace(/\.dxf$/, `_PT_${ac.ax.name}.dxf`), ptDXF(list, `Profils en travers ${ac.ax.name} — ${S.prj.name}`, ve), 'application/dxf');
+      toast(`${list.length} profils en travers de ${ac.ax.name} exportés (exagération × ${ve}).`); return;
+    }
     const bd = ptBranch(); if (!bd) return;
     const list = ptList(), ve = +($('#ptVe').value || 0) || 2;
     download(fname('dxf').replace(/\.dxf$/, `_PT_${bd.name}.dxf`), ptDXF(list, `Profils en travers ${bd.name} — ${S.prj.name}`, ve), 'application/dxf');
     toast(`${list.length} profils en travers exportés (exagération × ${ve}).`);
   });
   $('#btnPtCsv').addEventListener('click', () => {
+    const ac = ptAxisCtx();
+    if (ac) {
+      const c = (v, k = 2) => (v == null ? '' : v.toFixed(k).replace('.', ','));
+      const rows = ['Profil;s;X;Y;Z_axe;Z_TN;devers_%;deblai_m2;remblai_m2;V_deblai_m3;V_remblai_m3', ...ptAxisList(ac).list.map((q) => `${q.name};${c(q.s, 1)};${c(q.p.x, 3)};${c(q.p.y, 3)};${c(q.zAxe)};${c(q.zTN)};${c(q.dev.d * 100, 1)};${c(q.cut)};${c(q.fill)};${c(q.vCut, 1)};${c(q.vFill, 1)}`)];
+      download(fname('csv').replace(/\.csv$/, `_PT_${ac.ax.name}.csv`), '\ufeff' + rows.join('\r\n'), 'text/csv;charset=utf-8'); return;
+    }
     const bd = ptBranch(); if (!bd) return;
     const c = (v, k = 2) => (v == null ? '' : v.toFixed(k).replace('.', ','));
     const rows = ['s;X;Y;Z_axe;Z_TN;deblai_m2;remblai_m2;V_deblai_m3;V_remblai_m3', ...ptList().map((q) => `${c(q.s, 1)};${c(q.p.x, 3)};${c(q.p.y, 3)};${c(q.zAxe)};${c(q.zTN)};${c(q.cut)};${c(q.fill)};${c(q.vCut, 1)};${c(q.vFill, 1)}`)];

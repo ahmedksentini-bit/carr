@@ -215,6 +215,13 @@ ou sur un fond topographique DXF.
   pente maximale et rayons saillants / rentrants de la catégorie (ICTAAL, guide des échangeurs, ARP). Tirant d'air
   sous chaque passage supérieur (voie portée − tablier − autoroute ≥ gabarit) dans la fiche de l'ouvrage, avec un
   bouton qui relève la voie portée au gabarit (sommet placé au droit de l'ouvrage, voisins dégagés, rayon adapté).
+- **Profils types, dévers, coupes et cubatures des axes de l'échangeur** (onglet Profils en travers, liste « Axe ») :
+  coupes aux profils implantés sur l'autoroute, les voies secondaires et les bretelles. Profil type tiré des
+  paramètres de chaque axe (TPC, BDG, voies, BAU/BDD, bermes ; bretelle : voie, BDG, BDD) ; dévers d'alignement
+  (2,5 % par défaut, en toit ou unique pour une bretelle) et, en courbe de rayon < Rdn, plate-forme déversée vers
+  l'intérieur de 2,5 à 7 % (linéaire en 1/R, guide des échangeurs § 3.5 ; route ordinaire : Rdn ≈ 900 m, Rm ≈ 240 m,
+  ordre de grandeur à ajuster) ; bermes à 8 % ; talus et fossé de l'onglet. Épaisseur de chaussée : cubatures au fond
+  de forme. Volumes par la méthode des aires moyennes, récapitulatif par axe, exports DXF et CSV.
 - **Ouvrages numérotés** : passages supérieurs, tiges, anneaux de giratoire dénivelé et cadres sont numérotés OA1, OA2…
   dans l'ordre des abscisses de l'autoroute (numéro cerclé sur le plan) ; le nom de chaque ouvrage se modifie dans
   l'onglet Ouvrages. **+ Passage supérieur** : dessinez une voie secondaire qui franchit l'autoroute, l'ouvrage est
