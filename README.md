@@ -157,7 +157,10 @@ ou sur un fond topographique DXF.
   d'entrée de 180°, extrémités libres sur la route transversale pour le carrefour à étudier). Les nez sont placés hors des
   plates-formes croisées. Courbes composées (arc continu de rayons différents, rapport < 2) et **entrecroisements** (§ 7.3 :
   enchaînement E → S ≥ 1 200 m, entrecroisement 500–750 m, report sur collectrice, Z ≥ 275 m sur bretelle / collectrice)
-  contrôlés.
+  contrôlés. **Voie d'entrecroisement** (§ 3.4.3 : 3,50 m contiguë à la chaussée + BDD 1,00 m) dessinée de E.1,00 à
+  S.1,00 quand une entrée est suivie d'une sortie rapprochée (insertion et biseau de sortie qui se rejoindraient, ou
+  Z ≤ 750 m sur autoroute) ; musoirs superposés (S.1,00 en amont de E.1,00) signalés en erreur. Le gabarit de trèfle
+  relève au besoin le rayon des boucles pour garder Z ≥ 0 sur chaque chaussée.
 - **Exports** : DXF R12 par calques `GIRA_*` (AutoCAD, Covadis, BricsCAD…), PNG, points d'implantation X, Y, Z en CSV,
   projet `.gira.json` (et sauvegarde automatique dans le navigateur).
 
@@ -311,8 +314,9 @@ structure de l'HCM, d'après Troutbeck & Brilon, *Traffic Flow Theory*, chap. 8 
 - Échangeur : seules les sorties en déboîtement et les entrées en insertion à une voie sont dessinées (pas
   d'affectation Sa, d'adjonction Ea / Eb21 ni d'entrecroisement) ; la trompette, le trèfle et le demi-trèfle sont des gabarits de principe
   (rayons, emprise de l'ordre de 1,5 km le long de l'autoroute) à ajuster ; avec des boucles de 40 à 60 m, l'entrecroisement
-  entre deux boucles successives sur la collectrice reste très inférieur aux 275 m du § 7.3.3 (il est signalé) ; la voie
-  auxiliaire continue d'entrecroisement n'est pas dessinée (insertion et décélération se superposent) ; les carrefours aux
+  entre deux boucles successives sur la collectrice reste très inférieur aux 275 m du § 7.3.3 (il est signalé), et sur
+  une route ordinaire (tpl 4,70 m, Lm 74 m) les boucles passent à Ri ≈ 66 m pour que les musoirs ne se chevauchent pas ;
+  les carrefours aux
   extrémités du demi-trèfle ne sont pas générés ; l'ouvrage de franchissement n'est pas dessiné ; la section courante est tracée en droites et arcs (sans
   clothoïdes) ; les bretelles n'ont pas encore de profil en long ni de profils en travers, ni de vue 3D, et leur
   extrémité n'est pas encore raccordée automatiquement au giratoire (branche à sens unique) : l'axe se termine sur la
