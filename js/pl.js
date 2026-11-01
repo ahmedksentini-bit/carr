@@ -132,20 +132,29 @@ export function plChecks(PL, context, sEnd) {
 
 // --------------------------------------------------------------------------- Graphique SVG
 // tnLine : [[s, z]] ; stations : plStations ; PL : plBuild ; opts : { w, h, ve (0 = auto), sel (PI sélectionné) }.
+// opts : ve (exagération verticale z / s ; 0 = auto), h (hauteur imposée), zExtra (cotes à inclure dans le cadre),
+// overlay(ctx) → SVG dessiné sous la ligne rouge (ouvrages, gabarits ; ctx = { X, Y, vis, m, w, h }), plan
+// ([{ s0, s1, k0, k1, R }] : diagramme des courbures), devers ([{ s, l, r }] en % : pentes transversales gauche / droite).
 export function plChartSVG(PL, tnLine, sEnd, opts = {}) {
-  const w = opts.w || 600, h = opts.h || 330, m = { l: 46, r: 14, t: 22, b: 40 };
+  const stripH = (opts.plan ? 34 : 0) + (opts.devers ? 84 : 0);
+  const m = { l: 46, r: 14, t: 22, b: 40 + stripH };
   const sMax = Math.max(sEnd, PL.sEnd, 20);
-  const zs = [...tnLine.map((p) => p[1]), ...PL.nodes.map((n) => n.z)];
+  // largeur : ajustée au panneau, ou allongée (défilement horizontal) pour garder au moins pxm px par mètre d'abscisse
+  // quand l'exagération verticale est imposée (sinon un axe de plusieurs kilomètres serait écrasé)
+  const w = opts.w || Math.max(600, opts.ve > 0 && opts.pxm > 0 ? Math.ceil(m.l + m.r + sMax * opts.pxm) : 600);
+  const zs = [...tnLine.map((p) => p[1]), ...PL.nodes.map((n) => n.z), ...(opts.zExtra || []).filter(Number.isFinite)];
   for (let s = 0; s <= sMax; s += sMax / 40) zs.push(PL.zAt(s));
   let zmin = Math.min(...zs), zmax = Math.max(...zs);
   if (!(zmax - zmin > 0.5)) { zmin -= 1; zmax += 1; }
   const sx = (w - m.l - m.r) / sMax;
+  // échelle imposée : hauteur du graphique ajustée pour loger le profil (z exagéré ve fois par rapport à s)
+  const h = opts.h || (opts.ve > 0 ? m.t + m.b + Math.max(160, Math.min(1500, (zmax - zmin) * sx * opts.ve * 1.15 + 40)) : 330 + stripH);
   const veAuto = Math.max(1, Math.min(20, Math.round((h - m.t - m.b) / ((zmax - zmin) * sx) / 1.3)));
   const ve = opts.ve > 0 ? opts.ve : veAuto;
   const sz = sx * ve, zc = (zmin + zmax) / 2;
   const X = (s) => m.l + s * sx, Y = (z) => m.t + (h - m.t - m.b) / 2 - (z - zc) * sz;
   const vis = (z) => Math.max(m.t, Math.min(h - m.b, Y(z)));
-  let out = `<svg viewBox="0 0 ${w} ${h}" class="plsvg" data-l="${m.l}" data-t="${m.t}" data-sx="${sx}" data-sz="${sz}" data-zc="${zc}" data-hh="${h}" data-mt="${m.t}" data-mb="${m.b}">`;
+  let out = `<svg viewBox="0 0 ${w} ${h}"${w > 600 ? ` style="width:${((w / 600) * 100).toFixed(1)}%;max-width:none"` : ''} class="plsvg" data-l="${m.l}" data-t="${m.t}" data-sx="${sx}" data-sz="${sz}" data-zc="${zc}" data-hh="${h}" data-mt="${m.t}" data-mb="${m.b}">`;
   // Grille et axes
   const gs = niceStep(sMax / 8), gz = niceStep((zmax - zmin) / 5);
   for (let s = 0; s <= sMax + 1e-9; s += gs) out += `<line class="gl" x1="${X(s)}" y1="${m.t}" x2="${X(s)}" y2="${h - m.b}"/><text class="tk" x="${X(s)}" y="${h - m.b + 14}" text-anchor="middle">${fmt(s, 0)}</text>`;
@@ -162,6 +171,8 @@ export function plChartSVG(PL, tnLine, sEnd, opts = {}) {
     out += `<path class="pl-fill" d="${fill}"/><path class="pl-cut" d="${cut}"/>`;
     out += `<path class="pl-tn" d="${tnLine.map(([s, z], i) => `${i ? 'L' : 'M'}${X(s).toFixed(1)},${vis(z).toFixed(1)}`).join('')}"/>`;
   }
+  if (opts.overlay) out += opts.overlay({ X, Y, vis, m, w, h, sMax });
+  out += plStrips(opts, { X, m, w, h, sMax, stripH });
   if (opts.noRed) { // axe sans profil : terrain seul, les points s'ajoutent par clic
     out += `<text class="pf-note" x="${(w + m.l) / 2}" y="${m.t + 18}" text-anchor="middle">Aucun profil : cliquez pour placer des points, ou « Proposer depuis le TN »</text>`;
     PL.nodes.forEach((nd, i) => { const inf = opts.nodeInfo ? opts.nodeInfo(i, nd) : null; if (inf?.fixed) out += `<circle class="pl-pi fixed" cx="${X(nd.s)}" cy="${vis(nd.z)}" r="4"/><text class="pl-lb" x="${X(nd.s)}" y="${vis(nd.z) + 18}" text-anchor="middle">${inf.label}</text>`; });
@@ -189,6 +200,29 @@ export function plChartSVG(PL, tnLine, sEnd, opts = {}) {
   });
   out += `<text class="pf-note" x="${w - m.r}" y="12" text-anchor="end">exagération verticale × ${ve}${opts.ve > 0 ? '' : ' (auto)'}</text>`;
   out += `<text class="al" x="${m.l}" y="12">${opts.axisLabel || 's (m) depuis le carrefour · z (m)'}</text></svg>`;
+  return out;
+}
+// Bandeaux sous le profil : diagramme des courbures du tracé en plan, puis pentes transversales gauche / droite.
+function plStrips(opts, { X, m, w, h, sMax, stripH }) {
+  if (!stripH) return '';
+  let out = '', y0 = h - stripH + 6;
+  const x0 = m.l, x1 = w - m.r;
+  if (opts.plan) {
+    const mid = y0 + 13, kMax = Math.max(1e-6, ...opts.plan.map((e) => Math.max(Math.abs(e.k0), Math.abs(e.k1)))), Yk = (k) => mid - (10 * k) / kMax;
+    out += `<text class="pl-bl" x="${x0 - 4}" y="${mid + 3}" text-anchor="end">plan</text><line class="pl-b0" x1="${x0}" y1="${mid}" x2="${x1}" y2="${mid}"/>`;
+    out += `<path class="pl-crv" d="${opts.plan.map((e, i) => `${i ? 'L' : 'M'}${X(Math.max(0, e.s0)).toFixed(1)},${Yk(e.k0).toFixed(1)}L${X(Math.min(sMax, e.s1)).toFixed(1)},${Yk(e.k1).toFixed(1)}`).join('')}"/>`;
+    for (const e of opts.plan) if (e.R && Math.abs(e.k0 - e.k1) < 1e-9 && X(e.s1) - X(e.s0) > 26) out += `<text class="pl-bt" x="${X((e.s0 + e.s1) / 2)}" y="${e.k0 > 0 ? mid + 12 : mid - 4}" text-anchor="middle">R ${fmt(e.R, 0)}</text>`;
+    y0 += 34;
+  }
+  if (opts.devers?.length) {
+    const top = y0 + 4, bot = y0 + 70, mid = (top + bot) / 2, D = 8, Yd = (v) => mid - ((bot - top) / 2) * (Math.max(-D, Math.min(D, v)) / D);
+    out += `<rect class="pl-band" x="${x0}" y="${top}" width="${x1 - x0}" height="${bot - top}"/>`;
+    for (const v of [-7, -2.5, 0, 2.5, 7]) out += `<line class="${v ? 'pl-bg' : 'pl-b0'}" x1="${x0}" y1="${Yd(v)}" x2="${x1}" y2="${Yd(v)}"/><text class="pl-bt" x="${x0 - 4}" y="${Yd(v) + 3}" text-anchor="end">${v > 0 ? '+' : v < 0 ? '−' : ''}${fmt(Math.abs(v), v % 1 ? 1 : 0)}</text>`;
+    const path = (f) => opts.devers.map((q, i) => `${i ? 'L' : 'M'}${X(q.s).toFixed(1)},${Yd(f(q)).toFixed(1)}`).join('');
+    out += `<path class="pl-dvl" d="${path((q) => q.l)}"/><path class="pl-dvr" d="${path((q) => q.r)}"/>`;
+    out += `<text class="pl-bt" x="${x1 - 2}" y="${top + 10}" text-anchor="end"><tspan class="pl-dvl-t">— gauche</tspan>  <tspan class="pl-dvr-t">— droite</tspan>  (% vers l'extérieur ; −2,5 = toit)</text>`;
+    out += `<text class="pl-bl" x="${x0 + 3}" y="${top + 10}">dévers</text>`;
+  }
   return out;
 }
 function niceStep(v) { const p = 10 ** Math.floor(Math.log10(Math.max(1e-9, v))), r = v / p; return (r < 1.5 ? 1 : r < 3.5 ? 2 : r < 7.5 ? 5 : 10) * p; }

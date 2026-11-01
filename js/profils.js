@@ -41,7 +41,7 @@ export function listAxes(prj, D) {
     if (!R?.al?.path) return;
     const els = R.al.elems || [], tan = [];
     for (let j = 1; j < els.length; j++) if (els[j].kind !== els[j - 1].kind || els[j].kind !== 'L') tan.push({ s: els[j].s0, type: `${KN[els[j - 1].kind] || els[j - 1].kind} / ${KN[els[j].kind] || els[j].kind}` });
-    fromPath(`r:${r.id}`, r.name, R.al.path, tan, { half: (R.rp?.w || 3.5) / 2 + (R.rp?.bdd ?? 1) });
+    fromPath(`r:${r.id}`, r.name, R.al.path, tan, { half: (R.rp?.w || 3.5) / 2 + (R.rp?.bdd ?? 1), al: R.al });
   });
   // Branches du carrefour actif : axe projet de la branche (alignement, puis axe suivi).
   for (const bd of D?.branches || []) {

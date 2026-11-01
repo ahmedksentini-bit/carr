@@ -122,7 +122,13 @@ ou sur un fond topographique DXF.
   La ligne rouge remplace la pente constante de la branche dans le modèle altimétrique (dévers, points d'implantation).
   Contrôles : chevauchement des raccordements, pente maximale et rayons minimaux (ARP catégorie R80 par défaut, valeurs
   urbaines usuelles — à confirmer selon la catégorie ; l'autoroute et les voies secondaires suivent leur catégorie de
-  conception, voir « Catégories de conception »), pente ≤ 2 % sur les 20 derniers mètres (ACI), PI hors de l'axe.
+  conception, voir « Catégories de conception »). Graphique des axes de l'échangeur : exagération verticale × 10 par
+  défaut (z dix fois plus que s ; en échelle imposée, 1 px par mètre d'abscisse et défilement horizontal, « auto »
+  ajuste le profil au panneau), ouvrages superposés — sur l'autoroute, gabarit au-dessus de la chaussée et intrados du
+  tablier de chaque passage supérieur (rouge si le tirant d'air manque) ; sur la voie portée, tablier, piles, culées et
+  gabarit de l'autoroute franchie ; cadres et buses sous la chaussée de leur axe (traverse, cellules, fil d'eau) —,
+  bandeau du tracé en plan (diagramme des courbures, rayons) et bandeau des dévers gauche / droite (bascule sur les
+  clothoïdes), pente ≤ 2 % sur les 20 derniers mètres (ACI), PI hors de l'axe.
 - **Profils en travers** (onglet Profils travers) : coupes perpendiculaires à l'axe projet aux stations régulières
   (pas réglable) : plateforme issue du modèle (îlot séparateur ou TPC en saillie, voies avec leur dévers, BDD et berme
   en interurbain, caniveau, bordure, trottoir et contre-bordure en urbain — onglet Profil), talus de remblai (3/2) et

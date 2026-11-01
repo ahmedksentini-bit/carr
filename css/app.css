@@ -239,6 +239,7 @@ td.pict { padding: 2px 4px; width: 30px; }
 td.pict svg { display: block; }
 
 /* Profil en long */
+.chart.pl { overflow-x: auto; }
 .chart.pl svg { background: var(--panel2); }
 .plsvg .pl-tn { fill: none; stroke: #9ca3af; stroke-width: 1.4; }
 .plsvg .pl-red { fill: none; stroke: #ef4444; stroke-width: 2; }
@@ -252,6 +253,24 @@ td.pict svg { display: block; }
 .plsvg .pl-pi.sel { stroke: #fde047; stroke-width: 3; }
 .plsvg .pf-note { fill: var(--muted); font-size: 10.5px; }
 .plsvg { cursor: crosshair; user-select: none; }
+.plsvg .pl-gab { fill: rgba(34,197,94,0.10); stroke: #22c55e; stroke-width: 1; stroke-dasharray: 4 3; }
+.plsvg .pl-gab.err { fill: rgba(239,68,68,0.14); stroke: #ef4444; }
+.plsvg .pl-deck { fill: rgba(203,213,225,0.55); stroke: #cbd5e1; stroke-width: 1; }
+.plsvg .pl-deck.err { stroke: #ef4444; }
+.plsvg .pl-sup { stroke: #cbd5e1; stroke-width: 3; }
+.plsvg .pl-cul { fill: #94a3b8; }
+.plsvg .pl-cad { fill: rgba(148,163,184,0.45); stroke: #e2e8f0; stroke-width: 1; }
+.plsvg .pl-cadi { fill: rgba(56,189,248,0.35); }
+.plsvg .pl-ovl { fill: #e2e8f0; font-size: 10px; }
+.plsvg .pl-band { fill: rgba(255,255,255,0.03); stroke: var(--line, #334155); }
+.plsvg .pl-b0 { stroke: #64748b; stroke-width: 1; }
+.plsvg .pl-bg { stroke: #334155; stroke-width: 1; stroke-dasharray: 3 3; }
+.plsvg .pl-bl { fill: var(--muted); font-size: 10px; }
+.plsvg .pl-bt { fill: var(--muted); font-size: 9.5px; }
+.plsvg .pl-crv { fill: none; stroke: #a78bfa; stroke-width: 1.4; }
+.plsvg .pl-dvl { fill: none; stroke: #38bdf8; stroke-width: 1.5; }
+.plsvg .pl-dvr { fill: none; stroke: #f59e0b; stroke-width: 1.5; }
+.plsvg .pl-dvl-t { fill: #38bdf8; } .plsvg .pl-dvr-t { fill: #f59e0b; }
 #plTable input { width: 76px; font-family: var(--mono); text-align: right; }
 #plTable td.act button { padding: 1px 7px; }
 #plStations td { font-family: var(--mono); text-align: right; }
