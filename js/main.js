@@ -9,7 +9,7 @@ import { buildDesign, fmt, fmtGis } from './roundabout.js';
 import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan, SECTION, sectionParams, TAD, SIGNS, signParams } from './norms.js';
 import { GAMMES, CATALOG } from './signs.js';
 import { signSVG, signOutline } from './signicons.js';
-import { rampParams, endFrame, normRamp, trumpet, deriveTrumpet, cloverleaf, halfCloverleaf, HWY_CAT, RAMP_CAT } from './echangeur.js';
+import { rampParams, endFrame, normRamp, trumpet, deriveTrumpet, crossingWith, xref, cloverleaf, halfCloverleaf, HWY_CAT, RAMP_CAT } from './echangeur.js';
 import { pathProject } from './clotho.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
@@ -60,6 +60,9 @@ function newBranch(prj, axis) {
   };
 }
 
+function newCross(k) {
+  return { id: uid(), on: true, kind: 'route', name: `Voie secondaire ${k + 1}`, cat: 'L2', V: '', lanes: '', wLane: '', bau: '', bdg: '', median: '', berme: '', pk0: '', axis: [] };
+}
 function newProject(context = 'interurbain') {
   const R = PRESETS[context].ring, jid = uid();
   return {
@@ -75,7 +78,7 @@ function newProject(context = 'interurbain') {
     pt: {}, // profils en travers : pas, demi-largeur, talus (valeurs vides = défauts de pt.js)
     hwy: { on: false, name: 'A1', cat: 'L2', V: '', lanes: 2, wLane: '', bau: '', bdg: '', median: '', berme: '', pk0: '', axis: [] }, // échangeur : section courante
     ramps: [], // échangeur : bretelles
-    cross: { on: false, kind: 'route', name: '', cat: 'L2', V: '', lanes: '', wLane: '', bau: '', bdg: '', median: '', berme: '', pk0: '', axis: [] }, // route transversale (second axe)
+    crosses: [], // voies secondaires (une par échangeur : tige, route croisée ou seconde autoroute)
     traffic: { period: 'HPM', site: context === 'urbain' ? 'urbain' : 'rase', uvpPL: 2, od: {}, pl: {}, qp: {}, tad: {} },
     branches: [],
     opts: { angleUnit: 'gon', textH: 0.8, theme: 'dark', vis: {}, dxfOpacity: 0.9 },
@@ -91,10 +94,10 @@ function migrate(p, opt = {}) {
     center: { ...base.center, ...p.center }, crs: { ...base.crs, ...p.crs }, bg: { ...base.bg, ...p.bg },
     plan: { ...base.plan, ...p.plan, tag: { ...base.plan.tag, ...p.plan?.tag } },
     section: { ...p.section }, signs: { ...p.signs }, tn: { ...base.tn, ...p.tn, pts: Array.isArray(p.tn?.pts) ? p.tn.pts : [] }, pt: { ...p.pt },
-    hwy: { ...base.hwy, ...p.hwy, axis: Array.isArray(p.hwy?.axis) ? p.hwy.axis : [] }, ramps: Array.isArray(p.ramps) ? p.ramps.map(normRamp) : [], cross: { ...base.cross, ...p.cross, axis: Array.isArray(p.cross?.axis) ? p.cross.axis : [] },
+    hwy: { ...base.hwy, ...p.hwy, axis: Array.isArray(p.hwy?.axis) ? p.hwy.axis : [] }, ramps: Array.isArray(p.ramps) ? p.ramps.map(normRamp) : [], crosses: (Array.isArray(p.crosses) ? p.crosses : p.cross && (p.cross.on || p.cross.axis?.length) ? [p.cross] : []).map((c, k) => ({ ...newCross(k), ...c, id: c.id || uid(), axis: Array.isArray(c.axis) ? c.axis : [] })),
     traffic: { ...base.traffic, ...p.traffic, od: { ...p.traffic?.od }, pl: { ...p.traffic?.pl }, qp: { ...p.traffic?.qp }, tad: { ...p.traffic?.tad } },
   };
-  delete out.view;
+  delete out.view; delete out.cross;
   out.kind = ['T', 'X'].includes(p.kind) ? p.kind : 'giratoire';
   if (!Array.isArray(out.plan.main)) out.plan.main = ['', ''];
   out.ring.devers = RING_DEVERS; // valeur imposée
@@ -159,7 +162,7 @@ const junctionCache = new Map();
 function otherDesigns() {
   const out = [];
   for (const o of S.prj.others || []) {
-    const sub = { ...S.prj, ...pickJ(o), hwy: { ...S.prj.hwy, on: false }, ramps: [], cross: { ...S.prj.cross, on: false } };
+    const sub = { ...S.prj, ...pickJ(o), hwy: { ...S.prj.hwy, on: false }, ramps: [], crosses: [] };
     const sig = JSON.stringify(pickJ(o)) + S.prj.opts.textH + S.prj.opts.angleUnit;
     let c = junctionCache.get(o.id);
     if (!c || c.sig !== sig) { let D = null; try { D = buildDesign(sub); } catch (e) { console.warn(e); } c = { sig, D }; junctionCache.set(o.id, c); }
@@ -182,6 +185,7 @@ const S = {
   ptSel: -1, ptSt: 0, // profils en travers : branche et station affichées
 };
 let viewer, tiles, placeTiles;
+S.xsel = 0; S.pendingTpl = null;
 
 function init() {
   viewer = new Viewer($('#cv'));
@@ -288,6 +292,21 @@ function autosave() {
 
 // ================================================================ Échangeur
 // Champs de la section courante (ICTAAL 2015, maj 2021).
+// Voies secondaires : liste, voie sélectionnée (S.xsel) et ses champs.
+function renderCrossFields() {
+  const C = S.prj.crosses || [];
+  if (S.xsel >= C.length) S.xsel = C.length - 1;
+  if (S.xsel < 0 && C.length) S.xsel = 0;
+  const k = S.xsel, p = `crosses.${k}.`;
+  $('#crossList').innerHTML = C.map((c, i) => `<li data-xi="${i}" class="${i === k ? 'on' : ''}"><span class="dot"></span><b>${esc(c.name || `Voie secondaire ${i + 1}`)}</b><span>${c.kind === 'autoroute' ? 'autoroute (nœud)' : 'route ordinaire'}</span><span></span></li>`).join('') || '<li class="empty-li">Aucune voie secondaire.</li>';
+  $('#crossFields').innerHTML = k < 0 ? '' :
+    `<label class="chk"><input type="checkbox" data-k="${p}on"> Voie active</label>` +
+    '<div class="row">' + fld(p + 'name', 'Nom', '', { text: true }) + sel(p + 'kind', 'Type', [['route', 'Route ordinaire (diffuseur)'], ['autoroute', 'Autoroute (nœud)']], { branch: false }) + '</div>' +
+    '<div class="row">' + sel(p + 'cat', 'Catégorie (autoroute)', Object.entries(HWY_CAT).map(([kk, c]) => [kk, c.label]), { branch: false }) + fld(p + 'V', 'Vitesse limite', 'km/h', { ph: '90 / 110' }) + '</div>' +
+    '<div class="row">' + fld(p + 'lanes', 'Voies par sens', '', { ph: '1 / 2' }) + fld(p + 'wLane', 'Largeur de voie', 'm', { ph: '3,50' }) + '</div>' +
+    '<div class="row">' + fld(p + 'bau', 'BAU / BDD', 'm', { ph: '2,00 / 2,50' }) + fld(p + 'median', 'Bande médiane', 'm', { ph: '0 / 3,00' }) + '</div>' +
+    '<div class="row">' + fld(p + 'bdg', 'BDG', 'm', { ph: '0 / 1,00' }) + fld(p + 'berme', 'Berme', 'm', { ph: '0,75 / 1,00' }) + '</div>';
+}
 function buildEchFields() {
   $('#hwyFields').innerHTML =
     '<div class="row">' + fld('hwy.name', 'Nom', '', { text: true }) + sel('hwy.cat', 'Catégorie', Object.entries(HWY_CAT).map(([k, c]) => [k, c.label]), { branch: false }) + '</div>' +
@@ -296,12 +315,7 @@ function buildEchFields() {
     '<div class="row">' + fld('hwy.bdg', 'BDG', 'm', { ph: '1,00' }) + fld('hwy.median', 'Bande médiane', 'm', { ph: '3,00' }) + '</div>' +
     '<div class="row">' + fld('hwy.berme', 'Berme', 'm', { ph: '1,00' }) + fld('hwy.pk0', 'PK origine', 'm', { ph: '0' }) + '</div>' +
     '';
-  $('#crossFields').innerHTML =
-    '<div class="row">' + fld('cross.name', 'Nom', '', { text: true }) + sel('cross.kind', 'Type', [['route', 'Route ordinaire (diffuseur)'], ['autoroute', 'Autoroute (nœud)']], { branch: false }) + '</div>' +
-    '<div class="row">' + sel('cross.cat', 'Catégorie (autoroute)', Object.entries(HWY_CAT).map(([k, c]) => [k, c.label]), { branch: false }) + fld('cross.V', 'Vitesse limite', 'km/h', { ph: '90 / 110' }) + '</div>' +
-    '<div class="row">' + fld('cross.lanes', 'Voies par sens', '', { ph: '1 / 2' }) + fld('cross.wLane', 'Largeur de voie', 'm', { ph: '3,50' }) + '</div>' +
-    '<div class="row">' + fld('cross.bau', 'BAU / BDD', 'm', { ph: '2,00 / 2,50' }) + fld('cross.median', 'Bande médiane', 'm', { ph: '0 / 3,00' }) + '</div>' +
-    '<div class="row">' + fld('cross.bdg', 'BDG', 'm', { ph: '0 / 1,00' }) + fld('cross.berme', 'Berme', 'm', { ph: '0,75 / 1,00' }) + '</div>';
+  renderCrossFields();
   $('#hwyFields').innerHTML +=
     '<div class="row">' + fld('hwy.trR2', 'Trompette : rayon R2 de la S-semi', 'm', { ph: '62', title: 'Grande courbe de la sortie semi-directe ; la boucle en est déduite (concentrique)' }) + fld('hwy.trGap', 'Trompette : écart boucle / S-semi', 'm', { ph: '0', title: 'Terre-plein entre la boucle et la sortie semi-directe, côté amont (0 : plates-formes tangentes)' }) + fld('hwy.trTpc', 'Trompette : séparation des voies de la tige (TPC)', 'm', { ph: '1', title: 'Entre les bords des deux voies de la tige, BDG comprises ; constante sur toute la tige et sur l\'ouvrage' }) + '</div>';
 }
@@ -311,21 +325,22 @@ function refreshEch() {
   const H = S.prj.hwy, ramps = S.prj.ramps || [], D = S.D;
   if (S.rsel >= ramps.length) S.rsel = ramps.length - 1;
   const r = ramps[S.rsel], R = D?.ramps?.[S.rsel];
-  const sig = JSON.stringify([S.rsel, H.axis?.length, S.prj.cross?.axis?.length, ramps.map((q) => [q.id, q.name, q.from?.ref, q.to?.ref, q.pis?.length, q.cat])]);
+  const sig = JSON.stringify([S.rsel, S.xsel, H.axis?.length, (S.prj.crosses || []).map((c) => [c.id, c.name, c.kind, c.axis?.length]), ramps.map((q) => [q.id, q.name, q.from?.ref, q.to?.ref, q.pis?.length, q.cat])]);
   if (sig !== S.echSig) {
     S.echSig = sig;
     $('#rampList').innerHTML = ramps.map((q, i) => `<li data-ri="${i}" class="rli${i === S.rsel ? ' on' : ''}"><b>${esc(q.name)}</b> ${esc(rampParams(S.prj, q).label)} · ${esc(RAMP_CAT[q.cat]?.label || '')}</li>`).join('') || '<li class="empty-li">Aucune bretelle.</li>';
     const nV = H.axis?.length || 0;
     $('#hwyVertices').innerHTML = nV > 2 ? '<h3>Sommets de l\'axe</h3><div class="tablewrap"><table class="pts"><tr><th>#</th><th>X</th><th>Y</th><th>R (m)</th></tr>' +
       H.axis.map((q, k) => `<tr><td>${k}</td><td><input data-k="hwy.axis.${k}.x" inputmode="decimal"></td><td><input data-k="hwy.axis.${k}.y" inputmode="decimal"></td><td>${k && k < nV - 1 ? `<input data-k="hwy.axis.${k}.r" inputmode="decimal">` : ''}</td></tr>`).join('') + '</table></div>' : '';
-    const XC = S.prj.cross?.axis || [], nX = XC.length;
-    $('#crossVertices').innerHTML = nX >= 2 ? '<h3>Sommets de l\'axe transversal</h3><div class="tablewrap"><table class="pts"><tr><th>#</th><th>X</th><th>Y</th><th>R (m)</th></tr>' +
-      XC.map((q, k) => `<tr><td>${k}</td><td><input data-k="cross.axis.${k}.x" inputmode="decimal"></td><td><input data-k="cross.axis.${k}.y" inputmode="decimal"></td><td>${k && k < nX - 1 ? `<input data-k="cross.axis.${k}.r" inputmode="decimal">` : ''}</td></tr>`).join('') + '</table></div>' : '';
+    renderCrossFields();
+    const xk = S.xsel, XC = S.prj.crosses?.[xk]?.axis || [], nX = XC.length;
+    $('#crossVertices').innerHTML = nX >= 2 ? '<h3>Sommets de l\'axe de la voie secondaire</h3><div class="tablewrap"><table class="pts"><tr><th>#</th><th>X</th><th>Y</th><th>R (m)</th></tr>' +
+      XC.map((q, k) => `<tr><td>${k}</td><td><input data-k="crosses.${xk}.axis.${k}.x" inputmode="decimal"></td><td><input data-k="crosses.${xk}.axis.${k}.y" inputmode="decimal"></td><td>${k && k < nX - 1 ? `<input data-k="crosses.${xk}.axis.${k}.r" inputmode="decimal">` : ''}</td></tr>`).join('') + '</table></div>' : '';
     if (!r) $('#rampForm').innerHTML = '';
     else {
       const i = S.rsel, k = (f) => `ramps.${i}.${f}`;
-      const XN = S.prj.cross?.name || 'Route transversale';
-      const refs = (role) => [['free', 'Libre (extrémité du tracé)'], ['hwy1', `${H.name || 'Autoroute'} — sens 1`], ['hwy2', `${H.name || 'Autoroute'} — sens 2`], ...(S.prj.cross?.on ? [['x1', `${XN} — sens 1`], ['x2', `${XN} — sens 2`]] : []),
+      const xRefs = (S.prj.crosses || []).flatMap((c, k) => (c.on === false ? [] : [[xref(k, 1), `${c.name || `Voie secondaire ${k + 1}`} — sens 1`], [xref(k, 2), `${c.name || `Voie secondaire ${k + 1}`} — sens 2`]]));
+      const refs = (role) => [['free', 'Libre (extrémité du tracé)'], ['hwy1', `${H.name || 'Autoroute'} — sens 1`], ['hwy2', `${H.name || 'Autoroute'} — sens 2`], ...xRefs,
         ...ramps.filter((q) => q.id !== r.id).map((q) => [q.id, `Bretelle ${q.name}`])].map(([v, l]) => [v, role === 'from' && v !== 'free' ? `Sortie de ${l.replace(/^Bretelle /, '')}` : role === 'to' && v !== 'free' ? `Entrée sur ${l.replace(/^Bretelle /, '')}` : l]);
       const endFields = (role) => {
         const e = r[role], att = e?.ref && e.ref !== 'free', hw = att && /^hwy/.test(e.ref), div = role === 'from';
@@ -360,7 +375,7 @@ function refreshEch() {
     ['Plate-forme', fmt(2 * (hw.E2 + hw.H.berme)) + ' m'],
     ['Rm / Rdn (ICTAAL tab. 3-1)', `${hw.H.C.Rm} / ${hw.H.C.Rdn} m`],
   ]) : '<p class="note">Activez l\'autoroute et dessinez son axe (milieu du terre-plein central).</p>';
-  const xr = D?.cross;
+  const xr = D?.crosses?.[S.xsel];
   $('#crossOut').innerHTML = xr?.ok ? kv([
     ['Longueur de l\'axe', fmt(xr.sEnd) + ' m'],
     ['Profil en travers (par sens)', `${xr.H.median > 0 ? `BDG ${fmt(xr.H.bdg)} + ` : ''}${xr.H.lanes} × ${fmt(xr.H.wLane)} + ${xr.isRoute ? 'BDD' : 'BAU'} ${fmt(xr.H.bau)} m`],
@@ -385,10 +400,11 @@ function hostAt(w) {
     const pr = pathProject(D.hwy.path, w);
     if (pr && Math.abs(pr.off) >= D.hwy.E0 && Math.abs(pr.off) <= D.hwy.E2 + 30) best = { ref: pr.off < 0 ? 'hwy1' : 'hwy2', s: pr.s, d: Math.abs(pr.off) - D.hwy.E1 };
   }
-  if (D?.cross?.ok) {
-    const pr = pathProject(D.cross.path, w);
-    if (pr && Math.abs(pr.off) >= D.cross.E0 && Math.abs(pr.off) <= D.cross.E2 + 30 && (!best || Math.abs(pr.off) - D.cross.E1 < best.d)) best = { ref: pr.off < 0 ? 'x1' : 'x2', s: pr.s, d: Math.abs(pr.off) - D.cross.E1 };
-  }
+  (D?.crosses || []).forEach((c, k) => {
+    if (!c?.ok) return;
+    const pr = pathProject(c.path, w);
+    if (pr && Math.abs(pr.off) >= c.E0 && Math.abs(pr.off) <= c.E2 + 30 && (!best || Math.abs(pr.off) - c.E1 < best.d)) best = { ref: xref(k, pr.off < 0 ? 1 : 2), s: pr.s, d: Math.abs(pr.off) - c.E1 };
+  });
   for (const R of D?.ramps || []) {
     if (!R?.al) continue;
     const pr = pathProject(R.al.path, w);
@@ -514,29 +530,51 @@ function syncRampBranches() {
   }
   for (const r of S.prj.ramps) if (r.cut && !ends.some((e) => used.has(e) && e.r === r)) delete r.cut;
 }
-function addTrumpetAt(w) {
+// Gabarit d'échangeur : clic sur une voie secondaire existante (au croisement, du côté de la voirie ordinaire pour une
+// trompette), sinon le clic commence le tracé d'une nouvelle voie secondaire ; le gabarit est construit à sa fin.
+function pickSecondary(w, px, py) {
+  let best = null;
+  (S.D?.crosses || []).forEach((c, k) => {
+    if (!c?.ok) return;
+    const pr = pathProject(c.path, w);
+    if (pr && Math.abs(pr.off) * viewer.s < Math.max(12, (c.E2 + 6) * viewer.s) && (!best || Math.abs(pr.off) < best.d)) best = { k, d: Math.abs(pr.off) };
+  });
+  if (best) { runTemplate(S.pendingTpl, w, best.k); return; }
+  const kind = S.pendingTpl;
+  setTool('axis'); S.hwyDraw = 'cross'; S.pendingTpl = kind; S.draft = [w]; setPrompt(); viewer.invalidate();
+}
+function runTemplate(kind, w, k) {
+  S.pendingTpl = null; S.xsel = k;
+  if (kind === 'trompette') addTrumpetAt(w, k); else addCloverAt(w, kind, k);
+  setTool('select');
+}
+function addTrumpetAt(w, crossK) {
   const R2 = parseNum(String(S.prj.hwy.trR2 ?? ''));
-  const T = trumpet(S.prj, S.D, w, uid, { gap: parseNum(String(S.prj.hwy.trGap ?? '')) || 0, ...(R2 > 0 ? { R2 } : {}) });
+  const T = trumpet(S.prj, S.D, w, uid, { gap: parseNum(String(S.prj.hwy.trGap ?? '')) || 0, ...(R2 > 0 ? { R2 } : {}), ...(crossK != null ? { crossK } : {}) });
   if (T.err) { toast(T.err, 'warn'); return; }
   const nOld = removeGenerated(T.P0);
   S.prj.ramps.push(...T.ramps.map((r) => ({ ...r, gen: 'trompette' }))); S.rsel = S.prj.ramps.length - 3;
   setTool('select'); update(); zoomAll();
-  toast(`Trompette générée : ${T.info}.${nOld ? ` ${nOld} bretelle(s) du gabarit précédent remplacée(s) (Ctrl+Z pour annuler).` : ''} Raccordez le haut de la tige au carrefour.` + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
+  toast(`Trompette générée${crossK != null ? ` sur ${S.prj.crosses[crossK]?.name || 'la voie secondaire'}` : ''} : ${T.info}.${nOld ? ` ${nOld} bretelle(s) du gabarit précédent remplacée(s) (Ctrl+Z pour annuler).` : ''} Raccordez le haut de la tige au carrefour.` + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
 }
 
-// Trèfle / demi-trèfle : l'axe de la route transversale est (re)créé perpendiculaire à l'autoroute au point cliqué.
-function addCloverAt(w, kind) {
-  const X = S.prj.cross || (S.prj.cross = {});
-  if (kind === 'demitrefle' && X.kind === 'autoroute') { toast('Le demi-trèfle se raccorde à une route ordinaire : choisissez « Route ordinaire » pour la route transversale.', 'warn'); return; }
-  if (X.axis?.length >= 2 && !confirm(t('L\'axe actuel de la route transversale sera remplacé. Continuer ?'))) return;
-  const T = (kind === 'trefle' ? cloverleaf : halfCloverleaf)(S.prj, S.D, w, uid);
+// Trèfle / demi-trèfle sur la voie secondaire k : construit au croisement avec l'autoroute ; l'axe de la voie est redressé
+// perpendiculairement à l'autoroute (biais non traité pour ces gabarits), sur 1,5 km de part et d'autre (800 m : demi).
+function addCloverAt(w, kind, k) {
+  const X = S.prj.crosses[k];
+  if (!X) return;
+  if (kind === 'demitrefle' && X.kind === 'autoroute') { toast('Le demi-trèfle se raccorde à une route ordinaire : choisissez « Route ordinaire » pour cette voie secondaire.', 'warn'); return; }
+  const C = crossingWith(S.D, w, k), P = C ? C.P0 : w;
+  const T = (kind === 'trefle' ? cloverleaf : halfCloverleaf)(S.prj, S.D, P, uid, { crossK: k });
   if (T.err) { toast(T.err, 'warn'); return; }
+  const skew = C ? Math.abs(90 - (Math.acos(Math.min(1, Math.abs(G.dot(C.dir, G.norm(G.sub(T.crossAxis[1], T.crossAxis[0])))))) * 180) / Math.PI) : 0;
   X.on = true; X.axis = T.crossAxis;
+  if (skew > 0.5) toast(t(`${X.name} : axe redressé perpendiculairement à l'autoroute (biais de ${fmt(skew, 1)}° non traité pour ce gabarit).`), 'warn');
   const nOld = removeGenerated(G.lerp(T.crossAxis[0], T.crossAxis[1], 0.5), 1500);
   const n0 = S.prj.ramps.length;
   S.prj.ramps.push(...T.ramps.map((r) => ({ ...r, gen: kind }))); S.rsel = n0;
   setTool('select'); update(); zoomAll();
-  const what = kind === 'trefle' ? (X.kind === 'autoroute' ? 'Trèfle (nœud autoroutier, collectrices sur les deux axes)' : 'Trèfle complet (collectrices sur l\'autoroute)') : 'Demi-trèfle (extrémités libres sur la route transversale)';
+  const what = (kind === 'trefle' ? (X.kind === 'autoroute' ? 'Trèfle (nœud autoroutier, collectrices sur les deux axes)' : 'Trèfle complet (collectrices sur l\'autoroute)') : 'Demi-trèfle (extrémités libres sur la voie secondaire)') + ` sur ${X.name}`;
   toast(`${what} généré : ${T.info}.${nOld ? ` ${nOld} bretelle(s) du gabarit précédent remplacée(s) (Ctrl+Z pour annuler).` : ''}` + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
 }
 
@@ -551,8 +589,7 @@ function drawEch(ctx, v, T, exp) {
   };
   const sq = (pts, col) => { ctx.fillStyle = col; for (const p of pts) { const [x, y] = v.w2s(p.x, p.y); ctx.fillRect(x - 3.5, y - 3.5, 7, 7); } };
   if (H.axis?.length >= 2) { poly(H.axis, T.L.AXE_SAISI.stroke, 1.2, [7, 5]); if (S.tool === 'select') sq(H.axis, T.L.AXE_SAISI.stroke); }
-  const X = S.prj.cross;
-  if (X?.on && X.axis?.length >= 2) { poly(X.axis, T.L.AXE_SAISI.stroke, 1.2, [7, 5]); if (S.tool === 'select') sq(X.axis, T.L.AXE_SAISI.stroke); }
+  for (const X of S.prj.crosses || []) if (X.on !== false && X.axis?.length >= 2) { poly(X.axis, T.L.AXE_SAISI.stroke, 1.2, [7, 5]); if (S.tool === 'select') sq(X.axis, T.L.AXE_SAISI.stroke); }
   (S.D?.ramps || []).forEach((R, i) => {
     if (!R?.pts) return;
     const on = i === S.rsel, col = on ? T.sel : T.L.AXE_SAISI.stroke;
@@ -571,17 +608,18 @@ function hitEchHandle(px, py) {
   }
   const ax = S.prj.hwy.axis || [];
   for (let k = 0; k < ax.length; k++) if (near(ax[k])) return { kind: 'hvx', k };
-  const cx = S.prj.cross?.on ? S.prj.cross.axis || [] : [];
-  for (let k = 0; k < cx.length; k++) if (near(cx[k])) return { kind: 'cvx', k };
+  for (const [c, X] of (S.prj.crosses || []).entries()) { if (X.on === false) continue; const cx = X.axis || []; for (let k = 0; k < cx.length; k++) if (near(cx[k])) return { kind: 'cvx', c, k }; }
   return null;
 }
 
 function bindEch() {
   $('#btnHwyAxis').addEventListener('click', () => { setTool('axis'); S.hwyDraw = 'hwy'; setPrompt(); });
   $('#btnCrossAxis').addEventListener('click', () => { setTool('axis'); S.hwyDraw = 'cross'; setPrompt(); });
+  $('#crossList').addEventListener('click', (e) => { const li = e.target.closest('li[data-xi]'); if (!li) return; S.xsel = +li.dataset.xi; S.echSig = ''; refreshPanels(); viewer.invalidate(); });
   const place = (kind) => {
     if (!S.D?.hwy?.ok) { toast('Activez l\'autoroute et dessinez d\'abord son axe.', 'warn'); return; }
-    setTool(kind === 'trompette' ? 'trumpet' : kind === 'trefle' || kind === 'demitrefle' ? kind : 'ramp'); S.rampKind = kind; setPrompt();
+    if (['trompette', 'trefle', 'demitrefle'].includes(kind)) { setTool('pickx'); S.pendingTpl = kind; setPrompt(); return; } // l'échangeur se construit sur une voie secondaire
+    setTool('ramp'); S.rampKind = kind; setPrompt();
   };
   $('#btnRampOut').addEventListener('click', () => place('sortie'));
   $('#btnRampIn').addEventListener('click', () => place('entree'));
@@ -760,7 +798,7 @@ function drawOverlay(ctx, v, T) {
 function elGeom(el) {
   const D = S.D;
   if (el.type === 'ramp') { const R = D?.ramps?.[el.i]; return R?.al?.path ? { lines: [G.samplePath(R.al.path, 2)], half: R.rp.w / 2 + R.rp.bdd } : null; }
-  if (el.type === 'hwy' || el.type === 'cross') { const r = el.type === 'hwy' ? D?.hwy : D?.cross; return r?.ok ? { lines: [G.samplePath(r.path, 4)], half: r.E2 + r.H.berme } : null; }
+  if (el.type === 'hwy' || el.type === 'cross') { const r = el.type === 'hwy' ? D?.hwy : D?.crosses?.[el.i]; return r?.ok ? { lines: [G.samplePath(r.path, 4)], half: r.E2 + r.H.berme } : null; }
   if (el.type === 'branch') {
     const b = S.prj.branches[el.i], q = D?.branches?.find((x) => x.idx === el.i);
     const pts = b?.axis?.length >= 2 ? b.axis : q ? [q.W({ x: q.x0, y: q.a }), q.W({ x: q.xEnd, y: q.a })] : null;
@@ -792,11 +830,10 @@ function hitElement(px, py) {
     const [x, y] = viewer.w2s(o.D.O.x, o.D.O.y), R = Math.max(18, (o.D.kind === 'giratoire' ? o.D.Rpo : 20) * viewer.s), d = Math.hypot(px - x, py - y);
     if (d < R) cands.push({ type: 'junction', i: o.id, sc: -150 + d / R });
   }
-  for (const type of ['hwy', 'cross']) {
-    const r = type === 'hwy' ? D?.hwy : D?.cross;
+  for (const [type, i, r] of [['hwy', 0, D?.hwy], ...(D?.crosses || []).map((c, k) => ['cross', k, c])]) {
     if (!r?.ok) continue;
     const tol = Math.max(7, (r.E2 + r.H.berme) * viewer.s), d = polyDist(G.samplePath(r.path, Math.max(2, 6 / viewer.s)));
-    if (d < tol) cands.push({ type, i: 0, sc: d - tol + 1000 }); // les bretelles et branches posées dessus restent prioritaires
+    if (d < tol) cands.push({ type, i, sc: d - tol + 1000 }); // les bretelles et branches posées dessus restent prioritaires
   }
   cands.sort((a, b) => a.sc - b.sc);
   return cands[0] ? { type: cands[0].type, i: cands[0].i } : null;
@@ -806,7 +843,7 @@ const POP_GROUP = { ramp: '#grpRamp', hwy: '#grpHwy', cross: '#grpCross', branch
 function popTitle(el) {
   if (el.type === 'ramp') { const r = S.prj.ramps[el.i]; return `Bretelle ${r?.name || ''} — ${S.D?.ramps?.[el.i]?.label || ''}`; }
   if (el.type === 'hwy') return `Autoroute ${S.prj.hwy.name || ''}`;
-  if (el.type === 'cross') return `Route transversale ${S.prj.cross.name || ''}`;
+  if (el.type === 'cross') return `Voie secondaire ${S.prj.crosses[el.i]?.name || ''}`;
   if (el.type === 'branch') return `Branche ${S.prj.branches[el.i]?.name || ''}`;
   return `${S.D?.kind === 'giratoire' ? 'Giratoire' : 'Carrefour'} — ${S.prj.jname || ''}`;
 }
@@ -815,6 +852,7 @@ function openPop(el, px, py) {
   if (el.type === 'junction') { switchJunction(el.i, { zoom: false }); el = { type: 'ring', i: 0 }; }
   if (el.type === 'ramp') { S.rsel = el.i; refreshPanels(); }
   if (el.type === 'branch') selectBranch(el.i);
+  if (el.type === 'cross') { S.xsel = el.i; S.echSig = ''; refreshPanels(); }
   const pop = $('#elPop'), node = $(POP_GROUP[el.type]);
   if (!node) return;
   const ph = document.createElement('p'); ph.className = 'note moved-note'; ph.textContent = t('Affiché dans la fenêtre de l\'élément sur le plan.');
@@ -840,10 +878,27 @@ function popDelete() {
   const el = S.pop; if (!el) return;
   if (el.type === 'ramp') { S.rsel = el.i; closePop(); $('#btnRampDel').click(); return; }
   if (el.type === 'branch') { const n = S.prj.branches.length; deleteBranch(el.i); if (S.prj.branches.length < n) closePop(); return; }
-  if (el.type === 'hwy' || el.type === 'cross') {
-    const H = S.prj[el.type], what = el.type === 'hwy' ? `l'axe de l'autoroute ${H.name || ''}` : `la route transversale ${H.name || ''}`;
-    if (!confirm(t(`Supprimer ${what} ? Les bretelles qui s'y raccordent restent à supprimer ou à raccorder.`))) return;
-    H.axis = []; if (el.type === 'cross') H.on = false;
+  if (el.type === 'hwy') {
+    if (!confirm(t(`Supprimer l'axe de l'autoroute ${S.prj.hwy.name || ''} ? Les bretelles qui s'y raccordent restent à supprimer ou à raccorder.`))) return;
+    S.prj.hwy.axis = []; closePop(); update(); return;
+  }
+  if (el.type === 'cross') {
+    const X = S.prj.crosses[el.i]; if (!X) return;
+    if (!confirm(t(`Supprimer la voie secondaire ${X.name || ''} ? Les bretelles qui s'y raccordent deviennent libres.`))) return;
+    // Les références des voies suivantes (xk:s) sont décalées ; celles de la voie supprimée deviennent libres.
+    const shift = (ref) => { const m = /^x(?:(\d+):)?([12])$/.exec(ref || ''); if (!m) return ref; const k = m[1] ? +m[1] : 0; if (k === el.i) return 'free'; return k > el.i ? xref(k - 1, +m[2]) : ref; };
+    S.prj.ramps.forEach((r, i) => {
+      for (const role of ['from', 'to']) {
+        const e = r[role]; if (!e?.ref) continue;
+        const nr = shift(e.ref);
+        if (nr === 'free' && e.ref !== 'free') { // l'extrémité devient libre : un sommet à sa position actuelle
+          const P = S.D?.ramps?.[i]?.pts, q = P && (role === 'from' ? P[0] : P[P.length - 1]);
+          if (q) { const v = { x: +q.x.toFixed(3), y: +q.y.toFixed(3), R: '', A: '' }; if (role === 'from') r.pis.unshift(v); else r.pis.push(v); }
+          r[role] = { ref: 'free' };
+        } else e.ref = nr;
+      }
+    });
+    S.prj.crosses.splice(el.i, 1); S.xsel = Math.min(S.xsel, S.prj.crosses.length - 1); S.echSig = '';
     closePop(); update(); return;
   }
   if (el.type === 'ring') {
@@ -878,10 +933,11 @@ const PROMPTS = {
   extend: 'Prolonger l\'axe : cliquez les points suivants vers l\'extérieur — Entrée / clic droit pour terminer, Échap pour annuler.',
   center: 'Centre : cliquez la position du centre de l\'anneau.',
   hwy: 'Autoroute : cliquez les sommets de l\'axe (milieu du TPC) — Entrée / clic droit pour terminer.',
-  cross: 'Route transversale : cliquez les sommets de son axe — Entrée / clic droit pour terminer.',
+  cross: 'Voie secondaire : cliquez les sommets de son axe (du côté de la voirie ordinaire vers l\'autoroute) — Entrée / clic droit pour terminer.',
   trefle: 'Trèfle : cliquez sur l\'axe de l\'autoroute à l\'endroit du croisement.',
   demitrefle: 'Demi-trèfle : cliquez sur l\'axe de l\'autoroute à l\'endroit du croisement.',
   ramp: 'Bretelle : cliquez sur la chaussée de l\'autoroute ou d\'une bretelle au point S.1,00 m (sortie) ou E.1,00 m (entrée).',
+  pickx: 'Échangeur : cliquez la voie secondaire au croisement (trompette : du côté de la voirie ordinaire), ou dessinez une nouvelle voie secondaire en commençant du côté de la voirie ordinaire — Entrée / clic droit pour terminer.',
   trumpet: 'Trompette : cliquez au croisement de la route transversale (ou sur l\'autoroute à l\'endroit de l\'ouvrage), du côté de la voirie ordinaire.',
   measure: 'Mesure : cliquez deux points.',
 };
@@ -890,6 +946,7 @@ function setTool(t) {
   if (S.tool === 'axis' && t !== 'axis' && S.draft.length >= 2) finishAxis();
   S.tool = t; S.draft = []; S.meas = []; S.drag = null; S.extend = null; S.hwyDraw = false;
   if (!['ramp', 'trumpet', 'trefle', 'demitrefle'].includes(t)) S.rampKind = null;
+  if (!['pickx', 'axis'].includes(t)) S.pendingTpl = null;
   $$('.tools [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
   updateCursor(); setPrompt(); viewer.invalidate();
 }
@@ -929,12 +986,15 @@ function startExtend(e) {
 function finishAxis() {
   const pts = dedupe(S.draft);
   S.draft = [];
-  if (S.hwyDraw) { // axe de l'autoroute ou de la route transversale
-    const key = S.hwyDraw === 'cross' ? 'cross' : 'hwy';
-    S.hwyDraw = false;
+  if (S.hwyDraw) { // axe de l'autoroute ou nouvelle voie secondaire
+    const key = S.hwyDraw === 'cross' ? 'cross' : 'hwy', tpl = S.pendingTpl;
+    S.hwyDraw = false; S.pendingTpl = null;
     if (pts.length >= 2) {
-      S.prj[key].axis = pts.map((p, i) => ({ x: p.x, y: p.y, r: i && i < pts.length - 1 ? (key === 'hwy' ? 1500 : 400) : '' }));
-      S.prj[key].on = true; S.echSig = ''; update();
+      const axis = pts.map((p, i) => ({ x: p.x, y: p.y, r: i && i < pts.length - 1 ? (key === 'hwy' ? 1500 : 400) : '' }));
+      if (key === 'hwy') { S.prj.hwy.axis = axis; S.prj.hwy.on = true; }
+      else { const k = S.prj.crosses.length; S.prj.crosses.push({ ...newCross(k), axis }); S.xsel = k; }
+      S.echSig = ''; update();
+      if (key === 'cross' && tpl) { runTemplate(tpl, pts[0], S.prj.crosses.length - 1); return; } // premier point : côté de la voirie ordinaire
     }
     setTool('select'); return;
   }
@@ -1070,8 +1130,7 @@ function bindCanvas() {
     if (S.tool === 'axis') { S.draft.push(w); setPrompt(); }
     else if (S.tool === 'center') { S.prj.center = { auto: false, x: w.x, y: w.y }; syncInputs(); update(); setTool('select'); }
     else if (S.tool === 'ramp') addRampAt(w);
-    else if (S.tool === 'trumpet') addTrumpetAt(w);
-    else if (S.tool === 'trefle' || S.tool === 'demitrefle') addCloverAt(w, S.tool);
+    else if (S.tool === 'pickx') pickSecondary(w, px, py);
     else if (S.tool === 'measure') { S.meas.push(w); if (S.meas.length > 2) S.meas = [w]; showMeasure(); }
     else if (S.tool === 'select') {
       const h = hitHandle(px, py);
@@ -1118,7 +1177,7 @@ function onMove(px, py) {
     d.moved = true; update({ commit: false, panels: false });
   }
   else if (d?.kind === 'rpi') { const q = S.prj.ramps[d.ri].pis[d.k]; S.prj.ramps[d.ri].pis[d.k] = { ...q, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
-  else if (d?.kind === 'cvx') { const q = S.prj.cross.axis[d.k]; S.prj.cross.axis[d.k] = { ...q, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
+  else if (d?.kind === 'cvx') { const ax = S.prj.crosses[d.c].axis, q = ax[d.k]; ax[d.k] = { ...q, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
   else if (d?.kind === 'hvx') { const q = S.prj.hwy.axis[d.k]; S.prj.hwy.axis[d.k] = { ...q, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
   else if (d?.kind === 'center') { S.prj.center = { auto: false, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
   else if (!d && S.tool === 'select') {
