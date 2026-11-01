@@ -254,6 +254,7 @@ function changeCRS(cfg) {
 // ================================================================ Mise à jour
 function update({ commit = true, panels = true } = {}) {
   rebuildTerrain();
+  if (!S.D && S.prj.hwy?.on) try { S.D = buildDesign(S.prj); } catch (e) { console.error(e); } // premier calcul (ouverture) : les trompettes se recalculent sur l'autoroute construite
   try { syncTrumpets(); } catch (e) { console.error(e); }
   try { syncRampBranches(); syncTrumpets(); } catch (e) { console.error(e); } // la tige peut avoir été raccourcie par une branche
   try { S.D = buildDesign(S.prj); } catch (e) { console.error(e); S.D = null; toast('Erreur de calcul : ' + e.message, 'err'); }
@@ -539,8 +540,7 @@ function regenTrumpet(semi) {
   if (S.trSig.get(semi.id) === sig) return;
   S.trSig.set(semi.id, sig);
   const ids = [grp.boucle?.id, semi.id, grp.sdir?.id, grp.edir?.id];
-  let n = 0; const mk = () => ids[n++] || uid();
-  const T = trumpet(S.prj, S.D, tp.click, mk, { ...tpOpt(tp), boucleCut: grp.boucle?.cut });
+  const T = trumpetChecked(tp.click, () => { let n = 0; return () => ids[n++] || uid(); }, { ...tpOpt(tp), boucleCut: grp.boucle?.cut });
   if (T.err) { // retour aux derniers paramètres valides
     const g = S.trGood.get(semi.id);
     if (g) { semi.tp = JSON.parse(g); S.trSig.set(semi.id, ''); }
@@ -710,9 +710,23 @@ function withHwyCover(build) {
   if (!T.err) T.extNote = `Axe de l'autoroute prolongé${dA ? ` de ${dA} m à l'origine` : ''}${dA && dB ? ' et' : ''}${dB ? ` de ${dB} m à la fin` : ''} pour loger le gabarit${dA ? ' (PK conservés)' : ''}.`;
   return T;
 }
+// Trompette vérifiée : le premier sommet de la S-semi est reprojeté sur la ligne d'obliquité de la chaussée réelle
+// (autoroute en courbe), ce qui peut faire chevaucher ses deux raccordements ; la construction est alors reprise avec un
+// alignement intermédiaire plus long (marge 5, 15, 30, 50 m) jusqu'à ce que le bloc ne présente plus d'erreur.
+function trumpetChecked(click, mkIds, opt) {
+  let T = null;
+  for (const m of [5, 15, 30, 50]) {
+    T = trumpet(S.prj, S.D, click, mkIds(), { ...opt, semiMargin: m });
+    if (T.err) return T;
+    const names = new Set(T.ramps.map((r) => r.name)), D2 = { prims: [], points: [] };
+    try { buildEchangeur({ ...S.prj, ramps: T.ramps }, D2); } catch (e) { console.error(e); return T; }
+    if (!(D2.echIssues || []).some((i) => i.lvl === 'err' && [...names].some((nm) => i.msg.startsWith(nm + ' :')))) return T;
+  }
+  return T;
+}
 function addTrumpetAt(w, crossK) {
   const tp = { crossK: crossK ?? null, click: { x: +w.x.toFixed(3), y: +w.y.toFixed(3) }, R2: parseNum(String(S.prj.hwy.trR2 ?? '')) || 62, gap: parseNum(String(S.prj.hwy.trGap ?? '')) || 0, tpc: parseNum(String(S.prj.hwy.trTpc ?? '')) || 1, Ys: '' };
-  const T = withHwyCover(() => trumpet(S.prj, S.D, w, uid, tpOpt(tp)));
+  const T = withHwyCover(() => trumpetChecked(w, () => uid, tpOpt(tp)));
   if (T.err) { toast(T.err, 'warn'); return; }
   const nOld = removeGenerated(T.P0);
   tp.P0 = { x: +T.P0.x.toFixed(3), y: +T.P0.y.toFixed(3) }; tp.u = { x: +T.bridge.dir.x.toFixed(6), y: +T.bridge.dir.y.toFixed(6) };
@@ -724,6 +738,55 @@ function addTrumpetAt(w, crossK) {
 
 // Trèfle / demi-trèfle sur la voie secondaire k : construit au croisement avec l'autoroute ; l'axe de la voie est redressé
 // perpendiculairement à l'autoroute (biais non traité pour ces gabarits), sur 1,5 km de part et d'autre (800 m : demi).
+// Rectification locale de la voie secondaire pour un gabarit : seul le tronçon utile (± Lneed autour du croisement P0,
+// dans la direction dir du gabarit) devient rectiligne ; au-delà, le tracé saisi (sinueux) est conservé, raccordé par
+// un sommet à 120 m de chaque extrémité du tronçon droit (rayon R0, réduit pour que la courbe ne morde pas le tronçon).
+// Les abscisses des raccordements du gabarit (repère droit : base Lc au croisement) sont reportées sur le nouvel axe ;
+// si le tracé saisi est orienté en sens inverse de dir, il garde son sens (chaussées 1 / 2 permutées, abscisses
+// miroirs). Renvoie un résumé pour le message.
+function rectifyCross(k, P0, dirIn, Lneed, ramps, Lc) {
+  const X = S.prj.crosses[k], orig = (X.axis || []).map((p) => ({ ...p }));
+  const C = X.kind === 'autoroute' ? HWY_CAT[X.cat] || HWY_CAT.L2 : null, R0 = C ? Math.max(600, C.Rdn) : 250;
+  let dir = G.norm(dirIn), flip = false;
+  // projection de P0 sur le tracé saisi
+  const Ls = [0]; for (let i = 1; i < orig.length; i++) Ls.push(Ls[i - 1] + G.dist(orig[i - 1], orig[i]));
+  let best = null;
+  for (let i = 1; i < orig.length; i++) {
+    const a = orig[i - 1], b = orig[i], d = G.sub(b, a), ll = G.dot(d, d) || 1, t = Math.max(0, Math.min(1, G.dot(G.sub(P0, a), d) / ll));
+    const q = G.add(a, G.mul(d, t)), dd = G.dist(P0, q);
+    if (!best || dd < best.dd) best = { dd, s: Ls[i - 1] + t * Math.sqrt(ll), dir: G.norm(d) };
+  }
+  if (best && G.dot(best.dir, dir) < 0) { dir = G.neg(dir); flip = true; }
+  const r3p = (q) => ({ x: +q.x.toFixed(3), y: +q.y.toFixed(3) });
+  // De chaque côté : sommet de raccordement à J au-delà du tronçon droit, J assez grand pour loger le rayon R0.
+  const sideOf = (sg) => {
+    const far = best ? orig.filter((p, i) => (sg < 0 ? Ls[i] < best.s - Lneed - 200 : Ls[i] > best.s + Lneed + 200)) : [];
+    const nxt = sg < 0 ? far[far.length - 1] : far[0];
+    let J = 120;
+    if (nxt) {
+      const E = G.add(P0, G.mul(dir, sg * Lneed)), v = G.norm(G.sub(nxt, E)), dl = Math.acos(Math.max(-1, Math.min(1, sg * G.dot(v, dir))));
+      J = Math.max(120, R0 * Math.tan(dl / 2) + 20);
+    }
+    const V = G.add(P0, G.mul(dir, sg * (Lneed + J)));
+    const keep = best ? orig.filter((p, i) => (sg < 0 ? Ls[i] < best.s - Lneed - J - 60 : Ls[i] > best.s + Lneed + J + 60)) : [];
+    return { V, J, keep };
+  };
+  const SA = sideOf(-1), SB = sideOf(1), before = SA.keep, after = SB.keep;
+  const rAt = (prev, V, next, J) => { const u = G.norm(G.sub(V, prev)), v = G.norm(G.sub(next, V)), dl = Math.acos(Math.max(-1, Math.min(1, G.dot(u, v)))); return dl < 1e-3 ? 0 : Math.floor(Math.min(R0, (J - 5) / Math.tan(dl / 2)) / 5) * 5; };
+  const A = SA.V, B = SB.V;
+  const Av = { ...r3p(A), ...(before.length ? { r: rAt(before[before.length - 1], A, B, SA.J) } : {}) };
+  const Bv = { ...r3p(B), ...(after.length ? { r: rAt(A, B, after[0], SB.J) } : {}) };
+  X.on = true; X.axis = [...before, Av, Bv, ...after];
+  // abscisses du gabarit → nouvel axe
+  const path = G.roundPolylineFit(X.axis, X.axis.map((p) => p.r)).segs, sc = pathProject(path, P0).s;
+  const r1 = xref(k, 1), r2 = xref(k, 2);
+  for (const r of ramps) for (const e of [r.from, r.to]) {
+    if (!e || (e.ref !== r1 && e.ref !== r2) || e.s === '' || e.s == null) continue;
+    const u = +e.s - Lc;
+    if (flip) { e.ref = e.ref === r1 ? r2 : r1; e.s = +(sc - u).toFixed(2); } else e.s = +(sc + u).toFixed(2);
+  }
+  return { kept: before.length + after.length, L: Math.round(2 * Lneed + SA.J + SB.J) };
+}
 function addCloverAt(w, kind, k) {
   const X = S.prj.crosses[k];
   if (!X) return;
@@ -732,14 +795,18 @@ function addCloverAt(w, kind, k) {
   const T = withHwyCover(() => (kind === 'trefle' ? cloverleaf : halfCloverleaf)(S.prj, S.D, P, uid, { crossK: k }));
   if (T.err) { toast(T.err, 'warn'); return; }
   const skew = C ? (Math.acos(Math.min(1, Math.abs(G.dot(C.dir, G.norm(G.sub(T.crossAxis[1], T.crossAxis[0])))))) * 180) / Math.PI : 0;
-  X.on = true; X.axis = T.crossAxis;
-  if (skew > 0.5) toast(t(`${X.name} : axe redressé perpendiculairement à l'autoroute (biais de ${fmt(skew, 1)}° non traité pour ce gabarit).`), 'warn');
   const nOld = removeGenerated(G.lerp(T.crossAxis[0], T.crossAxis[1], 0.5), 1500);
+  // Tronçon rendu rectiligne et perpendiculaire : emprise des bretelles le long de la voie secondaire + 150 m.
+  const P0 = G.lerp(T.crossAxis[0], T.crossAxis[1], 0.5), dirX = G.norm(G.sub(T.crossAxis[1], T.crossAxis[0]));
+  const Lc0 = G.dist(T.crossAxis[0], T.crossAxis[1]) / 2;
+  const Lneed = Math.min(Lc0 - 130, Math.max(...T.ramps.flatMap((r) => (r.pis || []).map((q) => Math.abs(G.dot(G.sub(q, P0), dirX))))) + 150);
+  const RC = rectifyCross(k, P0, dirX, Lneed, T.ramps, Lc0);
+  const rectMsg = `${X.name} rectifiée sur ${RC.L} m autour du croisement${skew > 0.5 ? ` (perpendiculaire à l'autoroute, biais de ${fmt(skew, 1)}° supprimé localement)` : ''}${RC.kept ? ', raccordée de part et d\'autre à votre tracé' : ''}.`;
   const n0 = S.prj.ramps.length;
   S.prj.ramps.push(...T.ramps.map((r) => ({ ...r, gen: kind }))); S.rsel = n0;
   setTool('select'); update(); zoomAll();
   const what = (kind === 'trefle' ? (X.kind === 'autoroute' ? 'Trèfle (nœud autoroutier, collectrices sur les deux axes)' : 'Trèfle complet (collectrices sur l\'autoroute)') : 'Demi-trèfle (extrémités libres sur la voie secondaire)') + ` sur ${X.name}`;
-  toast(`${what} généré : ${T.info}.${nOld ? ` ${nOld} bretelle(s) du gabarit précédent remplacée(s) (Ctrl+Z pour annuler).` : ''}` + (T.extNote ? ' ' + T.extNote : '') + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
+  toast(`${what} généré : ${T.info}. ${rectMsg}${nOld ? ` ${nOld} bretelle(s) du gabarit précédent remplacée(s) (Ctrl+Z pour annuler).` : ''}` + (T.extNote ? ' ' + T.extNote : '') + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
 }
 
 // Losange, losange à giratoires, demi-échangeur, giratoire dénivelé sur la voie secondaire k. Les giratoires sont créés
@@ -770,7 +837,13 @@ function addDiamondAt(w, kind, k) {
     : diamond(S.prj, S.D, P, uid, { crossK: k, dir: C?.dir, gir, part: demi ? (H.dmSide === 'fin' ? 'fin' : 'debut') : 'complet', Yj: nv(H.loY), Rg: nv(H.loRg) })));
   if (T.err) { toast(T.err, 'warn'); return; }
   const nOld = removeGenerated(P, 1500), nJ = removeGenJunctions(P, 1500);
-  if (T.crossOff) X.on = false; else { X.on = true; X.axis = T.crossAxis; }
+  let rect = null;
+  if (T.crossOff) X.on = false;
+  else if (!(T.juncs || []).length) { // losange / demi-échangeur à extrémités libres : tracé saisi conservé au-delà des carrefours
+    const P0 = G.lerp(T.crossAxis[0], T.crossAxis[1], 0.5), dirX = G.norm(G.sub(T.crossAxis[1], T.crossAxis[0]));
+    const Lneed = Math.max(...T.ramps.flatMap((r) => (r.pis || []).map((q) => Math.abs(G.dot(G.sub(q, P0), dirX))))) + 60;
+    rect = rectifyCross(k, P0, dirX, Lneed, T.ramps, G.dist(T.crossAxis[0], T.crossAxis[1]) / 2);
+  } else { X.on = true; X.axis = T.crossAxis; }
   const n0 = S.prj.ramps.length;
   S.prj.ramps.push(...T.ramps.map((r) => ({ ...r, name: `${r.name}-X${k + 1}`, gen: kind }))); S.rsel = n0; // S1-X2 : sortie du sens 1 sur la voie secondaire 2
   S.prj.genJ = S.prj.genJ || {};
@@ -787,6 +860,7 @@ function addDiamondAt(w, kind, k) {
   const what = { losange: 'Losange (carrefours plans à compléter aux extrémités libres)', losangegir: 'Losange à deux giratoires', demiech: `Demi-échangeur (bretelles côté ${H.dmSide === 'fin' ? 'fin' : 'origine'} de l'axe${gir ? ', giratoires' : ', extrémités libres'})`, girden: 'Giratoire dénivelé à deux ouvrages' }[kind];
   const msgs = [`${what} généré sur ${X.name} : ${T.info}.`];
   if (T.crossOff) msgs.push(`${X.name} est désactivée : le giratoire la remplace par deux branches.`);
+  if (rect) msgs.push(`${X.name} rendue rectiligne sur ${rect.L} m autour du croisement${rect.kept ? ', raccordée de part et d\'autre à votre tracé' : ''}.`);
   if (nOld || nJ) msgs.push(`Gabarit précédent remplacé (${nOld} bretelle(s)${nJ ? `, ${nJ} giratoire(s)` : ''}) — Ctrl+Z pour annuler.`);
   if (T.extNote) msgs.push(T.extNote);
   if (T.warn) msgs.push(T.warn);
@@ -3016,7 +3090,7 @@ async function openProject(file) {
   try {
     const js = JSON.parse(await file.text());
     if (js.app !== 'GIRA') throw new Error('ce fichier n\'est pas un projet GIRA');
-    S.prj = migrate(js);
+    S.prj = migrate(js); S.D = null; S.trSig = new Map(); S.trGood = new Map();
     S.sel = -1; S.hist = []; S.fut = [];
     applyCRS(); syncCtxUI(); syncCrsUI(); renderBranchForm(); update();
     if (js.view && isFinite(js.view.s)) { viewer.cx = js.view.cx; viewer.cy = js.view.cy; viewer.s = js.view.s; viewer.invalidate(); } else zoomGira();

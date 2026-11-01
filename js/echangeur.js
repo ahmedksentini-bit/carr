@@ -807,7 +807,7 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
     const lam1 = 140 + T1 + 10, P1y = -yA - p3 * lam1;
     if (P1y <= Tp.y) continue;
     const P1 = add(Tp, mul(uf, (P1y - Tp.y) / uf.y));
-    if (dist(P1, P2) >= T1 + T2 + 5 && (!best || P1.x - lam1 > best.xS)) best = { P1, P2, xS: P1.x - lam1, deg };
+    if (dist(P1, P2) >= T1 + T2 + (opt.semiMargin ?? 5) && (!best || P1.x - lam1 > best.xS)) best = { P1, P2, xS: P1.x - lam1, deg };
   }
   if (!best) return { err: 'Gabarit impossible avec ces rayons.' };
   const sEnd = add(Rp, mul(u, Ys));

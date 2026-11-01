@@ -195,6 +195,14 @@ ou sur un fond topographique DXF.
   l'axe de la branche. Les branches des bretelles se dessinent par le raccordement automatique ci-dessous ; un nouveau
   gabarit au même croisement remplace aussi les giratoires du précédent. Grands giratoires (Rg > 25 m, hors tableau
   ACI) : îlots séparateurs construits sur le triangle de Rg = 25 m.
+- **Voie secondaire sinueuse** : le trèfle, le demi-trèfle et le losange à extrémités libres ne remplacent plus tout
+  l'axe saisi par une droite ; seul le tronçon occupé par le gabarit (emprise des bretelles + 150 m, ou + 60 m pour le
+  losange) est rendu rectiligne (perpendiculaire à l'autoroute pour le trèfle et le demi-trèfle, dans la direction du
+  croisement pour le losange) et raccordé de part et d'autre au tracé saisi par une courbe (250 m sur route, Rdn
+  au moins sur autoroute) ; le sens du tracé et les abscisses des raccordements sont conservés.
+- **Trompette sur autoroute en courbe** : la S-semi est recalculée avec un alignement intermédiaire plus long si ses
+  deux raccordements se chevauchent une fois le premier sommet reporté sur la ligne d'obliquité réelle ; les trompettes
+  d'un projet ouvert sont recalculées dès l'ouverture.
 - **Onglet Ouvrages** : réglages communs (tirant d'air, piles, dispositifs de retenue et classes W, travure), liste des
   ouvrages et travure modifiable de chacun : travées le long de l'axe (centrées sur le croisement, décalage possible),
   ajout / suppression d'une travée, épaisseur imposée, retour à l'implantation automatique ; le dessin, la fiche et les
