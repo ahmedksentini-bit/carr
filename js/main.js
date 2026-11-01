@@ -2971,7 +2971,7 @@ function drawHydro() {
   // écoulements orientés de l'amont vers l'aval : flèches régulières (tous les ~250 m) et à l'extrémité aval
   for (const st of R.streams || []) {
     if (st.pts.length < 2) continue;
-    P({ k: 'path', L: 'BASSINS', segs: segs(st.pts), role: 'stream' });
+    P({ k: 'path', L: 'BASSINS', segs: segs(st.pts), role: 'stream', arrow: true }); // pointe à l'extrémité aval, même sur un tronçon court
     let acc = 0, next = 120;
     for (let i = 1; i < st.pts.length; i++) {
       const a = st.pts[i - 1], b = st.pts[i], d = G.dist(a, b);
@@ -2994,9 +2994,14 @@ function hyRdp(pts, tol) {
   const keep = new Uint8Array(pts.length); keep[0] = keep[pts.length - 1] = 1;
   const st = [[0, pts.length - 1]];
   while (st.length) {
-    const [a, b] = st.pop(), A = pts[a], B = pts[b], dx = B.x - A.x, dy = B.y - A.y, L = Math.hypot(dx, dy) || 1;
+    const [a, b] = st.pop(), A = pts[a], B = pts[b], dx = B.x - A.x, dy = B.y - A.y, L2 = dx * dx + dy * dy;
     let dm = -1, im = -1;
-    for (let i = a + 1; i < b; i++) { const d = Math.abs((pts[i].x - A.x) * dy - (pts[i].y - A.y) * dx) / L; if (d > dm) { dm = d; im = i; } }
+    // distance au SEGMENT (au sommet A si le segment est dégénéré, cas d'un anneau fermé dont les extrémités coïncident)
+    for (let i = a + 1; i < b; i++) {
+      const u = L2 > 1e-12 ? Math.max(0, Math.min(1, ((pts[i].x - A.x) * dx + (pts[i].y - A.y) * dy) / L2)) : 0;
+      const d = Math.hypot(pts[i].x - (A.x + u * dx), pts[i].y - (A.y + u * dy));
+      if (d > dm) { dm = d; im = i; }
+    }
     if (dm > tol && im > 0) { keep[im] = 1; st.push([a, im], [im, b]); }
   }
   return pts.filter((_, i) => keep[i]);
