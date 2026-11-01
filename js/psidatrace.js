@@ -133,10 +133,26 @@ export function deckTrace(B) {
     const psi = (Math.atan2(dN, dT) * 200) / Math.PI;
     return { s, psi: Math.abs(psi - 100) < 0.5 ? 100 : Math.round(psi * 10) / 10, kind: B.sup[i].kind };
   }).sort((a, b) => a.s - b.s);
-  // ouvrage droit entre les lignes d'appui extrêmes (R > 100 km partout) : pas de tracé
-  let kMax = 0;
-  for (let k = 0; k <= 200; k++) kMax = Math.max(kMax, Math.abs(A.courbure(st[0].s + ((st[st.length - 1].s - st[0].s) * k) / 200)));
-  if (kMax < 1e-5) return null;
+  // courbure maximale entre les lignes d'appui extrêmes, élément par élément (un arc court n'échappe pas à un
+  // échantillonnage) ; angles vifs (sommet de rayon nul) : tangentes discontinues entre éléments successifs
+  const sA = st[0].s, sB = st[st.length - 1].s;
+  let kMax = 0, acc = 0;
+  const kinks = [];
+  segments.forEach((g, i) => {
+    const L = segLen(g), lo = Math.max(sA, acc), hi = Math.min(sB, acc + L);
+    if (hi > lo - 1e-9) {
+      if (g.type === 'arc') kMax = Math.max(kMax, 1 / g.r);
+      else if (g.type === 'clothoide') kMax = Math.max(kMax, Math.abs(clothoKappa(g, lo - acc)), Math.abs(clothoKappa(g, hi - acc)));
+    }
+    if (i && acc > sA + 1e-6 && acc < sB - 1e-6) {
+      const t1 = A.tangente(acc - 1e-4), t2 = A.tangente(acc + 1e-4), d = Math.abs(Math.atan2(t1[0] * t2[1] - t1[1] * t2[0], t1[0] * t2[0] + t1[1] * t2[1]));
+      if (d > 2e-3) kinks.push({ s: acc, gr: (d * 200) / Math.PI });
+    }
+    acc += L;
+  });
+  if (kinks.length) warnings.push(`axe à angle vif entre les appuis (${kinks.map((k) => `${(Math.round(k.gr * 10) / 10).toString().replace('.', ',')} gr à s = ${k.s.toFixed(1).replace('.', ',')} m`).join(' ; ')}) : PSIDA suppose un axe à tangente continue — arrondissez le sommet (rayon) de la voie portée`);
+  const curved = kMax >= 1e-5;
+  if (!curved && !kinks.length) return null;
   const psiLignes = st.map((q) => q.psi), psiMin = Math.min(...psiLignes.map((p) => Math.min(p, 200 - p)));
   if (psiMin < 50) warnings.push(`biais trop prononcé pour la plaque de PSIDA (ψ = ${psiLignes.map((p) => String(p).replace('.', ',')).join(' / ')} gr ; ψ ≥ 50 gr requis)`);
   const clean = (g) => {
@@ -148,7 +164,7 @@ export function deckTrace(B) {
   return {
     segments: segments.map(clean), s0: stations[0], source: `GIRA – ${B.name || 'ouvrage'}`, stations,
     ...(psiLignes.some((p) => p !== 100) ? { psiLignes } : {}),
-    psiMin, rMin: 1 / kMax, spans: stations.slice(1).map((s, k) => s - stations[k]),
+    curved, psiMin, rMin: curved ? 1 / kMax : Infinity, spans: stations.slice(1).map((s, k) => s - stations[k]),
     elements: segments.map(libelleElement), ecart, warnings,
   };
 }
