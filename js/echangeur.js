@@ -176,8 +176,12 @@ export function buildEchangeur(prj, D) {
   const text = (lay, p, s, rot = 0, align = 'center', h = TH) => P({ k: 'text', L: lay, p, s, rot: upright(rot), align, h });
   const WV = weavePairs(prj);
   D.weaves = WV;
+  const unitA = prj.opts?.angleUnit || 'gon';
+  const fmtA = (rad) => (unitA === 'deg' ? `${fmt((rad * 180) / Math.PI, 4)}°` : `${fmt((rad * 200) / Math.PI, 4)} gr`);
 
   // --- Sections courantes (autoroute et route transversale) ----------------------------------
+  const XP0 = crossParams(prj), roads = ['hwy', 'cross'];
+  const axisPaths = { hwy: H.axis.length >= 2 ? G.roundPolyline(H.axis, H.axis.map((p) => p.r)) : null, cross: XP0.on && XP0.axis.length >= 2 ? G.roundPolyline(XP0.axis, XP0.axis.map((p) => p.r)) : null };
   const drawRoad = (key, H) => {
     const path = G.roundPolyline(H.axis, H.axis.map((p) => p.r));
     const sEnd = G.pathLen(path), isRoute = key === 'cross' && H.kind === 'route';
@@ -240,6 +244,44 @@ export function buildEchangeur(prj, D) {
       text('COTATION', add(p, mul(n, E2 + H.berme + 2.5)), `${isRoute ? 'PR' : 'PK'} ${fmt((H.pk0 + st) / 1000, 3)}`, ang(tg), 'center', TH * 0.8);
       pt(`${H.name} · ${isRoute ? 'PR' : 'PK'} ${fmt((H.pk0 + st) / 1000, 3)}`, p);
     }
+    // Cotation des courbes de l'axe : rayon, développement, angle au centre, tangente ; repères TC / CT en travers.
+    const W = E2 + H.berme;
+    let sArc = 0;
+    path.forEach((sg, j) => {
+      const Ls = G.segLen(sg);
+      if (sg.t === 'A') {
+        const sw = G.sweep(sg), sgn = sg.ccw ? 1 : -1, T = sg.r * Math.tan(sw / 2);
+        const lbl = `R ${fmt(sg.r)} m · Lc ${fmt(Ls)} m · Δ ${fmtA(sw)} · T ${fmt(T)} m`, hL = TH * 1.6;
+        // Étiquette au milieu de l'arc, déplacée le long de l'arc si elle tombe sur l'autre axe (croisement).
+        const others = roads.filter((o) => o !== key).map((o) => axisPaths[o]).filter(Boolean);
+        const clear = (f) => {
+          const a = sg.sa + sgn * sw * f, q = add(sg.c, mul(G.unit(a), sg.r + W + 3));
+          return others.every((op) => { const pr = pathProject(op, q); return !pr || dist(pr.p, q) > 0.35 * lbl.length * hL + 25; });
+        };
+        const f = [0.5, 0.3, 0.7, 0.15, 0.85, 0.05, 0.95].find(clear), need = 0.35 * lbl.length * hL + 30;
+        if (f != null) { const am = sg.sa + sgn * sw * f; text('COTATION', add(sg.c, mul(G.unit(am), sg.r + W + 3)), lbl, am + (sgn * Math.PI) / 2, 'center', hL); }
+        else { // arc court au droit du croisement : étiquette reportée sur l'alignement qui suit (ou précède), rappelée par une ligne
+          const ends = [[sg.ea, 1], [sg.sa, -1]].map(([a, dir]) => {
+            const P0 = add(sg.c, mul(G.unit(a), sg.r + W + 3)), tg = mul(G.unit(a + (sgn * Math.PI) / 2), dir);
+            return { P0, q: add(P0, mul(tg, need)), th: a + (sgn * Math.PI) / 2 };
+          });
+          const e = ends.find(({ q }) => others.every((op) => { const pr = pathProject(op, q); return !pr || dist(pr.p, q) > need - 25; })) || ends[0];
+          text('COTATION', e.q, lbl, e.th, 'center', hL);
+          P({ k: 'path', L: 'COTATION', segs: [G.L(e.P0, add(e.P0, mul(sub(e.q, e.P0), 1 - (0.35 * lbl.length * hL + 2) / need)))] });
+        }
+        for (const [nm, a, st] of [['TC', sg.sa, sArc], ['CT', sg.ea, sArc + Ls]]) {
+          const v = G.unit(a);
+          P({ k: 'path', L: 'COTATION', segs: [G.L(add(sg.c, mul(v, sg.r - W - 1)), add(sg.c, mul(v, sg.r + W + 1)))] });
+          text('COTATION', add(sg.c, mul(v, sg.r + W + 2.5)), `${nm}${j}`, a, 'center', TH * 0.8);
+          pt(`${H.name} · ${nm}${j} (${isRoute ? 'PR' : 'PK'} ${fmt((H.pk0 + st) / 1000, 3)}, R ${fmt(sg.r)} m)`, G.polar(sg.c, sg.r, a));
+        }
+        pt(`${H.name} · centre de la courbe ${j} (R ${fmt(sg.r)} m)`, sg.c);
+      } else if (Ls > 20) {
+        const m = G.segAt(sg, 0.5), th = ang(sub(sg.b, sg.a)), n = rot90(unit(th));
+        text('COTATION', add(m, mul(n, W + 3)), `alignement ${fmt(Ls)} m`, th, 'center', TH * 0.9);
+      }
+      sArc += Ls;
+    });
     pt(`${H.name} · origine`, G.pathPointAt(path, 0)); pt(`${H.name} · fin`, G.pathPointAt(path, sEnd));
     return road;
   };
@@ -590,7 +632,7 @@ export function buildEchangeur(prj, D) {
       if (el.kind !== 'A') return;
       const m = el.pointAt(el.len / 2), hd = el.headAt(el.len / 2), n = rot90(unit(hd));
       const side = el.sg > 0 ? -1 : 1, tg = al.tangents.find((t) => Math.abs(t.R - el.R) < 1e-9);
-      text('COTATION', add(m, mul(n, side * (half + rp.bdd + 2))), `${tg?.loop ? 'boucle ' : ''}R ${fmt(el.R)} m (Ri ${fmt(R.rIn(el.R))}) · A ${fmt(tg?.A || 0)} · d ${fmt(deversOfRadius(R.rIn(el.R), C), 1)} %${R.rIn(el.R) < 100 ? ` · surl. ${fmt((50 * rp.lanes) / R.rIn(el.R))}` : ''}`, hd, 'center', TH * 0.8);
+      text('COTATION', add(m, mul(n, side * (half + rp.bdd + 2))), `${tg?.loop ? 'boucle ' : ''}R ${fmt(el.R)} m (Ri ${fmt(R.rIn(el.R))}) · A ${fmt(tg?.A || 0)} · d ${fmt(deversOfRadius(R.rIn(el.R), C), 1)} %${R.rIn(el.R) < 100 ? ` · surl. ${fmt((50 * rp.lanes) / R.rIn(el.R))}` : ''} · Lc ${fmt(el.len)} m · Δ ${fmtA(el.len / el.R)}`, hd, 'center', TH * 0.8);
     });
     const sl = Math.min(L, R.sTplS + 30), m0 = al.pointAt(sl), n0 = rot90(unit(al.headAt(sl)));
     text('COTATION', add(m0, mul(n0, -(half + rp.bdd + 2))), `${name} — ${rp.label}`, al.headAt(sl), 'center', TH);

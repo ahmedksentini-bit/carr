@@ -160,7 +160,10 @@ ou sur un fond topographique DXF.
   contrôlés. **Voie d'entrecroisement** (§ 3.4.3 : 3,50 m contiguë à la chaussée + BDD 1,00 m) dessinée de E.1,00 à
   S.1,00 quand une entrée est suivie d'une sortie rapprochée (insertion et biseau de sortie qui se rejoindraient, ou
   Z ≤ 750 m sur autoroute) ; musoirs superposés (S.1,00 en amont de E.1,00) signalés en erreur. Le gabarit de trèfle
-  relève au besoin le rayon des boucles pour garder Z ≥ 0 sur chaque chaussée.
+  relève au besoin le rayon des boucles pour garder Z ≥ 0 sur chaque chaussée. **Cotations** des courbes de l'autoroute et
+  de la route transversale (R, développement Lc, angle au centre Δ dans l'unité choisie, tangente T, repères TC / CT avec
+  PK / PR, centres dans la liste des points ; longueur des alignements) et des arcs des bretelles (R, Ri, A, dévers,
+  surlargeur, Lc, Δ) ; l'étiquette d'une courbe d'axe est déplacée hors du croisement.
 - **Exports** : DXF R12 par calques `GIRA_*` (AutoCAD, Covadis, BricsCAD…), PNG, points d'implantation X, Y, Z en CSV,
   projet `.gira.json` (et sauvegarde automatique dans le navigateur).
 
