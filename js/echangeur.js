@@ -5,7 +5,7 @@
 // Sources : Cerema, « Les échangeurs sur routes de type Autoroute », éd. 2013, maj 2021 (noté [ECH]) ;
 // ICTAAL éd. 2015, maj 2021 (noté [ICTAAL]). Les renvois § sont ceux de ces guides.
 import * as G from './geom.js';
-import { buildAlignment, offsetPolyline, polySegs, pathTangentAt, pathProject, cloMinLength, tangentLength } from './clotho.js';
+import { buildAlignment, offsetPolyline, polySegs, pathTangentAt, pathProject, cloMinLength, tangentLength, cloXY } from './clotho.js';
 import { fmt, upright } from './common.js';
 
 const { add, sub, mul, norm, rot90, neg, dist, ang, unit } = G;
@@ -507,18 +507,30 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
   const alL = buildAlignment([{ x: -off2, y: Ys }, { x: -off2, y: yPI, R: Rl, A: Al, loop: true }, { x: xE, y: -yA }]);
   const arc = alL.elems.find((e) => e.kind === 'A');
   const yc = arc ? arc.C.y : yPI - Rl; // la grande courbe de S-semi enveloppe la boucle (tangente à la tige à cette hauteur)
-  // S-semi : P1 sur la ligne d'obliquité du divergent (3 %), P2 au coin sud-est, extrémité libre en haut de la tige.
+  // S-semi : sortie par la droite (R1), puis grande courbe à gauche qui enveloppe la boucle (R2) et remonte la tige.
+  // Le cercle de R2 est centré à g mètres à l'ouest du centre de la boucle et tangent à la tige : les plates-formes se
+  // touchent le long de la tige (chaussée bidirectionnelle) et le terre-plein entre les deux s'ouvre jusqu'à 2g à l'ouest.
+  // Contraintes : 1er rayon de sortie ≥ 100 m et R1 < 2·R2 (§ 3.2.2) ; clothoïdes ≥ max(6R^0,4 ; 7|Δd|) (§ 3.2.3).
+  const g = opt.gap ?? 10, Cl = arc ? arc.C : { x: -off2 - Rl, y: yPI - Rl };
+  const Qx = Cl.x - g, Qy = Cl.y, rho = off2 - Qx; // rayon effectif (arc + ripage de la clothoïde)
+  const Amin = (R) => Math.ceil(Math.sqrt(cloMinLength(R, Math.abs(deversOfRadius(R, RAMP_CAT.b50) - 2.5), 1) * R) / 5) * 5;
+  let R2 = rho, A2 = 50;
+  for (let i = 0; i < 4; i++) { A2 = opt.A2 || Amin(R2); const L2 = (A2 * A2) / R2, e = cloXY(A2, L2), tau = L2 / (2 * R2); R2 = rho - (e.y - R2 * (1 - Math.cos(tau))); }
+  R2 = Math.round(R2 * 10) / 10;
+  const R1 = opt.R1 || Math.max(100, Math.min(Math.floor((2 * R2 - 1) / 5) * 5, 150)), A1 = opt.A1 || Amin(R1);
   let best = null;
-  for (let phi = 40; phi <= 75; phi += 5) {
-    const f = (phi * Math.PI) / 180, T2 = tangentLength(Rd, Ad, Math.PI / 2 + f), T1 = tangentLength(Rd, Ad, f - Math.atan(p3));
-    const P2 = { x: off2, y: yc - T2 }, lam1 = 140 + T1 + 30, P1y = -yA - p3 * lam1;
-    const run = (P1y - P2.y) / Math.tan(f), P1 = { x: off2 - run, y: P1y };
-    if ((P1y - P2.y) / Math.sin(f) >= T1 + T2 + 10) { best = { P1, P2, xS: P1.x - lam1 }; break; }
+  for (let deg = 25; deg <= 70; deg += 5) { // angle de la droite entre R1 et R2 : le plus compact (divergent le plus proche)
+    const f = (deg * Math.PI) / 180, u = { x: Math.cos(f), y: -Math.sin(f) };
+    const Tp = { x: Qx - rho * Math.sin(f), y: Qy - rho * Math.cos(f) }; // point de tangence de la droite sur le cercle effectif
+    const P2 = { x: off2, y: Tp.y + ((off2 - Tp.x) / u.x) * u.y };
+    const T1 = tangentLength(R1, A1, f - Math.atan(p3)), T2 = tangentLength(R2, A2, Math.PI / 2 + f);
+    const lam1 = 140 + T1 + 10, P1y = -yA - p3 * lam1, P1 = { x: P2.x - (P1y - P2.y) / Math.tan(f), y: P1y };
+    if (Math.hypot(P2.x - P1.x, P2.y - P1.y) >= T1 + T2 + 5 && (!best || P1.x - lam1 > best.xS)) best = { P1, P2, xS: P1.x - lam1, deg };
   }
   if (!best) return { err: 'Gabarit impossible avec ces rayons.' };
   const B2 = { ...base, id: ids[1], name: 'S-semi', from: { ref: far, s: st(best.xS), biseau: '', obl: '', tpl: '' }, to: { ref: 'free' },
-    pis: [{ ...W(best.P1.x, best.P1.y), R: Rd, A: Ad }, { ...W(best.P2.x, best.P2.y), R: Rd, A: Ad }, W(off2, Ys)] };
-  const alS = buildAlignment([{ x: best.xS, y: -yA }, { ...best.P1, R: Rd, A: Ad }, { ...best.P2, R: Rd, A: Ad }, { x: off2, y: Ys }]);
+    pis: [{ ...W(best.P1.x, best.P1.y), R: R1, A: A1 }, { ...W(best.P2.x, best.P2.y), R: R2, A: A2 }, W(off2, Ys)] };
+  const alS = buildAlignment([{ x: best.xS, y: -yA }, { ...best.P1, R: R1, A: A1 }, { ...best.P2, R: R2, A: A2 }, { x: off2, y: Ys }]);
   // Bretelles directes : raccordées à la tige vers y = 240 m (insertion de 100 + 75 m sur S-semi).
   const yM = opt.yM || 240, Ld = opt.Ldir || 300;
   const B3 = { ...base, id: ids[2], name: 'S-directe', from: { ref: near, s: st(off2 + w + 1 + Ld), biseau: '', obl: '', tpl: '' },
