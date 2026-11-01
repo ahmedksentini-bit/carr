@@ -148,7 +148,16 @@ ou sur un fond topographique DXF.
   sur l'axe à l'endroit de l'ouvrage génère l'entrée en boucle, la sortie semi-directe qui l'enveloppe, la sortie et
   l'entrée directes raccordées à la tige bidirectionnelle. Surlargeur de 50/R par voie à l'intérieur des courbes de rayon
   < 100 m, introduite linéairement le long des clothoïdes (§ 3.4.2) ; rayons limites, dévers et vitesses contrôlés au
-  bord intérieur de la chaussée (Ri = R axe − l/2, § 3.2.1).
+  bord intérieur de la chaussée (Ri = R axe − l/2, § 3.2.1). **Route transversale** (second axe : route ordinaire ou
+  seconde autoroute) et **gabarits de trèfle** : un clic sur l'axe de l'autoroute au croisement crée l'axe transversal
+  perpendiculaire et génère soit le *trèfle complet* (quatre boucles de 270° sur trois sommets en arc continu, Ri ≈ 54 m ;
+  quatre bretelles directes à deux courbes reliées par un alignement à 45° qui contourne la boucle ; voies collectrices
+  sur l'autoroute, et aussi sur la seconde autoroute pour un nœud, dont les boucles passent en branche 70 km/h,
+  Ri ≥ 125 m, et les directes en 90 km/h), soit le *demi-trèfle* (de chaque côté, sortie directe enveloppant une boucle
+  d'entrée de 180°, extrémités libres sur la route transversale pour le carrefour à étudier). Les nez sont placés hors des
+  plates-formes croisées. Courbes composées (arc continu de rayons différents, rapport < 2) et **entrecroisements** (§ 7.3 :
+  enchaînement E → S ≥ 1 200 m, entrecroisement 500–750 m, report sur collectrice, Z ≥ 275 m sur bretelle / collectrice)
+  contrôlés.
 - **Exports** : DXF R12 par calques `GIRA_*` (AutoCAD, Covadis, BricsCAD…), PNG, points d'implantation X, Y, Z en CSV,
   projet `.gira.json` (et sauvegarde automatique dans le navigateur).
 
@@ -257,7 +266,7 @@ tab. 3-1 (Rdn, Rm), § 3.2.2 (enchaînement : R1 ≤ 1,5 R2 pour les branches, R
 § 3.2.5 (Ld = (Vs² − VR²) / 2(1,5 + 10 p), La = (VE² − VR²) / 2(1 − 10 p), Vs = 70 km/h, VE = 55 km/h), tab. 3-2
 (profil en long), § 3.4.2 (bretelle : BDD 1,00 / 3,50 / BDG 0,50 ; surlargeur 50/R si R < 100 m), § 3.5 (dévers),
 § 4.1.3.1 (biseau), schéma 5-1 (insertion 200 + 75 m), § 6.1 (tpl, obliquité, Lm), tab. 4-2 (d3, d2), annexe tab. 12-1
-(vitesse associée au rayon). ICTAAL 2015 maj 2021 : tab. 3-1 et 3-2 (section courante), § 4.1 (profil en travers).
+(vitesse associée au rayon), § 6.2.4 (boucle en sortie), § 7.3 (enchaînements et entrecroisements). ICTAAL 2015 maj 2021 : tab. 3-1 et 3-2 (section courante), § 4.1 (profil en travers).
 Largeur au tpl par défaut : BAU + 2,00 m (emprise de la balise J14, déduite du schéma 6-1) + BDG portée à 0,70 m
 (note 9), soit 5,20 m avec une BAU de 2,50 m comme dans le schéma 6-1. Traitement de la BAU : absorbée le long du biseau
 de déboîtement (bord de plate-forme = max(BAU ; rive de la bretelle + BDD)), interrompue et couverte par la zone
@@ -300,8 +309,11 @@ structure de l'HCM, d'après Troutbeck & Brilon, *Traffic Flow Theory*, chap. 8 
 ## Limites connues
 
 - Échangeur : seules les sorties en déboîtement et les entrées en insertion à une voie sont dessinées (pas
-  d'affectation Sa, d'adjonction Ea / Eb21 ni d'entrecroisement) ; la trompette est un gabarit de principe (rayons,
-  emprise de l'ordre de 1,5 km le long de l'autoroute) à ajuster ; l'ouvrage de franchissement n'est pas dessiné ; la section courante est tracée en droites et arcs (sans
+  d'affectation Sa, d'adjonction Ea / Eb21 ni d'entrecroisement) ; la trompette, le trèfle et le demi-trèfle sont des gabarits de principe
+  (rayons, emprise de l'ordre de 1,5 km le long de l'autoroute) à ajuster ; avec des boucles de 40 à 60 m, l'entrecroisement
+  entre deux boucles successives sur la collectrice reste très inférieur aux 275 m du § 7.3.3 (il est signalé) ; la voie
+  auxiliaire continue d'entrecroisement n'est pas dessinée (insertion et décélération se superposent) ; les carrefours aux
+  extrémités du demi-trèfle ne sont pas générés ; l'ouvrage de franchissement n'est pas dessiné ; la section courante est tracée en droites et arcs (sans
   clothoïdes) ; les bretelles n'ont pas encore de profil en long ni de profils en travers, ni de vue 3D, et leur
   extrémité n'est pas encore raccordée automatiquement au giratoire (branche à sens unique) : l'axe se termine sur la
   branche dessinée.

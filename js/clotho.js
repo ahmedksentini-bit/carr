@@ -30,18 +30,21 @@ export function cloMinLength(R, dDev, lanes = 1) {
   return lanes >= 2 ? Math.max(R / 9, 14 * dDev) : Math.max(6 * Math.pow(R, 0.4), 7 * dDev);
 }
 
-// Construit l'alignement. pis : [{x, y, R?, A?, loop?}] ; le premier et le dernier sommet sont des extrémités.
-// loop : le raccordement tourne « par le grand côté » (déviation 2π − δ du côté opposé) — boucle d'échangeur
-// d'environ 270° : l'axe se recoupe au sommet (franchissement dénivelé).
-// Retourne { elems, path, length, pointAt, headAt, curvAt, points, issues, tangents }.
+// Construit l'alignement. pis : [{x, y, R?, A?, loop?, link?}] ; le premier et le dernier sommet sont des extrémités.
+// loop : le raccordement tourne « par le grand côté » (déviation 2π − δ du côté opposé) — boucle de trompette d'environ
+// 270° dont l'axe se recoupe au sommet (franchissement dénivelé).
+// link : pas de clothoïde entre l'arc de ce sommet et celui du sommet précédent (arc continu, même rayon) — permet de
+// décrire une boucle de 180° ou de 270° en un seul arc sur deux ou trois sommets, sans recoupement.
+// Les clothoïdes d'entrée et de sortie d'un sommet peuvent donc différer (L1 = A²/R ou 0, L2 = A²/R ou 0).
+// Retourne { elems, path, length, pointAt, headAt, curvAt, elemAt, points, issues, tangents }.
 export function buildAlignment(pis, { name = '' } = {}) {
   const issues = [], elems = [], points = [];
-  const P = pis.map((p) => ({ x: +p.x, y: +p.y, R: +p.R || 0, A: +p.A || 0, loop: !!p.loop }));
+  const P = pis.map((p) => ({ x: +p.x, y: +p.y, R: +p.R || 0, A: +p.A || 0, loop: !!p.loop, link: !!p.link }));
   const n = P.length;
   const out = { elems, path: [], length: 0, points, issues, pointAt: null, headAt: null, curvAt: null, tangents: [] };
   if (n < 2) return out;
-  // Tangentes consommées à chaque sommet intérieur.
-  const T = new Array(n).fill(0), geo = new Array(n).fill(null);
+  // Tangentes d'entrée (Ti) et de sortie (To) à chaque sommet intérieur.
+  const Ti = new Array(n).fill(0), To = new Array(n).fill(0), geo = new Array(n).fill(null);
   for (let i = 1; i < n - 1; i++) {
     const d1 = norm(sub(P[i], P[i - 1])), d2 = norm(sub(P[i + 1], P[i]));
     const cr = cross(d1, d2);
@@ -49,51 +52,62 @@ export function buildAlignment(pis, { name = '' } = {}) {
     if (P[i].loop) { defl = 2 * Math.PI - defl; sg = -sg; }
     if (!(P[i].R > 0) || defl < 1e-5) { geo[i] = null; continue; }
     const R = P[i].R;
-    let A = P[i].A, L = A > 0 ? (A * A) / R : 0, tau = L / (2 * R);
-    if (2 * tau > defl) { // les deux clothoïdes consomment plus que la déflexion : on les raccourcit (ove sans arc)
-      tau = defl / 2; L = 2 * R * tau; A = Math.sqrt(L * R);
-      issues.push({ lvl: 'warn', msg: `${name} PI ${i} : déflexion trop faible pour les clothoïdes A = ${P[i].A} ; A ramené à ${A.toFixed(0)}.` });
+    let A1 = P[i].link ? 0 : P[i].A, A2 = P[i + 1]?.link && i + 1 < n - 1 ? 0 : P[i].A;
+    let L1 = A1 > 0 ? (A1 * A1) / R : 0, L2 = A2 > 0 ? (A2 * A2) / R : 0;
+    if ((L1 + L2) / (2 * R) > defl) { // les clothoïdes consomment plus que la déflexion : on les raccourcit (ove sans arc)
+      const k = (defl * 2 * R) / (L1 + L2); L1 *= k; L2 *= k; A1 = L1 > 0 ? Math.sqrt(L1 * R) : 0; A2 = L2 > 0 ? Math.sqrt(L2 * R) : 0;
+      issues.push({ lvl: 'warn', msg: `${name} PI ${i} : déflexion trop faible pour les clothoïdes A = ${P[i].A} ; A ramené à ${Math.max(A1, A2).toFixed(0)}.` });
     }
-    const e = L > 0 ? cloXY(A, L) : { x: 0, y: 0 };
-    const dR = e.y - R * (1 - Math.cos(tau)), Xm = e.x - R * Math.sin(tau);
-    T[i] = Xm + (R + dR) * Math.tan(defl / 2);
-    geo[i] = { d1, d2, defl, sg, R, A, L, tau, th0: ang(d1), th1: ang(d2), loop: P[i].loop };
+    const tau1 = L1 / (2 * R), tau2 = L2 / (2 * R), th0 = ang(d1), th1 = th0 + sg * defl;
+    // Forme du raccordement depuis TS = origine : clothoïde L1, arc, clothoïde L2 ; Ti, To tels que TS = PI − Ti·d1 et
+    // ST = PI + To·d2 (valeurs négatives possibles pour une boucle).
+    const SC = L1 > 0 ? cloPoint({ x: 0, y: 0 }, th0, sg, A1, L1) : { x: 0, y: 0 }, thSC = th0 + sg * tau1;
+    const C = add(SC, mul(rot90(unit(thSC)), sg * R)), sweep = defl - tau1 - tau2;
+    const CS = G.polar(C, R, ang(sub(SC, C)) + sg * sweep);
+    const q = L2 > 0 ? cloPoint({ x: 0, y: 0 }, th1 + Math.PI, -sg, A2, L2) : { x: 0, y: 0 }; // CS − ST
+    const E = sub(CS, q), det = cross(d1, d2);
+    let t, m;
+    if (Math.abs(det) > 1e-9) { t = cross(E, d2) / det; m = cross(d1, E) / det; }
+    else { t = -dot(E, d1) / 2; m = t; } // demi-tour exact : symétrique
+    Ti[i] = t; To[i] = m;
+    geo[i] = { d1, d2, defl, sg, R, A: P[i].A, A1, A2, L1, L2, tau1, tau2, th0, th1, sweep, loop: P[i].loop, link: P[i].link };
   }
   for (let i = 1; i < n - 1; i++) {
     const seg = dist(P[i - 1], P[i]);
-    if (T[i - 1] + T[i] > seg + 1e-6 || (P[i].loop && -T[i] > dist(P[i], P[i + 1]) + 1e-6)) issues.push({ lvl: 'err', msg: `${name} : les raccordements des PI ${i - 1} et ${i} se chevauchent (${(T[i - 1] + T[i]).toFixed(1)} m > ${seg.toFixed(1)} m).` });
+    if (To[i - 1] + Ti[i] > seg + (P[i].link ? 0.05 : 1e-3)) issues.push({ lvl: 'err', msg: `${name} : les raccordements des PI ${i - 1} et ${i} se chevauchent (${(To[i - 1] + Ti[i]).toFixed(1)} m > ${seg.toFixed(1)} m).` });
   }
-  if (T[n - 2] > dist(P[n - 2], P[n - 1]) + 1e-6) issues.push({ lvl: 'err', msg: `${name} : le dernier raccordement dépasse l'extrémité de l'axe.` });
+  if (To[n - 2] > dist(P[n - 2], P[n - 1]) + 1e-3) issues.push({ lvl: 'err', msg: `${name} : le dernier raccordement dépasse l'extrémité de l'axe.` });
   // Éléments successifs.
   let cur = P[0], s = 0;
   const pushLine = (a, b) => { const l = dist(a, b); if (l < 1e-6) return; const th = ang(sub(b, a)); elems.push({ kind: 'L', s0: s, len: l, p0: a, th0: th, R: 0, pointAt: (t) => add(a, mul(unit(th), t)), headAt: () => th, curvAt: () => 0 }); s += l; };
   for (let i = 1; i < n - 1; i++) {
     const g = geo[i];
     if (!g) { pushLine(cur, P[i]); cur = P[i]; continue; }
-    const TS = sub(P[i], mul(g.d1, T[i])), ST = add(P[i], mul(g.d2, T[i]));
+    let TS = sub(P[i], mul(g.d1, Ti[i]));
+    if (g.link && i > 1 && geo[i - 1] && dist(cur, TS) < 0.05) TS = cur; // arc continu : raccord exact (arrondis des sommets)
+    const ST = add(P[i], mul(g.d2, To[i]));
     pushLine(cur, TS);
-    const { sg, R, A, L, tau } = g;
+    const { sg, R, A1, A2, L1, L2, tau1, sweep } = g;
     let SC = TS, thSC = g.th0;
-    if (L > 0) { // clothoïde d'entrée
-      const k2 = 1 / (2 * A * A), p0 = TS, th0 = g.th0, s0 = s;
-      elems.push({ kind: 'C', s0, len: L, p0, th0, R, A, sg, pointAt: (t) => cloPoint(p0, th0, sg, A, t), headAt: (t) => th0 + sg * t * t * k2, curvAt: (t) => (sg * t) / (A * A) });
-      SC = cloPoint(TS, g.th0, sg, A, L); thSC = g.th0 + sg * tau; s += L;
+    if (L1 > 0) { // clothoïde d'entrée
+      const k2 = 1 / (2 * A1 * A1), p0 = TS, th0 = g.th0, s0 = s;
+      elems.push({ kind: 'C', s0, len: L1, p0, th0, R, A: A1, sg, pointAt: (t) => cloPoint(p0, th0, sg, A1, t), headAt: (t) => th0 + sg * t * t * k2, curvAt: (t) => (sg * t) / (A1 * A1) });
+      SC = cloPoint(TS, g.th0, sg, A1, L1); thSC = g.th0 + sg * tau1; s += L1;
       points.push({ name: `TS${i}`, p: TS }); points.push({ name: `SC${i}`, p: SC });
-    } else points.push({ name: `TC${i}`, p: TS });
-    const sweep = g.defl - 2 * tau; // arc circulaire
+    } else if (!g.link) points.push({ name: `TC${i}`, p: TS });
     const C = add(SC, mul(rot90(unit(thSC)), sg * R));
     const sa = ang(sub(SC, C)), p0 = SC, s0 = s;
-    elems.push({ kind: 'A', s0, len: R * sweep, p0, th0: thSC, R, sg, C, pointAt: (t) => G.polar(C, R, sa + (sg * t) / R), headAt: (t) => thSC + (sg * t) / R, curvAt: () => sg / R, seg: G.A(C, R, sa, sa + sg * sweep, sg > 0) });
+    elems.push({ kind: 'A', s0, len: R * sweep, p0, th0: thSC, R, sg, C, pi: i, pointAt: (t) => G.polar(C, R, sa + (sg * t) / R), headAt: (t) => thSC + (sg * t) / R, curvAt: () => sg / R, seg: G.A(C, R, sa, sa + sg * sweep, sg > 0) });
     s += R * sweep;
     const CS = elems[elems.length - 1].pointAt(R * sweep);
-    if (L > 0) { // clothoïde de sortie, paramétrée depuis ST à rebours
-      const k2 = 1 / (2 * A * A), th1 = g.th1, s0 = s;
-      elems.push({ kind: 'C', s0, len: L, p0: CS, th0: thSC + sg * sweep, R, A, sg, out: true, pointAt: (t) => cloPoint(ST, th1 + Math.PI, -sg, A, L - t), headAt: (t) => th1 - sg * (L - t) * (L - t) * k2, curvAt: (t) => (sg * (L - t)) / (A * A) });
-      s += L;
+    if (L2 > 0) { // clothoïde de sortie, paramétrée depuis ST à rebours
+      const k2 = 1 / (2 * A2 * A2), th1 = g.th1, s1 = s;
+      elems.push({ kind: 'C', s0: s1, len: L2, p0: CS, th0: thSC + sg * sweep, R, A: A2, sg, out: true, pointAt: (t) => cloPoint(ST, th1 + Math.PI, -sg, A2, L2 - t), headAt: (t) => th1 - sg * (L2 - t) * (L2 - t) * k2, curvAt: (t) => (sg * (L2 - t)) / (A2 * A2) });
+      s += L2;
       points.push({ name: `CS${i}`, p: CS }); points.push({ name: `ST${i}`, p: ST });
-    } else points.push({ name: `CT${i}`, p: ST });
+    } else if (!(P[i + 1]?.link && i + 1 < n - 1)) points.push({ name: `CT${i}`, p: ST });
     cur = ST;
-    out.tangents.push({ i, T: T[i], ...g });
+    out.tangents.push({ i, T: Ti[i], To: To[i], L: L1, ...g });
   }
   pushLine(cur, P[n - 1]);
   out.length = s;
@@ -104,6 +118,20 @@ export function buildAlignment(pis, { name = '' } = {}) {
   out.elemAt = (d) => find(d)[0];
   out.path = alignPath(out);
   return out;
+}
+
+// Longueurs de tangente (entrée, sortie) d'un raccordement clothoïde (A1) – arc R – clothoïde (A2) de déviation defl
+// (rad, éventuellement > π) ; mêmes conventions que buildAlignment.
+export function tangentLengths(R, A1, A2, defl) {
+  const L1 = A1 > 0 ? (A1 * A1) / R : 0, L2 = A2 > 0 ? (A2 * A2) / R : 0, sg = 1, th0 = 0, th1 = defl;
+  const d1 = { x: 1, y: 0 }, d2 = unit(th1);
+  const SC = L1 > 0 ? cloPoint({ x: 0, y: 0 }, th0, sg, A1, L1) : { x: 0, y: 0 }, thSC = L1 / (2 * R);
+  const C = add(SC, mul(rot90(unit(thSC)), R)), sweep = defl - L1 / (2 * R) - L2 / (2 * R);
+  const CS = G.polar(C, R, ang(sub(SC, C)) + sweep);
+  const q = L2 > 0 ? cloPoint({ x: 0, y: 0 }, th1 + Math.PI, -sg, A2, L2) : { x: 0, y: 0 };
+  const E = sub(CS, q), det = cross(d1, d2);
+  if (Math.abs(det) < 1e-9) { const t = -dot(E, d1) / 2; return [t, t]; }
+  return [cross(E, d2) / det, cross(d1, E) / det];
 }
 
 // Chemin geom.js : droites et arcs vrais, clothoïdes échantillonnées.
