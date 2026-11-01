@@ -29,6 +29,7 @@ export const THEMES = {
       TALUS: { stroke: '#a8a29e', w: 1, roles: { crete: { stroke: '#d6d3d1', w: 1.3 } } },
       SIGNALISATION: { stroke: '#f87171', w: 1.4, text: '#fca5a5' },
       IMPLANTATION: { stroke: '#e879f9', w: 1, text: '#f0abfc' },
+      PROFILS: { stroke: '#4ade80', w: 1.1, text: '#86efac' },
     },
   },
   light: {
@@ -57,6 +58,7 @@ export const THEMES = {
       TALUS: { stroke: '#78716c', w: 1, roles: { crete: { stroke: '#57534e', w: 1.3 } } },
       SIGNALISATION: { stroke: '#b91c1c', w: 1.4, text: '#991b1b' },
       IMPLANTATION: { stroke: '#a21caf', w: 1, text: '#86198f' },
+      PROFILS: { stroke: '#15803d', w: 1.1, text: '#166534' },
     },
   },
 };
@@ -163,7 +165,7 @@ function arrowHead(ctx, x0, y0, x1, y1, size) {
 export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
   if (!D) return;
   const T = THEMES[theme];
-  const order = ['MNT', 'CHAUSSEE', 'TALUS', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'RETENUE', 'OUVRAGE', 'PMR', 'VISIBILITE', 'EPURE', 'AXE', 'DEVERS', 'COTATION', 'SIGNALISATION'];
+  const order = ['MNT', 'CHAUSSEE', 'TALUS', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'RETENUE', 'OUVRAGE', 'PMR', 'VISIBILITE', 'EPURE', 'AXE', 'PROFILS', 'DEVERS', 'COTATION', 'SIGNALISATION'];
   ctx.lineCap = 'butt'; ctx.lineJoin = 'round';
   for (const layer of order) {
     if (vis[layer] === false) continue;

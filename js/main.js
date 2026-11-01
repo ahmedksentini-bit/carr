@@ -18,6 +18,8 @@ import { plParams, plBuild, plStations, plTerrainLine, plFromTerrain, plChartSVG
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
 import { buildOuvrages, W_CLASSES, psidaLink, psidaProject } from './ouvrage.js';
+import { buildProfils, listAxes, nearestAxis, profParams, profilsCsv } from './profils.js';
+import { cadreGeoms, drawCadre, cadreChecks, cadreLink, cadreProject, CADRE_DEF } from './cadres.js';
 import { chausseeOverlaps } from './overlap.js';
 import { analyse, SITES } from './capacity.js';
 import { initLang, getLang, t } from './i18n.js';
@@ -278,11 +280,26 @@ function update({ commit = true, panels = true } = {}) {
   if (S.prj.center.auto && S.D?.O) { S.prj.center.x = S.D.O.x; S.prj.center.y = S.D.O.y; }
   try { S.checks = checkDesign(S.prj, S.D); } catch (e) { console.error(e); S.checks = []; }
   S.Do = otherDesigns();
-  S.ouvr = null;
+  S.ouvr = null; S.cadres = [];
+  let CG = [];
+  if (S.D) try { CG = cadreGeoms(S.prj, S.D); } catch (e) { console.error(e); }
   if (S.D) try { // ouvrages de franchissement de l'autoroute (passages supérieurs)
-    S.ouvr = buildOuvrages(S.prj, S.D, { girden: girdenList() });
+    S.ouvr = buildOuvrages(S.prj, S.D, { girden: girdenList(), cadres: CG });
     for (const q of S.ouvr.issues) S.checks.push({ lvl: q.lvl, group: 'Ouvrages', msg: q.msg });
   } catch (e) { console.error(e); }
+  if (S.D) { // cadres PICF / PIPO (numérotés avec les passages supérieurs)
+    const TH = (S.prj.opts?.textH || 0.8) * 1.2;
+    CG.forEach((g, i) => {
+      const name = S.ouvr?.cadreNames?.get(g.c.id) || String(g.c.name || '').trim() || `OA${(S.ouvr?.list?.length || 0) + i + 1}`;
+      if (g.err) { S.checks.push({ lvl: 'warn', group: 'Ouvrages', msg: `${name} : ${g.err}.` }); S.cadres.push({ ...g, name }); return; }
+      let dr = null;
+      try { dr = drawCadre(g, name, (o) => S.D.prims.push(o), TH); } catch (e) { console.error(e); }
+      for (const q of cadreChecks(g, name)) S.checks.push({ ...q, group: 'Ouvrages' });
+      S.cadres.push({ ...g, name, nameAuto: S.ouvr?.cadreAuto?.get(g.c.id), poly: dr?.poly });
+    });
+  }
+  S.prof = null;
+  if (S.D) try { S.prof = buildProfils(S.prj, S.D, (S.prj.opts?.textH || 0.8) * 1.2); for (const q of S.prof.issues) S.checks.push({ ...q, group: 'Profils' }); } catch (e) { console.error(e); }
   for (const id of S.rampKinks || []) { const r = S.prj.ramps.find((q) => q.id === id); if (r) S.checks.push({ lvl: 'err', group: 'Échangeur', msg: `${r.name} : arrivée au giratoire non tangente (la courbe se termine dans la branche) — allongez le dernier alignement ou déplacez le dernier sommet dans l'axe de la branche.` }); }
   if (S.D?.hwy?.ok) try { // chaussées superposées hors ouvrage
     const juncs = [{ O: S.D.O, Rg: +S.prj.ring.Rg, kind: S.prj.kind }, ...(S.Do || []).map((d) => { const o = S.prj.others.find((q) => q.id === d.id); return { O: d.D.O, Rg: +o?.ring?.Rg || 20, kind: o?.kind }; })].filter((j) => j.O && (j.kind || 'giratoire') === 'giratoire');
@@ -297,18 +314,22 @@ function update({ commit = true, panels = true } = {}) {
 
 // Onglet Ouvrages : liste, travure modifiable de l'ouvrage choisi (réglages par ouvrage dans prj.ouvr.decks), fiche.
 const parseSpans = (t) => String(t || '').split(/;|\s+|,(?=\s)/).map((x) => parseNum(x.trim())).filter((v) => Number.isFinite(v) && v > 0);
+const cadreItem = (g) => ({ key: `c:${g.c.id}`, cadre: true, g, name: g.name, src: `${g.K?.type === 'pipo' ? 'PIPO' : 'PICF'} sous ${g.ax?.name || g.c.axisName || '?'}`, sX: g.sX ?? 0, P: g.p });
 function renderOuvr() {
-  const OV = S.ouvr?.list || [];
+  const OV = [...(S.ouvr?.list || []), ...(S.cadres || []).map(cadreItem)].sort((a, b) => (a.sX ?? 0) - (b.sX ?? 0));
   if (!OV.some((q) => q.key === S.osel)) S.osel = OV[0]?.key ?? null;
   const nErr = (o) => (S.checks || []).filter((c) => c.group === 'Ouvrages' && c.lvl === 'err' && c.msg.startsWith(o.name + ' –')).length;
-  $('#ouvrList').innerHTML = OV.map((o) => `<li data-okey="${esc(o.key)}" class="${o.key === S.osel ? 'on' : ''}"><span class="dot${nErr(o) ? ' err' : ''}"></span><b>${esc(o.name)}</b><span>${esc(o.src)}</span><span>${o.spans.length} travées${o.user ? ' (saisies)' : ''}</span></li>`).join('')
-    || '<li class="empty-li">Aucun ouvrage : une voie secondaire, la tige d\'une trompette ou l\'anneau d\'un giratoire dénivelé doit croiser l\'autoroute.</li>';
+  const nErr2 = (o) => (S.checks || []).filter((c) => c.group === 'Ouvrages' && c.lvl === 'err' && (c.msg.startsWith(o.name + ' –') || c.msg.startsWith(o.name + ' :'))).length;
+  $('#ouvrList').innerHTML = OV.map((o) => `<li data-okey="${esc(o.key)}" class="${o.key === S.osel ? 'on' : ''}"><span class="dot${nErr(o) || nErr2(o) ? ' err' : ''}"></span><b>${esc(o.name)}</b><span>${esc(o.src)}</span><span>${o.cadre ? (o.g.K ? `${o.g.K.n > 1 ? `${o.g.K.n} × ` : ''}${fmt(o.g.K.B, 2)} × ${fmt(o.g.K.H, 2)} m` : '') : `${o.spans.length} travées${o.user ? ' (saisies)' : ''}`}</span></li>`).join('')
+    || '<li class="empty-li">Aucun ouvrage : dessinez une voie secondaire qui croise l\'autoroute (passage supérieur), ou placez un PICF / PIPO sur un axe.</li>';
   const o = OV.find((q) => q.key === S.osel), ed = $('#ouvrEdit');
   if (!o) { ed.innerHTML = ''; ed.dataset.key = ''; $('#ouvrOut').innerHTML = ''; return; }
+  if (o.cadre) { renderCadreEdit(o); return; }
   const ov = S.prj.ouvr?.decks?.[o.key] || {};
   if (!ed.contains(document.activeElement) || ed.dataset.key !== o.key) {
     ed.dataset.key = o.key;
     ed.innerHTML = `<h3>${esc(o.name)} — ${esc(o.src)}</h3>` +
+      `<div class="row"><label class="fld">Nom de l'ouvrage<input id="ovName" type="text" autocomplete="off" value="${esc(ov.name || '')}" placeholder="${esc(o.nameAuto || o.name)} (automatique)"></label></div>` +
       `<div class="row"><label class="fld">Travées le long de l'axe, de culée à culée (m)<input id="ovSpans" type="text" autocomplete="off" style="width:100%;min-width:16em" value="${esc(o.spans.map((v) => fmt(v, 2)).join(' ; '))}"></label></div>` +
       `<div class="row"><label class="fld">Décalage le long de l'axe (m)<input id="ovShift" type="text" inputmode="decimal" autocomplete="off" value="${ov.shift ? esc(fmt(+ov.shift, 2)) : ''}" placeholder="0"></label>` +
       `<label class="fld">Épaisseur de la dalle imposée (m)<input id="ovH" type="text" inputmode="decimal" autocomplete="off" value="${+ov.h > 0 ? esc(fmt(+ov.h, 2)) : ''}" placeholder="${esc(fmt(o.hGuide, 2))} (guide)"></label></div>` +
@@ -324,6 +345,38 @@ function renderOuvr() {
     ['Axe des piles de rive', `à ${fmt(o.yP, 2)} m de l'axe de l'autoroute`],
     ['Talus 3/2 sous culée', `hauteur ${fmt(o.Ht, 2)} m, emprise ${fmt(1.5 * o.Ht, 2)} m`],
   ]) + `<div class="row"><a class="btn primary" href="${esc(psidaLink(o, S.prj))}" target="_blank" rel="noopener" title="Ouvre psida.ksr-infra.org (onglet Conception) avec la travure, la largeur, l'épaisseur, le biais, le tirant d'air et les appuis de cet ouvrage">Ouvrir dans PSIDA ↗</a><button class="mini" data-psidajson="${esc(o.name)}" title="Projet PSIDA (.json) à ouvrir avec le bouton Ouvrir de PSIDA">Exporter (.json)</button></div>` + `<p class="note">${esc(o.hText)}</p><ul class="ouvr-items">${o.items.map((it) => `<li class="${lvlCls[it.level] || ''}">${esc(it.text)}</li>`).join('')}</ul></div>`).join('');
+}
+// Fiche d'un cadre PICF / PIPO : paramètres modifiables (vides = valeurs automatiques), grandeurs, lien PSIDA.
+function renderCadreEdit(o) {
+  const g = o.g, c = g.c, K = g.K, ed = $('#ouvrEdit');
+  if (!ed.contains(document.activeElement) || ed.dataset.key !== o.key) {
+    ed.dataset.key = o.key;
+    const inp = (k, label, ph, unit = 'm') => `<label class="fld">${label}${unit ? ` (${unit})` : ''}<input data-cf="${k}" type="text" inputmode="decimal" autocomplete="off" value="${c[k] === '' || c[k] == null ? '' : esc(fmt(+c[k], 2))}" placeholder="${esc(ph)}"></label>`;
+    const sel = (k, label, opts) => `<label class="fld">${label}<select data-cf="${k}">${opts.map(([v, t]) => `<option value="${v}"${(c[k] || opts[0][0]) === v ? ' selected' : ''}>${t}</option>`).join('')}</select></label>`;
+    ed.innerHTML = `<h3>${esc(o.name)} — ${esc(o.src)}</h3>` +
+      `<div class="row"><label class="fld">Nom de l'ouvrage<input data-cf="name" type="text" autocomplete="off" value="${esc(c.name || '')}" placeholder="${esc(g.nameAuto || o.name)} (automatique)"></label>` +
+      sel('type', 'Type', [['picf', 'cadre fermé (PICF, dalot)'], ['pipo', 'portique ouvert (PIPO)']]) + sel('usage', 'Voie franchie', [['eau', 'écoulement (ouvrage hydraulique)'], ['route', 'route (passage inférieur)'], ['rail', 'voie ferrée']]) + `</div>` +
+      `<div class="row">${inp('n', 'Cellules', '1', '')}${inp('B', 'Ouverture B', '3,00')}${inp('H', 'Hauteur intérieure H', '2,50')}${inp('Hr', 'Remblai sur traverse', '1,50')}</div>` +
+      `<div class="row">${inp('biais', 'Biais', '100 (droit)', 'gr')}${inp('L', 'Longueur L', `${fmt(K?.Lauto ?? 0, 2)} (auto)`)}${inp('s', 'Abscisse sur l\'axe porteur', '')}</div>` +
+      `<div class="row">${inp('ep', 'Piédroits', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('et', 'Traverse', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('er', 'Radier', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('ei', 'Voiles intermédiaires', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}</div>` +
+      `<div class="row">${inp('wingA', 'Murs en aile : angle', '30', '°')}${inp('wingL', 'longueur', `${fmt(K?.wingL ?? 0, 2)} (auto)`)}</div>` +
+      `<div class="row"><button id="cdZoom">Voir sur le plan</button><button id="cdDel">Supprimer l'ouvrage</button></div>` +
+      `<p class="note">Biais : angle entre l'axe de l'ouvrage et l'axe de la voie portée (100 gr = ouvrage perpendiculaire) ; les têtes restent parallèles à la voie portée. Épaisseurs automatiques : e ≈ 0,15 + B/20 (ordre de grandeur des cadres Sétra PICF), à confirmer dans PSIDA. Longueur automatique : plate-forme + talus 3/2 jusqu'au niveau de la traverse, divisée par le sinus du biais.</p>`;
+  }
+  $('#ouvrOut').innerHTML = !K ? `<p class="note">${esc(g.err || '')}</p>` : `<div class="ouvr">` + kv([
+    ['Type', `${K.type === 'pipo' ? 'Portique ouvert PIPO' : 'Cadre fermé PICF'}, ${K.n} cellule${K.n > 1 ? 's' : ''} de ${fmt(K.B, 2)} × ${fmt(K.H, 2)} m`],
+    ['Largeur extérieure', `${fmt(K.W, 2)} m (piédroits ${fmt(K.ep, 2)}${K.n > 1 ? `, voiles ${fmt(K.ei, 2)}` : ''} m)`],
+    ['Traverse / radier', `${fmt(K.et, 2)} / ${K.type === 'pipo' ? 'semelles' : `${fmt(K.er, 2)} m`}`],
+    ['Longueur', `${fmt(K.L, 2)} m${+c.L ? '' : ' (automatique)'} ; biais ${fmt(K.psi, 1)} gr`],
+    ['Remblai sur traverse', `${fmt(K.Hr, 2)} m`],
+    ['Murs en aile', K.wingL > 0.1 ? `${fmt(K.wingL, 2)} m à ${fmt(K.wingA, 0)}°` : 'sans'],
+    ['Voie portée', `${esc(g.ax?.name || '')}, abscisse ${fmt(g.s, 2)} m`],
+  ]) + `<div class="row"><a class="btn primary" href="${esc(cadreLink(g, o.name, S.prj))}" target="_blank" rel="noopener" title="Ouvre psida.ksr-infra.org (onglet Cadres et portiques) avec le type, les dimensions, le biais, la longueur et le remblai de cet ouvrage">Ouvrir dans PSIDA ↗</a><button class="mini" data-cadrejson="${esc(c.id)}" title="Projet PSIDA (.json) à ouvrir avec le bouton Ouvrir de PSIDA">Exporter (.json)</button></div></div>`;
+}
+function setCadre(id, patch) {
+  const c = (S.prj.cadres || []).find((q) => q.id === id); if (!c) return;
+  for (const [k, v] of Object.entries(patch)) { if (v == null || v === '') delete c[k]; else c[k] = v; }
+  update();
 }
 function setOuvrDeck(key, patch) {
   S.prj.ouvr = S.prj.ouvr || {}; S.prj.ouvr.decks = S.prj.ouvr.decks || {};
@@ -699,6 +752,36 @@ function pickSecondary(w, px, py) {
   const kind = S.pendingTpl;
   setTool('axis'); S.hwyDraw = 'cross'; S.pendingTpl = kind; S.draft = [w]; setPrompt(); viewer.invalidate();
 }
+// Clic sur un axe : profils en série (deux clics), profil isolé, cadre PICF / PIPO.
+function pickOnAxis(w) {
+  const axes = listAxes(S.prj, S.D), hit = nearestAxis(axes, w, 15 / viewer.s);
+  if (S.tool === 'profser' && S.profA) {
+    const A = S.profA, ax = axes.find((a) => a.key === A.key), pr = ax?.project(w);
+    if (!pr) { toast('Axe du premier point introuvable.', 'warn'); S.profA = null; setPrompt(); return; }
+    const s1 = Math.max(0, Math.min(ax.len, pr.s));
+    if (Math.abs(s1 - A.s) < 1) { toast('Cliquez le second point plus loin sur le même axe.', 'warn'); return; }
+    const P = profParams(S.prj);
+    S.prj.prof = S.prj.prof || {};
+    (S.prj.prof.series = S.prj.prof.series || []).push({ id: uid(), axis: A.key, axisName: A.name, s0: +Math.min(A.s, s1).toFixed(3), s1: +Math.max(A.s, s1).toFixed(3), step: P.step, tan: P.tan });
+    setTool('select'); update();
+    toast(`Série de profils sur ${A.name}, de ${fmt(Math.min(A.s, s1))} à ${fmt(Math.max(A.s, s1))} m au pas de ${fmt(P.step)} m${P.tan ? ', points de tangence compris' : ''}.`);
+    return;
+  }
+  if (!hit) { toast('Cliquez sur un axe : autoroute, voie secondaire, bretelle ou branche.', 'warn'); return; }
+  const ax = hit.ax, s0 = +hit.s.toFixed(3);
+  if (S.tool === 'profser') { S.profA = { key: ax.key, name: ax.name, s: s0, p: ax.at(s0).p }; setPrompt(); viewer.invalidate(); return; }
+  if (S.tool === 'profone') {
+    S.prj.prof = S.prj.prof || {};
+    (S.prj.prof.manual = S.prj.prof.manual || []).push({ id: uid(), axis: ax.key, axisName: ax.name, s: s0 });
+    update(); toast(`Profil placé sur ${ax.name} à l'abscisse ${fmt(s0)} m.`); return;
+  }
+  if (S.tool === 'cadre') {
+    const c = { id: uid(), ...CADRE_DEF, axis: ax.key, axisName: ax.name, s: s0 };
+    (S.prj.cadres = S.prj.cadres || []).push(c); S.osel = `c:${c.id}`;
+    setTool('select'); update(); showTab('ouvrages');
+    toast(`Cadre placé sur ${ax.name} (abscisse ${fmt(s0)} m) : réglez son type, ses dimensions et son biais dans l'onglet Ouvrages.`);
+  }
+}
 function runTemplate(kind, w, k) {
   S.pendingTpl = null; S.xsel = k;
   if (kind === 'trompette') addTrumpetAt(w, k); else if (DIAMONDS.includes(kind)) addDiamondAt(w, kind, k); else addCloverAt(w, kind, k);
@@ -977,15 +1060,33 @@ function bindEch() {
     S.prj.ramps.splice(S.rsel, 1); S.rsel = -1; update();
   });
   $('#ouvrList').addEventListener('click', (e) => { const li = e.target.closest('[data-okey]'); if (!li) return; S.osel = li.dataset.okey; $('#ouvrEdit').dataset.key = ''; renderOuvr(); });
+  $('#btnOuvrPS').addEventListener('click', () => { setTool('axis'); S.hwyDraw = 'cross'; setPrompt(); toast('Dessinez la voie secondaire en traversant l\'autoroute (Entrée ou clic droit pour terminer) : le passage supérieur est implanté à leur croisement.'); });
+  $('#btnOuvrCadre').addEventListener('click', () => setTool('cadre'));
   $('#ouvrEdit').addEventListener('change', (e) => {
     const key = $('#ouvrEdit').dataset.key; if (!key) return;
+    if (key.startsWith('c:')) {
+      const f = e.target.dataset.cf; if (!f) return;
+      const raw = e.target.value.trim();
+      const v = ['name', 'type', 'usage'].includes(f) ? raw : raw === '' ? '' : parseNum(raw);
+      if (v !== '' && typeof v === 'number' && !Number.isFinite(v)) { toast('Valeur numérique attendue.', 'warn'); return; }
+      setCadre(key.slice(2), { [f]: v });
+      $('#ouvrEdit').dataset.key = ''; renderOuvr(); return;
+    }
+    if (e.target.id === 'ovName') { setOuvrDeck(key, { name: e.target.value.trim() || null }); $('#ouvrEdit').dataset.key = ''; renderOuvr(); return; }
     if (e.target.id === 'ovSpans') { const sp = parseSpans(e.target.value); if (sp.length && sp.every((v) => v > 1)) setOuvrDeck(key, { spans: sp }); else toast('Travées : saisissez des longueurs supérieures à 1 m séparées par « ; ».', 'warn'); }
     else if (e.target.id === 'ovShift') setOuvrDeck(key, { shift: parseNum(e.target.value) || null });
     else if (e.target.id === 'ovH') { const h = parseNum(e.target.value); setOuvrDeck(key, { h: h > 0.1 ? h : null }); }
     $('#ouvrEdit').dataset.key = ''; renderOuvr();
   });
   $('#ouvrEdit').addEventListener('click', (e) => {
-    const key = $('#ouvrEdit').dataset.key, o = (S.ouvr?.list || []).find((q) => q.key === key); if (!o || !e.target.id) return;
+    const key = $('#ouvrEdit').dataset.key;
+    if (key?.startsWith('c:')) {
+      const g = (S.cadres || []).find((q) => q.c.id === key.slice(2)); if (!g) return;
+      if (e.target.id === 'cdZoom' && g.p) { viewer.cx = g.p.x; viewer.cy = g.p.y; viewer.s = Math.max(viewer.s, 4); viewer.invalidate(); }
+      else if (e.target.id === 'cdDel' && confirm(t(`Supprimer l'ouvrage ${g.name} ?`))) { S.prj.cadres = S.prj.cadres.filter((q) => q.id !== g.c.id); S.osel = null; $('#ouvrEdit').dataset.key = ''; update(); }
+      return;
+    }
+    const o = (S.ouvr?.list || []).find((q) => q.key === key); if (!o || !e.target.id) return;
     const sp = o.spans.slice(), m = Math.floor(sp.length / 2);
     if (e.target.id === 'ovAdd') { sp.splice(m, 0, sp[m]); setOuvrDeck(key, { spans: sp }); }
     else if (e.target.id === 'ovDel') { if (sp.length < 2) return; sp.splice(m, 1); setOuvrDeck(key, { spans: sp }); }
@@ -995,6 +1096,13 @@ function bindEch() {
     $('#ouvrEdit').dataset.key = ''; renderOuvr();
   });
   $('#ouvrOut').addEventListener('click', (e) => { // projet PSIDA (.json) de l'ouvrage
+    const bc = e.target.closest('[data-cadrejson]');
+    if (bc) {
+      const g = (S.cadres || []).find((q) => q.c.id === bc.dataset.cadrejson); if (!g?.K) return;
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([cadreProject(g, g.name, S.prj)], { type: 'application/json' }));
+      a.download = `psida-${g.name}-${g.K.type}-${fmt(g.K.B, 2)}x${fmt(g.K.H, 2)}.json`.replace(/[\s,]+/g, '_'); a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000); return;
+    }
     const b = e.target.closest('[data-psidajson]'); if (!b) return;
     const o = (S.ouvr?.list || []).find((q) => q.name === b.dataset.psidajson); if (!o) return;
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([psidaProject(o, S.prj)], { type: 'application/json' }));
@@ -1147,6 +1255,7 @@ function drawOverlay(ctx, v, T) {
   };
   if (S.tool === 'axis' && S.draft.length) poly(cur ? [...S.draft, cur] : S.draft, T.rubber);
   if (S.tool === 'measure' && S.meas.length) poly(S.meas.length === 1 && cur ? [S.meas[0], cur] : S.meas, T.rubber);
+  if (S.tool === 'profser' && S.profA) { const [x, y] = v.w2s(S.profA.p.x, S.profA.p.y); ctx.strokeStyle = T.rubber; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.stroke(); }
   if (S.snap) {
     const [x, y] = v.w2s(S.snap.x, S.snap.y);
     ctx.strokeStyle = T.snap; ctx.lineWidth = 2; ctx.strokeRect(x - 6, y - 6, 12, 12);
@@ -1297,6 +1406,10 @@ function bindPop() {
 const PROMPTS = {
   select: 'Sélection : survolez un élément (branche, giratoire, bretelle, autoroute) et cliquez-le pour ouvrir sa fenêtre ; glissez ses sommets ou le centre.',
   pan: 'Panoramique : glissez pour déplacer la vue.',
+  profser: 'Profils en série : cliquez le premier point sur un axe (autoroute, voie secondaire, bretelle ou branche), puis le second sur le même axe.',
+  profser2: 'Profils en série : cliquez le second point sur le même axe (Échap pour annuler).',
+  profone: 'Profil isolé : cliquez sur un axe à l\'endroit du profil (plusieurs clics possibles ; Échap pour terminer).',
+  cadre: 'PICF / PIPO : cliquez sur l\'axe de la voie portée, à l\'endroit de l\'ouvrage.',
   axis0: 'Axe : cliquez le 1er point, côté extérieur (ou saisissez X,Y).',
   axis1: 'Axe : point suivant vers le carrefour — Entrée / clic droit pour terminer, Retour arrière pour annuler.',
   extend: 'Prolonger l\'axe : cliquez les points suivants vers l\'extérieur — Entrée / clic droit pour terminer, Échap pour annuler.',
@@ -1316,6 +1429,7 @@ function setTool(t) {
   S.tool = t; S.draft = []; S.meas = []; S.drag = null; S.extend = null; S.hwyDraw = false;
   if (!['ramp', 'trumpet', 'trefle', 'demitrefle'].includes(t)) S.rampKind = null;
   if (!['pickx', 'axis'].includes(t)) S.pendingTpl = null;
+  if (t !== 'profser') S.profA = null;
   $$('.tools [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
   updateCursor(); setPrompt(); viewer.invalidate();
 }
@@ -1323,7 +1437,7 @@ function updateCursor() {
   $('#cv').style.cursor = S.space || S.tool === 'pan' ? 'grab' : S.tool === 'select' ? 'default' : 'crosshair';
 }
 function setPrompt() {
-  const k = S.tool === 'axis' ? (S.hwyDraw ? (S.hwyDraw === 'cross' ? 'cross' : 'hwy') : S.extend ? 'extend' : S.draft.length ? 'axis1' : 'axis0') : S.tool;
+  const k = S.tool === 'axis' ? (S.hwyDraw ? (S.hwyDraw === 'cross' ? 'cross' : 'hwy') : S.extend ? 'extend' : S.draft.length ? 'axis1' : 'axis0') : S.tool === 'profser' && S.profA ? 'profser2' : S.tool;
   $('#stPrompt').textContent = PROMPTS[k] || '';
 }
 function cancelTool() {
@@ -1500,6 +1614,7 @@ function bindCanvas() {
     else if (S.tool === 'center') { S.prj.center = { auto: false, x: w.x, y: w.y }; syncInputs(); update(); setTool('select'); }
     else if (S.tool === 'ramp') addRampAt(w);
     else if (S.tool === 'pickx') pickSecondary(w, px, py);
+    else if (['profser', 'profone', 'cadre'].includes(S.tool)) pickOnAxis(w);
     else if (S.tool === 'measure') { S.meas.push(w); if (S.meas.length > 2) S.meas = [w]; showMeasure(); }
     else if (S.tool === 'select') {
       const h = hitHandle(px, py);
@@ -1888,6 +2003,7 @@ function refreshPanels() {
   refreshDevers();
   refreshChecks();
   refreshPoints();
+  try { renderProfils(); } catch (e) { console.error(e); }
   refreshCapacity();
   refreshVisibility();
   refreshProfile();
@@ -2205,6 +2321,21 @@ function refreshFixPanel() {
   host.innerHTML = html;
 }
 
+// Onglet Implantation : profils en travers (réglages, séries et profils isolés, tableau).
+function renderProfils() {
+  const P = profParams(S.prj), list = S.prof?.list || [];
+  const st = $('#profStep'); if (st && document.activeElement !== st) st.value = S.prj.prof?.step ? fmt(+S.prj.prof.step, 2) : '';
+  $('#profTan').checked = P.tan; $('#profOn').checked = P.on;
+  const cnt = (id) => list.filter((q) => q.ref === id).length;
+  $('#profSeries').innerHTML = [
+    ...P.series.map((se) => `<li data-ser="${esc(se.id)}"><b>Série</b><span>${esc(se.axisName || se.axis)} : ${fmt(+se.s0)} → ${fmt(+se.s1)} m</span><span>pas <input class="mini-in" data-ser-step="${esc(se.id)}" type="text" inputmode="decimal" value="${esc(fmt(+se.step || P.step, 2))}" size="5"> m · <label><input type="checkbox" data-ser-tan="${esc(se.id)}"${se.tan ?? P.tan ? ' checked' : ''}> tangence</label> · ${cnt(se.id)} profils <button class="mini" data-ser-del="${esc(se.id)}" title="Supprimer la série">✕</button></span></li>`),
+    ...P.manual.map((m) => `<li data-man="${esc(m.id)}"><b>Isolé</b><span>${esc(m.axisName || m.axis)} : ${fmt(+m.s)} m</span><span><button class="mini" data-man-del="${esc(m.id)}" title="Supprimer ce profil">✕</button></span></li>`),
+  ].join('') || '<li class="empty-li">Aucun profil : « Série entre deux points » puis deux clics sur un même axe, ou « Profil isolé ».</li>';
+  $('#profTable').innerHTML = list.length
+    ? '<thead><tr><th>Profil</th><th>Axe</th><th>Abscisse</th><th>X</th><th>Y</th><th>Gisement (gr)</th><th>Origine</th></tr></thead><tbody>' +
+      list.map((q, i) => `<tr data-prof="${i}"><td>${esc(q.name)}</td><td>${esc(q.axisName)}</td><td class="mono">${q.s.toFixed(3)}</td><td class="mono">${q.p.x.toFixed(3)}</td><td class="mono">${q.p.y.toFixed(3)}</td><td class="mono">${q.gis.toFixed(4)}</td><td>${esc(q.src)}${q.type ? ` (${esc(q.type)})` : ''}</td></tr>`).join('') + '</tbody>'
+    : '';
+}
 function refreshPoints() {
   const pts = S.D?.points || [];
   $('#ptsInfo').textContent = pts.length ? `${pts.length} points · ${S.crs.geo ? S.crs.label : 'coordonnées locales'}` : '';
@@ -2900,6 +3031,29 @@ function bindUI() {
   $('#btnDxf').addEventListener('click', exportDXF);
   $('#btnPng').addEventListener('click', exportPNG);
   $('#btnCsv').addEventListener('click', exportCSV);
+  $('#btnProfSer').addEventListener('click', () => setTool('profser'));
+  $('#btnProfOne').addEventListener('click', () => setTool('profone'));
+  $('#btnProfCsv').addEventListener('click', () => {
+    const list = S.prof?.list || [];
+    if (!list.length) { toast('Aucun profil à exporter.', 'warn'); return; }
+    download(fname('csv').replace(/\.csv$/, '_profils.csv'), '\ufeff' + profilsCsv(list), 'text/csv;charset=utf-8');
+  });
+  $('#btnProfClear').addEventListener('click', () => { if (!confirm(t('Supprimer tous les profils en travers implantés ?'))) return; if (S.prj.prof) { S.prj.prof.series = []; S.prj.prof.manual = []; } update(); });
+  const profSet = (k, v) => { S.prj.prof = S.prj.prof || {}; if (v === '' || v == null) delete S.prj.prof[k]; else S.prj.prof[k] = v; update(); };
+  $('#profStep').addEventListener('change', (e) => { const v = parseNum(e.target.value); profSet('step', v > 0 ? v : ''); });
+  $('#profTan').addEventListener('change', (e) => profSet('tan', e.target.checked));
+  $('#profOn').addEventListener('change', (e) => profSet('on', e.target.checked));
+  $('#profSeries').addEventListener('change', (e) => {
+    const P = S.prj.prof || {}, id = e.target.dataset.serStep || e.target.dataset.serTan, se = (P.series || []).find((q) => q.id === id); if (!se) return;
+    if (e.target.dataset.serStep) { const v = parseNum(e.target.value); if (!(v >= 1)) { toast('Pas d\'au moins 1 m.', 'warn'); return; } se.step = v; } else se.tan = e.target.checked;
+    update();
+  });
+  $('#profSeries').addEventListener('click', (e) => {
+    const P = S.prj.prof || {}, ds = e.target.dataset;
+    if (ds.serDel) { P.series = (P.series || []).filter((q) => q.id !== ds.serDel); update(); }
+    else if (ds.manDel) { P.manual = (P.manual || []).filter((q) => q.id !== ds.manDel); update(); }
+  });
+  $('#profTable').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-prof]'); const q = tr && S.prof?.list?.[+tr.dataset.prof]; if (!q) return; viewer.cx = q.p.x; viewer.cy = q.p.y; viewer.s = Math.max(viewer.s, 3); viewer.invalidate(); });
   $('#btnHelp').addEventListener('click', () => $('#dlgHelp').showModal());
   renderBranchForm();
   renderDxfLayers();
