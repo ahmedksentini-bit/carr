@@ -146,7 +146,9 @@ ou sur un fond topographique DXF.
   **Boucles** (sommet « boucle » : arc unique d'environ 270° encadré de clothoïdes, 40 à 60 m, § 3.2.1 ; sortie en
   boucle signalée comme exceptionnelle, collectrice ≥ 60 m au-delà du tpl, § 6.2.4). **Gabarit de trompette** : un clic
   sur l'axe à l'endroit de l'ouvrage génère l'entrée en boucle, la sortie semi-directe qui l'enveloppe, la sortie et
-  l'entrée directes raccordées à la tige bidirectionnelle.
+  l'entrée directes raccordées à la tige bidirectionnelle. Surlargeur de 50/R par voie à l'intérieur des courbes de rayon
+  < 100 m, introduite linéairement le long des clothoïdes (§ 3.4.2) ; rayons limites, dévers et vitesses contrôlés au
+  bord intérieur de la chaussée (Ri = R axe − l/2, § 3.2.1).
 - **Exports** : DXF R12 par calques `GIRA_*` (AutoCAD, Covadis, BricsCAD…), PNG, points d'implantation X, Y, Z en CSV,
   projet `.gira.json` (et sauvegarde automatique dans le navigateur).
 

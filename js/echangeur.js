@@ -118,7 +118,6 @@ export function endFrame(host, e, w) {
   return { s, d, nr, S1, A, dir };
 }
 
-const surl = (k) => (Math.abs(k) < 0.01 ? 0.5 * Math.pow(Math.abs(k) / 0.01, 2) : 50 * Math.abs(k)); // [ECH] § 3.4.2 : 50/R si R < 100 m
 
 // Construit l'échangeur ; ajoute prims, points, issues au projet dérivé D.
 export function buildEchangeur(prj, D) {
@@ -280,37 +279,44 @@ export function buildEchangeur(prj, D) {
     al.issues.forEach((i) => (i.lvl === 'err' ? err : warn)(i.msg.replace(`${name} : `, '').replace(`${name} `, '')));
     if (!(al.length > 1)) { err('axe de bretelle trop court.'); continue; }
     const half = rp.w / 2;
-    R.offL = (s) => { const k = al.curvAt(s); return half + (k > 0 ? surl(k) : 0); };
-    R.offR = (s) => { const k = al.curvAt(s); return -(half + (k < 0 ? surl(k) : 0)); };
+    // Rayons : les valeurs limites du tab. 3-1 sont mesurées au bord intérieur de la chaussée, sans la surlargeur (§ 3.2.1) ;
+    // les contrôles, dévers et vitesses portent donc sur Ri = R(axe) − l/2.
+    const rIn = (Rax) => Rax - half;
+    R.rIn = rIn;
+    // Surlargeur (§ 3.4.2) : 50/R par voie, à l'intérieur des courbes de rayon < 100 m, introduite linéairement le long des
+    // clothoïdes (proportionnelle à la courbure, nulle ailleurs).
+    R.surl = (s) => { const e = al.elemAt(s); if (!e || e.kind === 'L' || !(rIn(e.R) < 100)) return 0; const k = Math.abs(al.curvAt(s)); return k > 1e-9 ? (50 * rp.lanes * k * e.R) / rIn(e.R) : 0; };
+    R.offL = (s) => half + (al.curvAt(s) > 0 ? R.surl(s) : 0);
+    R.offR = (s) => -(half + (al.curvAt(s) < 0 ? R.surl(s) : 0));
     R.sTplS = Fs ? Math.min(al.length, rp.from.Lm) : 0;
     R.sTplE = Ft ? Math.min(al.length, rp.to.Lm) : 0;
     // Contrôles des rayons [ECH] tab. 3-1, § 3.2.1 à 3.2.3 ; boucles § 3.2.1, 6.2.4.
     const curves = al.tangents;
     curves.forEach((c, j) => {
-      const Rr = c.R, tag = c.loop ? `boucle (PI ${c.i})` : `PI ${c.i}`;
+      const Rr = rIn(c.R), tag = c.loop ? `boucle (PI ${c.i})` : `PI ${c.i}`;
       if (c.loop) {
         if (rp.lanes > 1) err(`${tag} : une boucle ne comporte qu'une voie (§ 3.2.1, 6.2.4).`);
         if (rp.cat !== 'b50') warn(`${tag} : une boucle relève de la catégorie « bretelle 1 voie ≤ 70 km/h » (tab. 3-1).`);
-        if (Rr < 40) err(`${tag} : R = ${fmt(Rr)} m < 40 m (tab. 3-1).`);
-        else if (Rr > 60) warn(`${tag} : R = ${fmt(Rr)} m > 60 m — préconisé ≤ 60 m pour éviter les mises en vitesse (§ 3.2.1).`);
-        else info(`${tag} : R = ${fmt(Rr)} m, vitesse associée ${fmt(speedOfRadius(Rr), 0)} km/h, développement ${fmt((c.defl * 180) / Math.PI, 0)}°.`);
-      } else if (Rr < C.Rm) err(`${tag} : R = ${fmt(Rr)} m < Rm = ${C.Rm} m (${C.label}, tab. 3-1).`);
-      else if (Rr < C.Rdn) info(`${tag} : R = ${fmt(Rr)} m < Rdn = ${C.Rdn} m → courbe déversée à ${fmt(deversOfRadius(Rr, C), 1)} % (§ 3.5).`);
-      if (!c.loop && rp.cat === 'b50' && Rr < 54) warn(`${tag} : R = ${fmt(Rr)} m < 54 m → vitesse < 50 km/h (§ 3.2.1 : 54 m conseillé).`);
+        if (Rr < 40) err(`${tag} : Ri = ${fmt(Rr)} m < 40 m (tab. 3-1, bord intérieur).`);
+        else if (Rr > 60) warn(`${tag} : Ri = ${fmt(Rr)} m > 60 m — préconisé ≤ 60 m pour éviter les mises en vitesse (§ 3.2.1).`);
+        else info(`${tag} : Ri = ${fmt(Rr)} m, vitesse associée ${fmt(speedOfRadius(Rr), 0)} km/h, développement ${fmt((c.defl * 180) / Math.PI, 0)}°.`);
+      } else if (Rr < C.Rm) err(`${tag} : Ri = ${fmt(Rr)} m < Rm = ${C.Rm} m (${C.label}, tab. 3-1).`);
+      else if (Rr < C.Rdn) info(`${tag} : Ri = ${fmt(Rr)} m < Rdn = ${C.Rdn} m → courbe déversée à ${fmt(deversOfRadius(Rr, C), 1)} % (§ 3.5).`);
+      if (rp.cat === 'b50' && Rr < 54) warn(`${tag} : Ri = ${fmt(Rr)} m < 54 m → vitesse < 50 km/h (§ 3.2.1 : 54 m conseillé).`);
       if (j === 0 && rp.from?.isHwy) {
         if (c.loop) {
           warn(`sortie en boucle : à titre exceptionnel et sur justification (§ 6.2.4).`);
           const l0 = al.elems[0]?.kind === 'L' ? al.elems[0].len : 0;
           if (l0 < rp.from.Lm + 60 - 1e-6) err(`sortie en boucle : collectrice de ${fmt(l0 - rp.from.Lm)} m au-delà du tpl < 60 m (§ 6.2.4).`);
-        } else if (Rr < C.Rfirst) (C.branche ? warn : err)(`premier rayon de sortie R = ${fmt(Rr)} m < ${C.Rfirst} m (${C.branche ? '1,5 Rdn, branche' : '100 m hors boucle, bretelle'} ; § 3.2.2).`);
+        } else if (Rr < C.Rfirst) (C.branche ? warn : err)(`premier rayon de sortie Ri = ${fmt(Rr)} m < ${C.Rfirst} m (${C.branche ? '1,5 Rdn, branche' : '100 m hors boucle, bretelle'} ; § 3.2.2).`);
       }
-      const Lmin = cloMinLength(Rr, Math.abs(deversOfRadius(Rr, C) - 2.5), rp.lanes);
-      if (Rr <= 1.5 * C.Rdn && c.L + 1e-6 < Lmin) warn(`${tag} : clothoïde L = ${fmt(c.L)} m < ${fmt(Lmin)} m (max(${rp.lanes >= 2 ? 'R/9 ; 14|Δd|' : '6R^0,4 ; 7|Δd|'}), § 3.2.3) → A ≥ ${fmt(Math.sqrt(Lmin * Rr))}.`);
-      if (Rr <= C.Rdn && c.L <= 0) warn(`${tag} : courbe de rayon ${fmt(Rr)} m ≤ Rdn sans clothoïde (§ 3.2.3).`);
+      const Lmin = cloMinLength(c.R, Math.abs(deversOfRadius(Rr, C) - 2.5), rp.lanes);
+      if (Rr <= 1.5 * C.Rdn && c.L + 1e-6 < Lmin) warn(`${tag} : clothoïde L = ${fmt(c.L)} m < ${fmt(Lmin)} m (max(${rp.lanes >= 2 ? 'R/9 ; 14|Δd|' : '6R^0,4 ; 7|Δd|'}), § 3.2.3) → A ≥ ${fmt(Math.sqrt(Lmin * c.R))}.`);
+      if (Rr <= C.Rdn && c.L <= 0) warn(`${tag} : courbe de rayon Ri ${fmt(Rr)} m ≤ Rdn sans clothoïde (§ 3.2.3).`);
       if (j > 0) {
-        const R1 = curves[j - 1].R, R2 = Rr;
+        const R1 = rIn(curves[j - 1].R), R2 = Rr;
         const okSeq = R2 >= 1.5 * C.Rdn || (C.branche ? R1 <= 1.5 * R2 : R1 < 2 * R2);
-        if (!okSeq) warn(`enchaînement PI ${curves[j - 1].i} → PI ${c.i} : R1 = ${fmt(R1)} m, R2 = ${fmt(R2)} m ne respecte pas ${C.branche ? 'R1 ≤ 1,5 R2' : 'R1 < 2 R2'} (§ 3.2.2).`);
+        if (!okSeq) warn(`enchaînement PI ${curves[j - 1].i} → PI ${c.i} : Ri1 = ${fmt(R1)} m, Ri2 = ${fmt(R2)} m ne respecte pas ${C.branche ? 'R1 ≤ 1,5 R2' : 'R1 < 2 R2'} (§ 3.2.2).`);
       }
     });
     // Alignements droits intermédiaires ([ECH] § 3.2.2 : ≥ 60 m bretelle / 100 m branche entre courbes de même sens < 1,5 Rdn).
@@ -330,10 +336,10 @@ export function buildEchangeur(prj, D) {
     if (Fs) {
       if (R.lad + 1e-6 < rp.from.Lm) err(`alignement droit depuis S.1,00 m de ${fmt(R.lad)} m < Lm = ${fmt(rp.from.Lm)} m (§ 6.1).`);
       const vS = rp.from.isHwy || rp.from.host.lanes >= 2 ? 70 : 50;
-      const Vs = vS / 3.6, VR = (first ? speedOfRadius(first.R) : 70) / 3.6;
+      const Vs = vS / 3.6, VR = (first ? speedOfRadius(rIn(first.R)) : 70) / 3.6;
       const Ld = Math.max(0, (Vs * Vs - VR * VR) / (2 * (1.5 + 10 * grade)));
       R.Ld = Ld; R.Ldisp = R.lad + (first?.L || 0); R.VR = VR * 3.6; R.Vs = vS;
-      if (first && Ld > R.Ldisp + 1e-6) err(`zone de décélération ${fmt(R.Ldisp)} m < Ld = ${fmt(Ld)} m (${vS} → ${fmt(VR * 3.6)} km/h, R = ${fmt(first.R)} m, p = ${fmt(rp.pente, 1)} %, § 3.2.5).`);
+      if (first && Ld > R.Ldisp + 1e-6) err(`zone de décélération ${fmt(R.Ldisp)} m < Ld = ${fmt(Ld)} m (${vS} → ${fmt(VR * 3.6)} km/h, Ri = ${fmt(rIn(first.R))} m, p = ${fmt(rp.pente, 1)} %, § 3.2.5).`);
       if (rp.from.isHwy && ![150, 110, 90].includes(rp.from.biseau)) info(`biseau de ${fmt(rp.from.biseau)} m : 150 m en règle générale, 110 m en relief difficile, 90 m si une seule voie (§ 4.1.3.1).`);
       if (!rp.from.isHwy) {
         const Pr = hF.R, st0 = Fs.s - rp.from.biseau;
@@ -346,10 +352,10 @@ export function buildEchangeur(prj, D) {
       if (R.ladE + 1e-6 < rp.to.Lm) err(`alignement droit jusqu'à E.1,00 m de ${fmt(R.ladE)} m < Lm = ${fmt(rp.to.Lm)} m (§ 6.1).`);
       if (rp.to.p < 0.03 - 1e-9 || rp.to.p > 0.05 + 1e-9) warn(`obliquité d'entrée ${fmt(rp.to.p * 100, 1)} % hors de 3 à 5 % (§ 6.1).`);
       if (rp.to.isHwy) {
-        const VE = 55 / 3.6, VR = (last ? speedOfRadius(last.R) : 70) / 3.6;
+        const VE = 55 / 3.6, VR = (last ? speedOfRadius(rIn(last.R)) : 70) / 3.6;
         const La = Math.max(0, (VE * VE - VR * VR) / (2 * (1 - 10 * grade)));
         R.La = La; R.Ladisp = R.ladE + (last?.L || 0); R.VRe = VR * 3.6;
-        if (last && La > R.Ladisp + 1e-6) err(`zone d'accélération ${fmt(R.Ladisp)} m < La = ${fmt(La)} m (${fmt(VR * 3.6)} → 55 km/h, R = ${fmt(last.R)} m, rampe ${fmt(rp.pente, 1)} %, § 3.2.5).`);
+        if (last && La > R.Ladisp + 1e-6) err(`zone d'accélération ${fmt(R.Ladisp)} m < La = ${fmt(La)} m (${fmt(VR * 3.6)} → 55 km/h, Ri = ${fmt(rIn(last.R))} m, rampe ${fmt(rp.pente, 1)} %, § 3.2.5).`);
       } else {
         const Pr = hT.R, sFin = Ft.s + rp.to.ins + rp.to.biseau;
         if (sFin > Pr.al.length) warn(`la voie d'insertion dépasse l'extrémité de ${Pr.name} (${fmt(sFin - Pr.al.length)} m).`);
@@ -357,7 +363,7 @@ export function buildEchangeur(prj, D) {
         Pr.children.push({ a: Ft.s - rp.to.Lm, b: sFin });
       }
     }
-    R.deversAt = (s) => { const k = al.curvAt(s); const Rr = Math.abs(k) > 1e-9 ? 1 / Math.abs(k) : Infinity; return Rr >= C.Rdn ? -2.5 : (k > 0 ? 1 : -1) * deversOfRadius(Rr, C); }; // + vers la gauche
+    R.deversAt = (s) => { const k = al.curvAt(s); const Rr = Math.abs(k) > 1e-9 ? rIn(1 / Math.abs(k)) : Infinity; return Rr >= C.Rdn ? -2.5 : (k > 0 ? 1 : -1) * deversOfRadius(Rr, C); }; // + vers la gauche
     R.ok = !R.issues.some((i) => i.lvl === 'err');
     built.set(R.id, R);
   }
@@ -463,7 +469,7 @@ export function buildEchangeur(prj, D) {
       if (el.kind !== 'A') return;
       const m = el.pointAt(el.len / 2), hd = el.headAt(el.len / 2), n = rot90(unit(hd));
       const side = el.sg > 0 ? -1 : 1, tg = al.tangents.find((t) => Math.abs(t.R - el.R) < 1e-9);
-      text('COTATION', add(m, mul(n, side * (half + rp.bdd + 2))), `${tg?.loop ? 'boucle ' : ''}R ${fmt(el.R)} m · A ${fmt(tg?.A || 0)} · d ${fmt(deversOfRadius(el.R, C), 1)} %`, hd, 'center', TH * 0.8);
+      text('COTATION', add(m, mul(n, side * (half + rp.bdd + 2))), `${tg?.loop ? 'boucle ' : ''}R ${fmt(el.R)} m (Ri ${fmt(R.rIn(el.R))}) · A ${fmt(tg?.A || 0)} · d ${fmt(deversOfRadius(R.rIn(el.R), C), 1)} %${R.rIn(el.R) < 100 ? ` · surl. ${fmt((50 * rp.lanes) / R.rIn(el.R))}` : ''}`, hd, 'center', TH * 0.8);
     });
     const sl = Math.min(L, R.sTplS + 30), m0 = al.pointAt(sl), n0 = rot90(unit(al.headAt(sl)));
     text('COTATION', add(m0, mul(n0, -(half + rp.bdd + 2))), `${name} — ${rp.label}`, al.headAt(sl), 'center', TH);
@@ -496,7 +502,7 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
   const st = (x) => +(s0 + x * sgn).toFixed(2);
   const far = sgn > 0 ? 'hwy1' : 'hwy2', near = sgn > 0 ? 'hwy2' : 'hwy1';
   const w = 3.5, yA = hw.E1 + 1 + w / 2, off2 = w / 2 + 0.5; // axe de la bretelle à E.1,00 ; demi-entraxe de la tige
-  const Rl = opt.Rl || 50, Al = opt.Al || 40, Rd = opt.Rd || 120, Ad = opt.Ad || 80, Ys = opt.Ystem || 450;
+  const Rl = opt.Rl || 56, Al = opt.Al || 45, Rd = opt.Rd || 120, Ad = opt.Ad || 80, Ys = opt.Ystem || 450;
   const p3 = 0.03, lam = 150;
   const ids = [mkId(), mkId(), mkId(), mkId()];
   const base = { cat: 'b50', lanes: 1, pente: '' };
@@ -513,12 +519,19 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
   // ouvre un terre-plein qui croît de 0 (le long de la tige) à 2g (côté amont).
   // Contraintes : 1er rayon de sortie ≥ 100 m et R1 < 2·R2 (§ 3.2.2) ; clothoïdes ≥ max(6R^0,4 ; 7|Δd|) (§ 3.2.3).
   const g = Math.max(0, opt.gap ?? 0), Cl = arc ? arc.C : { x: -off2 - Rl, y: yPI - Rl };
-  const Qx = Cl.x - g, Qy = Cl.y, rho = off2 - Qx; // rayon effectif (arc + ripage de la clothoïde)
-  const Amin = (R) => Math.ceil(Math.sqrt(cloMinLength(R, Math.abs(deversOfRadius(R, RAMP_CAT.b50) - 2.5), 1) * R) / 5) * 5;
-  let R2 = rho, A2 = 50;
-  for (let i = 0; i < 4; i++) { A2 = opt.A2 || Amin(R2); const L2 = (A2 * A2) / R2, e = cloXY(A2, L2), tau = L2 / (2 * R2); R2 = rho - (e.y - R2 * (1 - Math.cos(tau))); }
+  // La surlargeur de S-semi (50/Ri, côté intérieur, donc côté boucle, § 3.4.2) s'ajoute à l'écart pour garder les
+  // plates-formes tangentes sans chevauchement.
+  const Amin = (R) => Math.ceil(Math.sqrt(cloMinLength(R, Math.abs(deversOfRadius(R - w / 2, RAMP_CAT.b50) - 2.5), 1) * R) / 5) * 5;
+  const Qy = Cl.y;
+  let R2 = off2 - Cl.x + g, A2 = 50, sw = 0, Qx = Cl.x - g, rho = off2 - Qx;
+  for (let i = 0; i < 6; i++) {
+    Qx = Cl.x - g - sw; rho = off2 - Qx; // rayon effectif (arc + ripage de la clothoïde)
+    A2 = opt.A2 || Amin(R2); const L2 = (A2 * A2) / R2, e = cloXY(A2, L2), tau = L2 / (2 * R2); R2 = rho - (e.y - R2 * (1 - Math.cos(tau)));
+    sw = R2 - w / 2 < 100 ? 50 / (R2 - w / 2) : 0;
+  }
   R2 = Math.round(R2 * 10) / 10;
-  const R1 = opt.R1 || Math.max(100, Math.min(Math.floor((2 * R2 - 1) / 5) * 5, 150)), A1 = opt.A1 || Amin(R1);
+  // Rayons comparés au bord intérieur (axe − 1,75 m) : Ri1 ≥ 100 m et Ri1 < 2·Ri2.
+  const R1 = opt.R1 || Math.max(100, Math.min(Math.floor((2 * (R2 - w / 2) - 1) / 5) * 5, 150)) + w / 2, A1 = opt.A1 || Amin(R1);
   let best = null;
   for (let deg = 25; deg <= 70; deg += 5) { // angle de la droite entre R1 et R2 : le plus compact (divergent le plus proche)
     const f = (deg * Math.PI) / 180, u = { x: Math.cos(f), y: -Math.sin(f) };

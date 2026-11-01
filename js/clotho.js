@@ -101,6 +101,7 @@ export function buildAlignment(pis, { name = '' } = {}) {
   out.pointAt = (d) => { const [e, t] = find(d); return e.pointAt(t); };
   out.headAt = (d) => { const [e, t] = find(d); return e.headAt(t); };
   out.curvAt = (d) => { const [e, t] = find(d); return e.curvAt(t); };
+  out.elemAt = (d) => find(d)[0];
   out.path = alignPath(out);
   return out;
 }
