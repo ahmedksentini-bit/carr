@@ -175,6 +175,14 @@ footer.status { display: flex; align-items: center; gap: 14px; padding: 0 10px; 
 
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line2); border-radius: 10px; max-width: 720px; padding: 6px 22px 16px; }
 dialog::backdrop { background: rgba(0,0,0,.55); }
+/* grande fenêtre du profil en long */
+dialog.dlg-big { width: 96vw; max-width: none; height: 92vh; max-height: none; padding: 0; display: none; flex-direction: column; }
+dialog.dlg-big[open] { display: flex; }
+dialog.dlg-big .dlg-head { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line2); }
+dialog.dlg-big .dlg-head .ttl { flex: 1; font-weight: 600; }
+dialog.dlg-big #plPopBody { flex: 1; overflow: auto; padding: 10px 14px; }
+dialog.dlg-big .chart.pl { overflow-x: auto; }
+dialog.dlg-big .chart.pl svg { width: calc(var(--w) * 1.5) !important; max-width: none; height: auto; }
 dialog h2 { margin: 14px 0 8px; }
 dialog h3 { font-size: 13px; margin: 16px 0 6px; }
 dialog ol { padding-left: 20px; }
