@@ -17,7 +17,7 @@ import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF } from './pt.j
 import { plParams, plBuild, plStations, plTerrainLine, plFromTerrain, plChartSVG, plChartPick, plDXF, plChecks, axisLength } from './pl.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
-import { buildOuvrages, W_CLASSES } from './ouvrage.js';
+import { buildOuvrages, W_CLASSES, psidaLink, psidaProject } from './ouvrage.js';
 import { analyse, SITES } from './capacity.js';
 import { initLang, getLang, t } from './i18n.js';
 import { analysePlan, gapParams, GAPS } from './capacity-plan.js';
@@ -272,6 +272,43 @@ function update({ commit = true, panels = true } = {}) {
   autosave();
 }
 
+// Onglet Ouvrages : liste, travure modifiable de l'ouvrage choisi (réglages par ouvrage dans prj.ouvr.decks), fiche.
+const parseSpans = (t) => String(t || '').split(/;|\s+|,(?=\s)/).map((x) => parseNum(x.trim())).filter((v) => Number.isFinite(v) && v > 0);
+function renderOuvr() {
+  const OV = S.ouvr?.list || [];
+  if (!OV.some((q) => q.key === S.osel)) S.osel = OV[0]?.key ?? null;
+  const nErr = (o) => (S.checks || []).filter((c) => c.group === 'Ouvrages' && c.lvl === 'err' && c.msg.startsWith(o.name + ' –')).length;
+  $('#ouvrList').innerHTML = OV.map((o) => `<li data-okey="${esc(o.key)}" class="${o.key === S.osel ? 'on' : ''}"><span class="dot${nErr(o) ? ' err' : ''}"></span><b>${esc(o.name)}</b><span>${esc(o.src)}</span><span>${o.spans.length} travées${o.user ? ' (saisies)' : ''}</span></li>`).join('')
+    || '<li class="empty-li">Aucun ouvrage : une voie secondaire, la tige d\'une trompette ou l\'anneau d\'un giratoire dénivelé doit croiser l\'autoroute.</li>';
+  const o = OV.find((q) => q.key === S.osel), ed = $('#ouvrEdit');
+  if (!o) { ed.innerHTML = ''; ed.dataset.key = ''; $('#ouvrOut').innerHTML = ''; return; }
+  const ov = S.prj.ouvr?.decks?.[o.key] || {};
+  if (!ed.contains(document.activeElement) || ed.dataset.key !== o.key) {
+    ed.dataset.key = o.key;
+    ed.innerHTML = `<h3>${esc(o.name)} — ${esc(o.src)}</h3>` +
+      `<div class="row"><label class="fld">Travées le long de l'axe, de culée à culée (m)<input id="ovSpans" type="text" autocomplete="off" style="width:100%;min-width:16em" value="${esc(o.spans.map((v) => fmt(v, 2)).join(' ; '))}"></label></div>` +
+      `<div class="row"><label class="fld">Décalage le long de l'axe (m)<input id="ovShift" type="text" inputmode="decimal" autocomplete="off" value="${ov.shift ? esc(fmt(+ov.shift, 2)) : ''}" placeholder="0"></label>` +
+      `<label class="fld">Épaisseur de la dalle imposée (m)<input id="ovH" type="text" inputmode="decimal" autocomplete="off" value="${+ov.h > 0 ? esc(fmt(+ov.h, 2)) : ''}" placeholder="${esc(fmt(o.hGuide, 2))} (guide)"></label></div>` +
+      `<div class="row"><button id="ovAdd" title="Ajoute une travée au milieu (même longueur que la travée centrale)">+ Travée</button><button id="ovDel" title="Supprime la travée centrale">− Travée</button><button id="ovAuto" title="Revient à l'implantation automatique (BAU, dispositif de retenue, TPC, talus 3/2)">Travure automatique</button><button id="ovZoom">Voir sur le plan</button></div>` +
+      `<p class="note">Les travées se suivent de la culée côté sens 1 à la culée côté sens 2 et sont centrées sur le croisement (décalage positif vers la culée côté sens 2) ; les lignes d'appui restent parallèles à l'autoroute. Une pile dans la chaussée ou la largeur de fonctionnement d'un dispositif de retenue, ou un talus de culée qui l'empiète, est signalé.${o.user ? ` Implantation automatique : ${o.spansAuto.map((v) => fmt(v, 2)).join(' ; ')} m.` : ''}</p>`;
+  }
+  const lvlCls = { ok: 'ok', info: '', warn: 'warn', err: 'err' };
+  $('#ouvrOut').innerHTML = [o].map((o) => `<div class="ouvr">` + kv([
+    ['Biais géométrique ψ', `${fmt(o.psi, 1)} gr`],
+    ['Travure', `${o.spans.map((v) => fmt(v, 2)).join(' + ')} = ${fmt(o.spans.reduce((a, b) => a + b, 0), 2)} m${o.central ? ' (pile centrale dans le TPC)' : ' (sans appui central)'}`],
+    ['Largeur du tablier', `${fmt(o.width, 2)} m`],
+    ['Dalle', `PSI-${o.type}, h ≈ ${fmt(o.h, 2)} m ; about ≥ ${fmt(o.about, 2)} m`],
+    ['Axe des piles de rive', `à ${fmt(o.yP, 2)} m de l'axe de l'autoroute`],
+    ['Talus 3/2 sous culée', `hauteur ${fmt(o.Ht, 2)} m, emprise ${fmt(1.5 * o.Ht, 2)} m`],
+  ]) + `<div class="row"><a class="btn primary" href="${esc(psidaLink(o, S.prj))}" target="_blank" rel="noopener" title="Ouvre psida.ksr-infra.org (onglet Conception) avec la travure, la largeur, l'épaisseur, le biais, le tirant d'air et les appuis de cet ouvrage">Ouvrir dans PSIDA ↗</a><button class="mini" data-psidajson="${esc(o.name)}" title="Projet PSIDA (.json) à ouvrir avec le bouton Ouvrir de PSIDA">Exporter (.json)</button></div>` + `<p class="note">${esc(o.hText)}</p><ul class="ouvr-items">${o.items.map((it) => `<li class="${lvlCls[it.level] || ''}">${esc(it.text)}</li>`).join('')}</ul></div>`).join('');
+}
+function setOuvrDeck(key, patch) {
+  S.prj.ouvr = S.prj.ouvr || {}; S.prj.ouvr.decks = S.prj.ouvr.decks || {};
+  const d = { ...(S.prj.ouvr.decks[key] || {}), ...patch };
+  for (const k of Object.keys(d)) if (d[k] == null || d[k] === '') delete d[k];
+  if (Object.keys(d).length) S.prj.ouvr.decks[key] = d; else delete S.prj.ouvr.decks[key];
+  update();
+}
 // Giratoires dénivelés générés (anneau franchissant l'autoroute) : centre, rayons, nom.
 function girdenList() {
   const out = [];
@@ -280,7 +317,7 @@ function girdenList() {
     const j = id === S.prj.jid ? S.prj : S.prj.others.find((o) => o.id === id);
     if (!j || j.center?.x == null) continue;
     const O = id === S.prj.jid ? S.D?.O : (S.Do || []).find((d) => d.id === id)?.D?.O;
-    out.push({ name: id === S.prj.jid ? S.prj.jname : j.name, O: O || { x: +j.center.x, y: +j.center.y }, Rg: +j.ring.Rg, la: +j.ring.la || 8 });
+    out.push({ id, name: id === S.prj.jid ? S.prj.jname : j.name, O: O || { x: +j.center.x, y: +j.center.y }, Rg: +j.ring.Rg, la: +j.ring.la || 8 });
   }
   return out;
 }
@@ -328,11 +365,11 @@ function renderCrossFields() {
     '<div class="row">' + fld(p + 'bdg', 'BDG', 'm', { ph: '0 / 1,00' }) + fld(p + 'berme', 'Berme', 'm', { ph: '0,75 / 1,00' }) + '</div>';
 }
 function buildOuvrFields() {
-  const Wopts = Object.entries(W_CLASSES).map(([k, v]) => [k, `${k} (${fmt(v, 2)} m)`]);
+  const Wopts = (d) => [['', `${d} (${fmt(W_CLASSES[d], 2)} m), par défaut`], ...Object.entries(W_CLASSES).filter(([k]) => k !== d).map(([k, v]) => [k, `${k} (${fmt(v, 2)} m)`])];
   $('#ouvrFields').innerHTML =
-    '<div class="row">' + sel('ouvr.on', 'Ouvrages', [['', 'dessinés'], ['non', 'non dessinés']], { branch: false }) + sel('ouvr.nTrav', 'Travure', [['auto', 'automatique (4 travées si TPC ≥ 3 m)'], ['4', '4 travées (pile centrale)'], ['3', '3 travées (sans pile centrale)']], { branch: false }) + '</div>' +
+    '<div class="row">' + sel('ouvr.on', 'Ouvrages', [['', 'dessinés'], ['non', 'non dessinés']], { branch: false }) + sel('ouvr.nTrav', 'Travure', [['', 'automatique (4 travées si TPC ≥ 3 m)'], ['4', '4 travées (pile centrale)'], ['3', '3 travées (sans pile centrale)']], { branch: false }) + '</div>' +
     '<div class="row">' + fld('ouvr.gab', 'Tirant d\'air', 'm', { ph: '4,75' }) + fld('ouvr.ep', 'Épaisseur des piles voiles', 'm', { ph: '0,80' }) + '</div>' +
-    '<div class="row">' + fld('ouvr.dRet', 'Bord de BAU → face du dispositif de retenue', 'm', { ph: '0' }) + sel('ouvr.Wr', 'Largeur de fonctionnement en rive', Wopts, { branch: false }) + sel('ouvr.Wt', 'Largeur de fonctionnement dans le TPC', Wopts, { branch: false }) + '</div>' +
+    '<div class="row">' + fld('ouvr.dRet', 'Bord de BAU → face du dispositif de retenue', 'm', { ph: '0' }) + sel('ouvr.Wr', 'Largeur de fonctionnement en rive', Wopts('W4'), { branch: false }) + sel('ouvr.Wt', 'Largeur de fonctionnement dans le TPC', Wopts('W2'), { branch: false }) + '</div>' +
     '<div class="row">' + fld('ouvr.corn', 'Largeur hors chaussée de chaque côté (corniche, longrine)', 'm', { ph: '0,50' }) + fld('ouvr.fck', 'Béton de la dalle fck', 'MPa', { ph: '30' }) + '</div>';
 }
 function buildEchFields() {
@@ -409,16 +446,7 @@ function refreshEch() {
     ['Plate-forme', fmt(2 * (hw.E2 + hw.H.berme)) + ' m'],
     ['Rm / Rdn (ICTAAL tab. 3-1)', `${hw.H.C.Rm} / ${hw.H.C.Rdn} m`],
   ]) : '<p class="note">Activez l\'autoroute et dessinez son axe (milieu du terre-plein central).</p>';
-  const OV = S.ouvr?.list || [], lvlCls = { ok: 'ok', info: '', warn: 'warn', err: 'err' };
-  $('#ouvrOut').innerHTML = OV.length ? OV.map((o) => `<details class="ouvr"${OV.length === 1 ? ' open' : ''}><summary><b>${esc(o.name)}</b> — ${esc(o.src)} : ${o.spans.length} travées ${o.spans.map((v) => fmt(v, 2)).join(' + ')} m</summary>` + kv([
-    ['Biais géométrique ψ', `${fmt(o.psi, 1)} gr`],
-    ['Travure', `${o.spans.map((v) => fmt(v, 2)).join(' + ')} = ${fmt(o.spans.reduce((a, b) => a + b, 0), 2)} m${o.central ? ' (pile centrale dans le TPC)' : ' (sans appui central)'}`],
-    ['Largeur du tablier', `${fmt(o.width, 2)} m`],
-    ['Dalle', `PSI-${o.type}, h ≈ ${fmt(o.h, 2)} m ; about ≥ ${fmt(o.about, 2)} m`],
-    ['Axe des piles de rive', `à ${fmt(o.yP, 2)} m de l'axe de l'autoroute`],
-    ['Talus 3/2 sous culée', `hauteur ${fmt(o.Ht, 2)} m, emprise ${fmt(1.5 * o.Ht, 2)} m`],
-  ]) + `<p class="note">${esc(o.hText)}</p><ul class="ouvr-items">${o.items.map((it) => `<li class="${lvlCls[it.level] || ''}">${esc(it.text)}</li>`).join('')}</ul></details>`).join('')
-    : '<p class="note">Aucun ouvrage : une voie secondaire, la tige d\'une trompette ou l\'anneau d\'un giratoire dénivelé doit croiser l\'autoroute.</p>';
+  renderOuvr();
   const xr = D?.crosses?.[S.xsel];
   $('#crossOut').innerHTML = xr?.ok ? kv([
     ['Longueur de l\'axe', fmt(xr.sEnd) + ' m'],
@@ -827,6 +855,31 @@ function bindEch() {
     if (!r || !confirm(t(`Supprimer la bretelle ${r.name} ?`))) return;
     for (const q of S.prj.ramps) for (const e of [q.from, q.to]) if (e?.ref === r.id) e.ref = 'free'; // les raccordements à cette bretelle deviennent libres
     S.prj.ramps.splice(S.rsel, 1); S.rsel = -1; update();
+  });
+  $('#ouvrList').addEventListener('click', (e) => { const li = e.target.closest('[data-okey]'); if (!li) return; S.osel = li.dataset.okey; $('#ouvrEdit').dataset.key = ''; renderOuvr(); });
+  $('#ouvrEdit').addEventListener('change', (e) => {
+    const key = $('#ouvrEdit').dataset.key; if (!key) return;
+    if (e.target.id === 'ovSpans') { const sp = parseSpans(e.target.value); if (sp.length && sp.every((v) => v > 1)) setOuvrDeck(key, { spans: sp }); else toast('Travées : saisissez des longueurs supérieures à 1 m séparées par « ; ».', 'warn'); }
+    else if (e.target.id === 'ovShift') setOuvrDeck(key, { shift: parseNum(e.target.value) || null });
+    else if (e.target.id === 'ovH') { const h = parseNum(e.target.value); setOuvrDeck(key, { h: h > 0.1 ? h : null }); }
+    $('#ouvrEdit').dataset.key = ''; renderOuvr();
+  });
+  $('#ouvrEdit').addEventListener('click', (e) => {
+    const key = $('#ouvrEdit').dataset.key, o = (S.ouvr?.list || []).find((q) => q.key === key); if (!o || !e.target.id) return;
+    const sp = o.spans.slice(), m = Math.floor(sp.length / 2);
+    if (e.target.id === 'ovAdd') { sp.splice(m, 0, sp[m]); setOuvrDeck(key, { spans: sp }); }
+    else if (e.target.id === 'ovDel') { if (sp.length < 2) return; sp.splice(m, 1); setOuvrDeck(key, { spans: sp }); }
+    else if (e.target.id === 'ovAuto') setOuvrDeck(key, { spans: null, shift: null, h: null });
+    else if (e.target.id === 'ovZoom') { viewer.cx = o.P.x; viewer.cy = o.P.y; viewer.s = Math.max(viewer.s, 4); viewer.invalidate(); return; }
+    else return;
+    $('#ouvrEdit').dataset.key = ''; renderOuvr();
+  });
+  $('#ouvrOut').addEventListener('click', (e) => { // projet PSIDA (.json) de l'ouvrage
+    const b = e.target.closest('[data-psidajson]'); if (!b) return;
+    const o = (S.ouvr?.list || []).find((q) => q.name === b.dataset.psidajson); if (!o) return;
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([psidaProject(o, S.prj)], { type: 'application/json' }));
+    a.download = `psida-${o.name}-${o.spans.map((v) => fmt(v, 1)).join('-')}.json`.replace(/[\s,]+/g, '_'); a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   });
   $('#rampList').addEventListener('click', (e) => { const li = e.target.closest('[data-ri]'); if (!li) return; S.rsel = +li.dataset.ri; refreshPanels(); viewer.invalidate(); });
   // Changement d'extrémité (capturé avant la mise à jour) : une extrémité qui devient libre reçoit un sommet à la position

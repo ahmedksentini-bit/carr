@@ -290,3 +290,5 @@ details.ouvr summary { cursor: pointer; }
 ul.ouvr-items { margin: 4px 0 2px 16px; padding: 0; font-size: 12px; }
 ul.ouvr-items li.ok { color: var(--ok, #16a34a); }
 ul.ouvr-items li.warn { color: var(--warn); }
+a.btn { display: inline-block; text-decoration: none; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+a.btn:hover { filter: brightness(1.08); }
