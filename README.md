@@ -128,7 +128,11 @@ ou sur un fond topographique DXF.
   tablier de chaque passage supérieur (rouge si le tirant d'air manque) ; sur la voie portée, tablier, piles, culées et
   gabarit de l'autoroute franchie ; cadres et buses sous la chaussée de leur axe (traverse, cellules, fil d'eau) —,
   bandeau du tracé en plan (diagramme des courbures, rayons) et bandeau des dévers gauche / droite (bascule sur les
-  clothoïdes), pente ≤ 2 % sur les 20 derniers mètres (ACI), PI hors de l'axe.
+  clothoïdes). Cartouche repris de BVTrace (sous le profil et dans l'export DXF, au 1/1000 avec plan de
+  comparaison) : N° profil, distance partielle (cotée entre deux profils), distance cumulée, cote TN, cote projet
+  (valeurs écrites à la verticale, stations éclaircies si elles se touchent), alignements droits (i, L) et
+  raccordements paraboliques (R, L, i → i) en cellules fusionnées ; stations = profils en travers implantés sur l'axe,
+  sinon pas régulier (10 à 100 m selon la longueur), pente ≤ 2 % sur les 20 derniers mètres (ACI), PI hors de l'axe.
 - **Profils en travers** (onglet Profils travers) : coupes perpendiculaires à l'axe projet aux stations régulières
   (pas réglable) : plateforme issue du modèle (îlot séparateur ou TPC en saillie, voies avec leur dévers, BDD et berme
   en interurbain, caniveau, bordure, trottoir et contre-bordure en urbain — onglet Profil), talus de remblai (3/2) et

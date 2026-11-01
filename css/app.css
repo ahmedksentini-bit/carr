@@ -271,6 +271,18 @@ td.pict svg { display: block; }
 .plsvg .pl-dvl { fill: none; stroke: #38bdf8; stroke-width: 1.5; }
 .plsvg .pl-dvr { fill: none; stroke: #f59e0b; stroke-width: 1.5; }
 .plsvg .pl-dvl-t { fill: #38bdf8; } .plsvg .pl-dvr-t { fill: #f59e0b; }
+/* cartouche du profil en long (repris de BVTrace : fond clair, cellules rouges / bleues des éléments) */
+.plsvg .pc-bg { fill: #f7f9fb; }
+.plsvg .pc-fr { fill: none; stroke: #8c98a4; stroke-width: 0.9; }
+.plsvg .pc-rl { stroke: #8c98a4; stroke-width: 0.9; }
+.plsvg .pc-st { stroke: #888; stroke-width: 0.6; }
+.plsvg .pc-lb { fill: #222; font-size: 9.5px; font-weight: 600; }
+.plsvg .pc-v, .plsvg .pc-n { fill: #111; font-size: 9px; font-family: var(--mono); }
+.plsvg .pc-seg { fill: rgba(198,40,40,0.14); stroke: #9b1c1c; stroke-width: 0.8; }
+.plsvg .pc-seg-t { fill: #9b1c1c; font-weight: 600; }
+.plsvg .pc-para { fill: rgba(21,101,192,0.14); stroke: #0d47a1; stroke-width: 0.8; }
+.plsvg .pc-para-t { fill: #0d47a1; font-weight: 600; }
+.plsvg .pc-rap { stroke: #9ca3af; stroke-width: 0.7; stroke-dasharray: 2 2; }
 #plTable input { width: 76px; font-family: var(--mono); text-align: right; }
 #plTable td.act button { padding: 1px 7px; }
 #plStations td { font-family: var(--mono); text-align: right; }
