@@ -9,7 +9,7 @@ import { buildDesign, fmt, fmtGis } from './roundabout.js';
 import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan, SECTION, sectionParams, TAD, SIGNS, signParams } from './norms.js';
 import { GAMMES, CATALOG } from './signs.js';
 import { signSVG, signOutline } from './signicons.js';
-import { rampParams, endFrame, normRamp, trumpet, cloverleaf, halfCloverleaf, HWY_CAT, RAMP_CAT } from './echangeur.js';
+import { rampParams, endFrame, normRamp, trumpet, deriveTrumpet, cloverleaf, halfCloverleaf, HWY_CAT, RAMP_CAT } from './echangeur.js';
 import { pathProject } from './clotho.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
@@ -249,6 +249,7 @@ function changeCRS(cfg) {
 // ================================================================ Mise à jour
 function update({ commit = true, panels = true } = {}) {
   rebuildTerrain();
+  try { syncTrumpets(); } catch (e) { console.error(e); }
   try { S.D = buildDesign(S.prj); } catch (e) { console.error(e); S.D = null; toast('Erreur de calcul : ' + e.message, 'err'); }
   if (S.prj.center.auto && S.D?.O) { S.prj.center.x = S.D.O.x; S.prj.center.y = S.D.O.y; }
   try { S.checks = checkDesign(S.prj, S.D); } catch (e) { console.error(e); S.checks = []; }
@@ -338,6 +339,7 @@ function refreshEch() {
         '<div class="row">' + fld(k('name'), 'Nom', '', { text: true }) + sel(k('cat'), 'Catégorie', Object.entries(RAMP_CAT).map(([c, q]) => [c, q.label]), { branch: false }) + '</div>' +
         '<div class="row">' + fld(k('pente'), 'Déclivité (sens de circulation)', '%', { ph: '0', title: 'Valeur algébrique : pente < 0, rampe > 0 (§ 3.2.5)' }) + '</div>' +
         '<h3>Origine</h3>' + endFields('from') + '<h3>Extrémité</h3>' + endFields('to') +
+        (isDerivedLoop(r) ? '<p class="note warn">Boucle de trompette déduite de la S-semi (concentrique à sa grande courbe, tangente à la tige et au convergent) : modifiez la S-semi, la boucle, la tige et les directes suivent.</p>' : '') +
         '<h3>Sommets (PI) de la bretelle</h3><p class="note">Dans le sens de circulation. R : rayon de l\'arc, A : paramètre des clothoïdes (L = A²/R). Boucle : le raccordement tourne par le grand côté (environ 270°), l\'axe se recoupe au sommet (ouvrage).</p>' +
         '<div class="tablewrap"><table class="pts"><tr><th>PI</th><th>X</th><th>Y</th><th>R (m)</th><th>A (m)</th><th title="Boucle de trompette : le raccordement tourne par le grand côté">Boucle</th><th title="Arc continu avec le sommet précédent (même rayon, sans clothoïde entre les deux)">Arc ↺</th><th></th></tr>' +
         r.pis.map((q, j) => {
@@ -425,12 +427,40 @@ function removeGenerated(P0, R0 = 900) {
   for (const q of S.prj.ramps) for (const e of [q.from, q.to]) if (gone.has(e?.ref)) e.ref = 'free';
   return gone.size;
 }
+// Trompettes : la boucle, la tige et les directes suivent la S-semi. Groupe : grp / role (gabarits récents) ou, pour les
+// projets antérieurs, noms et raccordements (S-directe → S-semi, E-directe ← E-boucle).
+const isDerivedLoop = (r) => !!r && (r.role === 'boucle' || (r.gen === 'trompette' && r.name === 'E-boucle'));
+function trumpetGroup(semi) {
+  const R = S.prj.ramps;
+  if (semi.grp) { const by = (role) => R.find((q) => q.grp === semi.grp && q.role === role); return { boucle: by('boucle'), sdir: by('sdir'), edir: by('edir') }; }
+  const sdir = R.find((q) => q.to?.ref === semi.id && q.name === 'S-directe');
+  const end = semi.pis?.[semi.pis.length - 1];
+  const loops = R.filter((q) => q.name === 'E-boucle' && q.to?.ref === semi.from?.ref && q.pis?.[0]);
+  const boucle = end ? loops.sort((a, b) => G.dist(a.pis[0], end) - G.dist(b.pis[0], end))[0] : null;
+  const edir = boucle ? R.find((q) => q.from?.ref === boucle.id && q.name === 'E-directe') : null;
+  return { boucle, sdir, edir };
+}
+function syncTrumpets() {
+  if (!S.D?.hwy?.ok) return;
+  S.trSig = S.trSig || new Map();
+  for (const semi of S.prj.ramps.filter((r) => r.role === 'semi' || (r.name === 'S-semi' && r.from?.ref?.startsWith('hwy')))) {
+    const sig = JSON.stringify([semi.from, semi.pis, S.prj.hwy.axis, S.prj.hwy.trGap, S.prj.hwy.E1]);
+    if (S.trSig.get(semi.id) === sig) continue;
+    S.trSig.set(semi.id, sig);
+    const grp = trumpetGroup(semi);
+    if (!grp.boucle) continue;
+    const dv = deriveTrumpet(S.prj, S.D, semi, grp, { gap: parseNum(String(S.prj.hwy.trGap ?? '')) || 0 });
+    if (dv.err) { if (S.trErr !== dv.err) toast(dv.err, 'warn'); S.trErr = dv.err; continue; }
+    S.trErr = null;
+    for (const k of ['boucle', 'sdir', 'edir']) { const j = grp[k] ? S.prj.ramps.findIndex((q) => q.id === grp[k].id) : -1; if (j >= 0) S.prj.ramps[j] = dv[k]; }
+  }
+}
 function addTrumpetAt(w) {
   const R2 = parseNum(String(S.prj.hwy.trR2 ?? ''));
   const T = trumpet(S.prj, S.D, w, uid, { gap: parseNum(String(S.prj.hwy.trGap ?? '')) || 0, ...(R2 > 0 ? { R2 } : {}) });
   if (T.err) { toast(T.err, 'warn'); return; }
   const nOld = removeGenerated(T.P0);
-  S.prj.ramps.push(...T.ramps.map((r) => ({ ...r, gen: 'trompette' }))); S.rsel = S.prj.ramps.length - 4;
+  S.prj.ramps.push(...T.ramps.map((r) => ({ ...r, gen: 'trompette' }))); S.rsel = S.prj.ramps.length - 3;
   setTool('select'); update(); zoomAll();
   toast(`Trompette générée : ${T.info}.${nOld ? ` ${nOld} bretelle(s) du gabarit précédent remplacée(s) (Ctrl+Z pour annuler).` : ''} Raccordez le haut de la tige au carrefour.` + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
 }
@@ -468,7 +498,7 @@ function drawEch(ctx, v, T, exp) {
     if (!R?.pts) return;
     const on = i === S.rsel, col = on ? T.sel : T.L.AXE_SAISI.stroke;
     poly(R.pts, col, on ? 1.6 : 1, [5, 4]);
-    if (S.tool === 'select') sq(R.pis, col);
+    if (S.tool === 'select' && !isDerivedLoop(S.prj.ramps[i])) sq(R.pis, col);
   });
 }
 function hitEchHandle(px, py) {
@@ -477,7 +507,7 @@ function hitEchHandle(px, py) {
   const order = (S.D?.ramps || []).map((R, i) => i).sort((a, b) => (b === S.rsel) - (a === S.rsel));
   for (const i of order) {
     const R = S.D.ramps[i];
-    if (!R?.pis) continue;
+    if (!R?.pis || isDerivedLoop(S.prj.ramps[i])) continue; // boucle de trompette : déduite de la S-semi, non déplaçable
     for (let k = 0; k < R.pis.length; k++) if (near(R.pis[k])) return { kind: 'rpi', ri: i, k };
   }
   const ax = S.prj.hwy.axis || [];

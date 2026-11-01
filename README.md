@@ -148,7 +148,8 @@ ou sur un fond topographique DXF.
   croisement de la route transversale (tige éventuellement biaise, jusqu'à 40°) ou sur l'axe à l'endroit de l'ouvrage ;
   la sortie semi-directe est construite d'abord (R2 saisi, R1 de sortie ≥ 100 m et < 2 R2) et fixe la tige et l'ouvrage,
   l'entrée en boucle (seule boucle) en est déduite, concentrique ; sortie et entrée directes raccordées à la tige
-  bidirectionnelle. Un gabarit régénéré remplace le précédent au même croisement. Les rayons saisis aux sommets des axes
+  bidirectionnelle. Un gabarit régénéré remplace le précédent au même croisement. Quand on modifie la S-semi (sommets, rayons,
+  extrémité de la tige), la boucle, la tige, l'ouvrage et les directes suivent ; la boucle n'est pas déplaçable seule. Les rayons saisis aux sommets des axes
   sont appliqués tels quels quand les tangentes tiennent (côtés partagés entre sommets voisins, plus petit rayon servi
   d'abord) ; sinon le rayon réduit est signalé. Surlargeur de 50/R par voie à l'intérieur des courbes de rayon
   < 100 m, introduite linéairement le long des clothoïdes (§ 3.4.2) ; rayons limites, dévers et vitesses contrôlés au

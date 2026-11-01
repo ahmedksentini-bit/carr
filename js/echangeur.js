@@ -756,7 +756,74 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
   const warn = lo < 0 || hi > hw.sEnd ? `L'axe de l'autoroute doit couvrir les abscisses ${fmt(Math.max(0, lo), 0)} à ${fmt(hi, 0)} m (actuellement 0 à ${fmt(hw.sEnd, 0)} m).` : '';
   const obl = Math.abs(90 - (phi * 180) / Math.PI);
   const info = `S-semi R1 ${fmt(R1)} / R2 ${fmt(R2)} m → boucle déduite R ${fmt(Rl)} m (Ri ${fmt(Rl - half)} m)${tigeW ? ` ; tige sur la route transversale${obl > 0.5 ? `, biais ${fmt(obl, 1)}°` : ''}` : ''}`;
-  return { ramps: [B1, B2, B3, B4], warn, info, bridge: { p: P0, dir: add(mul(tL, u.x), mul(nL, u.y)) }, P0 };
+  // La boucle, la tige et les directes définitives sont redéduites de la S-semi (même calcul qu'après une modification).
+  const grp = ids[1], Bs = { ...B2, gen: 'trompette', grp, role: 'semi' };
+  const dv = deriveTrumpet(prj, D, Bs, { boucle: { ...B1, gen: 'trompette', grp, role: 'boucle' }, sdir: { ...B3, gen: 'trompette', grp, role: 'sdir' }, edir: { ...B4, gen: 'trompette', grp, role: 'edir' } }, opt);
+  if (dv.err) return { err: dv.err };
+  return { ramps: [dv.boucle, Bs, dv.sdir, dv.edir], warn, info: dv.info + (tigeW ? ` ; tige sur la route transversale${obl > 0.5 ? `, biais ${fmt(obl, 1)}°` : ''}` : ''), bridge: { p: P0, dir: add(mul(tL, u.x), mul(nL, u.y)) }, P0: dv.P0 };
+}
+
+// Trompette déduite de sa S-semi (création et après toute modification de la S-semi) : la dernière branche de la S-semi
+// porte la voie droite de la tige ; l'axe de la tige est à 2,25 m à sa gauche et l'ouvrage est son croisement avec
+// l'axe de l'autoroute. La boucle est concentrique à la grande courbe (R2) de la S-semi, tangente à la voie gauche de la
+// tige et à la ligne d'obliquité (3 %) de son convergent, ce qui fixe son rayon et son point E.1,00. Les bretelles
+// directes sont replacées sur la tige. prev : { boucle, sdir, edir } existants (identifiants et noms conservés).
+export function deriveTrumpet(prj, D, semi, prev, opt = {}) {
+  const hw = D?.hwy;
+  if (!hw?.ok) return { err: 'Axe de l\'autoroute absent.' };
+  const pis = semi.pis || [];
+  if (pis.length < 3 || !(+pis[pis.length - 2].R > 0)) return { err: 'S-semi incomplète (il faut R1, R2 et l\'extrémité de la tige).' };
+  const far = semi.from?.ref, sgn = far === 'hwy2' ? -1 : 1, near = far === 'hwy2' ? 'hwy1' : 'hwy2';
+  const w = 3.5, half = w / 2, yA = hw.E1 + 1 + half, off2 = half + 0.5, p3 = 0.03, g = Math.max(0, opt.gap ?? 0);
+  const P2w = pis[pis.length - 2], Ew = pis[pis.length - 1], uw = norm(sub(Ew, P2w)), rw = { x: uw.y, y: -uw.x };
+  // Ouvrage : croisement de l'axe de la tige avec l'axe de l'autoroute.
+  const A0 = sub(Ew, mul(rw, off2)), pts = G.samplePath(hw.path, 2);
+  let X = null;
+  for (let i = 1; i < pts.length && !X; i++) {
+    const a = G.cross(uw, sub(pts[i - 1], A0)), b = G.cross(uw, sub(pts[i], A0));
+    if (a === 0 || Math.sign(a) !== Math.sign(b)) X = G.lerp(pts[i - 1], pts[i], a / (a - b));
+  }
+  if (!X) return { err: 'La tige (dernière branche de la S-semi) ne croise pas l\'autoroute.' };
+  const pr = pathProject(hw.path, X), s0 = pr.s, P0 = pr.p, t = pathTangentAt(hw.path, s0), tL = sgn > 0 ? t : neg(t), nL = rot90(tL);
+  const Lc = (q) => { const v = sub(q, P0); return { x: G.dot(v, tL), y: G.dot(v, nL) }; };
+  const W = (q) => { const r = add(P0, add(mul(tL, q.x), mul(nL, q.y))); return { x: +r.x.toFixed(3), y: +r.y.toFixed(3) }; };
+  const st = (x) => +(s0 + x * sgn).toFixed(2);
+  const u = { x: G.dot(uw, tL), y: G.dot(uw, nL) };
+  if (u.y < Math.sin((40 * Math.PI) / 180)) return { err: 'La tige doit croiser l\'autoroute vers la voirie ordinaire, avec un biais ≤ 50°.' };
+  const r = { x: u.y, y: -u.x }, phi = Math.atan2(u.y, u.x), Lp = mul(r, -off2), Rp = mul(r, off2);
+  const onTige = (P, y) => add(P, mul(u, (y - P.y) / u.y));
+  const Amin = (R) => Math.ceil(Math.sqrt(cloMinLength(R, Math.abs(deversOfRadius(R - half, RAMP_CAT.b50) - 2.5), 1) * R) / 5) * 5;
+  const shift = (A, R) => { const L = (A * A) / R, e = cloXY(A, L), tau = L / (2 * R); return e.y - R * (1 - Math.cos(tau)); };
+  const surl = (R) => (R - half < 100 ? 50 / (R - half) : 0);
+  // S-semi dans le repère local : centre de sa grande courbe.
+  const xS = (num(semi.from?.s, 0) - s0) * sgn, El = Lc(Ew), Ys = G.dot(El, u);
+  const alS = buildAlignment([{ x: xS, y: -yA }, ...pis.slice(0, -1).map((q) => ({ ...Lc(q), R: +q.R || 0, A: +q.A || 0, semi: !!q.semi })), El]);
+  const arcs = alS.elems.filter((e) => e.kind === 'A'), big = arcs[arcs.length - 1];
+  if (!big) return { err: 'S-semi sans grande courbe.' };
+  const R2 = big.R, Cl = add(big.C, mul(r, g + surl(R2)));
+  // Boucle : tangente à la voie gauche de la tige (rayon effectif) et à la ligne d'obliquité de son convergent.
+  const rhoL = -G.dot(sub(Cl, Lp), r);
+  let Rl = rhoL - 1, Al = 45;
+  for (let i = 0; i < 8; i++) { Al = opt.Al || Amin(Rl); Rl = rhoL - shift(Al, Rl); }
+  Rl = Math.round(Rl * 10) / 10;
+  if (!(Rl > 30)) return { err: `Boucle déduite trop petite (R = ${fmt(Rl)} m) : agrandissez R2 de la S-semi.` };
+  const dc = norm({ x: 1, y: p3 }), nn = Math.hypot(1, p3);
+  const xE = Cl.x + (-yA - Cl.y - rhoL * nn) / p3;
+  const PIl = G.lineLine(Lp, u, { x: xE, y: -yA }, dc)?.p;
+  if (!PIl || -yA - Cl.y < rhoL * nn || xE < PIl.x + 60) return { err: 'La boucle déduite ne tient pas sous la chaussée : écartez la grande courbe de la S-semi de l\'autoroute.' };
+  const base = { cat: 'b50', lanes: 1, pente: '' };
+  const tStart = add(Lp, mul(u, Ys));
+  const boucle = { ...base, ...prev.boucle, from: { ref: 'free' }, to: { ...(prev.boucle?.to || {}), ref: far, s: st(xE) }, pis: [W(tStart), { ...W(PIl), R: Rl, A: Al, loop: true }] };
+  // Bretelles directes (mêmes règles qu'à la création).
+  const Ld = opt.Ldir || 300, Rd = opt.Rd || 120, Ad = opt.Ad || 80;
+  const PId = onTige(add(Rp, mul(r, 15)), yA + 10), PIe = onTige(add(Lp, mul(r, -15)), yA + 10);
+  const TdS = tangentLength(Rd, Ad, Math.PI - phi), TdE = tangentLength(Rd, Ad, phi);
+  const yM = Math.max(opt.yM || 240, G.dot(sub(PId, Rp), u) + TdS + 54 + 15), yME = Math.max(opt.yM || 240, G.dot(sub(PIe, Lp), u) + TdE + 54 + 15);
+  const xSd = PId.x + Math.max(Ld, 140 + TdS + 25) - 10.5, xEd = PIe.x - Math.max(Ld, 140 + TdE + 25) + 10.5;
+  const sdir = { ...base, ...prev.sdir, from: { ...(prev.sdir?.from || {}), ref: near, s: st(xSd) }, to: { ...(prev.sdir?.to || {}), ref: semi.id, s: +(alS.length - (Ys - yM)).toFixed(2) }, pis: [{ ...W(PId), R: Rd, A: Ad }] };
+  const edir = { ...base, ...prev.edir, from: { ...(prev.edir?.from || {}), ref: boucle.id, s: +(Ys - (yME + 5)).toFixed(2) }, to: { ...(prev.edir?.to || {}), ref: near, s: st(xEd) }, pis: [{ ...W(PIe), R: Rd, A: Ad }] };
+  const R1 = +pis[0].R || 0;
+  return { boucle, sdir, edir, P0, info: `S-semi R1 ${fmt(R1)} / R2 ${fmt(R2)} m → boucle déduite R ${fmt(Rl)} m (Ri ${fmt(Rl - half)} m)` };
 }
 
 // --- Trèfle et demi-trèfle ------------------------------------------------------------------------------------------
