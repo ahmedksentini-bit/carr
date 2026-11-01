@@ -236,6 +236,8 @@ ou sur un fond topographique DXF.
     l'ouvrage » ; un ouvrage placé n'est plus redimensionné mais vérifié (HW, vitesse ≤ 3 m/s, revanche : ✔ / ✖) ;
     « Revenir à la proposition » ; sur le plan, poignées de rotation (orientation 20 à 180 gr, 100 = droit, biais
     ψ = min(angle, 200 − angle)), de déplacement le long de l'axe et de longueur ;
+  - un clic sur un ouvrage du plan (tablier, cadre, buse) le met en surbrillance et ouvre sa fiche modifiable dans une
+    fenêtre (bouton Supprimer pour un cadre) ;
   - « Créer les ouvrages sur le plan » : un PICF (ou une buse) par franchissement, biais tiré de la direction de
     l'écoulement, remblai sur traverse tiré du profil en long ; numérotation OA, export PSIDA des dalots ;
   - tests : `node tools/test-watershed.mjs`, `node tools/test-hydrology.mjs`, `node tools/test-culvert.mjs`.
