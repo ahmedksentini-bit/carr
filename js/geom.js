@@ -137,6 +137,42 @@ export function roundPolyline(pts, radii = []) {
   return segs.filter((s) => segLen(s) > 1e-6);
 }
 
+// Polyligne d'axe → chemin avec raccordements circulaires, en respectant au mieux les rayons demandés : les longueurs des
+// côtés sont partagées entre les sommets voisins par ordre de rayon croissant (le plus petit rayon, le plus contraignant,
+// est servi d'abord) ; un rayon n'est réduit que si ses tangentes ne tiennent pas. Retourne { segs, fit : [{ i, req, r, T,
+// Tneed }] } pour signaler les rayons réduits.
+export function roundPolylineFit(pts, radii = []) {
+  const n = pts.length, fit = [];
+  if (n < 2) return { segs: [], fit };
+  const Ls = pts.slice(1).map((p, i) => dist(pts[i], p));
+  const geo = pts.map((V, i) => {
+    const r = +radii[i] || 0;
+    if (i === 0 || i === n - 1 || !(r > 0)) return null;
+    const d1 = norm(sub(V, pts[i - 1])), d2 = norm(sub(pts[i + 1], V)), cr = cross(d1, d2);
+    const defl = Math.atan2(Math.abs(cr), dot(d1, d2));
+    if (defl < 1e-4 || defl > Math.PI - 1e-4) return null;
+    return { i, r, d1, d2, ccw: cr > 0, tanh: Math.tan(defl / 2), need: r * Math.tan(defl / 2), T: 0 };
+  });
+  const usedIn = new Array(n).fill(0), usedOut = new Array(n).fill(0); // tangentes déjà prises sur les côtés i-1→i et i→i+1
+  for (const g of geo.filter(Boolean).sort((a, b) => a.r - b.r)) {
+    const i = g.i, avail = Math.min(Ls[i - 1] - usedOut[i - 1], Ls[i] - usedIn[i + 1]) - 0.01;
+    g.T = Math.max(0, Math.min(g.need, avail));
+    usedIn[i] = g.T; usedOut[i] = g.T;
+  }
+  const segs = [];
+  let cur = pts[0];
+  for (let i = 1; i < n - 1; i++) {
+    const g = geo[i];
+    if (!g || g.T < 0.01) { segs.push(L(cur, pts[i])); cur = pts[i]; if (g) fit.push({ i, req: g.r, r: 0, T: 0, Tneed: g.need }); continue; }
+    const r = g.T / g.tanh, V = pts[i], T1 = sub(V, mul(g.d1, g.T)), T2 = add(V, mul(g.d2, g.T));
+    const C = add(T1, mul(g.ccw ? rot90(g.d1) : neg(rot90(g.d1)), r));
+    segs.push(L(cur, T1)); segs.push(arcThrough(C, r, T1, T2, g.ccw)); cur = T2;
+    fit.push({ i, req: g.r, r, T: g.T, Tneed: g.need });
+  }
+  segs.push(L(cur, pts[n - 1]));
+  return { segs: segs.filter((q) => segLen(q) > 1e-6), fit };
+}
+
 // Décalage d'un chemin continu en tangence, de δ vers la gauche du sens de parcours (δ < 0 : vers la droite).
 export function offsetPath(segs, delta) {
   const out = [];

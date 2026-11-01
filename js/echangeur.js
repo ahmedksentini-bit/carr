@@ -181,9 +181,11 @@ export function buildEchangeur(prj, D) {
 
   // --- Sections courantes (autoroute et route transversale) ----------------------------------
   const XP0 = crossParams(prj), roads = ['hwy', 'cross'];
-  const axisPaths = { hwy: H.axis.length >= 2 ? G.roundPolyline(H.axis, H.axis.map((p) => p.r)) : null, cross: XP0.on && XP0.axis.length >= 2 ? G.roundPolyline(XP0.axis, XP0.axis.map((p) => p.r)) : null };
+  const axisPaths = { hwy: H.axis.length >= 2 ? G.roundPolylineFit(H.axis, H.axis.map((p) => p.r)).segs : null, cross: XP0.on && XP0.axis.length >= 2 ? G.roundPolylineFit(XP0.axis, XP0.axis.map((p) => p.r)).segs : null };
   const drawRoad = (key, H) => {
-    const path = G.roundPolyline(H.axis, H.axis.map((p) => p.r));
+    const { segs: path, fit } = G.roundPolylineFit(H.axis, H.axis.map((p) => p.r));
+    // Rayons saisis non applicables : tangentes plus longues que les côtés disponibles (partagés avec les sommets voisins).
+    for (const f of fit) if (f.r < f.req - 0.005) issues.push({ lvl: 'warn', msg: `${H.name} : sommet ${f.i}, rayon saisi ${fmt(f.req)} m non applicable — tangente nécessaire ${fmt(f.Tneed)} m, disponible ${fmt(f.T)} m entre les sommets voisins ; rayon appliqué ${fmt(f.r)} m. Déplacez les sommets ${f.i - 1} / ${f.i + 1} ou réduisez le rayon d'un sommet voisin.` });
     const sEnd = G.pathLen(path), isRoute = key === 'cross' && H.kind === 'route';
     const E0 = H.median / 2 + H.bdg, E1 = E0 + H.lanes * H.wLane, E2 = E1 + H.bau;
     const off = (delta) => G.offsetPath(path, delta);
@@ -353,7 +355,7 @@ export function buildEchangeur(prj, D) {
     }
     // Sommets : le premier est projeté sur la ligne d'obliquité du divergent, le dernier sur celle du convergent ;
     // les distances sont augmentées jusqu'à obtenir un alignement droit ≥ Lm (prolongement de l'obliquité, § 6.1).
-    const up = rp.pis.map((p) => ({ x: +p.x, y: +p.y, R: num(p.R, 0), A: num(p.A, 0), loop: !!p.loop, link: !!p.link }));
+    const up = rp.pis.map((p) => ({ x: +p.x, y: +p.y, R: num(p.R, 0), A: num(p.A, 0), loop: !!p.loop, link: !!p.link, semi: !!p.semi }));
     if (up.length < (Fs ? 0 : 1) + (Ft ? 0 : 1) || (!Fs && !Ft && up.length < 2)) { err('extrémité libre sans sommet : ajoutez des sommets.'); continue; }
     const both1 = Fs && Ft && up.length === 1;
     let lamS = Fs && up.length ? Math.max(10, G.dot(sub(up[0], Fs.A), Fs.dir)) : 0;
@@ -399,10 +401,10 @@ export function buildEchangeur(prj, D) {
     for (const t of al.tangents) {
       const g = curves[curves.length - 1];
       if (g && t.link && t.sg === g.sg) { g.defl += t.defl; g.L2 = t.L2; g.last = t.i; g.loop = g.loop || t.loop; g.R = Math.min(g.R, t.R); g.Rs.push(t.R); g.Rlast = t.R; }
-      else curves.push({ i: t.i, last: t.i, R: t.R, Rs: [t.R], Rfirst: t.R, Rlast: t.R, sg: t.sg, defl: t.defl, L1: t.L1, L2: t.L2, A: t.A, loop: t.loop, linkIn: !!t.link });
+      else curves.push({ i: t.i, last: t.i, R: t.R, Rs: [t.R], Rfirst: t.R, Rlast: t.R, sg: t.sg, defl: t.defl, L1: t.L1, L2: t.L2, A: t.A, loop: t.loop, semi: t.semi, linkIn: !!t.link });
     }
     curves.forEach((g, j) => { g.linkOut = !!curves[j + 1]?.linkIn; });
-    for (const g of curves) { g.loop = g.loop || g.defl >= (150 * Math.PI) / 180; g.L = Math.min(g.L1, g.L2); }
+    for (const g of curves) { g.loop = g.loop || (g.defl >= (150 * Math.PI) / 180 && !g.semi); g.L = Math.min(g.L1, g.L2); }
     curves.forEach((c, j) => {
       const Rr = rIn(c.R), pis = c.last > c.i ? `PI ${c.i}–${c.last}` : `PI ${c.i}`, tag = c.loop ? `boucle (${pis})` : pis;
       if (c.loop) {
@@ -648,78 +650,113 @@ export function echChecks(D) {
 
 // --- Gabarit de trompette -------------------------------------------------------------------------------------------
 // Diffuseur en trompette avec boucle en entrée (la sortie en boucle n'est admise qu'à titre exceptionnel, § 6.2.4).
-// Repère local : x le long de l'autoroute, y vers la voirie ordinaire (tige), origine au droit de l'ouvrage.
-// Chaussée éloignée (y < 0, circulation +x) : entrée en boucle (E-boucle) et sortie semi-directe (S-semi) qui contourne
-// la boucle ; chaussée proche (y > 0, circulation −x) : sortie directe (S-directe) insérée sur S-semi (Eb11) et entrée
-// directe (E-directe) qui se détache de E-boucle (sortie depuis bretelle). La tige est bidirectionnelle (deux bretelles
-// à sens unique accolées) et franchit l'autoroute ; son extrémité reste libre (giratoire ou carrefour du projet).
+// Ordre de construction : la sortie semi-directe (S-semi) est fixée d'abord (rayon R2 de sa grande courbe, R1 de sortie) ;
+// elle se termine sur la tige, qui suit la route transversale si elle est dessinée (même oblique) et franchit l'autoroute
+// sur l'ouvrage, au croisement des deux axes. La boucle (seule de l'échangeur) en est déduite : elle part de la tige et
+// s'inscrit dans la S-semi, concentrique à sa grande courbe ; son rayon est un résultat (contrôlé : 40 à 60 m, § 3.2.1).
+// Repère local : x le long de l'autoroute (chaussée éloignée, circulation +x), y vers la voirie ordinaire, origine à
+// l'ouvrage. Chaussée proche (y > 0, circulation −x) : sortie directe (S-directe) insérée sur S-semi (Eb11) et entrée
+// directe (E-directe) qui se détache de la boucle (sortie depuis bretelle). La tige est bidirectionnelle (deux bretelles
+// à sens unique accolées) ; son extrémité reste libre (giratoire ou carrefour du projet).
 export function trumpet(prj, D, click, mkId, opt = {}) {
   const hw = D?.hwy;
   if (!hw?.ok) return { err: 'Dessinez d\'abord l\'axe de l\'autoroute.' };
   const pr = pathProject(hw.path, click);
   if (!pr) return { err: 'Point non reconnu.' };
-  const s0 = pr.s, P0 = pr.p, t = pathTangentAt(hw.path, s0), sgn = pr.off >= 0 ? 1 : -1;
-  const tL = sgn > 0 ? t : neg(t), nL = rot90(tL);
-  const W = (x, y) => { const q = add(P0, add(mul(tL, x), mul(nL, y))); return { x: +q.x.toFixed(3), y: +q.y.toFixed(3) }; };
-  const Lc = (q) => { const v = sub(q, P0); return { x: G.dot(v, tL), y: G.dot(v, nL) }; };
+  // Ouvrage : croisement avec la route transversale dessinée la plus proche du clic, sinon point cliqué (tige ⟂).
+  let s0 = pr.s, P0 = pr.p, tigeW = null;
+  const sgn = pr.off >= 0 ? 1 : -1;
+  if (D.cross?.ok) {
+    const pts = G.samplePath(D.cross.path, 2);
+    let best = null;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pathProject(hw.path, pts[i - 1]), b = pathProject(hw.path, pts[i]);
+      if (!a || !b || Math.sign(a.off) === Math.sign(b.off)) continue;
+      const k = a.off / (a.off - b.off), X = G.lerp(pts[i - 1], pts[i], k), d = dist(X, click);
+      if (!best || d < best.d) best = { d, X, dir: norm(sub(pts[i], pts[i - 1])) };
+    }
+    if (best && best.d < 300) { const q = pathProject(hw.path, best.X); s0 = q.s; P0 = q.p; tigeW = best.dir; }
+  }
+  const t = pathTangentAt(hw.path, s0), tL = sgn > 0 ? t : neg(t), nL = rot90(tL);
+  const W = (q) => { const r = add(P0, add(mul(tL, q.x), mul(nL, q.y))); return { x: +r.x.toFixed(3), y: +r.y.toFixed(3) }; };
   const st = (x) => +(s0 + x * sgn).toFixed(2);
   const far = sgn > 0 ? 'hwy1' : 'hwy2', near = sgn > 0 ? 'hwy2' : 'hwy1';
-  const w = 3.5, yA = hw.E1 + 1 + w / 2, off2 = w / 2 + 0.5; // axe de la bretelle à E.1,00 ; demi-entraxe de la tige
-  const Rl = opt.Rl || 56, Al = opt.Al || 45, Rd = opt.Rd || 120, Ad = opt.Ad || 80, Ys = opt.Ystem || 450;
-  const p3 = 0.03, lam = 150;
+  // Direction de la tige (vers la voirie ordinaire) dans le repère local ; r : sa droite.
+  let u = { x: 0, y: 1 };
+  if (tigeW) { u = { x: G.dot(tigeW, tL), y: G.dot(tigeW, nL) }; if (u.y < 0) u = neg(u); }
+  if (u.y < Math.sin((40 * Math.PI) / 180)) return { err: 'Croisement trop oblique (< 40°) pour un gabarit de trompette.' };
+  const r = { x: u.y, y: -u.x }, phi = Math.atan2(u.y, u.x);
+  const w = 3.5, half = w / 2, yA = hw.E1 + 1 + half, off2 = half + 0.5; // axe de bretelle à E.1,00 ; demi-entraxe de la tige
+  const Lp = mul(r, -off2), Rp = mul(r, off2), onTige = (P, y) => add(P, mul(u, (y - P.y) / u.y));
+  // Longueurs adaptées au biais : alignements ≥ Lm (140 m côté autoroute, 54 m côté tige) + tangente du raccordement.
+  const Ld = opt.Ldir || 300, Rd = opt.Rd || 120, Ad = opt.Ad || 80;
+  const PId = onTige(add(Rp, mul(r, 15)), yA + 10), PIe = onTige(add(Lp, mul(r, -15)), yA + 10);
+  const TdS = tangentLength(Rd, Ad, Math.PI - phi), TdE = tangentLength(Rd, Ad, phi);
+  const tauS = G.dot(sub(PId, Rp), u), tauE = G.dot(sub(PIe, Lp), u);
+  const yM = Math.max(opt.yM || 240, tauS + TdS + 54 + 15), yME = Math.max(opt.yM || 240, tauE + TdE + 54 + 15);
+  // Tige : assez longue pour l'insertion de S-directe sur S-semi (100 + 75 m) et la sortie de E-directe.
+  const Ys = opt.Ystem || Math.max(450, yM + 175 + 30, yME + 120), p3 = 0.03, lam = 150, g = Math.max(0, opt.gap ?? 0);
   const ids = [mkId(), mkId(), mkId(), mkId()];
   const base = { cat: 'b50', lanes: 1, pente: '' };
-  // E-boucle : sommet de boucle au croisement de la tige (x = −off2) et de la ligne d'obliquité du convergent.
-  const xE = lam - off2, yPI = -yA - p3 * lam;
+  const Amin = (R) => Math.ceil(Math.sqrt(cloMinLength(R, Math.abs(deversOfRadius(R - half, RAMP_CAT.b50) - 2.5), 1) * R) / 5) * 5;
+  const shift = (A, R) => { const L = (A * A) / R, e = cloXY(A, L), tau = L / (2 * R); return e.y - R * (1 - Math.cos(tau)); }; // ripage
+  const surl = (R) => (R - half < 100 ? 50 / (R - half) : 0);
+  // 1. S-semi : grande courbe de rayon R2 (donnée) ; rayon effectif ρ2 = R2 + ripage de sa clothoïde.
+  const R2in = opt.R2 || 62;
+  const rho2in = R2in + shift(opt.A2 || Amin(R2in), R2in);
+  // 2. Boucle déduite : tangente à la voie gauche de la tige, son cercle effectif est intérieur à celui de S-semi, à la
+  // largeur de la tige près (2 × 2,25 m) et à la surlargeur de S-semi près (+ écart g éventuel côté amont).
+  const rhoL = rho2in - 2 * off2 - g - surl(R2in);
+  let Rl = rhoL - 1, Al = 45;
+  for (let i = 0; i < 8; i++) { Al = opt.Al || Amin(Rl); Rl = rhoL - shift(Al, Rl); }
+  Rl = Math.round(Rl * 10) / 10;
+  if (!(Rl > 30)) return { err: `Rayon R2 = ${fmt(R2in)} m trop petit : la boucle déduite aurait R = ${fmt(Rl)} m.` };
+  // Sommet de la boucle : croisement de la voie gauche de la tige et de la ligne d'obliquité du convergent (3 %).
+  const PIl = onTige(Lp, -yA - p3 * lam), xE = PIl.x + lam, tStart = add(Lp, mul(u, Ys));
   const B1 = { ...base, id: ids[0], name: 'E-boucle', from: { ref: 'free' }, to: { ref: far, s: st(xE), ins: '', biseau: '', obl: '', tpl: '' },
-    pis: [W(-off2, Ys), { ...W(-off2, yPI), R: Rl, A: Al, loop: true }] };
-  const alL = buildAlignment([{ x: -off2, y: Ys }, { x: -off2, y: yPI, R: Rl, A: Al, loop: true }, { x: xE, y: -yA }]);
+    pis: [W(tStart), { ...W(PIl), R: Rl, A: Al, loop: true }] };
+  const alL = buildAlignment([tStart, { ...PIl, R: Rl, A: Al, loop: true }, { x: xE, y: -yA }]);
   const arc = alL.elems.find((e) => e.kind === 'A');
-  const yc = arc ? arc.C.y : yPI - Rl; // la grande courbe de S-semi enveloppe la boucle (tangente à la tige à cette hauteur)
-  // S-semi : sortie par la droite (R1), puis grande courbe à gauche qui enveloppe la boucle (R2) et remonte la tige.
-  // Le cercle de R2 est centré à g mètres en amont du centre de la boucle et tangent à la tige. Par défaut g = 0 : les deux
-  // cercles sont concentriques et les plates-formes de la boucle et de S-semi sont tangentes sur tout le contour ; g > 0
-  // ouvre un terre-plein qui croît de 0 (le long de la tige) à 2g (côté amont).
-  // Contraintes : 1er rayon de sortie ≥ 100 m et R1 < 2·R2 (§ 3.2.2) ; clothoïdes ≥ max(6R^0,4 ; 7|Δd|) (§ 3.2.3).
-  const g = Math.max(0, opt.gap ?? 0), Cl = arc ? arc.C : { x: -off2 - Rl, y: yPI - Rl };
-  // La surlargeur de S-semi (50/Ri, côté intérieur, donc côté boucle, § 3.4.2) s'ajoute à l'écart pour garder les
-  // plates-formes tangentes sans chevauchement.
-  const Amin = (R) => Math.ceil(Math.sqrt(cloMinLength(R, Math.abs(deversOfRadius(R - w / 2, RAMP_CAT.b50) - 2.5), 1) * R) / 5) * 5;
-  const Qy = Cl.y;
-  let R2 = off2 - Cl.x + g, A2 = 50, sw = 0, Qx = Cl.x - g, rho = off2 - Qx;
+  if (!arc) return { err: 'Boucle impossible à construire.' };
+  // 3. S-semi recalée sur la boucle construite : centre décalé de g + surlargeur côté amont, tangente à la voie droite.
+  let R2 = R2in, A2 = 50, sw = surl(R2), Q = arc.C, rho = R2;
   for (let i = 0; i < 6; i++) {
-    Qx = Cl.x - g - sw; rho = off2 - Qx; // rayon effectif (arc + ripage de la clothoïde)
-    A2 = opt.A2 || Amin(R2); const L2 = (A2 * A2) / R2, e = cloXY(A2, L2), tau = L2 / (2 * R2); R2 = rho - (e.y - R2 * (1 - Math.cos(tau)));
-    sw = R2 - w / 2 < 100 ? 50 / (R2 - w / 2) : 0;
+    Q = sub(arc.C, mul(r, g + sw)); rho = G.dot(sub(Rp, Q), r);
+    A2 = opt.A2 || Amin(R2); R2 = rho - shift(A2, R2); sw = surl(R2);
   }
   R2 = Math.round(R2 * 10) / 10;
-  // Rayons comparés au bord intérieur (axe − 1,75 m) : Ri1 ≥ 100 m et Ri1 < 2·Ri2.
-  const R1 = opt.R1 || Math.max(100, Math.min(Math.floor((2 * (R2 - w / 2) - 1) / 5) * 5, 150)) + w / 2, A1 = opt.A1 || Amin(R1);
+  // Rayons comparés au bord intérieur (axe − 1,75 m) : Ri1 ≥ 100 m et Ri1 < 2·Ri2 (§ 3.2.2).
+  const R1 = opt.R1 || Math.max(100, Math.min(Math.floor((2 * (R2 - half) - 1) / 5) * 5, 150)) + half, A1 = opt.A1 || Amin(R1);
   let best = null;
-  for (let deg = 25; deg <= 70; deg += 5) { // angle de la droite entre R1 et R2 : le plus compact (divergent le plus proche)
-    const f = (deg * Math.PI) / 180, u = { x: Math.cos(f), y: -Math.sin(f) };
-    const Tp = { x: Qx - rho * Math.sin(f), y: Qy - rho * Math.cos(f) }; // point de tangence de la droite sur le cercle effectif
-    const P2 = { x: off2, y: Tp.y + ((off2 - Tp.x) / u.x) * u.y };
-    const T1 = tangentLength(R1, A1, f - Math.atan(p3)), T2 = tangentLength(R2, A2, Math.PI / 2 + f);
-    const lam1 = 140 + T1 + 10, P1y = -yA - p3 * lam1, P1 = { x: P2.x - (P1y - P2.y) / Math.tan(f), y: P1y };
-    if (Math.hypot(P2.x - P1.x, P2.y - P1.y) >= T1 + T2 + 5 && (!best || P1.x - lam1 > best.xS)) best = { P1, P2, xS: P1.x - lam1, deg };
+  for (let deg = 20; deg <= 75; deg += 5) { // angle de la droite entre R1 et R2 : le plus compact (divergent le plus proche)
+    const f = (deg * Math.PI) / 180, uf = { x: Math.cos(f), y: -Math.sin(f) };
+    const Tp = sub(Q, mul(rot90(uf), rho)); // tangence de la droite sur le cercle effectif (courbe à gauche)
+    const I = G.lineLine(Tp, uf, Rp, u);
+    if (!I || I.t <= 0) continue;
+    const P2 = I.p, T1 = tangentLength(R1, A1, f - Math.atan(p3)), T2 = tangentLength(R2, A2, phi + f);
+    const lam1 = 140 + T1 + 10, P1y = -yA - p3 * lam1;
+    if (P1y <= Tp.y) continue;
+    const P1 = add(Tp, mul(uf, (P1y - Tp.y) / uf.y));
+    if (dist(P1, P2) >= T1 + T2 + 5 && (!best || P1.x - lam1 > best.xS)) best = { P1, P2, xS: P1.x - lam1, deg };
   }
   if (!best) return { err: 'Gabarit impossible avec ces rayons.' };
+  const sEnd = add(Rp, mul(u, Ys));
   const B2 = { ...base, id: ids[1], name: 'S-semi', from: { ref: far, s: st(best.xS), biseau: '', obl: '', tpl: '' }, to: { ref: 'free' },
-    pis: [{ ...W(best.P1.x, best.P1.y), R: R1, A: A1 }, { ...W(best.P2.x, best.P2.y), R: R2, A: A2 }, W(off2, Ys)] };
-  const alS = buildAlignment([{ x: best.xS, y: -yA }, { ...best.P1, R: R1, A: A1 }, { ...best.P2, R: R2, A: A2 }, { x: off2, y: Ys }]);
-  // Bretelles directes : raccordées à la tige vers y = 240 m (insertion de 100 + 75 m sur S-semi).
-  const yM = opt.yM || 240, Ld = opt.Ldir || 300;
-  const B3 = { ...base, id: ids[2], name: 'S-directe', from: { ref: near, s: st(off2 + w + 1 + Ld), biseau: '', obl: '', tpl: '' },
-    to: { ref: ids[1], s: +(alS.length - (Ys - yM)).toFixed(2), ins: '', biseau: '', obl: '', tpl: '' }, pis: [{ ...W(off2 + 15, yA + 10), R: Rd, A: Ad }] };
-  const B4 = { ...base, id: ids[3], name: 'E-directe', from: { ref: ids[0], s: +(Ys - (yM + 5)).toFixed(2), biseau: '', obl: '', tpl: '' },
-    to: { ref: near, s: st(-(off2 + w + 1 + Ld)), ins: '', biseau: '', obl: '', tpl: '' }, pis: [{ ...W(-off2 - 15, yA + 10), R: Rd, A: Ad }] };
-  // Emprise nécessaire le long de l'autoroute (biseaux, insertions) ; ouvrage : la tige franchit l'autoroute en x = 0.
-  const need = [st(best.xS - 150), st(xE + 275), st(off2 + w + 1 + Ld + 150), st(-(off2 + w + 1 + Ld) - 275)];
+    pis: [{ ...W(best.P1), R: R1, A: A1 }, { ...W(best.P2), R: R2, A: A2, semi: true }, W(sEnd)] };
+  const alS = buildAlignment([{ x: best.xS, y: -yA }, { ...best.P1, R: R1, A: A1 }, { ...best.P2, R: R2, A: A2 }, sEnd]);
+  // 4. Bretelles directes : raccordées à la tige à yM le long de la tige (insertion de 100 + 75 m sur S-semi).
+  const xSd = PId.x + Math.max(Ld, 140 + TdS + 25) - 10.5, xEd = PIe.x - Math.max(Ld, 140 + TdE + 25) + 10.5;
+  const B3 = { ...base, id: ids[2], name: 'S-directe', from: { ref: near, s: st(xSd), biseau: '', obl: '', tpl: '' },
+    to: { ref: ids[1], s: +(alS.length - (Ys - yM)).toFixed(2), ins: '', biseau: '', obl: '', tpl: '' }, pis: [{ ...W(PId), R: Rd, A: Ad }] };
+  const B4 = { ...base, id: ids[3], name: 'E-directe', from: { ref: ids[0], s: +(Ys - (yME + 5)).toFixed(2), biseau: '', obl: '', tpl: '' },
+    to: { ref: near, s: st(xEd), ins: '', biseau: '', obl: '', tpl: '' }, pis: [{ ...W(PIe), R: Rd, A: Ad }] };
+  // Emprise nécessaire le long de l'autoroute (biseaux, insertions).
+  const need = [st(best.xS - 150), st(xE + 275), st(xSd + 150), st(xEd - 275)];
   const lo = Math.min(...need), hi = Math.max(...need);
   const warn = lo < 0 || hi > hw.sEnd ? `L'axe de l'autoroute doit couvrir les abscisses ${fmt(Math.max(0, lo), 0)} à ${fmt(hi, 0)} m (actuellement 0 à ${fmt(hw.sEnd, 0)} m).` : '';
-  void Lc;
-  return { ramps: [B1, B2, B3, B4], warn, bridge: { p: P0, dir: nL } };
+  const obl = Math.abs(90 - (phi * 180) / Math.PI);
+  const info = `S-semi R1 ${fmt(R1)} / R2 ${fmt(R2)} m → boucle déduite R ${fmt(Rl)} m (Ri ${fmt(Rl - half)} m)${tigeW ? ` ; tige sur la route transversale${obl > 0.5 ? `, biais ${fmt(obl, 1)}°` : ''}` : ''}`;
+  return { ramps: [B1, B2, B3, B4], warn, info, bridge: { p: P0, dir: add(mul(tL, u.x), mul(nL, u.y)) }, P0 };
 }
 
 // --- Trèfle et demi-trèfle ------------------------------------------------------------------------------------------

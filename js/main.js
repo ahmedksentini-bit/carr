@@ -235,7 +235,7 @@ function buildEchFields() {
     '<div class="row">' + fld('cross.bau', 'BAU / BDD', 'm', { ph: '2,00 / 2,50' }) + fld('cross.median', 'Bande médiane', 'm', { ph: '0 / 3,00' }) + '</div>' +
     '<div class="row">' + fld('cross.bdg', 'BDG', 'm', { ph: '0 / 1,00' }) + fld('cross.berme', 'Berme', 'm', { ph: '0,75 / 1,00' }) + '</div>';
   $('#hwyFields').innerHTML +=
-    '<div class="row">' + fld('hwy.trGap', 'Trompette : écart boucle / S-semi', 'm', { ph: '0', title: 'Terre-plein entre la boucle et la sortie semi-directe, côté amont (0 : plates-formes tangentes)' }) + '</div>';
+    '<div class="row">' + fld('hwy.trR2', 'Trompette : rayon R2 de la S-semi', 'm', { ph: '62', title: 'Grande courbe de la sortie semi-directe ; la boucle en est déduite (concentrique)' }) + fld('hwy.trGap', 'Trompette : écart boucle / S-semi', 'm', { ph: '0', title: 'Terre-plein entre la boucle et la sortie semi-directe, côté amont (0 : plates-formes tangentes)' }) + '</div>';
 }
 
 // Panneaux : liste des bretelles, formulaire de la bretelle sélectionnée, sommets de l'autoroute, résultats.
@@ -349,12 +349,24 @@ function addRampAt(w) {
 }
 
 // Trompette : quatre bretelles générées autour du point d'ouvrage cliqué sur l'axe ; la tige part du côté du clic.
+// Gabarits générés (trompette, trèfle, demi-trèfle) : un nouveau gabarit remplace ceux du même croisement (bretelles
+// marquées gen, ou portant un nom de gabarit pour les projets antérieurs, dont un sommet est à moins de R0 du point P0).
+const GEN_NAMES = /^(E-boucle|S-semi|S-directe|E-directe|[BD]-(SE|NE|NO|SO)|CX?[12]|S[12]-dir|E[12]-boucle)$/;
+function removeGenerated(P0, R0 = 900) {
+  const gone = new Set(S.prj.ramps.filter((r) => (r.gen || GEN_NAMES.test(r.name || '')) && (r.pis || []).some((q) => Math.hypot(q.x - P0.x, q.y - P0.y) < R0)).map((r) => r.id));
+  if (!gone.size) return 0;
+  S.prj.ramps = S.prj.ramps.filter((r) => !gone.has(r.id));
+  for (const q of S.prj.ramps) for (const e of [q.from, q.to]) if (gone.has(e?.ref)) e.ref = 'free';
+  return gone.size;
+}
 function addTrumpetAt(w) {
-  const T = trumpet(S.prj, S.D, w, uid, { gap: parseNum(String(S.prj.hwy.trGap ?? '')) || 0 });
+  const R2 = parseNum(String(S.prj.hwy.trR2 ?? ''));
+  const T = trumpet(S.prj, S.D, w, uid, { gap: parseNum(String(S.prj.hwy.trGap ?? '')) || 0, ...(R2 > 0 ? { R2 } : {}) });
   if (T.err) { toast(T.err, 'warn'); return; }
-  S.prj.ramps.push(...T.ramps); S.rsel = S.prj.ramps.length - 4;
+  const nOld = removeGenerated(T.P0);
+  S.prj.ramps.push(...T.ramps.map((r) => ({ ...r, gen: 'trompette' }))); S.rsel = S.prj.ramps.length - 4;
   setTool('select'); update(); zoomAll();
-  toast('Trompette générée (boucle en entrée) : ajustez les sommets, puis raccordez le haut de la tige au carrefour.' + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
+  toast(`Trompette générée : ${T.info}.${nOld ? ` ${nOld} bretelle(s) du gabarit précédent remplacée(s) (Ctrl+Z pour annuler).` : ''} Raccordez le haut de la tige au carrefour.` + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
 }
 
 // Trèfle / demi-trèfle : l'axe de la route transversale est (re)créé perpendiculaire à l'autoroute au point cliqué.
@@ -365,11 +377,12 @@ function addCloverAt(w, kind) {
   const T = (kind === 'trefle' ? cloverleaf : halfCloverleaf)(S.prj, S.D, w, uid);
   if (T.err) { toast(T.err, 'warn'); return; }
   X.on = true; X.axis = T.crossAxis;
+  const nOld = removeGenerated(G.lerp(T.crossAxis[0], T.crossAxis[1], 0.5), 1500);
   const n0 = S.prj.ramps.length;
-  S.prj.ramps.push(...T.ramps); S.rsel = n0;
+  S.prj.ramps.push(...T.ramps.map((r) => ({ ...r, gen: kind }))); S.rsel = n0;
   setTool('select'); update(); zoomAll();
   const what = kind === 'trefle' ? (X.kind === 'autoroute' ? 'Trèfle (nœud autoroutier, collectrices sur les deux axes)' : 'Trèfle complet (collectrices sur l\'autoroute)') : 'Demi-trèfle (extrémités libres sur la route transversale)';
-  toast(`${what} généré : ${T.info}.` + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
+  toast(`${what} généré : ${T.info}.${nOld ? ` ${nOld} bretelle(s) du gabarit précédent remplacée(s) (Ctrl+Z pour annuler).` : ''}` + (T.warn ? ' ' + T.warn : ''), T.warn ? 'warn' : 'info');
 }
 
 // Axe de l'autoroute et polygones des bretelles (sommets déplaçables).
@@ -584,7 +597,7 @@ const PROMPTS = {
   trefle: 'Trèfle : cliquez sur l\'axe de l\'autoroute à l\'endroit du croisement.',
   demitrefle: 'Demi-trèfle : cliquez sur l\'axe de l\'autoroute à l\'endroit du croisement.',
   ramp: 'Bretelle : cliquez sur la chaussée de l\'autoroute ou d\'une bretelle au point S.1,00 m (sortie) ou E.1,00 m (entrée).',
-  trumpet: 'Trompette : cliquez sur l\'axe de l\'autoroute à l\'endroit de l\'ouvrage, du côté de la voirie ordinaire.',
+  trumpet: 'Trompette : cliquez au croisement de la route transversale (ou sur l\'autoroute à l\'endroit de l\'ouvrage), du côté de la voirie ordinaire.',
   measure: 'Mesure : cliquez deux points.',
 };
 
