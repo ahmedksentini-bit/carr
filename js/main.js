@@ -28,6 +28,8 @@ import { sizeCulvert, culvertHydraulics, inletsForShape, defaultInletFor } from 
 import { DCAT, planChecks, platformChecks, catText, designCatOf, clothoidNeed } from './roadcat.js';
 import { buildAxisProfiles, axisPlChecks, clearanceChecks, axisTerrainLine, axisFromTerrain, buildNodes, axisLimits } from './axpl.js';
 import { chausseeOverlaps } from './overlap.js';
+import { autoProfile, newProfile, cloneProfile, findProfile } from './ptype.js';
+import { openTypeEditor } from './pttedit.js';
 import { analyse, SITES } from './capacity.js';
 import { initLang, getLang, t } from './i18n.js';
 import { analysePlan, gapParams, GAPS } from './capacity-plan.js';
@@ -3209,6 +3211,7 @@ function ptList() {
   return bd ? crossSections(S.prj, bd, S.tn?.tin) : [];
 }
 function refreshPT() {
+  $('#pttBox').hidden = true;
   const sel = $('#ptBranch'), cands = (S.D?.branches || []).filter((bd) => bd.role !== 'principale');
   const axs = [...(S.axpl?.values() || [])], nP = (k) => (S.prof?.list || []).filter((q) => q.axis === k).length;
   const sig = JSON.stringify([cands.map((b) => [b.idx, b.name]), axs.map((a) => [a.key, a.name, nP(a.key)])]);
@@ -3231,6 +3234,7 @@ function refreshPT() {
   if (!bd) { $('#ptChart').innerHTML = '<p class="note">Dessinez les branches pour afficher leurs profils en travers.</p>'; $('#ptTable').innerHTML = ''; $('#ptStation').innerHTML = ''; return; }
   sel.value = `b:${bd.idx}`;
   $('#ptType').textContent = '';
+  $('#pttBox').hidden = true;
   let list;
   try { list = ptList(); } catch (e) { console.error(e); $('#ptChart').innerHTML = `<p class="note">Profils en travers : ${esc(e.message)}</p>`; return; }
   if (S.ptSt >= list.length) S.ptSt = list.length - 1;
@@ -3251,7 +3255,8 @@ function refreshPT() {
 }
 function refreshPTAxis(c) {
   const R = ptAxisList(c), list = R.list;
-  $('#ptType').textContent = `Profil type de ${c.ax.name} — ${typeText(R.T, typeParams(S.prj))}.`;
+  $('#ptType').textContent = `Profil type de ${c.ax.name} — ${R.used?.length ? `demi-profils de la bibliothèque : ${R.used.map((n) => `« ${n} »`).join(', ')} ; automatique ailleurs : ` : ''}${typeText(R.T, typeParams(S.prj))}.`;
+  try { renderPTT(c, list); } catch (e) { console.error(e); }
   if (!c.A.defined || !list.length) {
     $('#ptChart').innerHTML = `<p class="note">${!c.A.defined ? `Définissez d'abord le profil en long de ${esc(c.ax.name)} (onglet Profil en long).` : `Aucun profil implanté sur ${esc(c.ax.name)} : onglet Implantation, « Série entre deux points » ou « Profil isolé ».`}</p>`;
     $('#ptTable').innerHTML = ''; $('#ptStation').innerHTML = ''; $('#ptStation').dataset.sig = ''; $('#ptNote').textContent = ''; return;
@@ -3270,7 +3275,87 @@ function refreshPTAxis(c) {
   $('#ptNote').textContent = (S.tn ? '' : 'Aucun MNT : talus et cubatures non calculés (onglet Terrain). ') + (noTN ? `${noTN} profil(s) hors du MNT. ` : '') + (noEnd ? `${noEnd} profil(s) : talus sans entrée en terre dans la demi-largeur de coupe. ` : '')
     + `Total ${c.ax.name} : déblai ${fmt(R.vCut, 0)} m³, remblai ${fmt(R.vFill, 0)} m³ entre ${list[0].name} et ${list[list.length - 1].name} (aires moyennes${typeParams(S.prj).ech > 0 ? ', au fond de forme' : ''}, sans décapage ni foisonnement).`;
 }
+// ---------------------------------------------------------------- Profils types (ptype.js, pttedit.js)
+// Affectation des demi-profils à l'axe choisi (gauche, droite, plages d'abscisses) et bibliothèque du projet.
+const pttLib = () => (S.prj.ptt ||= { profiles: [], axes: {} });
+const pttAxis = (key) => { const L = pttLib(); return (L.axes[key] ||= { left: '', right: '', ranges: [] }); };
+function pttOptions(v) {
+  return `<option value="">Automatique (paramètres de l'axe)</option>` + (S.prj.ptt?.profiles || []).map((p) => `<option value="${esc(p.id)}"${p.id === v ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
+}
+function renderPTT(c, list) {
+  const box = $('#pttBox'); box.hidden = false; box.dataset.key = c.key;
+  const A = S.prj.ptt?.axes?.[c.key] || { left: '', right: '', ranges: [] }, ok = (id) => (findProfile(S.prj, id) ? id : '');
+  $('#pttL').innerHTML = pttOptions(ok(A.left)); $('#pttR').innerHTML = pttOptions(ok(A.right));
+  const libSel = $('#pttLib'), keep = libSel.value;
+  libSel.innerHTML = (S.prj.ptt?.profiles || []).map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('') || '<option value="">(vide)</option>';
+  if (keep && findProfile(S.prj, keep)) libSel.value = keep;
+  $('#pttRanges').innerHTML = (A.ranges || []).length
+    ? '<thead><tr><th>s début (m)</th><th>s fin (m)</th><th>gauche</th><th>droite</th><th></th></tr></thead><tbody>' + A.ranges.map((r, i) => `<tr><td><input data-rg="${i}" data-k="s0" inputmode="decimal" value="${fmt(r.s0, 1)}"></td><td><input data-rg="${i}" data-k="s1" inputmode="decimal" value="${fmt(r.s1, 1)}"></td>`
+      + `<td><select data-rg="${i}" data-k="left">${pttOptions(ok(r.left))}</select></td><td><select data-rg="${i}" data-k="right">${pttOptions(ok(r.right))}</select></td><td><button data-rgdel="${i}" title="Supprimer la plage">✕</button></td></tr>`).join('') + '</tbody>'
+    : '<tbody><tr><td class="note">Aucune plage : les demi-profils ci-dessus valent sur tout l\'axe.</td></tr></tbody>';
+}
+// Ouvre l'éditeur sur le demi-profil du côté sd (1 gauche, −1 droite) de l'axe : profil de la bibliothèque (modifié en
+// place) ou profil automatique (copié dans la bibliothèque et affecté à ce côté à la validation).
+function pttEditSide(sd) {
+  const c = ptAxisCtx(); if (!c) return;
+  const A = S.prj.ptt?.axes?.[c.key], id = A ? (sd === 1 ? A.left : A.right) : '', T = axisType(S.prj, S.D, c.key);
+  const auto = () => autoProfile(T, sd, typeParams(S.prj), ptParams(S.prj), `${c.ax.name} — ${sd === 1 ? 'gauche' : 'droite'}`);
+  const cs = ptAxisList(c).list[S.ptSt], dv = cs?.dev ? (sd === 1 ? cs.dev.left : cs.dev.right) * 100 : -typeParams(S.prj).dev * 100;
+  const P = findProfile(S.prj, id);
+  openTypeEditor(P || auto(), {
+    title: `Profil type de ${c.ax.name}, côté ${sd === 1 ? 'gauche' : 'droit'}${P ? '' : ' (copie du profil automatique)'}`, devers: Math.round(dv * 100) / 100, reset: auto,
+    onSave: (np) => {
+      const L = pttLib();
+      if (P) { const i = L.profiles.findIndex((q) => q.id === P.id); L.profiles[i] = { ...np, id: P.id }; }
+      else { const q = { ...np, id: np.id || Math.random().toString(36).slice(2, 10) }; L.profiles.push(q); pttAxis(c.key)[sd === 1 ? 'left' : 'right'] = q.id; }
+      update(); toast(`Profil type « ${np.name} » enregistré.`);
+    },
+  });
+}
+function pttUses(id) {
+  const out = [];
+  for (const [k, A] of Object.entries(S.prj.ptt?.axes || {})) {
+    if (A.left === id || A.right === id || (A.ranges || []).some((r) => r.left === id || r.right === id)) out.push(S.axpl?.get(k)?.name || k);
+  }
+  return out;
+}
+function bindPTT() {
+  const key = () => $('#pttBox').dataset.key;
+  $('#pttL').addEventListener('change', (e) => { pttAxis(key()).left = e.target.value; update(); });
+  $('#pttR').addEventListener('change', (e) => { pttAxis(key()).right = e.target.value; update(); });
+  $('#pttEdL').addEventListener('click', () => pttEditSide(1));
+  $('#pttEdR').addEventListener('click', () => pttEditSide(-1));
+  $('#pttAddRange').addEventListener('click', () => {
+    const c = ptAxisCtx(); if (!c) return;
+    const A = pttAxis(c.key), list = ptAxisList(c).list, s0 = list[S.ptSt]?.s ?? 0, s1 = list[list.length - 1]?.s ?? s0 + 100;
+    A.ranges.push({ s0: Math.round(s0 * 10) / 10, s1: Math.round(Math.max(s1, s0 + 1) * 10) / 10, left: A.left, right: A.right });
+    $('#pttMore').open = true; update();
+  });
+  $('#pttRanges').addEventListener('change', (e) => {
+    const el = e.target.closest('[data-rg]'); if (!el) return;
+    const r = pttAxis(key()).ranges[+el.dataset.rg]; if (!r) return;
+    if (el.dataset.k === 's0' || el.dataset.k === 's1') { const v = parseFloat(String(el.value).replace(',', '.')); if (!isFinite(v)) { toast('Abscisse invalide.', 'warn'); refreshPT(); return; } r[el.dataset.k] = v; }
+    else r[el.dataset.k] = el.value;
+    update();
+  });
+  $('#pttRanges').addEventListener('click', (e) => { const b = e.target.closest('[data-rgdel]'); if (b) { pttAxis(key()).ranges.splice(+b.dataset.rgdel, 1); update(); } });
+  $('#pttLibNew').addEventListener('click', () => openTypeEditor(newProfile(`Profil type ${(S.prj.ptt?.profiles?.length || 0) + 1}`), {
+    title: 'Nouveau demi-profil type', onSave: (np) => { pttLib().profiles.push(np); update(); $('#pttLib').value = np.id; toast(`Profil type « ${np.name} » ajouté à la bibliothèque ; affectez-le à un côté de l'axe.`); },
+  }));
+  $('#pttLibEdit').addEventListener('click', () => {
+    const P = findProfile(S.prj, $('#pttLib').value); if (!P) { toast('Bibliothèque vide : « Nouveau » ou « Éditer… » à côté d\'un demi-profil.', 'warn'); return; }
+    openTypeEditor(P, { title: `Profil type « ${P.name} »`, onSave: (np) => { const L = pttLib(), i = L.profiles.findIndex((q) => q.id === P.id); L.profiles[i] = { ...np, id: P.id }; update(); } });
+  });
+  $('#pttLibDup').addEventListener('click', () => { const P = findProfile(S.prj, $('#pttLib').value); if (!P) return; const q = cloneProfile(P, `${P.name} (copie)`); pttLib().profiles.push(q); update(); $('#pttLib').value = q.id; });
+  $('#pttLibDel').addEventListener('click', () => {
+    const P = findProfile(S.prj, $('#pttLib').value); if (!P) return;
+    const u = pttUses(P.id);
+    if (u.length) { toast(`« ${P.name} » est affecté à : ${u.join(', ')}. Retirez-le d'abord de ces axes.`, 'warn'); return; }
+    S.prj.ptt.profiles = S.prj.ptt.profiles.filter((q) => q.id !== P.id); update(); toast(`Profil type « ${P.name} » supprimé.`);
+  });
+}
 function bindPT() {
+  bindPTT();
   $('#ptBranch').addEventListener('change', (e) => { S.ptSel = e.target.value; S.ptSt = 0; refreshPT(); });
   $('#ptVe').addEventListener('change', refreshPT);
   $('#ptStation').addEventListener('change', (e) => { S.ptSt = +e.target.value; refreshPT(); });

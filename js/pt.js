@@ -59,7 +59,7 @@ export function terrainLine(tin, p, n, halfW, step = 0.5) {
   for (let y = -halfW; y <= halfW + 1e-9; y += step) { const q = G.add(p, G.mul(n, y)); const z = tin ? tinZ(tin, q.x, q.y) : null; out.push({ y, z }); }
   return out;
 }
-const tnAt = (tl, y) => {
+export const tnAt = (tl, y) => {
   for (let i = 0; i + 1 < tl.length; i++) {
     const a = tl[i], b = tl[i + 1];
     if (y >= a.y - 1e-9 && y <= b.y + 1e-9) { if (a.z == null || b.z == null) return null; return a.z + ((y - a.y) / (b.y - a.y)) * (b.z - a.z); }
@@ -184,7 +184,7 @@ export function crossSections(prj, bd, tin, P = ptParams(prj)) {
 // --------------------------------------------------------------------------- Graphique SVG d'une coupe
 export function ptChartSVG(cs, opts = {}) {
   const w = opts.w || 600, h = opts.h || 300, m = { l: 44, r: 14, t: 22, b: 36 };
-  const zs = [...cs.proj.map((q) => q.z), ...cs.tn.filter((q) => q.z != null).map((q) => q.z)];
+  const zs = [...cs.proj.map((q) => q.z), ...(cs.arase || []).map((q) => q.z), ...cs.tn.filter((q) => q.z != null).map((q) => q.z)];
   let zmin = Math.min(...zs), zmax = Math.max(...zs);
   if (!(zmax - zmin > 0.5)) { zmin -= 0.5; zmax += 0.5; }
   const sx = (w - m.l - m.r) / (2 * cs.halfW);
@@ -211,7 +211,11 @@ export function ptChartSVG(cs, opts = {}) {
     out += `<path class="pl-fill" d="${fill}"/><path class="pl-cut" d="${cut}"/>`;
     out += `<path class="pl-tn" d="${tnOk.map((q, i) => `${i ? 'L' : 'M'}${X(q.y).toFixed(1)},${Y(q.z).toFixed(1)}`).join('')}"/>`;
   }
+  // ligne Arase (fond de forme) et couches entre projet et arase
+  if (cs.arase?.length > 1) out += `<path class="pl-arase" d="${cs.arase.map((q, i) => `${i ? 'L' : 'M'}${X(q.y).toFixed(1)},${Y(q.z).toFixed(1)}`).join('')}"/>`;
   out += `<path class="pl-red" d="${cs.proj.map((q, i) => `${i ? 'L' : 'M'}${X(q.y).toFixed(1)},${Y(q.z).toFixed(1)}`).join('')}"/>`;
+  // entrées en terre
+  for (const e of [cs.endL, cs.endR]) if (e && e.br) out += `<circle class="pl-eet" cx="${X(e.y).toFixed(1)}" cy="${Y(e.z).toFixed(1)}" r="3"/><text class="pl-lb" x="${X(e.y)}" y="${Y(e.z) - 6}" text-anchor="middle" font-size="9">EET ${e.br === 'D' ? 'déblai' : 'remblai'}</text>`;
   for (const q of cs.platform) if (q.label && /^(voie|berme|trottoir|îlot)/.test(q.label)) out += `<text class="pl-lb" x="${X(q.y)}" y="${Y(q.z) - 6}" text-anchor="middle" font-size="9">${q.label}</text>`;
   out += `<line class="pl-tg" x1="${X(0)}" y1="${m.t}" x2="${X(0)}" y2="${h - m.b}"/>`;
   out += `<text class="pf-note" x="${w - m.r}" y="12" text-anchor="end">${cs.name ? `${cs.name} · ` : ''}s = ${fmt(cs.s, 1)} m${cs.dev ? ` · dévers ${cs.dev.f > 0 && cs.dev.f < 1 && cs.dev.left != null ? `G ${fmt(cs.dev.left * 100, 1)} % / D ${fmt(cs.dev.right * 100, 1)} % (bascule sur clothoïde)` : `${fmt(cs.dev.d * 100, 1)} %${cs.dev.inner ? ' (courbe)' : ' (toit)'}`}` : ''} · exagération × ${ve}</text>`;
@@ -222,7 +226,7 @@ function niceStep(v) { const p = 10 ** Math.floor(Math.log10(Math.max(1e-9, v)))
 
 // --------------------------------------------------------------------------- DXF : toutes les coupes en planches
 export function ptDXF(list, title, ve = 2, cols = 3) {
-  const w = new DxfWriter().layer('GIRA_PT_TN', 8).layer('GIRA_PT_PROJET', 1).layer('GIRA_PT_COTES', 4);
+  const w = new DxfWriter().layer('GIRA_PT_TN', 8).layer('GIRA_PT_PROJET', 1).layer('GIRA_PT_ARASE', 5).layer('GIRA_PT_COTES', 4);
   const H = 0.4, W = list[0] ? 2 * list[0].halfW + 10 : 60;
   let maxH = 0;
   for (const cs of list) { const zs = [...cs.proj.map((q) => q.z), ...cs.tn.filter((q) => q.z != null).map((q) => q.z)]; maxH = Math.max(maxH, (Math.max(...zs) - Math.min(...zs)) * ve + 6); }
@@ -233,9 +237,12 @@ export function ptDXF(list, title, ve = 2, cols = 3) {
     const tn = cs.tn.filter((q) => q.z != null);
     for (let k = 0; k + 1 < tn.length; k++) w.line('GIRA_PT_TN', { x: X(tn[k].y), y: Y(tn[k].z) }, { x: X(tn[k + 1].y), y: Y(tn[k + 1].z) });
     w.poly('GIRA_PT_PROJET', cs.proj.map((q) => ({ x: X(q.y), y: Y(q.z), b: 0 })));
+    if (cs.arase?.length > 1) w.poly('GIRA_PT_ARASE', cs.arase.map((q) => ({ x: X(q.y), y: Y(q.z), b: 0 })));
+    for (const e of [cs.endL, cs.endR]) if (e && e.br) w.text('GIRA_PT_COTES', { x: X(e.y), y: Y(e.z) + 0.3 }, H * 0.7, 0, `EET ${fmt(e.z, 2)}`, 'center');
     w.line('GIRA_PT_COTES', { x: X(-cs.halfW), y: oy }, { x: X(cs.halfW), y: oy });
     w.line('GIRA_PT_COTES', { x: X(0), y: oy }, { x: X(0), y: Y(cs.zAxe) + 1 });
     w.text('GIRA_PT_COTES', { x: X(-cs.halfW), y: oy - 1.2 }, H, 0, `${cs.name || 'PT'} s = ${fmt(cs.s, 1)} m — axe z ${fmt(cs.zAxe)} · TN ${cs.zTN == null ? '—' : fmt(cs.zTN)} · D ${fmt(cs.cut, 2)} m² · R ${fmt(cs.fill, 2)} m² · plan de comparaison ${fmt(zref, 0)}`);
+    if (cs.types && (cs.types.left !== 'Automatique' || cs.types.right !== 'Automatique')) w.text('GIRA_PT_COTES', { x: X(-cs.halfW), y: oy - 2 }, H * 0.8, 0, `profils types : gauche « ${cs.types.left} », droite « ${cs.types.right} »`);
     for (const q of cs.platform) if (q.label) w.text('GIRA_PT_COTES', { x: X(q.y), y: Y(q.z) + 0.3 }, H * 0.7, 0, `${q.label} ${fmt(q.z, 2)}`, 'center');
   });
   w.text('GIRA_PT_COTES', { x: 0, y: 3 }, H * 2, 0, `${title} — exagération verticale × ${ve}`);

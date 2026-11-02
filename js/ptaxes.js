@@ -16,7 +16,9 @@ import * as G from './geom.js';
 import { fmt } from './common.js';
 import { hwyParams, crossParams, crossList, RAMP_CAT, deversOfRadius } from './echangeur.js';
 import { DCAT, designCatOf, deversAt } from './roadcat.js';
-import { crossSectionFrom, ptParams, areas } from './pt.js';
+import { ptParams, areas, terrainLine, tnAt } from './pt.js';
+import { tinZ } from './tin.js';
+import { autoProfile, findProfile, assignedId, sectionFromTypes, evaluate } from './ptype.js';
 
 const num = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
 
@@ -88,36 +90,45 @@ export function axisPlatform(prj, D, ax, T, s, zAxe, TP = typeParams(prj)) {
   return { line: [...half[1].slice().reverse(), ...half[0].slice(1)], p, t, n, dev };
 }
 
-// Ligne de fond de forme : la ligne projet abaissée de e sous les bandes revêtues (marches verticales aux bords).
-function formeLine(proj, e) {
-  if (!(e > 0)) return proj;
-  // un segment est revêtu si son extrémité extérieure (|y| le plus grand) termine une bande revêtue
-  const paved = (i) => { if (i < 0 || i + 1 >= proj.length) return false; const a = proj[i], b = proj[i + 1]; return Math.abs(b.y) >= Math.abs(a.y) ? !!b.paved : !!a.paved; };
-  const out = [];
-  proj.forEach((q, i) => {
-    const l = paved(i - 1), r = paved(i);
-    if (l && r) out.push({ ...q, z: q.z - e });
-    else if (!l && !r) out.push(q);
-    else out.push({ ...q, z: l ? q.z - e : q.z }, { ...q, z: r ? q.z - e : q.z });
-  });
-  return out;
+// Demi-largeur construite d'un demi-profil (points calculables sans TN, dévers de 2,5 %).
+const widthCache = new WeakMap();
+function profWidth(prof) {
+  if (!widthCache.has(prof)) widthCache.set(prof, Math.max(0, ...[...evaluate(prof.cons, 'R', null, { devers: -0.025 }).values()].filter((r) => r.ok).map((r) => Math.abs(r.x))));
+  return widthCache.get(prof);
 }
 
-// Coupes aux profils implantés d'un axe : [{ name, s, cs, cut, fill, vCut, vFill }] et totaux.
+// Coupe d'un axe à partir de sa plate-forme (repère, dévers) et des deux demi-profils types (ptype.js) : talus jusqu'au
+// TN par la condition D/R, cubatures entre le TN et la ligne de terrassement (arase sous la chaussée, projet ailleurs).
+function typedSection(pf, tin, halfW, zA, L, R) {
+  const tl = terrainLine(tin, pf.p, pf.n, halfW), hasTN = tl.some((q) => q.z != null);
+  const S = sectionFromTypes({ p: pf.p, n: pf.n, zA, dev: pf.dev, tl, tnAt, halfW, left: L, right: R });
+  const ar = hasTN ? areas(S.terr, tl) : { cut: 0, fill: 0 }, arS = hasTN && S.arase.length ? areas(S.proj, tl) : null;
+  return {
+    s: 0, p: pf.p, n: pf.n, platform: S.platform, proj: S.proj, arase: S.arase, terr: S.terr, tn: tl, cut: ar.cut, fill: ar.fill,
+    ...(arS ? { cutS: arS.cut, fillS: arS.fill } : {}), endL: S.endL, endR: S.endR, branch: S.branch, ok: hasTN,
+    zAxe: zA, zTN: tin ? tinZ(tin, pf.p.x, pf.p.y) : null, halfW, types: { left: L.name, right: R.name },
+  };
+}
+
+// Coupes aux profils implantés d'un axe : [{ name, s, cs, cut, fill, vCut, vFill }] et totaux. Profil type de chaque
+// côté : celui de la bibliothèque affecté à l'axe (ou à la plage d'abscisses), sinon le profil automatique.
 export function axisSections(prj, D, ax, A, profs, tin) {
   const P = ptParams(prj), TP = typeParams(prj), T = axisType(prj, D, ax.key), out = [];
   if (!A?.defined) return { list: out, T, err: 'profil en long non défini' };
+  const auto = { 1: autoProfile(T, 1, TP, P, 'Automatique'), [-1]: autoProfile(T, -1, TP, P, 'Automatique') };
+  const used = new Set();
   for (const q of profs) {
     const zA = A.PL.zAt(q.s), pf = axisPlatform(prj, D, ax, T, q.s, zA, TP);
-    const edge = Math.max(...pf.line.map((r) => Math.abs(r.y)));
-    const cs = crossSectionFrom(pf, tin, { ...P, halfW: Math.max(P.halfW, edge + 35) });
-    cs.s = q.s; cs.name = q.name; cs.zAxe = zA; cs.dev = pf.dev;
-    if (TP.ech > 0 && cs.ok) { const ar = areas(formeLine(cs.proj, TP.ech), cs.tn); cs.cutS = cs.cut; cs.fillS = cs.fill; cs.cut = ar.cut; cs.fill = ar.fill; }
+    const L = findProfile(prj, assignedId(prj, ax.key, q.s, 1)) || auto[1], R = findProfile(prj, assignedId(prj, ax.key, q.s, -1)) || auto[-1];
+    if (!L.auto) used.add(L.name); if (!R.auto) used.add(R.name);
+    const edge = Math.max(profWidth(L), profWidth(R));
+    const cs = typedSection(pf, tin, Math.max(P.halfW, edge + 35), zA, L, R);
+    cs.s = q.s; cs.name = q.name; cs.dev = pf.dev;
     out.push(cs);
   }
   let vc = 0, vf = 0;
   out.forEach((cs, i) => { if (i) { const d = cs.s - out[i - 1].s; vc += ((cs.cut + out[i - 1].cut) / 2) * d; vf += ((cs.fill + out[i - 1].fill) / 2) * d; } cs.vCut = vc; cs.vFill = vf; });
-  return { list: out, T, vCut: vc, vFill: vf };
+  return { list: out, T, vCut: vc, vFill: vf, used: [...used] };
 }
 
 // Texte du profil type d'un axe.

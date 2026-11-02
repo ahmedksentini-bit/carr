@@ -235,6 +235,14 @@ ou sur un fond topographique DXF.
   l'intérieur de 2,5 à 7 % (linéaire en 1/R, guide des échangeurs § 3.5 ; route ordinaire : Rdn ≈ 900 m, Rm ≈ 240 m,
   ordre de grandeur à ajuster) ; bermes à 8 % ; talus et fossé de l'onglet. Épaisseur de chaussée : cubatures au fond
   de forme. Volumes par la méthode des aires moyennes, récapitulatif par axe, exports DXF et CSV.
+  **Profil type construit point par point** (repris de BVTrace, js/ptype.js et js/pttedit.js) : chaque côté de l'axe
+  reçoit un demi-profil, automatique (paramètres ci-dessus) ou de la bibliothèque du projet, éventuellement changé sur
+  des plages d'abscisses. Éditeur graphique : points origine / libre, ΔX / ΔZ, ΔX / pente (fixe ou au dévers de la
+  chaussée à la station : bascule sur les clothoïdes, courbes déversées), pente → TN (entrée en terre, EET),
+  condition déblai / remblai sur un point de test (branches R et D : talus, fossé…), lignes Projet et Arase, couches
+  de chaussée (arase recréée à leur épaisseur totale), TN de contrôle, annulation. Cubatures entre le TN et la ligne
+  de terrassement (arase sous la chaussée, projet ailleurs) ; arase et EET dessinés sur les coupes et dans le DXF
+  (calque GIRA_PT_ARASE). Contrôles : node tools/test-ptype.mjs.
 - **Hydrologie et hydraulique (onglet Hydrologie, moteur de BVTrace porté en JavaScript, js/hydro/)** :
   - bassins versants dont l'écoulement coupe les axes cochés (autoroute, voies secondaires, bretelles, branches), sur
     un MNT SRTM élargi autour des axes (marge doublée automatiquement tant qu'un bassin touche le bord, jusqu'à 24 km)
@@ -364,6 +372,8 @@ js/dims.js          cotations de type DAO
 js/crossing.js      passages piétons, abaissés de trottoir et bandes d'éveil de vigilance
 js/swept.js         épures de giration (semi-remorque)
 js/profile.js       profil en travers type de l'anneau (SVG, DXF)
+js/ptype.js         profils types des axes construits point par point (BVTrace) : évaluation, D/R, EET, arase
+js/pttedit.js       éditeur graphique des demi-profils types
 js/viewer.js        rendu canvas (projet, DXF, HUD)
 js/geom.js          géométrie (droites, arcs, raccordements, décalages)
 js/clotho.js        alignements en plan avec clothoïdes (raccordements progressifs)
