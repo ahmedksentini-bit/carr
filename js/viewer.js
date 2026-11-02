@@ -26,7 +26,8 @@ export const THEMES = {
       DEVERS: { stroke: '#fb923c', w: 1.2, text: '#fdba74' },
       OUVRAGE: { stroke: '#e2e8f0', w: 1.4, text: '#e2e8f0', fill: { tablier: 'rgba(203,213,225,0.16)', pile: 'rgba(148,163,184,0.45)', culee: 'rgba(148,163,184,0.55)' }, roles: { axe: { stroke: '#94a3b8', w: 0.8 }, cache: { stroke: '#cbd5e1', w: 1 } } },
       RETENUE: { stroke: '#fbbf24', w: 1.2, text: '#fcd34d', roles: { W: { stroke: 'rgba(251,191,36,0.75)', w: 0.9 } } },
-      TALUS: { stroke: '#a8a29e', w: 1, roles: { crete: { stroke: '#d6d3d1', w: 1.3 } } },
+      TALUS: { stroke: '#a8a29e', w: 1, roles: { crete: { stroke: '#d6d3d1', w: 1.3 }, R: { stroke: 'rgba(134,239,172,0.85)' }, D: { stroke: 'rgba(253,186,116,0.85)' } } },
+      EET: { stroke: '#bef264', w: 1.1, dash: [6, 3] },
       SIGNALISATION: { stroke: '#f87171', w: 1.4, text: '#fca5a5' },
       IMPLANTATION: { stroke: '#e879f9', w: 1, text: '#f0abfc' },
       PROFILS: { stroke: '#4ade80', w: 1.1, text: '#86efac' },
@@ -56,7 +57,8 @@ export const THEMES = {
       DEVERS: { stroke: '#c2410c', w: 1.2, text: '#9a3412' },
       OUVRAGE: { stroke: '#334155', w: 1.4, text: '#1e293b', fill: { tablier: 'rgba(100,116,139,0.14)', pile: 'rgba(71,85,105,0.4)', culee: 'rgba(71,85,105,0.5)' }, roles: { axe: { stroke: '#64748b', w: 0.8 }, cache: { stroke: '#475569', w: 1 } } },
       RETENUE: { stroke: '#b45309', w: 1.2, text: '#92400e', roles: { W: { stroke: 'rgba(180,83,9,0.7)', w: 0.9 } } },
-      TALUS: { stroke: '#78716c', w: 1, roles: { crete: { stroke: '#57534e', w: 1.3 } } },
+      TALUS: { stroke: '#78716c', w: 1, roles: { crete: { stroke: '#57534e', w: 1.3 }, R: { stroke: 'rgba(21,128,61,0.85)' }, D: { stroke: 'rgba(154,52,18,0.85)' } } },
+      EET: { stroke: '#4d7c0f', w: 1.1, dash: [6, 3] },
       SIGNALISATION: { stroke: '#b91c1c', w: 1.4, text: '#991b1b' },
       IMPLANTATION: { stroke: '#a21caf', w: 1, text: '#86198f' },
       PROFILS: { stroke: '#15803d', w: 1.1, text: '#166534' },
@@ -167,7 +169,7 @@ function arrowHead(ctx, x0, y0, x1, y1, size) {
 export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
   if (!D) return;
   const T = THEMES[theme];
-  const order = ['MNT', 'BASSINS', 'CHAUSSEE', 'TALUS', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'RETENUE', 'OUVRAGE', 'PMR', 'VISIBILITE', 'EPURE', 'AXE', 'PROFILS', 'DEVERS', 'COTATION', 'SIGNALISATION'];
+  const order = ['MNT', 'BASSINS', 'CHAUSSEE', 'TALUS', 'EET', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'RETENUE', 'OUVRAGE', 'PMR', 'VISIBILITE', 'EPURE', 'AXE', 'PROFILS', 'DEVERS', 'COTATION', 'SIGNALISATION'];
   ctx.lineCap = 'butt'; ctx.lineJoin = 'round';
   for (const layer of order) {
     if (vis[layer] === false) continue;
@@ -194,7 +196,7 @@ export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
         const [cx, cy] = v.w2s(pr.c.x, pr.c.y);
         ctx.beginPath(); ctx.arc(cx, cy, pr.r * v.s, 0, Math.PI * 2); ctx.stroke();
       } else if (pr.k === 'hatch') {
-        setStroke(ctx, v, st, pr);
+        setStroke(ctx, v, st.roles?.[pr.role] ? { ...st, ...st.roles[pr.role] } : st, pr);
         ctx.lineWidth = Math.max(0.6, (pr.wm || 0) * v.s);
         ctx.beginPath();
         for (const [a, b] of pr.lines) { const [x0, y0] = v.w2s(a.x, a.y), [x1, y1] = v.w2s(b.x, b.y); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); }

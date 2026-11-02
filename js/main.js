@@ -13,7 +13,7 @@ import { rampParams, endFrame, normRamp, buildEchangeur, trumpet, deriveTrumpet,
 import { pathProject, pathTangentAt, polySegs } from './clotho.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
-import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF } from './pt.js';
+import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF, crossSectionFrom, mainPlatform } from './pt.js';
 import { plParams, plBuild, plStations, plTerrainLine, plFromTerrain, plChartSVG, plChartPick, plDXF, plChecks, axisLength, axisPointAt } from './pl.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
@@ -30,6 +30,7 @@ import { buildAxisProfiles, axisPlChecks, clearanceChecks, axisTerrainLine, axis
 import { chausseeOverlaps } from './overlap.js';
 import { autoProfile, newProfile, cloneProfile, findProfile } from './ptype.js';
 import { openTypeEditor } from './pttedit.js';
+import { talusPrims, rowFromSection, radialTalus } from './talus.js';
 import { analyse, SITES } from './capacity.js';
 import { initLang, getLang, t } from './i18n.js';
 import { analysePlan, gapParams, GAPS } from './capacity-plan.js';
@@ -330,9 +331,66 @@ function update({ commit = true, panels = true } = {}) {
   } catch (e) { console.error(e); }
   for (const [id, msg] of S.trBad || []) { const r = S.prj.ramps.find((q) => q.id === id); if (r) S.checks.push({ lvl: 'err', group: 'Échangeur', msg: `Trompette (${r.name}) : boucle non déduite de la S-semi — ${msg}` }); else S.trBad.delete(id); }
   if (panels) refreshPanels();
+  scheduleTalus();
   viewer.invalidate();
   if (commit) commitHistory();
   autosave();
+}
+
+// ================================================================ Talus en plan (talus.js)
+// Couloirs de tous les axes : axes de l'échangeur ayant un profil en long (coupes au profil type, pas pt.talusStep),
+// branches et anneau des carrefours (actif et autres), route principale d'un carrefour plan ; masques : tabliers.
+function talusParams(prj = S.prj) { const p = prj.pt || {}, n = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v); return { step: Math.max(1, n(p.talusStep, 5)), esp: Math.max(0.5, n(p.barb, 2)) }; }
+function junctionCorridors(prj, D, tin, step, out, tag) {
+  if (!D?.branches) return;
+  const P = ptParams(prj), sec = sectionParams(prj);
+  for (const bd of D.branches) {
+    if (!bd.zAt || bd.role === 'principale') continue;
+    const rows = [], L = axisLength(bd);
+    for (let s = 0; s <= L + 1e-6; s = s + step > L && s < L - 0.5 ? L : s + step) { try { const cs = crossSection(prj, bd, s, tin, P); cs.s = s; rows.push(rowFromSection(cs)); } catch { /* station hors axe */ } if (s >= L) break; }
+    out.push({ id: `${tag}:b${bd.idx}`, rows });
+  }
+  if (isPlan(prj) && D.main && D.plan) {
+    const rows = [];
+    for (let X = -(D.plan.LA || 0); X <= (D.plan.LB || 0) + 1e-6; X += step) { try { const cs = crossSectionFrom(mainPlatform(prj, D, X, sec), tin, P); cs.s = X; rows.push(rowFromSection(cs)); } catch { /* hors MNT */ } }
+    out.push({ id: `${tag}:main`, rows });
+  } else if (D.O && D.zRing && D.Rg) {
+    const prof = ringProfile(prj, D), last = prof.line[prof.line.length - 1], re = last[0], N = Math.max(36, Math.ceil((2 * Math.PI * re) / step)), rows = [], plat = [];
+    for (let j = 0; j < N; j++) {
+      const phi = (j / N) * 2 * Math.PI, u = G.unit(phi), q = G.polar(D.O, re, phi), c = { x: q.x, y: q.y, z: D.zRing(G.polar(D.O, D.Rg, phi)) + last[1] };
+      const t = radialTalus(c, u, tin, P, Math.max(30, P.halfW));
+      rows.push({ L: null, R: t ? { ...t, edge: c } : { edge: c } }); plat.push(c);
+    }
+    out.push({ id: `${tag}:anneau`, rows, closed: true, plat });
+  }
+}
+function computeTalus() {
+  const tin = S.tn?.tin;
+  if (!tin || !S.D || (S.prj.opts.vis.TALUS === false && S.prj.opts.vis.EET === false)) return null;
+  const T = talusParams(), out = [], axes = S.prof?.axes || listAxes(S.prj, S.D);
+  for (const A of S.axpl?.values() || []) {
+    if (!A.defined) continue;
+    const ax = axes.find((a) => a.key === A.key); if (!ax) continue;
+    const profs = []; for (let s = 0; s < ax.len - 0.5; s += T.step) profs.push({ s, name: '' }); profs.push({ s: ax.len, name: '' });
+    try { out.push({ id: A.key, rows: axisSections(S.prj, S.D, ax, A, profs, tin).list.map(rowFromSection) }); } catch (e) { console.error(e); }
+  }
+  try { junctionCorridors(S.prj, S.D, tin, T.step, out, 'j0'); } catch (e) { console.error(e); }
+  for (const o of S.Do || []) { const sn = (S.prj.others || []).find((q) => q.id === o.id); if (sn) try { junctionCorridors({ ...S.prj, ...pickJ(sn) }, o.D, tin, T.step, out, o.id); } catch (e) { console.error(e); } }
+  const masks = (S.ouvr?.list || []).map((o) => o.poly).filter((p) => p?.length > 2);
+  return talusPrims(out, masks, { esp: T.esp });
+}
+let talusTimer = null;
+// Calcul différé (après une pause de 350 ms) : les coupes de tous les axes coûtent quelques dixièmes de seconde.
+function scheduleTalus() {
+  clearTimeout(talusTimer);
+  talusTimer = setTimeout(() => {
+    // pas de recalcul si rien d'utile n'a changé (sélection, vue, calques autres que les talus)
+    const v = S.prj.opts.vis, sig = JSON.stringify({ ...S.prj, tn: S.tnSig, opts: { ...S.prj.opts, vis: [v.TALUS, v.EET] }, view: null });
+    if (sig === S.talusSig) return;
+    S.talusSig = sig;
+    try { S.talus = computeTalus(); } catch (e) { console.error(e); S.talus = null; }
+    viewer.invalidate();
+  }, 350);
 }
 
 // Carrefours et leur cote zC (calage des extrémités de bretelles qui y aboutissent).
@@ -1283,6 +1341,7 @@ function renderScene(ctx, v, exp = null) {
   if (S.tn) drawDesign(ctx, v, { prims: S.tn.prims }, theme, S.prj.opts.vis, {});
   for (const o of S.Do || []) drawDesign(ctx, v, o.D, theme, S.prj.opts.vis, { onImagery: imagery && S.prj.bg.provider === 'esri', onImage: () => viewer.invalidate() });
   drawDesign(ctx, v, S.D, theme, S.prj.opts.vis, { onImagery: imagery && S.prj.bg.provider === 'esri', onImage: () => viewer.invalidate() });
+  if (S.talus?.prims) drawDesign(ctx, v, { prims: S.talus.prims }, theme, S.prj.opts.vis, {});
   if (!exp) for (const o of [{ D: S.D, name: S.prj.jname, active: true }, ...(S.Do || [])]) { // nom des carrefours
     if (!o.D?.O || (S.Do || []).length === 0) continue;
     const [x, y] = v.w2s(o.D.O.x, o.D.O.y);
@@ -3925,7 +3984,7 @@ function bindUI() {
       S.prj.traffic.tad = { ...S.prj.traffic.tad, [t.dataset.tadb]: t.checked };
       update({ commit: false });
     } else if (t.dataset.vis) {
-      S.prj.opts.vis[t.dataset.vis] = t.checked; viewer.invalidate(); autosave();
+      S.prj.opts.vis[t.dataset.vis] = t.checked; viewer.invalidate(); autosave(); if (t.dataset.vis === 'TALUS' || t.dataset.vis === 'EET') scheduleTalus();
     }
   });
   panel.addEventListener('change', (e) => {
@@ -4204,7 +4263,8 @@ function buildDxfText() {
   for (const l of Object.values(LAYERS)) if (l.dxf) w.layer(l.dxf, l.aci, l.ltype || 'CONTINUOUS');
   const lay = (k) => LAYERS[k]?.dxf;
   const TH = +S.prj.opts.textH || 0.8;
-  for (const pr of [...(S.tn && S.prj.opts.vis.MNT !== false ? S.tn.prims : []), ...(S.Do || []).flatMap((o) => o.D.prims || []), ...D.prims]) {
+  let tal = null; try { tal = computeTalus(); } catch (e) { console.error(e); }
+  for (const pr of [...(S.tn && S.prj.opts.vis.MNT !== false ? S.tn.prims : []), ...(S.Do || []).flatMap((o) => o.D.prims || []), ...D.prims, ...(tal?.prims || [])]) {
     const L = lay(pr.L);
     if (!L || S.prj.opts.vis[pr.L] === false) continue;
     const ex = pr.lt ? { ltype: pr.lt } : undefined;
