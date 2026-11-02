@@ -243,6 +243,13 @@ ou sur un fond topographique DXF.
   de chaussée (arase recréée à leur épaisseur totale), TN de contrôle, annulation. Cubatures entre le TN et la ligne
   de terrassement (arase sous la chaussée, projet ailleurs) ; arase et EET dessinés sur les coupes et dans le DXF
   (calque GIRA_PT_ARASE). Contrôles : node tools/test-ptype.mjs.
+- **Pont à poutres sur écoulement** (onglet Ouvrages, « + Pont à poutres », ou onglet Hydrologie, type « pont à
+  poutres ») : passage inférieur à travées indépendantes placé sur un axe comme un PICF (poignées de déplacement et
+  d'orientation) ; tablier dans l'axe de la voie portée, culées et piles parallèles à l'écoulement, travées le long de
+  l'axe ; voie à TPC : un tablier par sens ; poutres proposées selon la plus grande portée (BA ≤ 16 m, PRAD ≤ 30 m,
+  VIPP au-delà ; h_p ≈ L/13, L/18, L/17 ; entraxe ≈ 3 m) ; dessin en plan (tablier, poutres, culées, piles), au profil
+  en long (tablier et appuis), cotes de chaussée et d'intrados, hauteur libre sur le TN ; lien PSIDA (onglet Ponts à
+  poutres : travées, type, nombre et entraxe des poutres, hauteur, hourdis, chaussée, superstructures).
 - **Talus en plan** (js/talus.js, calques « Talus » et « Entrées en terre ») : pour tous les axes (autoroute, voies
   secondaires, bretelles ayant un profil en long ; branches, anneau et route principale des carrefours), coupes au
   profil type tous les 5 m (réglable, onglet Profils travers) ; bord de plate-forme côté talus, entrée en terre (EET)

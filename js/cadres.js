@@ -8,6 +8,11 @@
 // Dessin en plan (calque OUVRAGE) : têtes en trait plein (parallèles à l'axe de la voie portée), faces extérieures et
 // intérieures des piédroits et voiles cachées sous le remblai (tirets), semelles du PIPO, murs en aile, axe et étiquette. Export vers PSIDA
 // (onglet « Cadres et portiques », champs cf_*).
+// Pont à poutres (type « poutres ») : passage inférieur à travées indépendantes (VIPP, PRAD ou poutres BA) portant la
+// voie au-dessus d'un écoulement (ou d'une voie) : tablier dans l'axe de la voie portée, lignes d'appui (culées, piles)
+// parallèles à l'écoulement (orientation comme pour les cadres), travées mesurées le long de l'axe, largeur = plate-forme
+// de la voie + corniches ; type de poutres et hauteur proposés selon la plus grande portée (ordres de grandeur des
+// guides Sétra, à confirmer dans PSIDA, onglet « Ponts à poutres », champs pt_*).
 import * as G from './geom.js';
 import { fmt, upright } from './common.js';
 import { pathProject, polySegs } from './clotho.js';
@@ -20,8 +25,31 @@ const up50 = (v) => Math.ceil(v * 2 - 1e-9) / 2;
 
 export const CADRE_DEF = { type: 'picf', n: 1, B: 3, H: 2.5, Hr: 1.5, biais: 100, usage: 'eau', wingA: 30 };
 
+// Pont à poutres : travées (m) saisies « 20 ; 20 » ou tableau.
+export const parseSpansTxt = (v) => (Array.isArray(v) ? v : String(v ?? '').split(/[;+\s]+|,(?=\s)/)).map((x) => parseFloat(String(x).replace(',', '.'))).filter((x) => Number.isFinite(x) && x > 0);
+// Type de poutres selon la plus grande portée : BA ≤ 16 m, PRAD ≤ 30 m (Sétra, dossier PRAD 73), VIPP au-delà
+// (guide VIPP 1996 : 30 à 50 m). Élancement h_p / L : VIPP 1/17, PRAD 1/18, BA 1/13 (ordres de grandeur).
+export const PP_TYPES = { BA: 'poutres en béton armé', PRAD: 'poutres précontraintes par adhérence (PRAD)', BP: 'poutres précontraintes par post-tension (VIPP)' };
+// Voie portée à TPC (autoroute, voie secondaire de type autoroute) : deux tabliers jumeaux, un par sens (chaussée
+// = BDG + voies + BAU, corniches de 0,60 m), séparés au droit du TPC ; sinon un tablier sur toute la plate-forme.
+export function poutresDims(c, half = 6, H = null) {
+  const spans = parseSpansTxt(c.spans), sp = spans.length ? spans : [20], Lmax = Math.max(...sp), Ltot = sp.reduce((a, b) => a + b, 0);
+  const ang = Math.max(20, Math.min(180, num(c.biais, 100))), psi = ang <= 100 ? ang : 200 - ang, sinP = Math.sin((psi * Math.PI) / 200);
+  const twinOk = !!(H && num(H.median, 0) > 0.5), twin = twinOk && c.twin !== 'non';
+  const cw = twinOk ? num(H.bdg, 1) + Math.max(1, num(H.lanes, 2)) * num(H.wLane, 3.5) + num(H.bau, 2.5) : 2 * half;
+  const Wauto = up5(cw + 2 * 0.6), Wone = up5(2 * half + 2 * 0.6), W = Math.max(3, num(c.Wd, twin ? Wauto : twinOk ? Wone : Wauto));
+  const decks = twin ? [-1, 1].map((k) => k * (num(H.median, 0) / 2 + cw / 2)) : [0];
+  const road = twin ? cw / 2 : Math.min(half, W / 2);
+  const typ = PP_TYPES[c.pt] ? c.pt : Lmax <= 16 ? 'BA' : Lmax <= 30 ? 'PRAD' : 'BP';
+  const hpAuto = up5(Lmax / (typ === 'BP' ? 17 : typ === 'PRAD' ? 18 : 13)), hp = Math.max(0.4, num(c.hp, hpAuto)), hd = Math.max(0.15, num(c.hd, 0.25));
+  const nbAuto = Math.max(2, Math.round(W / 3)), nb = Math.max(2, Math.round(num(c.nb, nbAuto)));
+  const about = Math.max(0.3, num(c.about, 0.5));
+  return { type: 'poutres', spans: sp, n: sp.length, Lmax, Ltot, ang, psi, sinP, W, Wauto: twin || !twinOk ? Wauto : Wone, twin, twinOk, decks, road, typ, hp, hpAuto, hd, h: hp + hd, nb, nbAuto, b1: W / nb, about, Hr: 0, B: Lmax, H: hp, L: Ltot + 2 * about, Lg: (Ltot + 2 * about) / 2, Ld: (Ltot + 2 * about) / 2 };
+}
+
 // Grandeurs calculées d'un cadre (épaisseurs, largeur extérieure, longueur, murs).
-export function cadreDims(c, half = 6) {
+export function cadreDims(c, half = 6, axH = null) {
+  if (c.type === 'poutres') return poutresDims(c, half, axH);
   const buse = c.type === 'buse';
   const n = Math.max(1, Math.round(num(c.n, 1))), B = Math.max(0.3, num(c.B, buse ? 1 : 3)), H = buse ? B : Math.max(0.5, num(c.H, 2.5)), Hr = Math.max(0, num(c.Hr, 1.5));
   // buse : épaisseur de paroi ≈ D/12 + 0,08 m, entraxe libre entre buses ≥ max(0,40 m, D/3)
@@ -47,7 +75,7 @@ export function cadreGeoms(prj, D) {
     const ax = byKey[c.axis];
     if (!ax) { out.push({ c, err: `axe porteur introuvable (${c.axisName || c.axis})` }); continue; }
     const s = Math.max(0, Math.min(ax.len, num(c.s, 0))), { p, t } = ax.at(s), n = G.rot90(t);
-    const K = cadreDims(c, (ax.half || 6) + 1);
+    const K = cadreDims(c, c.type === 'poutres' ? ax.half || 6 : (ax.half || 6) + 1, ax.H);
     const th = (K.ang * Math.PI) / 200, d = G.norm(G.add(G.mul(t, Math.cos(th)), G.mul(n, Math.sin(th))));
     // demi-longueurs de part et d'autre de la voie : +d pointe à gauche (orientation 20 à 180 gr mesurée à gauche)
     const left = G.cross(t, d) > 0;
@@ -61,8 +89,57 @@ export function cadreGeoms(prj, D) {
 // Intersection de la droite (a, u) et de la droite (b, v).
 const meet = (a, u, b, v) => { const den = G.cross(u, v); if (Math.abs(den) < 1e-9) return null; const k = G.cross(G.sub(b, a), v) / den; return G.add(a, G.mul(u, k)); };
 
+// Lignes d'appui d'un pont à poutres : pour chaque appui (culée, piles, culée) et les deux abouts du tablier, abscisse
+// sur l'axe porteur, point, tangente et extrémités sur les bords du tablier (droite parallèle à l'écoulement d).
+export function poutresSupports(g, yc = 0) {
+  const { ax, s, d, K } = g, out = [];
+  const at = (x) => { const ss = Math.max(0, Math.min(ax.len, s + x)), q = ax.at(ss), cr = G.cross(q.t, d); return { x, s: ss, p: q.p, t: q.t, cr: Math.abs(cr) < 0.05 ? Math.sign(cr || 1) * 0.05 : cr }; };
+  const edge = (A, y) => G.add(A.p, G.mul(d, y / A.cr)); // point de la ligne d'appui à la distance y de l'axe (gauche > 0)
+  let x = -K.Ltot / 2;
+  const xs = [x]; for (const L of K.spans) { x += L; xs.push(x); }
+  xs.forEach((xi, i) => { const A = at(xi); out.push({ ...A, kind: i === 0 || i === xs.length - 1 ? 'culee' : 'pile', L: edge(A, yc + K.W / 2), R: edge(A, yc - K.W / 2) }); });
+  const ends = [at(-K.Ltot / 2 - K.about), at(K.Ltot / 2 + K.about)].map((A) => ({ ...A, L: edge(A, yc + K.W / 2), R: edge(A, yc - K.W / 2) }));
+  return { sup: out, ends, edge };
+}
+function drawPoutres(g, name, P, TH) {
+  const { p, d, K } = g, m = G.rot90(d);
+  const path = (pts, extra = {}) => P({ k: 'path', L: 'OUVRAGE', segs: polySegs(pts), ...extra });
+  const text = (q, s, rot, align = 'left', h = TH) => P({ k: 'text', L: 'OUVRAGE', p: q, s, rot: upright(rot), align, h });
+  let last = null;
+  for (const yc of K.decks) {
+    const { sup, ends, edge } = poutresSupports(g, yc);
+    // tablier : contour (bords le long de l'axe, abouts parallèles à l'écoulement), remplissage
+    const all = [ends[0], ...sup, ends[1]], poly = [...all.map((A) => A.L), ...all.map((A) => A.R).reverse()];
+    P({ k: 'fill', L: 'OUVRAGE', rings: [polySegs([...poly, poly[0]])], role: 'tablier' });
+    path([...poly, poly[0]], { wm: 0.25 });
+    // poutres (sous le hourdis : cachées), de culée à culée
+    for (let j = 0; j < K.nb; j++) { const y = yc - K.W / 2 + K.b1 * (j + 0.5); path(sup.map((A) => edge(A, y)), { role: 'cache', dash: [1.2, 0.6] }); }
+    // lignes d'appui : culées (mur de front, débordant de 0,5 m, et sa semelle côté remblai) et piles (sous le tablier)
+    for (const A of sup) {
+      const e = G.mul(d, 0.5 * Math.sign(G.dot(G.sub(A.L, A.R), d) || 1));
+      if (A.kind === 'culee') {
+        const back = G.mul(G.norm(A.t), ((A.x < 0 ? -1 : 1) * 0.6) / Math.max(0.3, Math.abs(A.cr)));
+        path([G.sub(A.R, e), G.add(A.L, e), G.add(G.add(A.L, e), back), G.add(G.sub(A.R, e), back), G.sub(A.R, e)], { wm: 0.25 });
+      } else path([G.sub(A.R, e), G.add(A.L, e)], { role: 'cache', dash: [2, 0.8], wm: 0.35 });
+    }
+    last = sup;
+  }
+  // contour d'ensemble (sélection, masque des talus) : bords extérieurs des tabliers extrêmes
+  const lo = Math.min(...K.decks) - K.W / 2, hi = Math.max(...K.decks) + K.W / 2;
+  const { ends: e0, sup: s0, edge } = poutresSupports(g, 0), chain = [e0[0], ...s0, e0[1]];
+  const poly = [...chain.map((A) => edge(A, hi)), ...chain.map((A) => edge(A, lo)).reverse()];
+  // axe de l'écoulement et étiquette
+  const hl = (hi - lo) / 2 / Math.max(0.2, K.sinP) + 8;
+  path([G.add(p, G.mul(d, -hl)), G.add(p, G.mul(d, hl))], { role: 'axe', dash: [3, 1, 0.5, 1] });
+  const desc = `${name} : pont à poutres ${K.typ === 'BP' ? 'VIPP' : K.typ}, ${K.spans.map((v) => fmt(v, 2)).join(' + ')} m, ${K.twin ? `2 tabliers de ${fmt(K.W, 2)} m` : `largeur ${fmt(K.W, 2)} m`}, ${K.nb} poutres h ${fmt(K.hp, 2)} m, biais ${fmt(K.psi, 1)} gr`;
+  const A = last[last.length - 1];
+  text(G.add(edge(A, hi + 1), G.mul(G.norm(A.t), 2)), desc, Math.atan2(A.t.y, A.t.x));
+  return { poly, desc };
+}
+
 // Dessin en plan d'un cadre et fiche.
 export function drawCadre(g, name, P, TH) {
+  if (g.K?.type === 'poutres') return drawPoutres(g, name, P, TH);
   const { p, t, d, K } = g, m = G.rot90(d);
   const path = (pts, extra = {}) => P({ k: 'path', L: 'OUVRAGE', segs: polySegs(pts), ...extra });
   const text = (q, s, rot, align = 'left', h = TH) => P({ k: 'text', L: 'OUVRAGE', p: q, s, rot: upright(rot), align, h });
@@ -108,6 +185,13 @@ export function drawCadre(g, name, P, TH) {
 // Contrôles d'un cadre.
 export function cadreChecks(g, name) {
   const out = [], K = g.K, c = g.c;
+  if (K?.type === 'poutres') {
+    const lim = { BA: 20, PRAD: 35, BP: 50 }[K.typ];
+    if (K.Lmax > lim) out.push({ lvl: 'warn', msg: `${name} : portée ${fmt(K.Lmax, 2)} m > ${lim} m, au-delà du domaine courant des ${PP_TYPES[K.typ]} (guides Sétra) ; choisir un autre type ou ajouter une pile.` });
+    if (K.psi < 70) out.push({ lvl: 'warn', msg: `${name} : biais ${fmt(K.psi, 1)} gr < 70 gr — tablier biais : PSIDA calcule les travées droites (Guyon-Massonnet), l'effet du biais est à vérifier.` });
+    if (K.b1 > 4 || K.b1 < 1.5) out.push({ lvl: 'info', msg: `${name} : entraxe des poutres ${fmt(K.b1, 2)} m hors de l'intervalle courant 1,50 – 4,00 m ; ajuster le nombre de poutres.` });
+    return out;
+  }
   for (const [v, side] of [[K.Lg, 'gauche'], [K.Ld, 'droit']]) if (v < K.Lauto / 2 - 0.05 && (c.Lg != null || c.Ld != null) && c[side === 'gauche' ? 'Lg' : 'Ld'] !== '' && c[side === 'gauche' ? 'Lg' : 'Ld'] != null) out.push({ lvl: 'warn', msg: `${name} : demi-longueur côté ${side} de la voie ${fmt(v, 2)} m < ${fmt(K.Lauto / 2, 2)} m nécessaires pour porter la demi-plate-forme et le talus 3/2 jusqu'au niveau de la traverse (biais compris).` });
   if (c.Lg == null && c.Ld == null && num(c.L, 0) && num(c.L, 0) < K.Lauto - 0.05) out.push({ lvl: 'warn', msg: `${name} : longueur ${fmt(K.L, 2)} m < ${fmt(K.Lauto, 2)} m nécessaires pour porter la plate-forme et le talus 3/2 jusqu'au niveau de la traverse (biais compris).` });
   if (K.psi < 50) out.push({ lvl: 'warn', msg: `${name} : biais ${fmt(K.psi, 1)} gr < 50 gr — biais prononcé (domaine des cadres Sétra PICF : 50 à 100 gr).` });
@@ -124,5 +208,15 @@ export function cadreData(g, name, prj) {
   if (prj?.name) d.plan_projet = prj.name;
   return d;
 }
-export const cadreLink = (g, name, prj) => `${PSIDA_URL}#cadres/d=${encodeURIComponent(b64(JSON.stringify(cadreData(g, name, prj))))}`;
-export const cadreProject = (g, name, prj) => JSON.stringify({ format: 'psida-projet', version: '0.99', date: new Date().toISOString(), source: 'GIRA (carr.ksr-infra.org)', data: cadreData(g, name, prj) }, null, 1);
+// Données PSIDA (onglet « Ponts à poutres ») d'un pont à poutres.
+export function poutresData(g, name, prj) {
+  const K = g.K, r = Math.min(K.road, K.W / 2 - 0.3), e = K.W / 2 + 0.3; // un tablier (les tabliers jumeaux sont identiques)
+  const d = { ouvrage: 'poutres', pt_spans: K.spans.map(f2).join(', '), pt_type: K.typ, pt_n: String(K.nb), pt_b1: f2(K.b1), pt_hd: f2(K.hd), pt_road: `${f2(-r)}, ${f2(r)}`, pt_foot: '', pt_lines: `18 @ ${f2(-e)} ; 18 @ ${f2(e)}` };
+  if (K.typ === 'BA') Object.assign(d, { pt_geo: 'rect', pt_parts: `0.35 ${f2(K.hp)}`, pt_b0: '0.35' });
+  else Object.assign(d, { pt_geo: 'dims', pt_hp: f2(K.hp) });
+  if (prj?.name) d.plan_projet = prj.name;
+  return d;
+}
+export const poutresLink = (g, name, prj) => `${PSIDA_URL}#poutres/d=${encodeURIComponent(b64(JSON.stringify(poutresData(g, name, prj))))}`;
+export const cadreLink = (g, name, prj) => g.K?.type === 'poutres' ? poutresLink(g, name, prj) : `${PSIDA_URL}#cadres/d=${encodeURIComponent(b64(JSON.stringify(cadreData(g, name, prj))))}`;
+export const cadreProject = (g, name, prj) => JSON.stringify({ format: 'psida-projet', version: '0.99', date: new Date().toISOString(), source: 'GIRA (carr.ksr-infra.org)', data: g.K?.type === 'poutres' ? poutresData(g, name, prj) : cadreData(g, name, prj) }, null, 1);

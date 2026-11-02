@@ -19,7 +19,7 @@ import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
 import { buildOuvrages, W_CLASSES, psidaLink, psidaProject, psidaWarnings, PSIDA_URL } from './ouvrage.js';
 import { buildProfils, listAxes, nearestAxis, profParams, profilsCsv } from './profils.js';
-import { cadreGeoms, drawCadre, cadreChecks, cadreLink, cadreProject, CADRE_DEF } from './cadres.js';
+import { cadreGeoms, drawCadre, cadreChecks, cadreLink, cadreProject, CADRE_DEF, PP_TYPES, parseSpansTxt, poutresSupports } from './cadres.js';
 import { axisSections, axisType, typeParams, typeText, axisPlatform } from './ptaxes.js';
 import { demFromSRTM, demFromTIN } from './hydro/dem.js';
 import { delineate } from './hydro/watershed.js';
@@ -376,7 +376,7 @@ function computeTalus() {
   }
   try { junctionCorridors(S.prj, S.D, tin, T.step, out, 'j0'); } catch (e) { console.error(e); }
   for (const o of S.Do || []) { const sn = (S.prj.others || []).find((q) => q.id === o.id); if (sn) try { junctionCorridors({ ...S.prj, ...pickJ(sn) }, o.D, tin, T.step, out, o.id); } catch (e) { console.error(e); } }
-  const masks = (S.ouvr?.list || []).map((o) => o.poly).filter((p) => p?.length > 2);
+  const masks = [...(S.ouvr?.list || []).map((o) => o.poly), ...(S.cadres || []).filter((g) => g.K?.type === 'poutres').map((g) => g.poly)].filter((p) => p?.length > 2);
   return talusPrims(out, masks, { esp: T.esp });
 }
 let talusTimer = null;
@@ -404,14 +404,14 @@ function junctionsZ() {
 }
 // Onglet Ouvrages : liste, travure modifiable de l'ouvrage choisi (réglages par ouvrage dans prj.ouvr.decks), fiche.
 const parseSpans = (t) => String(t || '').split(/;|\s+|,(?=\s)/).map((x) => parseNum(x.trim())).filter((v) => Number.isFinite(v) && v > 0);
-const cadreItem = (g) => ({ key: `c:${g.c.id}`, cadre: true, g, name: g.name, src: `${g.K?.type === 'pipo' ? 'PIPO' : g.K?.type === 'buse' ? 'Buse' : 'PICF'} sous ${g.ax?.name || g.c.axisName || '?'}`, sX: g.sX ?? 0, P: g.p });
+const cadreItem = (g) => ({ key: `c:${g.c.id}`, cadre: true, g, name: g.name, src: g.K?.type === 'poutres' ? `Pont à poutres portant ${g.ax?.name || g.c.axisName || '?'}` : `${g.K?.type === 'pipo' ? 'PIPO' : g.K?.type === 'buse' ? 'Buse' : 'PICF'} sous ${g.ax?.name || g.c.axisName || '?'}`, sX: g.sX ?? 0, P: g.p });
 function renderOuvr() {
   const OV = [...(S.ouvr?.list || []), ...(S.cadres || []).map(cadreItem)].sort((a, b) => (a.sX ?? 0) - (b.sX ?? 0));
   if (!OV.some((q) => q.key === S.osel)) S.osel = OV[0]?.key ?? null;
   const nErr = (o) => (S.checks || []).filter((c) => c.group === 'Ouvrages' && c.lvl === 'err' && c.msg.startsWith(o.name + ' –')).length;
   const nErr2 = (o) => (S.checks || []).filter((c) => c.group === 'Ouvrages' && c.lvl === 'err' && (c.msg.startsWith(o.name + ' –') || c.msg.startsWith(o.name + ' :'))).length;
-  $('#ouvrList').innerHTML = OV.map((o) => `<li data-okey="${esc(o.key)}" class="${o.key === S.osel ? 'on' : ''}"><span class="dot${nErr(o) || nErr2(o) ? ' err' : ''}"></span><b>${esc(o.name)}</b><span>${esc(o.src)}</span><span>${o.cadre ? (o.g.K ? `${o.g.K.n > 1 ? `${o.g.K.n} × ` : ''}${fmt(o.g.K.B, 2)} × ${fmt(o.g.K.H, 2)} m` : '') : `${o.spans.length} travées${o.user ? ' (saisies)' : ''}`}</span></li>`).join('')
-    || '<li class="empty-li">Aucun ouvrage : dessinez une voie secondaire qui croise l\'autoroute (passage supérieur), ou placez un PICF / PIPO sur un axe.</li>';
+  $('#ouvrList').innerHTML = OV.map((o) => `<li data-okey="${esc(o.key)}" class="${o.key === S.osel ? 'on' : ''}"><span class="dot${nErr(o) || nErr2(o) ? ' err' : ''}"></span><b>${esc(o.name)}</b><span>${esc(o.src)}</span><span>${o.cadre ? (o.g.K ? (o.g.K.type === 'poutres' ? `${o.g.K.spans.map((v) => fmt(v, 1)).join(' + ')} m` : `${o.g.K.n > 1 ? `${o.g.K.n} × ` : ''}${fmt(o.g.K.B, 2)} × ${fmt(o.g.K.H, 2)} m`) : '') : `${o.spans.length} travées${o.user ? ' (saisies)' : ''}`}</span></li>`).join('')
+    || '<li class="empty-li">Aucun ouvrage : dessinez une voie secondaire qui croise l\'autoroute (passage supérieur), ou placez un PICF / PIPO ou un pont à poutres sur un axe.</li>';
   const o = OV.find((q) => q.key === S.osel), ed = $('#ouvrEdit');
   if (!o) { ed.innerHTML = ''; ed.dataset.key = ''; $('#ouvrOut').innerHTML = ''; return; }
   if (o.cadre) { renderCadreEdit(o); return; }
@@ -439,6 +439,7 @@ function renderOuvr() {
 }
 // Fiche d'un cadre PICF / PIPO : paramètres modifiables (vides = valeurs automatiques), grandeurs, lien PSIDA.
 function renderCadreEdit(o) {
+  if (o.g.c.type === 'poutres') { renderPoutresEdit(o); return; }
   const g = o.g, c = g.c, K = g.K, ed = $('#ouvrEdit');
   if (!ed.contains(document.activeElement) || ed.dataset.key !== o.key) {
     ed.dataset.key = o.key;
@@ -446,7 +447,7 @@ function renderCadreEdit(o) {
     const sel = (k, label, opts) => `<label class="fld">${label}<select data-cf="${k}">${opts.map(([v, t]) => `<option value="${v}"${(c[k] || opts[0][0]) === v ? ' selected' : ''}>${t}</option>`).join('')}</select></label>`;
     ed.innerHTML = `<h3>${esc(o.name)} — ${esc(o.src)}</h3>` +
       `<div class="row"><label class="fld">Nom de l'ouvrage<input data-cf="name" type="text" autocomplete="off" value="${esc(c.name || '')}" placeholder="${esc(g.nameAuto || o.name)} (automatique)"></label>` +
-      sel('type', 'Type', [['picf', 'cadre fermé (PICF, dalot)'], ['pipo', 'portique ouvert (PIPO)'], ['buse', 'buse (B = diamètre)']]) + sel('usage', 'Voie franchie', [['eau', 'écoulement (ouvrage hydraulique)'], ['route', 'route (passage inférieur)'], ['rail', 'voie ferrée']]) + `</div>` +
+      sel('type', 'Type', [['picf', 'cadre fermé (PICF, dalot)'], ['pipo', 'portique ouvert (PIPO)'], ['buse', 'buse (B = diamètre)'], ['poutres', 'pont à poutres (travées indépendantes)']]) + sel('usage', 'Voie franchie', [['eau', 'écoulement (ouvrage hydraulique)'], ['route', 'route (passage inférieur)'], ['rail', 'voie ferrée']]) + `</div>` +
       `<div class="row">${inp('n', 'Cellules', '1', '')}${inp('B', 'Ouverture B', '3,00')}${inp('H', 'Hauteur intérieure H', '2,50')}${inp('Hr', 'Remblai sur traverse', '1,50')}</div>` +
       `<div class="row">${inp('biais', 'Orientation (20 à 180, 100 = droit)', '100', 'gr')}${inp('Lg', 'Demi-longueur côté gauche', `${fmt((+c.L || K?.Lauto || 0) / 2, 2)} (auto)`)}${inp('Ld', 'côté droit', `${fmt((+c.L || K?.Lauto || 0) / 2, 2)} (auto)`)}${inp('s', 'Abscisse sur l\'axe porteur', '')}</div>` +
       `<div class="row">${inp('ep', 'Piédroits', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('et', 'Traverse', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('er', 'Radier', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('ei', 'Voiles intermédiaires', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}</div>` +
@@ -464,6 +465,34 @@ function renderCadreEdit(o) {
     ['Murs en aile', K.wingL > 0.1 ? `${fmt(K.wingL, 2)} m à ${fmt(K.wingA, 0)}°` : 'sans'],
     ['Voie portée', `${esc(g.ax?.name || '')}, abscisse ${fmt(g.s, 2)} m`],
   ]) + (K.type === 'buse' ? '' : `<div class="row"><a class="btn primary" href="${esc(cadreLink(g, o.name, S.prj))}" target="_blank" rel="noopener" title="Ouvre psida.ksr-infra.org (onglet Cadres et portiques) avec le type, les dimensions, le biais, la longueur et le remblai de cet ouvrage">Ouvrir dans PSIDA ↗</a><button class="mini" data-cadrejson="${esc(c.id)}" title="Projet PSIDA (.json) à ouvrir avec le bouton Ouvrir de PSIDA">Exporter (.json)</button></div>`) + `</div>`;
+}
+// Fiche d'un pont à poutres : travées, type et hauteur des poutres, largeur, orientation des lignes d'appui ; PSIDA.
+function renderPoutresEdit(o) {
+  const g = o.g, c = g.c, K = g.K, ed = $('#ouvrEdit');
+  if (!ed.contains(document.activeElement) || ed.dataset.key !== o.key) {
+    ed.dataset.key = o.key;
+    const inp = (k, label, ph, unit = 'm') => `<label class="fld">${label}${unit ? ` (${unit})` : ''}<input data-cf="${k}" type="text" inputmode="decimal" autocomplete="off" value="${c[k] === '' || c[k] == null ? '' : esc(fmt(+c[k], 2))}" placeholder="${esc(ph)}"></label>`;
+    const sel = (k, label, opts) => `<label class="fld">${label}<select data-cf="${k}">${opts.map(([v, t]) => `<option value="${v}"${(c[k] ?? opts[0][0]) === v ? ' selected' : ''}>${t}</option>`).join('')}</select></label>`;
+    ed.innerHTML = `<h3>${esc(o.name)} — ${esc(o.src)}</h3>` +
+      `<div class="row"><label class="fld">Nom de l'ouvrage<input data-cf="name" type="text" autocomplete="off" value="${esc(c.name || '')}" placeholder="${esc(g.nameAuto || o.name)} (automatique)"></label>` +
+      sel('type', 'Type', [['picf', 'cadre fermé (PICF, dalot)'], ['pipo', 'portique ouvert (PIPO)'], ['buse', 'buse (B = diamètre)'], ['poutres', 'pont à poutres (travées indépendantes)']]) + sel('usage', 'Voie franchie', [['eau', 'écoulement (ouvrage hydraulique)'], ['route', 'route (passage inférieur)'], ['rail', 'voie ferrée']]) + `</div>` +
+      `<div class="row"><label class="fld">Travées le long de l'axe, de culée à culée (m)<input data-cf="spans" type="text" autocomplete="off" style="min-width:12em" value="${esc(K ? K.spans.map((v) => fmt(v, 2)).join(' ; ') : String(c.spans ?? ''))}" placeholder="20 ; 20"></label>` +
+      sel('pt', 'Poutres', [['', `automatique (${K ? PP_TYPES[K.typ] : '—'})`], ...Object.entries(PP_TYPES)]) + (K?.twinOk ? sel('twin', 'Tabliers', [['', 'un par sens (2 tabliers jumeaux)'], ['non', 'un seul sur toute la plate-forme']]) : '') + `</div>` +
+      `<div class="row">${inp('hp', 'Hauteur des poutres h_p', `${fmt(K?.hpAuto ?? 0, 2)} (auto)`)}${inp('hd', 'Hourdis', '0,25')}${inp('nb', 'Nombre de poutres', `${K?.nbAuto ?? ''} (auto)`, '')}${inp('Wd', 'Largeur du tablier', `${fmt(K?.Wauto ?? 0, 2)} (auto)`)}</div>` +
+      `<div class="row">${inp('biais', 'Orientation des lignes d\'appui (20 à 180, 100 = droit)', '100', 'gr')}${inp('about', 'About', '0,50')}${inp('s', 'Abscisse du milieu sur l\'axe porté', '')}</div>` +
+      `<div class="row"><button id="cdZoom">Voir sur le plan</button><button id="cdDel">Supprimer l'ouvrage</button></div>` +
+      `<p class="note">Le tablier suit l'axe de la voie portée ; culées et piles sont parallèles à l'écoulement (orientation mesurée à gauche de la voie, comme pour les cadres ; poignée ronde pleine sur le plan). Poutres proposées selon la plus grande portée : béton armé jusqu'à 16 m, PRAD jusqu'à 30 m, VIPP au-delà ; hauteur L/13, L/18 ou L/17 ; entraxe proche de 3 m ; largeur = plate-forme de la voie + 2 × 0,60 m (corniches, dispositifs de retenue) ; voie à TPC : un tablier par sens (BDG + voies + BAU + 2 × 0,60 m). Ordres de grandeur à confirmer dans PSIDA (onglet Ponts à poutres).</p>`;
+  }
+  if (!K) { $('#ouvrOut').innerHTML = `<p class="note">${esc(g.err || '')}</p>`; return; }
+  const A = S.axpl?.get(g.ax?.key), zR = A?.defined ? A.PL.zAt(g.s) : null, zt = S.tn?.tin && g.p ? tinZ(S.tn.tin, g.p.x, g.p.y) : null, zI = zR != null ? zR - 0.08 - K.h : null;
+  $('#ouvrOut').innerHTML = `<div class="ouvr">` + kv([
+    ['Travure', `${K.spans.map((v) => fmt(v, 2)).join(' + ')} = ${fmt(K.Ltot, 2)} m entre axes des culées (${K.n} travée${K.n > 1 ? 's' : ''} indépendante${K.n > 1 ? 's' : ''}), abouts ${fmt(K.about, 2)} m`],
+    ['Poutres', `${PP_TYPES[K.typ]}${c.pt ? '' : ' (automatique)'} : ${K.nb} poutres, entraxe ${fmt(K.b1, 2)} m, h_p ${fmt(K.hp, 2)} m + hourdis ${fmt(K.hd, 2)} m`],
+    ['Tablier', `${K.twin ? `2 tabliers jumeaux (un par sens) de ${fmt(K.W, 2)} m, chaussée ${fmt(2 * K.road, 2)} m chacun ; PSIDA calcule l'un d'eux` : `largeur ${fmt(K.W, 2)} m, chaussée ${fmt(2 * Math.min(K.road, K.W / 2 - 0.3), 2)} m`} ; orientation ${fmt(K.ang, 0)} gr, biais ψ ${fmt(K.psi, 1)} gr`],
+    ...(c.hydro ? [['Hydrologie', `${esc(c.hydro.id)} : Q${c.hydro.T} = ${fmt(c.hydro.Q, 2)} m³/s (onglet Hydrologie) — revanche sous poutres à vérifier sur la ligne d'eau du lit`]] : []),
+    ['Cotes', zR != null ? `chaussée ${fmt(zR, 2)} m, intrados ≈ ${fmt(zI, 2)} m (chaussée − 0,08 − poutre − hourdis)${zt != null ? `, TN au droit ${fmt(zt, 2)} m : hauteur libre ≈ ${fmt(zI - zt, 2)} m` : ''}` : 'profil en long de la voie portée à définir (onglet Profil en long)'],
+    ['Voie portée', `${esc(g.ax?.name || '')}, abscisse du milieu ${fmt(g.s, 2)} m`],
+  ]) + `<div class="row"><a class="btn primary" href="${esc(cadreLink(g, o.name, S.prj))}" target="_blank" rel="noopener" title="Ouvre psida.ksr-infra.org (onglet Ponts à poutres) avec les travées, le type et la hauteur des poutres, leur nombre et entraxe, la chaussée et les superstructures de cet ouvrage">Ouvrir dans PSIDA ↗</a><button class="mini" data-cadrejson="${esc(c.id)}" title="Projet PSIDA (.json) à ouvrir avec le bouton Ouvrir de PSIDA">Exporter (.json)</button></div></div>`;
 }
 function setCadre(id, patch) {
   const c = (S.prj.cadres || []).find((q) => q.id === id); if (!c) return;
@@ -878,6 +907,13 @@ function pickOnAxis(w) {
     (S.prj.prof.manual = S.prj.prof.manual || []).push({ id: uid(), axis: ax.key, axisName: ax.name, s: s0 });
     update(); toast(`Profil placé sur ${ax.name} à l'abscisse ${fmt(s0)} m.`); return;
   }
+  if (S.tool === 'poutres') {
+    const c = { id: uid(), type: 'poutres', usage: 'eau', spans: '20', biais: 100, axis: ax.key, axisName: ax.name, s: s0 };
+    (S.prj.cadres = S.prj.cadres || []).push(c); S.osel = `c:${c.id}`;
+    setTool('select'); update(); showTab('ouvrages');
+    toast(`Pont à poutres placé sur ${ax.name} (milieu à l'abscisse ${fmt(s0)} m) : réglez ses travées, ses poutres et l'orientation des appuis dans l'onglet Ouvrages.`);
+    return;
+  }
   if (S.tool === 'cadre') {
     const c = { id: uid(), ...CADRE_DEF, axis: ax.key, axisName: ax.name, s: s0 };
     (S.prj.cadres = S.prj.cadres || []).push(c); S.osel = `c:${c.id}`;
@@ -1106,6 +1142,7 @@ function addDiamondAt(w, kind, k) {
 // demi-ouvrage (côté gauche ou droit de la voie), l'autre tête ne bouge pas.
 function cadreHandles(g) {
   if (!g?.p || !g.d || !g.K) return null;
+  if (g.K.type === 'poutres') return { c: g.p, rot: G.add(g.p, G.mul(g.d, (Math.max(...g.K.decks.map(Math.abs)) + g.K.W / 2) / Math.max(0.2, g.K.sinP) + 6)) }; // pas de poignée de longueur : travées dans la fiche
   return { c: g.p, rot: G.add(g.p, G.mul(g.d, g.K.Lp + 6)), lenP: G.add(g.p, G.mul(g.d, g.K.Lp)), lenM: G.sub(g.p, G.mul(g.d, g.K.Lm)) };
 }
 function drawCadreHandles(ctx, v, T) {
@@ -1119,7 +1156,7 @@ function drawCadreHandles(ctx, v, T) {
     ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(rx, ry); ctx.stroke(); ctx.setLineDash([]);
     ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.stroke();
     ctx.beginPath(); ctx.arc(rx, ry, 5, 0, Math.PI * 2); ctx.fill();
-    for (const q of [h.lenM, h.lenP]) { const [lx, ly] = v.w2s(q.x, q.y); ctx.fillRect(lx - 3.5, ly - 3.5, 7, 7); }
+    for (const q of [h.lenM, h.lenP]) { if (!q) continue; const [lx, ly] = v.w2s(q.x, q.y); ctx.fillRect(lx - 3.5, ly - 3.5, 7, 7); }
   }
 }
 function hitCadreHandle(px, py) {
@@ -1130,8 +1167,8 @@ function hitCadreHandle(px, py) {
     const [cx, cy] = viewer.w2s(h.c.x, h.c.y), [rx, ry] = viewer.w2s(h.rot.x, h.rot.y);
     if (Math.hypot(rx - cx, ry - cy) < 14) continue;
     if (near(h.rot)) return { kind: 'cadr', id: g.c.id };
-    if (near(h.lenM)) return { kind: 'cadl', id: g.c.id, side: -1 };
-    if (near(h.lenP)) return { kind: 'cadl', id: g.c.id, side: 1 };
+    if (h.lenM && near(h.lenM)) return { kind: 'cadl', id: g.c.id, side: -1 };
+    if (h.lenP && near(h.lenP)) return { kind: 'cadl', id: g.c.id, side: 1 };
     if (near(h.c)) return { kind: 'cadm', id: g.c.id };
   }
   return null;
@@ -1205,12 +1242,14 @@ function bindEch() {
   $('#ouvrList').addEventListener('click', (e) => { const li = e.target.closest('[data-okey]'); if (!li) return; S.osel = li.dataset.okey; $('#ouvrEdit').dataset.key = ''; renderOuvr(); viewer.invalidate(); });
   $('#btnOuvrPS').addEventListener('click', () => { setTool('axis'); S.hwyDraw = 'cross'; setPrompt(); toast('Dessinez la voie secondaire en traversant l\'autoroute (Entrée ou clic droit pour terminer) : le passage supérieur est implanté à leur croisement.'); });
   $('#btnOuvrCadre').addEventListener('click', () => setTool('cadre'));
+  $('#btnOuvrPoutres').addEventListener('click', () => setTool('poutres'));
   $('#ouvrEdit').addEventListener('change', (e) => {
     const key = $('#ouvrEdit').dataset.key; if (!key) return;
     if (key.startsWith('c:')) {
       const f = e.target.dataset.cf; if (!f) return;
       const raw = e.target.value.trim();
-      const v = ['name', 'type', 'usage'].includes(f) ? raw : raw === '' ? '' : parseNum(raw);
+      if (f === 'spans' && raw && !parseSpansTxt(raw).every((x) => x >= 4)) { toast('Travées : longueurs d\'au moins 4 m séparées par « ; ».', 'warn'); return; }
+      const v = ['name', 'type', 'usage', 'spans', 'pt', 'twin'].includes(f) ? raw : raw === '' ? '' : parseNum(raw);
       if (v !== '' && typeof v === 'number' && !Number.isFinite(v)) { toast('Valeur numérique attendue.', 'warn'); return; }
       setCadre(key.slice(2), { [f]: v });
       $('#ouvrEdit').dataset.key = ''; renderOuvr(); return;
@@ -1275,7 +1314,7 @@ function bindEch() {
     if (bc) {
       const g = (S.cadres || []).find((q) => q.c.id === bc.dataset.cadrejson); if (!g?.K) return;
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([cadreProject(g, g.name, S.prj)], { type: 'application/json' }));
-      a.download = `psida-${g.name}-${g.K.type}-${fmt(g.K.B, 2)}x${fmt(g.K.H, 2)}.json`.replace(/[\s,]+/g, '_'); a.click();
+      a.download = (g.K.type === 'poutres' ? `psida-${g.name}-poutres-${g.K.spans.map((v) => fmt(v, 1)).join('+')}.json` : `psida-${g.name}-${g.K.type}-${fmt(g.K.B, 2)}x${fmt(g.K.H, 2)}.json`).replace(/[\s,]+/g, '_'); a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 2000); return;
     }
     const b = e.target.closest('[data-psidajson]'); if (!b) return;
@@ -1506,7 +1545,7 @@ function ouvrPoly(key) {
   return (S.ouvr?.list || []).find((o) => o.key === key)?.poly || null;
 }
 function ouvrName(key) {
-  if (String(key).startsWith('c:')) { const g = (S.cadres || []).find((q) => `c:${q.c.id}` === key); return g ? `${g.name} — ${g.K?.type === 'buse' ? 'buse' : g.K?.type === 'pipo' ? 'PIPO' : 'PICF'} sous ${g.ax?.name || ''}` : 'Ouvrage'; }
+  if (String(key).startsWith('c:')) { const g = (S.cadres || []).find((q) => `c:${q.c.id}` === key); return g ? `${g.name} — ${g.K?.type === 'poutres' ? 'pont à poutres sur' : g.K?.type === 'buse' ? 'buse sous' : g.K?.type === 'pipo' ? 'PIPO sous' : 'PICF sous'} ${g.ax?.name || ''}` : 'Ouvrage'; }
   const o = (S.ouvr?.list || []).find((q) => q.key === key); return o ? `${o.name} — ${o.src}` : 'Ouvrage';
 }
 // Groupes de champs de la barre latérale affichés dans la fenêtre.
@@ -1609,6 +1648,7 @@ const PROMPTS = {
   profser2: 'Profils en série : cliquez le second point sur le même axe (Échap pour annuler).',
   profone: 'Profil isolé : cliquez sur un axe à l\'endroit du profil (plusieurs clics possibles ; Échap pour terminer).',
   cadre: 'PICF / PIPO : cliquez sur l\'axe de la voie portée, à l\'endroit de l\'ouvrage.',
+  poutres: 'Pont à poutres : cliquez sur l\'axe de la voie portée, au milieu de l\'ouvrage (au droit de l\'écoulement).',
   axis0: 'Axe : cliquez le 1er point, côté extérieur (ou saisissez X,Y).',
   axis1: 'Axe : point suivant vers le carrefour — Entrée / clic droit pour terminer, Retour arrière pour annuler.',
   extend: 'Prolonger l\'axe : cliquez les points suivants vers l\'extérieur — Entrée / clic droit pour terminer, Échap pour annuler.',
@@ -1992,7 +2032,7 @@ function bindCanvas() {
     else if (S.tool === 'center') { S.prj.center = { auto: false, x: w.x, y: w.y }; syncInputs(); update(); setTool('select'); centerPlaced(); }
     else if (S.tool === 'ramp') addRampAt(w);
     else if (S.tool === 'pickx') pickSecondary(w, px, py);
-    else if (['profser', 'profone', 'cadre'].includes(S.tool)) pickOnAxis(w);
+    else if (['profser', 'profone', 'cadre', 'poutres'].includes(S.tool)) pickOnAxis(w);
     else if (S.tool === 'measure') { S.meas.push(w); if (S.meas.length > 2) S.meas = [w]; showMeasure(); }
     else if (S.tool === 'select') {
       const h = hitHandle(px, py);
@@ -3028,6 +3068,11 @@ function plAxisOverlay(key, ax, PL) {
   }
   for (const g of S.cadres || []) {
     if (g.err || g.ax?.key !== key || !g.K) continue;
+    if (g.K.type === 'poutres') { // pont à poutres porté par cet axe : tablier sous le profil, appuis
+      const K = g.K, { sup } = poutresSupports(g);
+      items.push({ t: 'span', s0: g.s - K.Ltot / 2 - K.about, s1: g.s + K.Ltot / 2 + K.about, h: K.h + 0.08, sup: sup.map((A) => ({ kind: A.kind, s: A.s })), label: `${g.name} · pont à poutres ${K.spans.map((v) => fmt(v, 1)).join(' + ')} m` });
+      continue;
+    }
     const K = g.K, zR = PL.zAt(g.s), zT = zR - K.Hr, zI = zT - K.et, zB = zI - K.H, hw = K.W / 2 / K.sinP;
     items.push({ t: 'cad', s: g.s, hw, zT, zI, zB, zF: zB - (K.type === 'pipo' ? 0 : K.er), K, label: `${g.name} · ${K.type === 'buse' ? `buse Ø ${fmt(K.B, 2)}` : `${K.n > 1 ? `${K.n} × ` : ''}${fmt(K.B, 2)} × ${fmt(K.H, 2)}`} · fil d'eau ${fmt(zB, 2)}` });
     zs.push(zB - K.er);
@@ -3563,7 +3608,7 @@ function computeHydro() {
   if (!R?.crossings?.length) { S.hyRes = null; return null; }
   const zRoad = (c) => { const A = S.axpl?.get(c.key); return A?.defined ? A.PL.zAt(c.pk) : null; };
   const linkOf = (c) => (S.prj.cadres || []).find((q) => q.hydro?.id === c.id && q.axis === c.key);
-  const sig = JSON.stringify([R.date, h.hyp, h.hyd, h.upstream, R.crossings.map((c) => [c.id, zRoad(c)]), (S.cadres || []).filter((g) => g.c.hydro).map((g) => [g.c.id, g.K?.type, g.K?.n, g.K?.B, g.K?.H, g.K?.L, g.K?.ang])]);
+  const sig = JSON.stringify([R.date, h.hyp, h.hyd, h.upstream, R.crossings.map((c) => [c.id, zRoad(c)]), (S.cadres || []).filter((g) => g.c.hydro).map((g) => [g.c.id, g.K?.type, g.K?.spans, g.K?.n, g.K?.B, g.K?.H, g.K?.L, g.K?.ang])]);
   if (S.hyRes && S.hySig === sig) return S.hyRes;
   const hyp = { ...h.hyp };
   const ids = new Set(R.crossings.map((c) => c.id));
@@ -3578,18 +3623,20 @@ function computeHydro() {
     const zr = zRoad(c), zt = c.m.zOutlet;
     const half = (ax?.half || 6) + 1, L = Math.ceil(((2 * (half + 1.5 * 1.0 + 0.5)) / Math.sin((biais * Math.PI) / 200)) * 2) / 2;
     let sz = null, linked = linkOf(c), lg = linked ? (S.cadres || []).find((g) => g.c.id === linked.id) : null, verif = null;
-    if (Q > 0 && lg?.K) { // ouvrage déjà placé (éventuellement modifié par l'utilisateur) : vérification de sa section
+    const bridge = lg?.K?.type === 'poutres'; // pont à poutres placé : pas de calcul de dalot (revanche sous poutres sur la ligne d'eau du lit)
+    if (Q > 0 && lg?.K && !bridge) { // ouvrage déjà placé (éventuellement modifié par l'utilisateur) : vérification de sa section
       const K = lg.K, section = K.type === 'buse' ? { shape: 'circular', diameter: K.B, cells: K.n } : { shape: 'box', width: K.B, height: K.H, cells: K.n };
       const params = { length: K.L, StricklerK: h.hyd.StricklerK, ...(h.hyd.inlet && (K.type === 'buse') === (h.hyd.shape === 'circular') ? { inlet: h.hyd.inlet } : {}), ...(Number.isFinite(zt) ? { upstreamInvert: zt } : {}), ...(zr != null && Number.isFinite(zt) ? { roadLevel: zr, minFreeboard: h.hyd.minFreeboard, maxHeadwater: Math.max(0.5, zr - h.hyd.minFreeboard - zt) } : {}) };
       try { verif = culvertHydraulics(section, Q, params); } catch (e) { verif = { warnings: [e.message] }; }
     }
-    if (Q > 0 && !verif) {
+    if (Q > 0 && !verif && !bridge) {
       const params = { length: L, StricklerK: h.hyd.StricklerK, ...(h.hyd.inlet ? { inlet: h.hyd.inlet } : {}), ...(Number.isFinite(zt) ? { upstreamInvert: zt } : {}), ...(zr != null && Number.isFinite(zt) ? { roadLevel: zr, minFreeboard: h.hyd.minFreeboard } : {}) };
       try { sz = sizeCulvert(Q, { shape: h.hyd.shape, maxHeadwaterRatio: h.hyd.maxHeadwaterRatio, ...(zr != null && Number.isFinite(zt) ? { maxHeadwater: Math.max(0.5, zr - h.hyd.minFreeboard - zt) } : {}) }, params); } catch (e) { sz = { error: e.message }; }
     }
     let ret = sz?.retained, rr = ret?.result;
     if (verif) { const K = lg.K; ret = { cells: K.n, width: K.B, height: K.H, diameter: K.type === 'buse' ? K.B : undefined }; rr = verif; biais = K.ang; }
-    const size = verif ? `${lg.name || ''} ${lg.K.type === 'buse' ? `${lg.K.n > 1 ? `${lg.K.n} × ` : ''}Ø ${fmt(lg.K.B, 2)}` : `${lg.K.n > 1 ? `${lg.K.n} × ` : ''}${fmt(lg.K.B, 2)} × ${fmt(lg.K.H, 2)}`}`.trim() : ret ? (h.hyd.shape === 'circular' ? `${ret.cells > 1 ? `${ret.cells} × ` : ''}Ø ${fmt(ret.width ?? ret.diameter ?? ret.section?.diameter, 2)}` : `${ret.cells > 1 ? `${ret.cells} × ` : ''}${fmt(ret.width, 2)} × ${fmt(ret.height, 2)}`) : null;
+    if (bridge) biais = lg.K.ang;
+    const size = bridge ? `${lg.name || ''} pont à poutres ${lg.K.spans.map((v) => fmt(v, 1)).join(' + ')}`.trim() : verif ? `${lg.name || ''} ${lg.K.type === 'buse' ? `${lg.K.n > 1 ? `${lg.K.n} × ` : ''}Ø ${fmt(lg.K.B, 2)}` : `${lg.K.n > 1 ? `${lg.K.n} × ` : ''}${fmt(lg.K.B, 2)} × ${fmt(lg.K.H, 2)}`}`.trim() : ret ? (h.hyd.shape === 'circular' ? `${ret.cells > 1 ? `${ret.cells} × ` : ''}Ø ${fmt(ret.width ?? ret.diameter ?? ret.section?.diameter, 2)}` : `${ret.cells > 1 ? `${ret.cells} × ` : ''}${fmt(ret.width, 2)} × ${fmt(ret.height, 2)}`) : null;
     const o = { c, r, Q, Qp, linked, lg, verif: !!verif, ok: rr ? !(rr.headwaterOk === false) && (rr.valid !== false) && !((rr.velocities?.outlet ?? rr.velocities?.full ?? 0) > 3.0001) && !(rr.freeboard != null && rr.freeboard < h.hyd.minFreeboard - 1e-6) : null, up: basins[i].upstreamUids, T: r.values?.returnPeriod ?? hyp.returnPeriod, biais, L, zr, zt, sz, ret, rr, size, hw: rr?.headwater, v: rr?.velocities?.outlet ?? rr?.velocities?.full ?? null };
     out.list.push(o); out.byId[c.id] = o;
   });
@@ -3654,16 +3701,23 @@ function renderHydro() {
       ['Ouvrage', sel.size ? `${esc(sel.size)} m, L ${fmt(sel.L, 1)} m, biais ${sel.biais} gr — ${esc(sel.sz?.message || '')}` : esc(sel.sz?.message || sel.sz?.error || '—')],
       ['Cotes', `chaussée ${sel.zr != null ? fmt(sel.zr, 2) : 'à définir (profil en long)'} · TN au franchissement ${fmt(sel.zt, 2)} m${sel.zr != null && Number.isFinite(sel.zt) && sel.zr - sel.zt < 2 ? ` — chaussée à ${fmt(sel.zr - sel.zt, 2)} m seulement au-dessus du fil d'eau : relevez le profil en long pour loger l'ouvrage (hauteur + traverse + remblai + revanche)` : ''}`],
     ]) + (() => {
-      const K = sel.lg?.K, buse = K ? K.type === 'buse' : h.hyd.shape === 'circular', r0 = sel.ret || {};
+      const K = sel.lg?.K, r0 = sel.ret || {};
+      const ty = S.hyohType?.[sel.c.id] || (K ? K.type : h.hyd.shape === 'circular' ? 'buse' : 'picf'), buse = ty === 'buse', pont = ty === 'poutres';
       const val = (v) => (v == null || !Number.isFinite(+v) ? '' : esc(fmt(+v, 2)));
-      return `<h4>Ouvrage ${sel.linked ? `${esc(sel.lg?.name || '')} (placé — vérification de sa section)` : '(proposé — non placé)'}</h4>` +
-        `<div class="row"><label class="fld">Type<select data-hyoh="type"><option value="picf"${!buse ? ' selected' : ''}>dalot (PICF)</option><option value="buse"${buse ? ' selected' : ''}>buse</option></select></label>` +
-        `<label class="fld">Nombre<input data-hyoh="n" type="text" inputmode="decimal" value="${val(K ? K.n : r0.cells || 1)}"></label>` +
+      // pont à poutres proposé : ouverture du dalot proposé + talus 3/2 des culées dans le lit, travées ≤ 30 m
+      const spansProp = () => { const Wc = (r0.cells || 1) * (r0.width || 3), Hc = r0.height || 2, Lt = Math.max(12, Math.ceil(Wc + 2 * 1.5 * Hc)), n = Math.ceil(Lt / 30); return Array(n).fill(Math.ceil((Lt / n) * 2) / 2).map((v) => fmt(v, 1)).join(' ; '); };
+      return `<h4>Ouvrage ${sel.linked ? `${esc(sel.lg?.name || '')} (placé${pont ? '' : ' — vérification de sa section'})` : '(proposé — non placé)'}</h4>` +
+        `<div class="row"><label class="fld">Type<select data-hyoh="type"><option value="picf"${ty === 'picf' || ty === 'pipo' ? ' selected' : ''}>dalot (PICF)</option><option value="buse"${buse ? ' selected' : ''}>buse</option><option value="poutres"${pont ? ' selected' : ''}>pont à poutres</option></select></label>` +
+        (pont ? `<label class="fld">Travées (m)<input data-hyoh="spans" type="text" value="${esc(K?.type === 'poutres' ? K.spans.map((v) => fmt(v, 1)).join(' ; ') : spansProp())}"></label>`
+          + `<label class="fld">Orientation des appuis (gr, 100 = droit)<input data-hyoh="biais" type="text" inputmode="decimal" value="${val(K ? K.ang : sel.biais)}"></label></div>`
+          + `<div class="row"><button data-hyohapply="${esc(sel.c.id)}" class="primary">${sel.linked ? 'Mettre à jour l\'ouvrage' : 'Placer cet ouvrage'}</button>${sel.linked ? `<button data-hyohgo="${esc(sel.linked.id)}">Fiche de l'ouvrage</button>` : ''}</div>`
+          + `<p class="note">Pont à poutres : travées proposées d'après l'ouverture du dalot dimensionné, élargie des talus 3/2 des culées dans le lit (travées de 30 m au plus). La revanche sous les poutres se vérifie sur la ligne d'eau du lit (non calculée ici) ; dimensions des poutres et lien PSIDA dans la fiche de l'ouvrage.</p>` : '') +
+        (pont ? '' : `<label class="fld">Nombre<input data-hyoh="n" type="text" inputmode="decimal" value="${val(K ? K.n : r0.cells || 1)}"></label>` +
         `<label class="fld">${buse ? 'Diamètre' : 'Ouverture B'} (m)<input data-hyoh="B" type="text" inputmode="decimal" value="${val(K ? K.B : r0.width ?? r0.diameter)}"></label>` +
         (buse ? '' : `<label class="fld">Hauteur H (m)<input data-hyoh="H" type="text" inputmode="decimal" value="${val(K ? K.H : r0.height)}"></label>`) +
         `<label class="fld">Orientation (gr, 100 = droit)<input data-hyoh="biais" type="text" inputmode="decimal" value="${val(K ? K.ang : sel.biais)}"></label></div>` +
         `<div class="row"><button data-hyohapply="${esc(sel.c.id)}" class="primary">${sel.linked ? 'Mettre à jour l\'ouvrage' : 'Placer cet ouvrage'}</button>${sel.linked ? `<button data-hyohreset="${esc(sel.c.id)}" title="Remet les dimensions et l'orientation proposées par le dimensionnement">Revenir à la proposition</button><button data-hyohgo="${esc(sel.linked.id)}">Fiche de l'ouvrage</button>` : ''}</div>` +
-        `<p class="note">Sur le plan, l'ouvrage s'oriente par la poignée ronde pleine au-delà de sa tête, se déplace le long de l'axe par sa poignée centrale et s'allonge par la poignée carrée ; la section placée est vérifiée ici (HW, vitesse, revanche).</p>`;
+        `<p class="note">Sur le plan, l'ouvrage s'oriente par la poignée ronde pleine au-delà de sa tête, se déplace le long de l'axe par sa poignée centrale et s'allonge par la poignée carrée ; la section placée est vérifiée ici (HW, vitesse, revanche).</p>`);
     })() + `<ul class="checks">${[...(sel.r.warnings || []), ...(sel.rr?.warnings || [])].map((w) => `<li class="warn"><span class="ic">!</span><span>${esc(w)}</span></li>`).join('')}</ul><div class="row"><button data-hyzoom="${esc(sel.c.id)}">Voir sur le plan</button></div>`;
   })() : '';
   const R = h.res;
@@ -3702,6 +3756,14 @@ function bindHydro() {
   });
   $('#hyTable').addEventListener('click', (e) => { if (e.target.closest('input')) return; const tr = e.target.closest('tr[data-hy]'); if (!tr) return; S.hySel = tr.dataset.hy; renderHydro(); });
   const hyPlace = (o, over = {}) => {
+    if (over.type === 'poutres') {
+      const ax = hyAxes().find((a) => a.key === o.c.key);
+      const data = { type: 'poutres', usage: 'eau', axis: o.c.key, axisName: ax?.name || o.c.traceName, s: o.c.pk, spans: over.spans, biais: +(over.biais ?? o.biais), hydro: { id: o.c.id, Q: o.Q, T: o.T } };
+      S.prj.cadres = S.prj.cadres || [];
+      const ex = S.prj.cadres.find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key);
+      if (ex) { const keep = { s: ex.s, name: ex.name }; for (const k of ['B', 'H', 'n', 'Hr', 'L', 'Lg', 'Ld', 'ep', 'et', 'er', 'ei']) delete ex[k]; Object.assign(ex, data, { s: keep.s }); if (keep.name) ex.name = keep.name; } else S.prj.cadres.push({ id: uid(), ...data });
+      return;
+    }
     const buse = (over.type ?? (o.lg?.K?.type === 'buse' ? 'buse' : hyCfg().hyd.shape === 'circular' ? 'buse' : 'picf')) === 'buse';
     const B = +(over.B ?? o.ret?.width ?? o.ret?.diameter ?? o.ret?.section?.diameter ?? 2), H = buse ? B : +(over.H ?? o.ret?.height ?? 2);
     const ax = hyAxes().find((a) => a.key === o.c.key), et = buse ? 0.08 + B / 12 : 0.15 + B / 20;
@@ -3717,10 +3779,12 @@ function bindHydro() {
     if (!ap && !rs) return;
     const o = S.hyRes?.byId?.[(ap || rs).dataset[ap ? 'hyohapply' : 'hyohreset']]; if (!o) return;
     if (rs) { const ex = (S.prj.cadres || []).find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key); if (ex) S.prj.cadres = S.prj.cadres.filter((q) => q !== ex); S.hySig = null; computeHydro(); const o2 = S.hyRes?.byId?.[o.c.id]; if (o2?.ret) hyPlace(o2, { keepL: false }); update(); toast(`${o.c.id} : ouvrage remis au dimensionnement proposé.`); return; }
-    const over = {}; for (const el of $('#hyDetail').querySelectorAll('[data-hyoh]')) { const k = el.dataset.hyoh, v = k === 'type' ? el.value : parseNum(el.value); if (k === 'type' || Number.isFinite(v)) over[k] = v; }
-    if (!(over.B > 0.2) || (over.type !== 'buse' && !(over.H > 0.2))) { toast('Dimensions de l\'ouvrage à saisir (m).', 'warn'); return; }
-    hyPlace(o, over); S.hySig = null; update(); toast(`${o.c.id} : ouvrage ${o.linked ? 'mis à jour' : 'placé'} — section vérifiée dans le tableau.`);
+    const over = {}; for (const el of $('#hyDetail').querySelectorAll('[data-hyoh]')) { const k = el.dataset.hyoh, v = k === 'type' || k === 'spans' ? el.value.trim() : parseNum(el.value); if (k === 'type' || k === 'spans' || Number.isFinite(v)) over[k] = v; }
+    if (over.type === 'poutres') { if (!parseSpansTxt(over.spans).length || !parseSpansTxt(over.spans).every((x) => x >= 4)) { toast('Travées du pont : longueurs d\'au moins 4 m séparées par « ; ».', 'warn'); return; } }
+    else if (!(over.B > 0.2) || (over.type !== 'buse' && !(over.H > 0.2))) { toast('Dimensions de l\'ouvrage à saisir (m).', 'warn'); return; }
+    hyPlace(o, over); if (S.hyohType) delete S.hyohType[o.c.id]; S.hySig = null; update(); toast(`${o.c.id} : ouvrage ${o.linked ? 'mis à jour' : 'placé'} — section vérifiée dans le tableau.`);
   });
+  $('#hyDetail').addEventListener('change', (e) => { const el = e.target.closest('[data-hyoh="type"]'); if (!el || !S.hySel) return; S.hyohType = { ...(S.hyohType || {}), [S.hySel]: el.value }; renderHydro(); });
   $('#hyDetail').addEventListener('click', (e) => { const b = e.target.closest('[data-hyzoom]'); const o = b && S.hyRes?.byId?.[b.dataset.hyzoom]; if (!o) return; viewer.cx = o.c.x; viewer.cy = o.c.y; viewer.s = Math.max(viewer.s, 1.5); viewer.invalidate(); });
   $('#btnHyClear').addEventListener('click', () => { if (S.prj.hydro) delete S.prj.hydro.res; S.hyRes = null; update(); });
   $('#btnHyCsv').addEventListener('click', () => {
