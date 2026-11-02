@@ -243,6 +243,14 @@ ou sur un fond topographique DXF.
   de chaussée (arase recréée à leur épaisseur totale), TN de contrôle, annulation. Cubatures entre le TN et la ligne
   de terrassement (arase sous la chaussée, projet ailleurs) ; arase et EET dessinés sur les coupes et dans le DXF
   (calque GIRA_PT_ARASE). Contrôles : node tools/test-ptype.mjs.
+- **Talus en plan** (js/talus.js, calques « Talus » et « Entrées en terre ») : pour tous les axes (autoroute, voies
+  secondaires, bretelles ayant un profil en long ; branches, anneau et route principale des carrefours), coupes au
+  profil type tous les 5 m (réglable, onglet Profils travers) ; bord de plate-forme côté talus, entrée en terre (EET)
+  et barbules comme dans BVTrace (une longue de la crête au pied, trois courtes partant de la crête : bord de
+  plate-forme en remblai, EET en déblai ; espacement réglable). Découpe automatique entre axes : rien sous la
+  plate-forme d'un autre axe ni sous un tablier ; deux remblais : le plus haut l'emporte, deux déblais : le plus
+  profond, déblai sous remblai : masqué — les lignes s'arrêtent sur la ligne de rencontre des talus. Export DXF
+  (GIRA_TALUS, GIRA_ENTREE_EN_TERRE). Contrôles : node tools/test-talus.mjs.
 - **Hydrologie et hydraulique (onglet Hydrologie, moteur de BVTrace porté en JavaScript, js/hydro/)** :
   - bassins versants dont l'écoulement coupe les axes cochés (autoroute, voies secondaires, bretelles, branches), sur
     un MNT SRTM élargi autour des axes (marge doublée automatiquement tant qu'un bassin touche le bord, jusqu'à 24 km)
@@ -374,6 +382,7 @@ js/swept.js         épures de giration (semi-remorque)
 js/profile.js       profil en travers type de l'anneau (SVG, DXF)
 js/ptype.js         profils types des axes construits point par point (BVTrace) : évaluation, D/R, EET, arase
 js/pttedit.js       éditeur graphique des demi-profils types
+js/talus.js         talus en plan : EET, barbules, découpe entre axes
 js/viewer.js        rendu canvas (projet, DXF, HUD)
 js/geom.js          géométrie (droites, arcs, raccordements, décalages)
 js/clotho.js        alignements en plan avec clothoïdes (raccordements progressifs)
