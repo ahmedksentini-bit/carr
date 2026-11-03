@@ -8,6 +8,7 @@ import * as G from './geom.js';
 import { buildAlignment, offsetPolyline, polySegs, pathTangentAt, pathProject, cloMinLength, tangentLength, tangentLengths, cloXY } from './clotho.js';
 import { fmt, upright } from './common.js';
 import { DCAT, designCatOf, clothoidNeed } from './roadcat.js';
+import { isVsa, vsaRules, vsaSequenceChecks, vsaDirectZmin, vsaSectionChecks } from './vsa.js';
 
 const { add, sub, mul, norm, rot90, neg, dist, ang, unit } = G;
 const num = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
@@ -53,11 +54,12 @@ export const J14_W = 2.0; // emprise de la balise J14 au musoir, déduite du sch
 // comme les voies secondaires « route ordinaire »).
 export function hwyParams(prj) {
   const h = prj.hwy || {}, auto = h.kind !== 'route';
-  const cat = HWY_CAT[h.cat] || HWY_CAT.L2;
+  const cat = HWY_CAT[h.cat] || HWY_CAT.L2, dcat = auto ? '' : DCAT[h.dcat] ? h.dcat : 'R1';
+  const sep = auto || isVsa(dcat); // VSA : chaussées séparées à 2 voies, BAU 2,50 m, BDG 1,00 m ([VSA] § 1.5, 5.1 à 5.3)
   return {
-    on: !!h.on, kind: auto ? 'autoroute' : 'route', name: h.name || (auto ? 'Autoroute' : 'Voie principale'), cat: HWY_CAT[h.cat] ? h.cat : 'L2', dcat: auto ? '' : DCAT[h.dcat] ? h.dcat : 'R1', C: cat, V: num(h.V, auto ? cat.V : 90),
-    lanes: Math.max(1, Math.round(num(h.lanes, auto ? 2 : 1))), wLane: num(h.wLane, 3.5), bau: num(h.bau, auto ? 2.5 : 2.0), bdg: num(h.bdg, auto ? 1.0 : 0),
-    median: num(h.median, auto ? 3.0 : 0), berme: num(h.berme, auto ? 1.0 : 0.75), z0: num(h.z0, 100), pente: num(h.pente, 0), pk0: num(h.pk0, 0),
+    on: !!h.on, kind: auto ? 'autoroute' : 'route', name: h.name || (auto ? 'Autoroute' : 'Voie principale'), cat: HWY_CAT[h.cat] ? h.cat : 'L2', dcat, C: cat, V: num(h.V, auto ? cat.V : isVsa(dcat) ? DCAT[dcat].V : 90),
+    lanes: Math.max(1, Math.round(num(h.lanes, sep ? 2 : 1))), wLane: num(h.wLane, 3.5), bau: num(h.bau, sep ? 2.5 : 2.0), bdg: num(h.bdg, sep ? 1.0 : 0),
+    median: num(h.median, sep ? 3.0 : 0), berme: num(h.berme, auto ? 1.0 : 0.75), z0: num(h.z0, 100), pente: num(h.pente, 0), pk0: num(h.pk0, 0),
     axis: (h.axis || []).map((p) => ({ x: +p.x, y: +p.y, r: +p.r || 0, a: p.a === '' || p.a == null || !isFinite(+p.a) ? null : +p.a })),
   };
 }
@@ -71,12 +73,12 @@ export const xref = (k, s) => (k ? `x${k}:${s}` : `x${s}`);
 export const parseXref = (ref) => { let m = /^x([12])$/.exec(ref || ''); if (m) return { k: 0, s: +m[1] }; m = /^x(\d+):([12])$/.exec(ref || ''); return m ? { k: +m[1], s: +m[2] } : null; };
 export function crossParams(prj, k = 0) {
   const h = crossList(prj)[k] || {}, auto = h.kind === 'autoroute';
-  const cat = auto ? HWY_CAT[h.cat] || HWY_CAT.L2 : null;
+  const cat = auto ? HWY_CAT[h.cat] || HWY_CAT.L2 : null, dcat = auto ? '' : DCAT[h.dcat] ? h.dcat : 'R1', sep = auto || isVsa(dcat);
   return {
     on: h.on !== false && !!(h.on || h.axis?.length), kind: auto ? 'autoroute' : 'route', name: h.name || (auto ? 'Autoroute 2' : `Voie secondaire ${k + 1}`), k,
-    cat: auto ? (HWY_CAT[h.cat] ? h.cat : 'L2') : '', dcat: auto ? '' : DCAT[h.dcat] ? h.dcat : 'R1', C: cat, V: num(h.V, auto ? cat.V : 90),
-    lanes: Math.max(1, Math.round(num(h.lanes, auto ? 2 : 1))), wLane: num(h.wLane, 3.5), bau: num(h.bau, auto ? 2.5 : 2.0),
-    bdg: num(h.bdg, auto ? 1.0 : 0), median: num(h.median, auto ? 3.0 : 0), berme: num(h.berme, auto ? 1.0 : 0.75), pk0: num(h.pk0, 0),
+    cat: auto ? (HWY_CAT[h.cat] ? h.cat : 'L2') : '', dcat, C: cat, V: num(h.V, auto ? cat.V : isVsa(dcat) ? DCAT[dcat].V : 90),
+    lanes: Math.max(1, Math.round(num(h.lanes, sep ? 2 : 1))), wLane: num(h.wLane, 3.5), bau: num(h.bau, sep ? 2.5 : 2.0),
+    bdg: num(h.bdg, sep ? 1.0 : 0), median: num(h.median, sep ? 3.0 : 0), berme: num(h.berme, auto ? 1.0 : 0.75), pk0: num(h.pk0, 0),
     axis: (h.axis || []).map((p) => ({ x: +p.x, y: +p.y, r: +p.r || 0, a: p.a === '' || p.a == null || !isFinite(+p.a) ? null : +p.a })),
   };
 }
@@ -153,7 +155,7 @@ export function rampParams(prj, r0) {
   const host = (ref) => {
     if (isHwyRef(ref)) {
       const X = parseXref(ref), road = X ? `cross${X.k}` : 'hwy', Q = X ? crossParams(prj, X.k) : H, sens = X ? X.s : +ref[ref.length - 1];
-      return { kind: 'hwy', ref, road, roadKind: X ? Q.kind : 'autoroute', sens, lanes: Q.lanes, bau: Q.bau, berme: Q.berme, V: Q.V, name: `${Q.name} sens ${sens}` };
+      return { kind: 'hwy', ref, road, roadKind: Q.kind, dcat: Q.dcat, sens, lanes: Q.lanes, bau: Q.bau, berme: Q.berme, V: Q.V, name: `${Q.name} sens ${sens}` };
     }
     const pr = (prj.ramps || []).find((q) => q.id === ref);
     if (!pr || pr.id === r.id) return null;
@@ -214,8 +216,12 @@ export function weavePairs(prj) {
     const S = list.filter((q) => q.kind === 'S' && q.id !== E.id && q.u > E.u - E.e.Lm).sort((a, b) => a.u - b.u)[0];
     if (!S) continue;
     const Z = S.u - E.u, auto = E.e.isHwy && E.e.host.roadKind === 'autoroute';
+    // VSA ([VSA] § 6.2.4.3) : voie d'entrecroisement jusqu'à 750 m quand l'enchaînement direct (D40 de la sortie à lc de la
+    // fin de l'entrée, présignalisation à d1m) est impossible.
+    const V = E.e.isHwy && E.e.host.roadKind === 'route' ? vsaRules(E.e.host.dcat, E.e.host.lanes) : null;
+    const vsaWeave = V && Z <= V.zMax && Z < vsaDirectZmin(V, E.e.ins, E.e.biseau, S.e.p);
     if (Z < 0 || out.byS.has(S.id)) continue;
-    if (Z <= E.e.ins + E.e.biseau + S.e.biseau + 1e-6 || (auto && Z <= 750)) {
+    if (Z <= E.e.ins + E.e.biseau + S.e.biseau + 1e-6 || (auto && Z <= 750) || vsaWeave) {
       out.byE.set(E.id, { sid: S.id, sE: E.e.s, sS: S.e.s, Z, pS: S.e.p });
       out.byS.set(S.id, E.id);
     }
@@ -255,6 +261,7 @@ export function buildEchangeur(prj, D) {
     const off = (delta) => G.offsetPath(pathD, delta);
     const road = { key, k: H.k, H, path, al, cat, sEnd, E0, E1, E2, ok: sEnd > 1, isRoute, drawn: [sA, sB] };
     if (!road.ok) return road;
+    if (isRoute) vsaSectionChecks(H, (lvl, msg) => issues.push({ lvl, msg: `${H.name} : ${msg}` }), fmt);
     const visible = pathD.length > 0;
     // Rayons de la section courante [ICTAAL] tab. 3-1 (autoroutes).
     if (H.C) path.forEach((sg) => {
@@ -405,7 +412,7 @@ export function buildEchangeur(prj, D) {
   const hostRoad = (road, sens) => {
     const sd = sens === 1 ? 1 : -1, { path, sEnd, E1, H: Q } = road;
     return mkOff({
-      kind: 'hwy', road: road.key, roadKind: road.isRoute ? 'route' : 'autoroute', ref: road.key === 'hwy' ? 'hwy' + sens : xref(road.k, sens), sens, sd, sEnd, name: `${Q.name} sens ${sens}`, lanes: Q.lanes, bau: Q.bau, berme: Q.berme, V: Q.V, C: Q.C, path,
+      kind: 'hwy', road: road.key, roadKind: road.isRoute ? 'route' : 'autoroute', dcat: Q.dcat, ref: road.key === 'hwy' ? 'hwy' + sens : xref(road.k, sens), sens, sd, sEnd, name: `${Q.name} sens ${sens}`, lanes: Q.lanes, bau: Q.bau, berme: Q.berme, V: Q.V, C: Q.C, path,
       pointAt: (st) => G.pathPointAt(path, cl(st, 0, sEnd)),
       dirAt: (st) => { const t = pathTangentAt(path, cl(st, 0, sEnd)); return sd === 1 ? t : neg(t); },
       edgeOff: () => E1,
@@ -454,9 +461,14 @@ export function buildEchangeur(prj, D) {
     for (const [h, e] of [[hF, rp.from], [hT, rp.to]]) if (h?.kind === 'hwy' && (e.s < -0.5 || e.s > h.sEnd + 0.5)) err(`point ${e === rp.from ? 'S' : 'E'}.1,00 à l'abscisse ${fmt(e.s, 0)} m, hors de l'axe de ${h.name.replace(/ sens \d$/, '')} (0 à ${fmt(h.sEnd, 0)} m) : prolongez l'axe.`);
     for (const [h, F] of [[hF, Fs], [hT, Ft]]) {
       if (h?.kind !== 'hwy') continue;
-      if (!h.C) continue;
+      const V = h.roadKind === 'route' ? vsaRules(h.dcat, h.lanes) : null;
+      if (!h.C && !V) continue;
       const hr = (() => { let acc = 0; for (const sg of h.path) { const l = G.segLen(sg); if (F.s <= acc + l) return sg.t === 'A' ? sg.r : 0; acc += l; } return 0; })();
-      if (hr && hr < 1.5 * h.C.Rdn) warn(`point d'accès dans une courbe de rayon ${fmt(hr)} m < 1,5 Rdn (${fmt(1.5 * h.C.Rdn)} m) : point singulier à éviter (guide échangeurs § 1).`);
+      if (V) {
+        // [VSA] § 6.1 : pas d'échangeur dans une courbe déversée (R < Rdn) ; R < 1,5 Rdn à éviter.
+        if (hr && hr < V.Rdn) err(`point d'accès dans une courbe déversée R = ${fmt(hr)} m < Rdn = ${V.Rdn} m : interdit sur ${V.label} (VSA § 6.1).`);
+        else if (hr && hr < 1.5 * V.Rdn) warn(`point d'accès dans une courbe de rayon ${fmt(hr)} m < 1,5 Rdn (${fmt(1.5 * V.Rdn)} m) : à éviter (VSA § 6.1).`);
+      } else if (hr && hr < 1.5 * h.C.Rdn) warn(`point d'accès dans une courbe de rayon ${fmt(hr)} m < 1,5 Rdn (${fmt(1.5 * h.C.Rdn)} m) : point singulier à éviter (guide échangeurs § 1).`);
     }
     // Sommets : le premier est projeté sur la ligne d'obliquité du divergent, le dernier sur celle du convergent ;
     // les distances sont augmentées jusqu'à obtenir un alignement droit ≥ Lm (prolongement de l'obliquité, § 6.1).
@@ -568,12 +580,20 @@ export function buildEchangeur(prj, D) {
     R.lad = e0.kind === 'L' ? e0.len : 0; R.ladE = eN.kind === 'L' ? eN.len : 0;
     if (Fs) {
       if (R.lad + 1e-6 < rp.from.Lm) err(`alignement droit depuis S.1,00 m de ${fmt(R.lad)} m < Lm = ${fmt(rp.from.Lm)} m (§ 6.1).`);
-      const vS = rp.from.isHwy || rp.from.host.lanes >= 2 ? 70 : 50;
+      const VsF = rp.from.isHwy && rp.from.host.roadKind === 'route' ? vsaRules(rp.from.host.dcat, rp.from.host.lanes) : null;
+      // [VSA] § 6.4.3.4 : 70 km/h sur VSA 110, 50 km/h sur VSA 90 ; [ECH] § 4.3 ailleurs.
+      const vS = VsF ? VsF.vS : rp.from.isHwy || rp.from.host.lanes >= 2 ? 70 : 50;
       const Vs = vS / 3.6, VR = (first ? speedOfRadius(rIn(first.R)) : 70) / 3.6;
       const Ld = Math.max(0, (Vs * Vs - VR * VR) / (2 * (1.5 + 10 * grade)));
       R.Ld = Ld; R.Ldisp = R.lad + (first?.L || 0); R.VR = VR * 3.6; R.Vs = vS;
       if (first && Ld > R.Ldisp + 1e-6) err(`zone de décélération ${fmt(R.Ldisp)} m < Ld = ${fmt(Ld)} m (${vS} → ${fmt(VR * 3.6)} km/h, Ri = ${fmt(rIn(first.R))} m, p = ${fmt(rp.pente, 1)} %, § 3.2.5).`);
-      if (rp.from.isHwy && ![150, 110, 90].includes(rp.from.biseau)) info(`biseau de ${fmt(rp.from.biseau)} m : 150 m en règle générale, 110 m en relief difficile, 90 m si une seule voie (§ 4.1.3.1).`);
+      if (VsF) {
+        // [VSA] sch. 14, § 6.2.2.1, § 6.3.1 : déboîtement 150 m (obliquité 3 %), 110 m si S < 650 uvp/h sur VSA 90.
+        const b = rp.from.biseau;
+        if (VsF.biseauSmin && b >= VsF.biseauSmin - 1e-6 && b < VsF.biseauS - 1e-6) info(`déboîtement réduit à ${fmt(b)} m : admis seulement si le trafic sortant est < 650 uvp/h (${VsF.label}, VSA § 6.2.2.1).`);
+        else if (b < VsF.biseauS - 1e-6) warn(`déboîtement de ${fmt(b)} m < ${VsF.biseauS} m${VsF.biseauSmin ? ` (${VsF.biseauSmin} m si S < 650 uvp/h)` : ''} (${VsF.label}, VSA sch. 14, § 6.2.2.1).`);
+        if (rp.from.p > 0.05 + 1e-9) warn(`obliquité de sortie ${fmt(rp.from.p * 100, 1)} % > 5 % (VSA § 6.3.1 : 3 % depuis la section courante).`);
+      } else if (rp.from.isHwy && rp.from.host.roadKind === 'autoroute' && ![150, 110, 90].includes(rp.from.biseau)) info(`biseau de ${fmt(rp.from.biseau)} m : 150 m en règle générale, 110 m en relief difficile, 90 m si une seule voie (§ 4.1.3.1).`);
       if (!rp.from.isHwy) {
         const Pr = hF.R, st0 = Fs.s - (WV.byS.has(R.id) ? 0 : rp.from.biseau);
         if (st0 < 0) warn(`le biseau commence avant l'origine de ${Pr.name} (${fmt(st0)} m).`);
@@ -584,8 +604,16 @@ export function buildEchangeur(prj, D) {
     if (Ft) {
       if (R.ladE + 1e-6 < rp.to.Lm) err(`alignement droit jusqu'à E.1,00 m de ${fmt(R.ladE)} m < Lm = ${fmt(rp.to.Lm)} m (§ 6.1).`);
       if (rp.to.p < 0.03 - 1e-9 || rp.to.p > 0.05 + 1e-9) warn(`obliquité d'entrée ${fmt(rp.to.p * 100, 1)} % hors de 3 à 5 % (§ 6.1).`);
+      const VsT = rp.to.isHwy && rp.to.host.roadKind === 'route' ? vsaRules(rp.to.host.dcat, rp.to.host.lanes) : null;
+      if (VsT && !WV.byE.has(R.id)) {
+        // [VSA] sch. 26 : insertion 200 m + biseau 75 m ; 150 m si E < 600 uvp/h sur VSA 90 avec BAU en aval.
+        const ins = rp.to.ins;
+        if (VsT.insEmin && ins >= VsT.insEmin - 1e-6 && ins < VsT.insE - 1e-6) info(`voie d'insertion réduite à ${fmt(ins)} m : admise seulement si le trafic entrant est < 600 uvp/h et avec une BAU en aval (${VsT.label}, VSA sch. 26).`);
+        else if (ins < VsT.insE - 1e-6) warn(`voie d'insertion de ${fmt(ins)} m < ${VsT.insE} m${VsT.insEmin ? ` (${VsT.insEmin} m si E < 600 uvp/h)` : ''} (${VsT.label}, VSA sch. 26).`);
+        if (rp.to.biseau < VsT.biseauE - 1e-6) warn(`biseau d'insertion de ${fmt(rp.to.biseau)} m < ${VsT.biseauE} m (VSA sch. 26).`);
+      }
       if (rp.to.isHwy) {
-        const VE = 55 / 3.6, VR = (last ? speedOfRadius(rIn(last.R)) : 70) / 3.6;
+        const VE = (VsT ? VsT.vE : 55) / 3.6, VR = (last ? speedOfRadius(rIn(last.R)) : 70) / 3.6;
         const La = Math.max(0, (VE * VE - VR * VR) / (2 * (1 - 10 * grade)));
         R.La = La; R.Ladisp = R.ladE + (last?.L || 0); R.VRe = VR * 3.6;
         if (last && La > R.Ladisp + 1e-6) err(`zone d'accélération ${fmt(R.Ladisp)} m < La = ${fmt(La)} m (${fmt(VR * 3.6)} → 55 km/h, Ri = ${fmt(rIn(last.R))} m, rampe ${fmt(rp.pente, 1)} %, § 3.2.5).`);
@@ -602,15 +630,19 @@ export function buildEchangeur(prj, D) {
   }
 
   // --- Entrecroisements (§ 7.3) : entrée suivie d'une sortie sur la même chaussée hôte -------------------------
+  const vsaD40 = new Map(); // sortie sur VSA dont le D40 est ramené à d1m (vsaSequenceChecks)
   {
     const ev = new Map(), push = (h, o) => { if (!ev.has(h.ref)) ev.set(h.ref, { h, list: [] }); ev.get(h.ref).list.push(o); };
     for (const R of D.ramps) {
       if (!R?.al) continue;
       if (R.Fs) push(R.hF, { u: R.Fs.s * R.hF.sd, kind: 'S', name: R.name, p: R.rp.from.p, id: R.id });
-      if (R.Ft) push(R.hT, { u: R.Ft.s * R.hT.sd, kind: 'E', name: R.name, Lm: R.rp.to.Lm, id: R.id });
+      if (R.Ft) push(R.hT, { u: R.Ft.s * R.hT.sd, kind: 'E', name: R.name, Lm: R.rp.to.Lm, id: R.id, uEnd: WV.byE.has(R.id) ? null : R.Ft.s * R.hT.sd + R.rp.to.ins + R.rp.to.biseau });
     }
     for (const { h, list } of ev.values()) {
       list.sort((a, b) => a.u - b.u);
+      // Chaussée hôte VSA 90 / 110 : enchaînements entrée – entrée, sortie – sortie, entrée – sortie ([VSA] § 6.2.4).
+      const V = h.kind === 'hwy' && h.roadKind === 'route' ? vsaRules(h.dcat, h.lanes) : null;
+      if (V) for (const [id, d] of vsaSequenceChecks(V, list, (id) => WV.byE.get(id)?.sid, (lvl, msg) => issues.push({ lvl, msg: `${h.name} : ${msg}` }), fmt)) vsaD40.set(id, d);
       list.forEach((e, k) => {
         if (e.kind !== 'E') return;
         // Sortie suivante : S.1,00 en aval du nez d'entrée (Z < 0 : voies d'insertion et de décélération confondues).
@@ -621,6 +653,7 @@ export function buildEchangeur(prj, D) {
         if (Z < 0) say('err', `zones de musoir superposées (S.1,00 à ${fmt(-Z)} m en amont de E.1,00) : pas d'entrecroisement possible, éloigner les accès (§ 6.1, 7.3).`);
         else if (WV.byE.get(e.id)?.sid === x.id) say('info', `voie d'entrecroisement de 3,50 m + BDD 1,00 m dessinée de E.1,00 à S.1,00 (Z = ${fmt(Z)} m, § 3.4.3).`);
         if (h.kind === 'ramp') { if (Z < 275 - 1e-6) say('warn', `entrecroisement sur bretelle / collectrice Z = ${fmt(Z)} m < 275 m (§ 7.3.3).`); }
+        else if (V) return; // contrôlé par vsaSequenceChecks
         else if (h.roadKind === 'route') say('info', `entrecroisement Z = ${fmt(Z)} m sur route ordinaire (hors du champ du guide échangeurs : à vérifier selon le guide de la route).`);
         else if (Z15 >= 1200) return;
         else if (Z < 500) say('err', `Z = ${fmt(Z)} m < 500 m : l'entrecroisement doit être reporté sur une voie collectrice (§ 7.3.2, 7.3.3).`);
@@ -738,7 +771,9 @@ export function buildEchangeur(prj, D) {
       text('COTATION', h.off(sNose, -1.5), `tpl ${fmt(e.tpl)} m · Lm ${fmt(e.Lm)} m`, ang(Fs.d), 'center', TH * 0.8);
       // Signalisation de direction (schémas 4-1, 4-8, tab. 4-2) : D30 au point S.1,50 m ; D40 et D50 en amont (autoroute).
       const sD30 = Fs.s + sd * 0.5 / e.p;
-      const signs = [['D30', 0], ...(h.kind === 'hwy' ? [['D40', { 90: 750, 110: 900, 130: 1000 }[h.V] || 900], ['D50', { 90: 1500, 110: 1800, 130: 2000 }[h.V] || 1800]] : [])];
+      // VSA : D40 à d1, D50 à d du D30 ([VRUA] p. 12 et 39 ; pas de D50 sur VSA 90).
+      const Vs = h.kind === 'hwy' && h.roadKind === 'route' ? vsaRules(h.dcat, h.lanes) : null;
+      const signs = [['D30', 0], ...(Vs ? [['D40', vsaD40.get(R.id) ?? Vs.d1], ...(Vs.d ? [['D50', Vs.d]] : [])] : h.kind === 'hwy' ? [['D40', { 90: 750, 110: 900, 130: 1000 }[h.V] || 900], ['D50', { 90: 1500, 110: 1800, 130: 2000 }[h.V] || 1800]] : [])];
       for (const [code, back] of signs) {
         const st = sD30 - sd * back;
         if (st < 0 || st > h.sEnd) { if (back) { const msg = `${code} à ${fmt(back)} m en amont de D30 : hors de l'axe dessiné.`; issues.push({ lvl: 'info', msg: `${name} : ${msg}` }); R.issues.push({ lvl: 'info', msg }); } continue; }
