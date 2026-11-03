@@ -292,8 +292,11 @@ ou sur un fond topographique DXF.
   et barbules comme dans BVTrace (une longue de la crête au pied, trois courtes partant de la crête : bord de
   plate-forme en remblai, EET en déblai ; espacement réglable). Découpe automatique entre axes : rien sous la
   plate-forme d'un autre axe ni sous un tablier ; deux remblais : le plus haut l'emporte, deux déblais : le plus
-  profond, déblai sous remblai : masqué — les lignes s'arrêtent sur la ligne de rencontre des talus. Export DXF
-  (GIRA_TALUS, GIRA_ENTREE_EN_TERRE). Contrôles : node tools/test-talus.mjs.
+  profond, déblai sous remblai : masqué — les lignes s'arrêtent sur la ligne de rencontre des talus, qui est
+  dessinée (calque Talus, trait propre) : intersection exacte des facettes des deux talus (remblai / remblai ou
+  déblai / déblai), limitée à leur partie commune et aux parties apparentes vis-à-vis des autres axes ; elle prolonge
+  le point où les deux EET se rejoignent. Export DXF (GIRA_TALUS, GIRA_ENTREE_EN_TERRE). Contrôles :
+  node tools/test-talus.mjs, node tools/test-talusx.mjs.
 - **Hydrologie et hydraulique (onglet Hydrologie, moteur de BVTrace porté en JavaScript, js/hydro/)** :
   - bassins versants dont l'écoulement coupe les axes cochés (autoroute, voies secondaires, bretelles, branches), sur
     un MNT SRTM élargi autour des axes (marge doublée automatiquement tant qu'un bassin touche le bord, jusqu'à 24 km)
