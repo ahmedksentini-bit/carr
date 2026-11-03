@@ -23,7 +23,27 @@ const num = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
 const up5 = (v) => Math.ceil(v * 20 - 1e-9) / 20;
 const up50 = (v) => Math.ceil(v * 2 - 1e-9) / 2;
 
-export const CADRE_DEF = { type: 'picf', n: 1, B: 3, H: 2.5, Hr: 1.5, biais: 100, usage: 'eau', wingA: 30 };
+export const CADRE_DEF = { type: 'picf', n: 1, B: 3, H: 2.5, Hr: 1.5, biais: 100, usage: 'eau' };
+// Têtes (clés du catalogue HDS-5, hydro/data/culvert-catalog.js) → géométrie en plan. Familles d'angles de BVTrace
+// (docs/context/ouvrages-tetes-murs.md) : 1 = 30 à 75° (45° proposé), 2 = 15° ou 90° seulement, 3 = 0°, 4 = 45° imposé,
+// 5 et 6 = mur frontal sans aile ; buses : mur de tête (101, 102, 201, 301, 302) ou extrémité sans mur (103, 202, 203).
+export const HEAD_TYPES = {
+  1: { key: 1, a: 45, range: [30, 75], murette: true, label: 'ailes évasées 30° à 75°' },
+  2: { key: 2, a: 15, set: [15, 90], murette: true, label: 'ailes à 15° ou mur frontal à 90°' },
+  3: { key: 3, fix: 0, murette: true, label: 'ailes parallèles' },
+  4: { key: 4, fix: 45, murette: true, label: 'ailes à 45°, biseau supérieur' },
+  5: { key: 5, wings: false, murette: true, label: 'mur frontal à 90°, chanfreins' },
+  6: { key: 6, wings: false, murette: true, label: 'mur frontal à 90°, biseaux' },
+  101: { key: 101, wings: false, murette: true, label: 'mur de tête, arête vive' },
+  102: { key: 102, wings: false, murette: true, label: 'mur de tête, emboîtement femelle' },
+  103: { key: 103, wings: false, murette: false, label: 'emboîtement femelle en saillie' },
+  201: { key: 201, wings: false, murette: true, label: 'métallique, mur de tête' },
+  202: { key: 202, wings: false, murette: false, label: 'métallique, biseautée au talus' },
+  203: { key: 203, wings: false, murette: false, label: 'métallique, en saillie' },
+  301: { key: 301, wings: false, murette: true, label: 'anneau biseauté à 45°' },
+  302: { key: 302, wings: false, murette: true, label: 'anneau biseauté à 33,7°' },
+};
+export const MURETTE = { t: 0.3, over: 0.5 }; // mur de tête : épaisseur, débord de part et d'autre de l'ouvrage (m)
 
 // Pont à poutres : travées (m) saisies « 20 ; 20 » ou tableau.
 export const parseSpansTxt = (v) => (Array.isArray(v) ? v : String(v ?? '').split(/[;+\s]+|,(?=\s)/)).map((x) => parseFloat(String(x).replace(',', '.'))).filter((x) => Number.isFinite(x) && x > 0);
@@ -64,8 +84,14 @@ export function cadreDims(c, half = 6, axH = null) {
   // la voie, Ld côté droit (saisies ou tirées par les poignées) ; à défaut, la moitié de L saisie ou de Lauto
   const Lh = Math.max(W / 2, num(c.L, Lauto) / 2), Lg = Math.max(W / 2, num(c.Lg, Lh)), Ld = Math.max(W / 2, num(c.Ld, Lh));
   const L = Lg + Ld;
-  const wingA = Math.max(0, Math.min(90, num(c.wingA, 30))), wingL = Math.max(0, num(c.wingL, up50(1.5 * (H + et))));
-  return { n, B, H, Hr, ep, et, ei, er, eAuto, ang, psi, sinP, W, L, Lg, Ld, Lauto, wingA, wingL, type: buse ? 'buse' : c.type === 'pipo' ? 'pipo' : 'picf' };
+  // Tête (configuration d'entrée HDS-5, BVTrace « Têtes de dalot ») : famille d'angles des murs en aile (mesurés depuis
+  // l'axe de l'ouvrage, 0 = prolongement des piédroits, 90 = mur frontal) et mur de tête (murette) ; une buse n'a pas
+  // de mur en aile (mur de tête, ou extrémité en saillie / biseautée sans mur).
+  const head = HEAD_TYPES[num(c.inlet, buse ? 101 : 4)] || HEAD_TYPES[buse ? 101 : 4];
+  let wingA = Math.max(0, Math.min(90, num(c.wingA, head.a ?? 30)));
+  if (head.fix != null) wingA = head.fix; else if (head.set && !head.set.includes(wingA)) wingA = head.set[0]; else if (head.range) wingA = Math.max(head.range[0], Math.min(head.range[1], wingA));
+  const wingL = head.wings === false || buse ? 0 : Math.max(0, num(c.wingL, up50(1.5 * (H + et))));
+  return { n, B, H, Hr, ep, et, ei, er, eAuto, ang, psi, sinP, W, L, Lg, Ld, Lauto, wingA, wingL, head, inlet: head.key, murette: head.murette, type: buse ? 'buse' : c.type === 'pipo' ? 'pipo' : 'picf' };
 }
 
 // Implantation : point et directions sur l'axe porteur, abscisse le long de l'autoroute (numérotation des ouvrages).
@@ -164,15 +190,8 @@ export function drawCadre(g, name, P, TH) {
     const bs = 3 * K.ep;
     for (const wc of [K.W / 2 - K.ep / 2, -K.W / 2 + K.ep / 2]) for (const ww of [wc + bs / 2, wc - bs / 2]) { const q = corner(ww); if (q[0] && q[1]) path(q, { role: 'cache', dash: [0.4, 0.4] }); }
   }
-  // Murs en aile évasés : depuis chaque angle extérieur, vers l'extérieur de l'ouvrage, à α de son axe.
-  if (K.wingL > 0.1) {
-    const a = (K.wingA * Math.PI) / 180, tw = 0.3;
-    for (const [k, sg] of [[0, -1], [1, 1]]) for (const [cc, sw] of [[cL, 1], [cR, -1]]) {
-      const c0 = cc[k], dir = G.norm(G.add(G.mul(d, sg * Math.cos(a)), G.mul(m, sw * Math.sin(a))));
-      const nn = G.mul(G.rot90(dir), -sw * sg), e1 = G.add(c0, G.mul(dir, K.wingL));
-      path([c0, e1, G.add(e1, G.mul(nn, tw)), G.add(c0, G.mul(nn, tw))], { wm: 0.2 });
-    }
-  }
+  // Têtes : mur de tête (murette) et murs en aile, alerte en rouge si la tête empiète sur le talus (g.headBad).
+  for (const k of [0, 1]) for (const pl of cadreHeadPolys(g)[k] || []) path(pl, { wm: 0.2, closed: true, ...(g.headBad?.[k] ? { role: 'err' } : {}) });
   // Axe de l'ouvrage et étiquette.
   path([G.add(p, G.mul(d, -K.Lm - 2)), G.add(p, G.mul(d, K.Lp + 2))], { role: 'axe', dash: [3, 1, 0.5, 1] });
   const what = K.type === 'pipo' ? 'PIPO' : K.type === 'buse' ? 'buse' : 'PICF';
@@ -180,6 +199,32 @@ export function drawCadre(g, name, P, TH) {
     : `${name} : ${what} ${K.n > 1 ? `${K.n} × ` : ''}${fmt(K.B, 2)} × ${fmt(K.H, 2)} m, L = ${fmt(K.L, 2)} m, biais ${fmt(K.psi, 1)} gr`;
   text(G.add(E[1], G.add(G.mul(d, 2 + K.wingL * 0.3), G.mul(m, K.W / 2 + 1))), desc, Math.atan2(d.y, d.x));
   return { poly, desc };
+}
+
+// Contours en plan des deux têtes (k = 0 : côté −d, k = 1 : côté +d) : mur de tête (débord MURETTE.over, épaisseur
+// MURETTE.t vers l'intérieur du remblai) et murs en aile évasés depuis les angles extérieurs, à α de l'axe de l'ouvrage.
+export function cadreHeadPolys(g) {
+  const { p, t, d, K } = g; if (!K || K.type === 'poutres') return [[], []];
+  const m = G.rot90(d), E = [G.add(p, G.mul(d, -K.Lm)), G.add(p, G.mul(d, K.Lp))];
+  const side = (w, k) => meet(G.add(p, G.mul(m, w)), d, E[k], t);
+  const out = [[], []];
+  for (const [k, sg] of [[0, -1], [1, 1]]) {
+    const a0 = side(K.W / 2, k), b0 = side(-K.W / 2, k); if (!a0 || !b0) continue;
+    const u = G.norm(G.sub(a0, b0)), into = G.mul(d, -sg); // le long de la tête (vers cL) ; vers l'intérieur du remblai
+    if (K.murette) {
+      const A = G.add(a0, G.mul(u, MURETTE.over)), B = G.add(b0, G.mul(u, -MURETTE.over));
+      out[k].push([A, B, G.add(B, G.mul(into, MURETTE.t)), G.add(A, G.mul(into, MURETTE.t))]);
+    }
+    if (K.wingL > 0.1) {
+      const a = (K.wingA * Math.PI) / 180, tw = 0.3;
+      for (const [c0, sw] of [[a0, 1], [b0, -1]]) {
+        const dir = G.norm(G.add(G.mul(d, sg * Math.cos(a)), G.mul(m, sw * Math.sin(a))));
+        const nn = G.mul(G.rot90(dir), -sw * sg), e1 = G.add(c0, G.mul(dir, K.wingL));
+        out[k].push([c0, e1, G.add(e1, G.mul(nn, tw)), G.add(c0, G.mul(nn, tw))]);
+      }
+    }
+  }
+  return out;
 }
 
 // Contrôles d'un cadre.

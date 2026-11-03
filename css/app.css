@@ -181,6 +181,25 @@ dialog.dlg-big[open] { display: flex; }
 dialog.dlg-big .dlg-head { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line2); }
 dialog.dlg-big .dlg-head .ttl { flex: 1; font-weight: 600; }
 dialog.dlg-big #plPopBody { flex: 1; overflow: auto; padding: 10px 14px; }
+dialog.dlg-big #bvBody { flex: 1; overflow: auto; padding: 10px 14px; }
+.bv-acts { flex-wrap: wrap; align-items: center; gap: 6px; }
+.bv-acts .fld.inl { display: inline-flex; align-items: center; gap: 6px; }
+.bv-acts button.danger { border-color: #ef4444; color: #fca5a5; }
+.bv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 10px 22px; }
+.bv-grid section.wide { grid-column: 1 / -1; }
+.bv-grid h4 { margin: 10px 0 4px; }
+table.bv-kv { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+table.bv-kv th, table.bv-kv td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line2); vertical-align: top; }
+table.bv-kv th { font-weight: 500; color: var(--muted); width: 42%; }
+table.bv-kv.tc th { width: auto; }
+table.bv-kv tr.on td { font-weight: 600; color: var(--accent); }
+table.bv-kv .err, .bv-grid .err { color: #ef4444; }
+svg.bv-chart { max-width: 100%; height: auto; background: rgba(127,127,127,.05); border-radius: 6px; }
+svg.bv-chart .gr { stroke: var(--line2); stroke-width: 0.6; }
+svg.bv-chart .ax { fill: var(--muted); font-size: 10px; }
+svg.bv-chart .ln { fill: none; stroke: #38bdf8; stroke-width: 2; }
+svg.bv-chart line.mk { stroke: #f59e0b; stroke-dasharray: 4 3; stroke-width: 1; }
+svg.bv-chart text.mk { fill: #f59e0b; font-size: 10px; }
 dialog.dlg-big .chart.pl { overflow-x: auto; }
 dialog.dlg-big .chart.pl svg { width: calc(var(--w) * 1.5) !important; max-width: none; height: auto; }
 dialog h2 { margin: 14px 0 8px; }
