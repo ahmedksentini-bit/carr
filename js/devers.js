@@ -9,6 +9,7 @@
 //           extérieur jusqu'au dévers courant de la section (toit).
 import * as G from './geom.js';
 import { plParams, plBuild, axisLength } from './pl.js';
+import { signedOffset, pointNormalAt } from './ringshape.js';
 
 const { sub, dot, mul, add, polar } = G;
 
@@ -23,7 +24,15 @@ export function addDevers(prj, D) {
   const zC = +r.zC || 0;
   const mode = r.mode === 'cone' ? 'cone' : 'aci';
   const zPlane = (P) => zC - p * dot(sub(P, O), g);
-  const zRing = (P) => {
+  // Cacahuète (D.shape) : même modèle, la distance radiale étant remplacée par le décalage signé off à la rive Rg
+  // (rr − Rg pour un cercle) et le point de la rive Rg par la projection de P sur le contour.
+  const zShape = (P) => {
+    const so = signedOffset(D.shape, P), off = so.off;
+    if (mode === 'cone') return zPlane(P) - d * Math.max(0, off + D.la);
+    if (off >= 0) return zPlane(P);
+    return zPlane(so.p) + d * Math.min(-off, D.la);
+  };
+  const zRing = D.shape ? zShape : (P) => {
     const rr = G.dist(P, O);
     if (mode === 'cone') return zPlane(P) - d * Math.max(0, rr - D.Ri);
     if (rr >= D.Rg) return zPlane(P);
@@ -47,7 +56,16 @@ export function addDevers(prj, D) {
 
   // Profil en long de l'anneau (bords extérieur et intérieur) par gisement.
   D.ringProfile = [];
-  for (let k = 0; k <= 72; k++) {
+  if (D.shape) {
+    // Profil le long du contour, repéré par le gisement depuis le centre du carrefour (contour étoilé depuis O).
+    const ext = G.samplePath(D.shape.path(0), 0.5), int = G.samplePath(D.shape.path(-D.la), 0.5);
+    const gonOf = (q) => G.normAng(Math.atan2(q.x - O.x, q.y - O.y)) * 200 / Math.PI;
+    const at = (pts, gon) => pts.reduce((b, q) => { const dg = Math.abs(((gonOf(q) - gon + 600) % 400) - 200); return dg < b.dg ? { q, dg } : b; }, { q: pts[0], dg: Infinity }).q;
+    for (let k = 0; k <= 72; k++) {
+      const gon = (k * 400) / 72, t = Math.PI / 2 - (gon * Math.PI) / 200;
+      D.ringProfile.push({ gon, zExt: zRing(at(ext, gon)), zInt: zRing(at(int, gon)), rad: radial(t) });
+    }
+  } else for (let k = 0; k <= 72; k++) {
     const gon = (k * 400) / 72, t = Math.PI / 2 - (gon * Math.PI) / 200;
     D.ringProfile.push({ gon, zExt: zRing(polar(O, D.Rg, t)), zInt: zRing(polar(O, D.Ri, t)), rad: radial(t) });
   }
@@ -57,7 +75,14 @@ export function addDevers(prj, D) {
 
   // Flèches de dévers sur l'anneau (évite les embouchures des branches).
   const rm = (D.Rg + D.Ri) / 2;
-  for (let k = 0; k < 12; k++) {
+  if (D.shape) {
+    // Cacahuète : 16 flèches réparties le long du milieu de l'anneau, normales au contour.
+    const path = D.shape.path(-D.la / 2), Lt = G.pathLen(path);
+    for (let k = 0; k < 16; k++) {
+      const q = pointNormalAt(path, ((k + 0.5) * Lt) / 16), phi = G.ang(q.n), v = radial(phi), dir = v >= 0 ? q.n : G.neg(q.n);
+      arrow(G.add(q.p, mul(dir, -1.2)), dir, 2.4, pct(Math.abs(v)));
+    }
+  } else for (let k = 0; k < 12; k++) {
     const phi = (k * Math.PI) / 6 + Math.PI / 12;
     const v = radial(phi);
     const e = G.unit(phi);
@@ -65,7 +90,8 @@ export function addDevers(prj, D) {
     arrow(G.add(polar(O, rm, phi), mul(dir, -1.2)), dir, 2.4, pct(Math.abs(v)));
   }
   if (p > 0) {
-    arrow(G.add(O, mul(g, -D.Rb * 0.35)), g, D.Rb * 0.7, `plan p = ${pct(p)}`, TH);
+    const rA = D.shape ? Math.min(D.Rb, 6) : D.Rb;
+    arrow(G.add(O, mul(g, -rA * 0.35)), g, rA * 0.7, `plan p = ${pct(p)}`, TH);
   }
 
   // Branches
@@ -74,7 +100,7 @@ export function addDevers(prj, D) {
       z0: zRing(bd.W({ x: bd.x0, y: bd.a })),
       d0In: -p * dot(bd.n, g), d0Out: p * dot(bd.n, g),
       defGrade: -p * dot(bd.u, g),
-      base: (Pw, x) => (x <= bd.x0 + 1e-6 && G.dist(Pw, O) <= D.Rg + 0.05 ? zRing(Pw) : null),
+      base: (Pw, x) => (x <= bd.x0 + 1e-6 && (D.shape ? signedOffset(D.shape, Pw).off <= 0.05 : G.dist(Pw, O) <= D.Rg + 0.05) ? zRing(Pw) : null),
       arrow, TH,
     });
   }
@@ -84,7 +110,7 @@ export function addDevers(prj, D) {
 // Profil et dévers d'une branche : profil en long rectiligne depuis x0, dévers de chaque voie variant
 // linéairement de la valeur imposée au raccordement (d0) au dévers courant sur la longueur de transition.
 function branchDevers(prj, D, bd, { z0, d0In, d0Out, defGrade, base, arrow, TH }) {
-  const b = prj.branches[bd.idx], O = D.O;
+  const b = prj.branches[bd.idx], O = bd.Oc || D.O;
   // Profil en long saisi (onglet Profil long) : ligne rouge depuis (0, z0) ; sinon pente constante.
   const PLp = plParams(b), PL = PLp.pis.length ? plBuild(PLp, z0) : null;
   const grade = PL ? PL.gradeAt(0) : b.pente !== '' && b.pente != null && isFinite(+b.pente) ? +b.pente / 100 : defGrade;

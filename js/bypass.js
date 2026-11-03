@@ -29,8 +29,9 @@ function cutBelowX(segs, xc) {
 // sortie de j ; o : { R (rayon en axe), w (largeur de chaussée), bdg, bdd, bddBr (BDD des branches), urbain }.
 // Retourne la géométrie en coordonnées monde, { needK, needJ } si les branches sont trop courtes, ou { error }.
 export function buildBypass(D, bk, bj, ringArc, o) {
-  const B = o.urbain ? BYPASS_URBAIN : BYPASS, O = D.O, w2 = o.w / 2;
-  const fk = frame(O, bk.u), fj = frame(O, bj.u);
+  const B = o.urbain ? BYPASS_URBAIN : BYPASS, w2 = o.w / 2;
+  // Repère de chaque branche : centre de son lobe pour un carrefour cacahuète (bk.Oc), centre de l'anneau sinon.
+  const fk = frame(bk.Oc || D.O, bk.u), fj = frame(bj.Oc || D.O, bj.u);
   const yk0 = bk.a + bk.th + bk.entry.wa, yj0 = bj.a - (bj.th + bj.exit.wa); // rives des chaussées d'approche
   const ek = yk0 + o.bddBr, ej = yj0 - o.bddBr;                              // bords de chaussée
   const yAc = ek + B.sep + o.bdg + w2, yBc = ej - (B.sep + o.bdg + w2);       // axes de la voie directe
@@ -74,7 +75,7 @@ export function buildBypass(D, bk, bj, ringArc, o) {
   const entryCut = fk.Wp(ck.segs), exitCut = fj.Wp(cj.segs);
   const noseK = fk.W(ck.P), noseJ = fj.W(cj.P);
   const island = [
-    ...entryCut, ...(ringArc ? [ringArc] : []), ...G.revPath(exitCut),
+    ...entryCut, ...(ringArc || []), ...G.revPath(exitCut),
     L(noseJ, G.segEnd(left[left.length - 1])), ...G.revPath(left), L(G.segStart(left[0]), noseK),
   ];
   const rive = [

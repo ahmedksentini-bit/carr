@@ -5,6 +5,7 @@
 import * as THREE from './vendor/three-0.170.module.min.js';
 import { OrbitControls } from './vendor/OrbitControls-0.170.js';
 import * as G from './geom.js';
+import { ringFrames, ringPointAt } from './ringshape.js';
 import { sectionParams } from './norms.js';
 import { ptParams, platform, mainPlatform, crossSectionFrom, sampleSection } from './pt.js';
 import { axisPointAt, axisLength } from './pl.js';
@@ -150,13 +151,16 @@ export class View3D {
     const kindR = (r) => { const p = parts.find((q) => r >= q.x0 - 1e-9 && r <= q.x1 + 1e-9); const l = p?.label || ''; return /îlot/.test(l) ? 'ilot' : /franchissable/.test(l) ? 'franchissable' : /BDG/.test(l) ? 'bdg' : /anneau/.test(l) ? 'anneau' : /BDD/.test(l) ? 'bdd' : /trottoir/.test(l) ? 'trottoir' : /berme/.test(l) ? 'berme' : /caniveau/.test(l) ? 'chaussee' : 'bordure'; };
     const rs = [0]; for (const [r] of line) if (r > rs[rs.length - 1] + 1e-6) rs.push(r);
     const zTop = zrel(line[0][0]);
-    const N = 144, rows = [], pts = [];
+    const N = D.shape ? 288 : 144, rows = [], pts = [];
+    // Cacahuète : repères le long de la rive Rg (normale extérieure) au lieu des azimuts autour du centre.
+    const frs = D.shape ? ringFrames(D.shape, N) : null, rb = Math.max(0.5, D.Rb);
     for (let j = 0; j <= N; j++) {
-      const phi = (j / N) * Math.PI * 2, base = zR(G.polar(O, D.Rg, phi)) - 0; // cote du bord Rg à cet azimut
+      const phi = (j / N) * Math.PI * 2, fr = frs ? frs[j % N] : null;
+      const base = zR(fr ? fr.p0 : G.polar(O, D.Rg, phi)) - 0; // cote du bord Rg à cet azimut
       const z = [], kind = [];
       rs.forEach((r, i) => { z.push(base + (r < line[0][0] ? zTop : zrel(r))); kind.push(i === 0 ? 'ilot' : kindR((rs[i - 1] + r) / 2)); });
       rows.push({ z, kind });
-      pts.push(rs.map((r) => { const q = G.polar(O, Math.max(r, 0.01), phi); return [q.x, q.y]; }));
+      pts.push(rs.map((r) => { const q = fr ? ringPointAt(D.shape, fr, r, D.Rg, rb) : G.polar(O, Math.max(r, 0.01), phi); return [q.x, q.y]; }));
     }
     // addGrid attend kind[j+1] pour la cellule j : décalage fait ci-dessus (kind[i] = nature entre rs[i-1] et rs[i]).
     this.addGrid(rows, rs, pts, 'anneau');
