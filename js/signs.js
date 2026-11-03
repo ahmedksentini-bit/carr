@@ -150,13 +150,15 @@ export function addSigns(prj, D) {
       if (!D.mini) {
         const yLane = (bd.hb || 0) + (bd.entry?.w ?? 3.5) / 2;
         const E0 = bd.W({ x: bd.x0, y: yLane }), E1 = bd.W({ x: bd.x0 + 8, y: yLane }), d = norm(sub(E0, E1));
-        const R = Math.max(1.5, (D.Rb > 2 ? D.Rb : D.Rpi) - 0.8);
-        const ts = G.lineCircle(E0, d, O, R).filter((t) => t > 0);
+        // Cacahuète : îlot du lobe de la branche (bd.Oc, rayon Rg du lobe réduit comme Rb / Rpi).
+        const dR = (bd.Rgc ?? D.Rg) - D.Rg, Ob = bd.Oc || O;
+        const R = Math.max(1.5, (D.Rb > 2 ? D.Rb : D.Rpi) + dR - 0.8);
+        const ts = G.lineCircle(E0, d, Ob, R).filter((t) => t > 0);
         let P;
         if (ts.length) P = add(E0, mul(d, ts[0]));
-        else { const t = Math.max(0, dot(sub(O, E0), d)); const q = add(E0, mul(d, t)); P = G.polar(O, R, ang(sub(q, O))); }
+        else { const t = Math.max(0, dot(sub(Ob, E0), d)); const q = add(E0, mul(d, t)); P = G.polar(Ob, R, ang(sub(q, Ob))); }
         const dist = G.dist(P, E0);
-        const sg = sign({ code: 'B21-1', branch: bd.name, bi: bd.idx, p: P, face: neg(d), out: norm(sub(P, O)), where: 'îlot central, face à l\'entrée', x: -dist, note: `à ${fmt(dist, 0)} m de la ligne de cédez-le-passage (ACI/P : ≈ ${fmt(SP.dB21, 0)} m) ; seul signal admis sur l'îlot central` });
+        const sg = sign({ code: 'B21-1', branch: bd.name, bi: bd.idx, p: P, face: neg(d), out: norm(sub(P, Ob)), where: 'îlot central, face à l\'entrée', x: -dist, note: `à ${fmt(dist, 0)} m de la ligne de cédez-le-passage (ACI/P : ≈ ${fmt(SP.dB21, 0)} m) ; seul signal admis sur l'îlot central` });
         if (dist < 8) say('info', `${bd.name} : B21-1 à ${fmt(dist, 0)} m seulement de la ligne de cédez-le-passage — vérifier sa perception (ACI/P : ≈ ${fmt(SP.dB21, 0)} m).`);
         void sg;
       }

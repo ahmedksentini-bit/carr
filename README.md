@@ -253,6 +253,16 @@ ou sur un fond topographique DXF.
 - **Voie principale** (onglet Échangeur, « Tracer la voie principale ») : autoroute (ICTAAL L1 / L2) ou route non
   autoroutière (catégories de conception ARP R1 / R2 / artère 110, VSA 90 / 110, AU 70, libre ; 2×1 voies, BDD 2,00 m,
   berme 0,75 m par défaut, terre-plein central facultatif) : on peut croiser et raccorder des routes non autoroutières.
+- **Carrefour « cacahuète »** (onglet Anneau, forme de l'anneau ; `js/ringshape.js`) : deux lobes circulaires (Rg,
+  Rg2) d'entraxe e reliés par deux cols concaves (rayons à la rive extérieure, 0 = col rectiligne : giratoire oblong),
+  orientés suivant la route principale ou un gisement saisi. Référence : Sétra, fiche d'expérience RACA « Le carrefour
+  cacahuète, un nouveau type de giratoire » (mai 2010 : Rg = 20 m, cols R = 30 m, anneau 7 m). Toutes les lignes de
+  l'anneau (bords, rives, îlot, bande franchissable, abords) sont parallèles à la rive extérieure ; chaque branche se
+  raccorde au lobe de son côté (erreur si Re / Rs empiètent sur un col). Contrôles : cols croisés (îlot coupé), largeur
+  de l'îlot au col, col plus serré que BDD + abords, forme non circulaire hors agglomération (Sétra 1998), déflexion
+  (point de l'îlot le plus saillant ; trajectoire en S signalée quand l'arc des trois points sort de l'anneau au col).
+  Dévers, profil de l'anneau, talus, vue 3D et signalisation (B21-1 sur l'îlot du lobe) suivent la forme. Tests :
+  `node tools/test-cacahuete.mjs`.
 - **Accès sur VSA 90 / 110** (`js/vsa.js`, voie principale ou secondaire de catégorie VSA) : guide Cerema « VSA 90 et
   110 » (2014, § 4.2, 6.1 à 6.4) complété, pour les accès rapprochés, par le guide Certu « Conception des accès sur VRU
   de type A » (2003). Section courante par défaut 2×2 voies, BAU 2,50 m, BDG 1,00 m, avec contrôles (chaussées
@@ -567,6 +577,9 @@ structure de l'HCM, d'après Troutbeck & Brilon, *Traffic Flow Theory*, chap. 8 
   extrémité n'est pas encore raccordée automatiquement au giratoire (branche à sens unique) : l'axe se termine sur la
   branche dessinée.
 
+- Carrefour cacahuète : branches raccordées aux arcs circulaires des lobes seulement (pas sur les cols) ; capacité
+  (Girabase) et quart gauche de visibilité calculés sur le cercle du lobe (approximation) ; la trajectoire en S au
+  droit d'un col est signalée mais son rayon n'est pas calculé.
 - Les largeurs par défaut de BDD (1,00 m), BDG (0,50 m) et berme (1,50 m) en interurbain sont des valeurs de départ
   à ajuster dans l'onglet Profil ; elles ne sont pas tirées du guide.
 - Carrefours en T et en X : abords (trottoirs, berme) et îlots dessinés ; la BDD n'est pas encore appliquée. Les

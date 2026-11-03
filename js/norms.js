@@ -454,6 +454,18 @@ export function checkDesign(prj, D) {
     const h = hintFor(k, prj);
     if (h) add(h.lvl || 'info', 'Anneau', `${LBL[k]} = ${f(+getPath(prj, k))} — ${h.txt}`);
   }
+  if (D.shape) {
+    // Carrefour « cacahuète » : Sétra, fiche d'expérience RACA (mai 2010) ; Sétra, carrefours interurbains (1998) :
+    // giratoire « nécessairement de forme circulaire » hors agglomération.
+    const S2 = D.shape;
+    add('info', 'Anneau', `Carrefour « cacahuète » (lobes Rg ${f(S2.R1)} / ${f(S2.R2)} m, entraxe ${f(S2.e)} m) : aménagement expérimental (Sétra, fiche RACA 2010 — Rg = 20 m, cols R = 30 m, anneau 7 m, 70 km/h en approche). Règles fondamentales d'un giratoire à respecter : lisibilité, visibilité, modération des vitesses, déflexion, absence d'obstacles sur l'îlot central.`);
+    if (prj.context === 'interurbain') add('warn', 'Anneau', 'Hors agglomération, le guide Sétra des carrefours interurbains (1998) retient un giratoire de forme circulaire : la forme cacahuète est à justifier par le contexte (deux carrefours proches, emprise contrainte, modération des vitesses).');
+    const R2 = S2.R2, hk = hintFor('ring.Rg', { ...prj, ring: { ...prj.ring, Rg: R2 } });
+    if (Math.abs(R2 - S2.R1) > 1e-6 && hk) add(hk.lvl || 'info', 'Anneau', `Rg2 = ${f(R2)} — ${hk.txt}`);
+    const Rb2 = D.Rb + (R2 - S2.R1);
+    if (Rb2 > 0 && Rb2 < 3.5) add('warn', 'Anneau', `Lobe 2 : partie infranchissable de l'îlot central de rayon ${f(Rb2)} m < 3,5 m.`);
+    add('info', 'Capacité', 'Capacité (Girabase) calculée comme pour un anneau circulaire de rayon Rg du lobe 1 : approximation pour un carrefour cacahuète (fonctionnement comparable à un giratoire classique selon la fiche Sétra).');
+  }
   if (D.Rb > 0 && D.Rb < 3.5) add('warn', 'Anneau', `Partie infranchissable de l'îlot central : rayon ${f(D.Rb)} m < 3,5 m.`);
   if (prj.context === 'interurbain' && D.Ri < 10 && D.Ri > 0) add('info', 'Anneau', `Ri = ${f(D.Ri)} m : Ri ≈ 10 m souhaitable avec semi-remorques.`);
   if (+prj.ring.la < 9 || +prj.ring.Rg < 20) add('info', 'Marquage', 'Pas de marquage axial sur l\'anneau (la < 9 m ou Rg < 20 m).');
@@ -471,7 +483,8 @@ export function checkDesign(prj, D) {
     }
     if (bd.a > 0.05) add('err', bd.name, `Axe excentré à droite de ${f(bd.a)} m : à exclure (ACI).`);
     else if (bd.a < -0.05) add(Math.abs(bd.a) > +prj.ring.Rg / 10 ? 'warn' : 'ok', bd.name, `Axe excentré à gauche de ${f(-bd.a)} m (légère excentration admise).`);
-    if (bd.defl) {
+    if (bd.defl?.sCurve) add('info', bd.name, `Déflexion vers ${bd.defl.to} : trajectoire en S imposée par le col du carrefour cacahuète (l'arc des 3 points sortirait de l'anneau) — méthode des 3 points non applicable ; la fiche Sétra RACA 2010 a mesuré des V85 de 28 à 37 km/h au point de conflit. Vérifier la trajectoire la plus rapide sur l'épure.`);
+    else if (bd.defl) {
       const R = bd.defl.R;
       add(R < 100 ? 'ok' : 'warn', bd.name, `Déflexion vers ${bd.defl.to} : rayon ≈ ${f(R, 0)} m ${R < 100 ? '< 100 m' : '≥ 100 m — insuffisante'}${R < 100 && R > 45 ? ' (≈ 30 m souhaitable)' : ''} (méthode des 3 points, à confirmer sur l'épure).`);
     }

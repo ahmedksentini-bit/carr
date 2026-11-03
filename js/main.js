@@ -28,6 +28,7 @@ import { computeAll as hydroComputeAll, defaultHypotheses, listMontanaStations, 
 import { sizeCulvert, culvertHydraulics, inletsForShape, defaultInletFor } from './hydro/culvert.js';
 import { DCAT, planChecks, platformChecks, catText, designCatOf, clothoidNeed } from './roadcat.js';
 import { isVsa } from './vsa.js';
+import { ringFrames } from './ringshape.js';
 import { buildAxisProfiles, axisPlChecks, clearanceChecks, axisTerrainLine, axisFromTerrain, buildNodes, axisLimits } from './axpl.js';
 import { chausseeOverlaps } from './overlap.js';
 import { autoProfile, newProfile, cloneProfile, findProfile } from './ptype.js';
@@ -358,9 +359,12 @@ function junctionCorridors(prj, D, tin, step, out, tag) {
     for (let X = -(D.plan.LA || 0); X <= (D.plan.LB || 0) + 1e-6; X += step) { try { const cs = crossSectionFrom(mainPlatform(prj, D, X, sec), tin, P); cs.s = X; rows.push(rowFromSection(cs)); } catch { /* hors MNT */ } }
     out.push({ id: `${tag}:main`, rows });
   } else if (D.O && D.zRing && D.Rg) {
-    const prof = ringProfile(prj, D), last = prof.line[prof.line.length - 1], re = last[0], N = Math.max(36, Math.ceil((2 * Math.PI * re) / step)), rows = [], plat = [];
+    const prof = ringProfile(prj, D), last = prof.line[prof.line.length - 1], re = last[0], rows = [], plat = [];
+    const N = D.shape ? Math.max(72, Math.ceil(G.pathLen(D.shape.path(re - D.Rg)) / step)) : Math.max(36, Math.ceil((2 * Math.PI * re) / step));
+    const frs = D.shape ? ringFrames(D.shape, N) : null; // cacahuète : normale au contour
     for (let j = 0; j < N; j++) {
-      const phi = (j / N) * 2 * Math.PI, u = G.unit(phi), q = G.polar(D.O, re, phi), c = { x: q.x, y: q.y, z: D.zRing(G.polar(D.O, D.Rg, phi)) + last[1] };
+      const phi = (j / N) * 2 * Math.PI, fr = frs?.[j];
+      const u = fr ? fr.n : G.unit(phi), q = fr ? G.add(fr.p0, G.mul(fr.n, re - D.Rg)) : G.polar(D.O, re, phi), c = { x: q.x, y: q.y, z: D.zRing(fr ? fr.p0 : G.polar(D.O, D.Rg, phi)) + last[1] };
       const t = radialTalus(c, u, tin, P, Math.max(30, P.halfW));
       rows.push({ L: null, R: t ? { ...t, edge: c } : { edge: c } }); plat.push(c);
     }
@@ -440,7 +444,7 @@ function junctionsZ() {
   const out = [];
   // cote zC d'un carrefour : ignorée si elle s'écarte de plus de 30 m du terrain naturel (valeur par défaut jamais réglée)
   const zOk = (z, O) => { if (z == null || !Number.isFinite(z)) return null; const t = S.tn?.tin ? tinZ(S.tn.tin, O.x, O.y) : null; return t != null && Math.abs(z - t) > 30 ? null : z; };
-  if (S.D?.O) out.push({ O: S.D.O, Rg: +S.prj.ring?.Rg || 20, zC: zOk(S.prj.ring?.zC === '' || S.prj.ring?.zC == null ? null : +S.prj.ring.zC, S.D.O), name: S.prj.jname || 'giratoire' });
+  if (S.D?.O) out.push({ O: S.D.O, Rg: (+S.prj.ring?.Rg || 20) + (S.D.shape ? S.D.shape.e / 2 : 0), zC: zOk(S.prj.ring?.zC === '' || S.prj.ring?.zC == null ? null : +S.prj.ring.zC, S.D.O), name: S.prj.jname || 'giratoire' });
   for (const d of S.Do || []) { const o = S.prj.others.find((q) => q.id === d.id); if (d.D?.O && o) out.push({ O: d.D.O, Rg: +o.ring?.Rg || 20, zC: zOk(o.ring?.zC === '' || o.ring?.zC == null ? null : +o.ring.zC, d.D.O), name: o.name }); }
   return out;
 }
@@ -1557,11 +1561,13 @@ function elGeom(el) {
   if (el.type === 'junction') {
     const o = (S.Do || []).find((x) => x.id === el.i); if (!o?.D?.O) return null;
     const R = o.D.kind === 'giratoire' ? o.D.Rg : 14, pts = [];
+    if (o.D.shape) return { lines: [G.samplePath(o.D.shape.path(0), 1)], half: (o.D.la || 8) / 2 };
     for (let k = 0; k <= 64; k++) pts.push(G.polar(o.D.O, R, (k / 64) * 2 * Math.PI));
     return { lines: [pts], half: o.D.kind === 'giratoire' ? (o.D.la || 8) / 2 : 10 };
   }
   if (el.type === 'ring' && D?.O) {
     const R = D.kind === 'giratoire' ? D.Rg - (D.la || 8) / 2 : 12, pts = [];
+    if (D.shape) return { lines: [G.samplePath(D.shape.path(-(D.la || 8) / 2), 1)], half: (D.la || 8) / 2 };
     for (let k = 0; k <= 64; k++) pts.push(G.polar(D.O, R, (k / 64) * 2 * Math.PI));
     return { lines: [pts], half: D.kind === 'giratoire' ? (D.la || 8) / 2 : 12 };
   }
@@ -1574,7 +1580,7 @@ function hitElement(px, py) {
   const bi = hitAxis(px, py);
   if (bi >= 0) cands.push({ type: 'branch', i: bi, sc: -100 });
   (D?.ramps || []).forEach((R, i) => { if (!R?.al?.path) return; const tol = Math.max(7, (R.rp.w / 2 + 1) * viewer.s), d = polyDist(R.samp || (R.samp = G.samplePath(R.al.path, 3))); if (d < tol) cands.push({ type: 'ramp', i, sc: d - tol }); });
-  if (D?.O) { const [x, y] = viewer.w2s(D.O.x, D.O.y), R = (D.kind === 'giratoire' ? D.Rpo || D.Rg : 15) * viewer.s; const d = Math.hypot(px - x, py - y); if (d < Math.max(10, R)) cands.push({ type: 'ring', i: 0, sc: d < R ? -200 : -50 }); } // dans l'anneau : prioritaire sur l'axe des branches
+  if (D?.O) { const [x, y] = viewer.w2s(D.O.x, D.O.y), R = (D.kind === 'giratoire' ? (D.Rpo || D.Rg) + (D.shape ? D.shape.e / 2 : 0) : 15) * viewer.s; const d = Math.hypot(px - x, py - y); if (d < Math.max(10, R)) cands.push({ type: 'ring', i: 0, sc: d < R ? -200 : -50 }); } // dans l'anneau : prioritaire sur l'axe des branches
   for (const o of S.Do || []) { // autres carrefours : un clic dans leur emprise les rend actifs
     if (!o.D?.O) continue;
     const [x, y] = viewer.w2s(o.D.O.x, o.D.O.y), R = Math.max(18, (o.D.kind === 'giratoire' ? o.D.Rpo : 20) * viewer.s), d = Math.hypot(px - x, py - y);
@@ -2268,7 +2274,7 @@ function parsePoint(s) {
 function designBBox() {
   const pts = [];
   if (S.D?.O) {
-    const O = S.D.O, r = S.D.Rg;
+    const O = S.D.O, r = S.D.Rg + (S.D.shape ? S.D.shape.e / 2 + Math.max(0, S.D.shape.R2 - S.D.shape.R1) : 0);
     pts.push({ x: O.x - r, y: O.y - r }, { x: O.x + r, y: O.y + r });
     for (const bd of S.D.branches) pts.push(bd.entry.F, bd.exit.F, bd.W({ x: bd.xEnd + 8, y: bd.a }));
   }
@@ -2310,7 +2316,14 @@ function buildStaticPanels() {
   $('#ringFields').innerHTML =
     fld('ring.Rg', 'Rayon extérieur Rg', 'm', { title: 'Rayon du marquage de rive extérieure de l\'anneau' }) +
     fld('ring.la', 'Largeur de l\'anneau la', 'm') +
-    fld('ring.bf', 'Bande franchissable bf', 'm');
+    fld('ring.bf', 'Bande franchissable bf', 'm') +
+    sel('ring.shape', 'Forme de l\'anneau', [['cercle', 'Circulaire'], ['cacahuete', 'Cacahuète (deux lobes, Sétra RACA 2010)']], { branch: false }) +
+    '<div id="peanutFields">' +
+    '<p class="note">Carrefour « cacahuète » : deux lobes circulaires (Rg, Rg2) reliés par des cols concaves (rayons à la rive extérieure ; 0 = col rectiligne, giratoire oblong). Chaque branche se raccorde au lobe de son côté. Référence : fiche d\'expérience Sétra RACA, mai 2010 (Rg = 20 m, cols R = 30 m, anneau 7 m).</p>' +
+    '<div class="row">' + fld('ring.e', 'Entraxe des lobes e', 'm', { ph: 'auto 2,2·Rg', title: 'Distance entre les centres des deux lobes' }) + fld('ring.Rg2', 'Rayon Rg2 du 2e lobe', 'm', { ph: '= Rg' }) + '</div>' +
+    '<div class="row">' + fld('ring.Rwg', 'Col gauche (rayon à la rive)', 'm', { ph: '30', title: 'À gauche de l\'axe lobe 1 → lobe 2 ; 0 = rectiligne' }) + fld('ring.Rwd', 'Col droit (rayon à la rive)', 'm', { ph: '30', title: 'À droite de l\'axe lobe 1 → lobe 2 ; 0 = rectiligne' }) + '</div>' +
+    fld('ring.gis', 'Gisement de l\'axe lobe 1 → lobe 2', 'gon', { ph: 'auto (route principale)', title: 'Vide : direction de la paire de branches la plus alignée' }) +
+    '</div>';
   $('#planFields').innerHTML =
     `<div class="row">${sel('plan.nLanes', 'Voies par sens', [['1', '1'], ['2', '2']], { branch: false })}` +
     `${sel('plan.regime', 'Régime des secondaires', [['stop', 'STOP'], ['cedez', 'Cédez-le-passage']], { branch: false })}</div>` +
@@ -2450,10 +2463,17 @@ function refreshPanels() {
   if (!plan) {
     // Anneau : grandeurs calculées
     const leMax = Math.max(0, ...br.map((b) => +b.le || 0));
+    const pf = $('#peanutFields'); if (pf) pf.style.display = S.prj.ring?.shape === 'cacahuete' ? '' : 'none';
     $('#ringOut').innerHTML = D?.O ? kv([
+      ...(D.shape ? [
+        ['Forme', `cacahuète : lobes Rg ${fmt(D.shape.R1)} / ${fmt(D.shape.R2)} m, entraxe ${fmt(D.shape.e)} m`],
+        ['Cols (rive extérieure)', D.shape.waists.map((w) => `${w.s > 0 ? 'gauche' : 'droit'} ${w.kind === 'A' ? 'R ' + fmt(w.Rw) + ' m' : 'rectiligne'}`).join(' · ')],
+        ['Axe lobe 1 → lobe 2', `${fmt(D.peanut.gis, 2)} gon${D.peanut.gisAuto ? ' (auto)' : ''}`],
+        ['Îlot infranchissable au droit des cols', fmt(D.peanut.waistIsl) + ' m'],
+      ] : []),
       ['Rayon intérieur Ri = Rg − la', fmt(D.Ri) + ' m'],
       ['Îlot central infranchissable', fmt(D.Rb) + ' m'],
-      ['Diamètre extérieur 2·Rg', fmt(2 * D.Rg) + ' m'],
+      [D.shape ? 'Longueur hors tout' : 'Diamètre extérieur 2·Rg', fmt(D.shape ? D.shape.e + D.shape.R1 + D.shape.R2 : 2 * D.Rg) + ' m'],
       ['1,2 × entrée la plus large', leMax ? fmt(1.2 * leMax) + ' m' : '—'],
       ['Branches', String(D.branches.length)],
       ['Centre', `${D.O.x.toFixed(3)} ; ${D.O.y.toFixed(3)}`],
@@ -2651,7 +2671,7 @@ function refreshBranchOut() {
     ['Îlot (base × hauteur)', islTxt],
     ['Décalage du triangle', fmt(bd.isl.shift) + ' m'],
     ['Largeur au droit de l\'anneau (entrée / sortie)', `${fmt(bd.entry.wRing)} / ${fmt(bd.exit.wRing)} m`],
-    ['Déflexion', bd.defl ? `R ≈ ${fmt(bd.defl.R, 0)} m vers ${bd.defl.to}` : '—'],
+    ['Déflexion', bd.defl ? (bd.defl.sCurve ? `trajectoire en S (col) vers ${bd.defl.to}` : `R ≈ ${fmt(bd.defl.R, 0)} m vers ${bd.defl.to}`) : '—'],
   ]);
 }
 

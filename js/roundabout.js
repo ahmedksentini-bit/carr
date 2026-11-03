@@ -15,6 +15,7 @@ import { makeDims } from './dims.js';
 import { crossing, crossingPrims, cutAtX, polyOf, closedSegs } from './crossing.js';
 import { addSigns } from './signs.js';
 import { buildEchangeur } from './echangeur.js';
+import { isPeanut, peanutParams, peanutShape, autoPeanutDir, gisToVec, vecToGis, projectOnPath, subPath, pointNormalAt, waistWidth, signedOffset } from './ringshape.js';
 
 const { add, sub, mul, dot, norm, rot90, neg, ang, polar, L, A } = G;
 const num = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
@@ -51,11 +52,31 @@ function buildRoundabout(prj, ext = {}) {
   D.O = O;
   if (!(Rg > 0) || !(Ri > 0)) { issues.push({ lvl: 'err', msg: 'Rayons incohérents : il faut Rg > la (Ri = Rg − la > 0).' }); return D; }
   if (Rb <= 0) issues.push({ lvl: 'err', msg: 'BDG et bande franchissable plus larges que l\'îlot central.' });
-  const target = { kind: 'circle', R: Rg };
+  // Carrefour « cacahuète » (Sétra, fiche RACA 2010) : deux lobes reliés par des cols ; chaque branche se raccorde
+  // au lobe de son côté, comme sur un giratoire circulaire de centre et de rayon ceux du lobe (ringshape.js).
+  let shape = null;
+  const tRi = -la, tRpi = -(la + sec.bdgRing), tRb = tRpi - bf, tRpo = sec.bdd;
+  if (isPeanut(ring)) {
+    const pp = peanutParams(ring, Rg);
+    const dir = pp.gis != null ? gisToVec(pp.gis) : autoPeanutDir(O, prj.branches);
+    shape = peanutShape(O, dir, pp);
+    if (!shape.ok) { issues.push({ lvl: 'err', msg: `Carrefour cacahuète : ${shape.err}` }); return D; }
+    D.shape = shape; D.Rg2 = pp.R2; D.peanut = { ...pp, gisAuto: pp.gis == null, gis: vecToGis(dir) };
+    if (pp.R2 - (la + sec.bdgRing + bf) <= 0) issues.push({ lvl: 'err', msg: 'Lobe 2 : BDG et bande franchissable plus larges que l\'îlot central.' });
+    const tMax = sec.bdd + sideBands(prj, sec).reduce((acc, [, w]) => acc + w, 0);
+    for (const W of shape.waists) if (W.kind === 'A' && W.Rw <= tMax + 0.5) issues.push({ lvl: 'err', msg: `Col ${W.s > 0 ? 'gauche' : 'droit'} : rayon ${fmt(W.Rw, 2)} m ≤ largeur BDD + abords (${fmt(tMax, 2)} m) — les bords extérieurs se retournent.` });
+    const wI = waistWidth(shape, tRb);
+    D.peanut.waistIsl = wI;
+    if (wI <= 0) issues.push({ lvl: 'err', msg: 'Carrefour cacahuète : les cols se croisent, l\'îlot central est coupé en deux — augmentez l\'entraxe ou les rayons des cols, ou réduisez la largeur d\'anneau.' });
+    else if (wI < 2 * 3.5) issues.push({ lvl: 'warn', msg: `Carrefour cacahuète : îlot central large de ${fmt(wI, 2)} m seulement au droit des cols (partie infranchissable) — perception de l'îlot et dégagement des obstacles à vérifier.` });
+  }
 
   prj.branches.forEach((b, idx) => {
     const name = b.name || `B${idx + 1}`;
     if (!b.axis || b.axis.length < 2) return;
+    // Cacahuète : centre et rayon du lobe de rattachement (le plus proche de l'extrémité de l'axe saisi).
+    const lob = shape ? shape.lobeOf(norm(sub(nearFar(b.axis, D.O).slice(-1)[0], D.O))) : null;
+    const O = lob ? lob.c : D.O, Rg = lob ? lob.R : D.Rg, target = { kind: 'circle', R: Rg };
     const isl = islandDims(prj, b);
     const tpcHalf = b.tpc?.on ? Math.max(0, +b.tpc.width) / 2 : 0;
     const hasIsland = isl.type !== 'aucun' || tpcHalf > 0;
@@ -158,7 +179,7 @@ function buildRoundabout(prj, ext = {}) {
     }
     const yl = crossLine(en, target, 0.25), xl = crossLine(ex, target, 0.25);
     const bd = {
-      idx, id: b.id, name, role: 'branche', theta, u, n, a, ai, x0, xT, xEnd, h, b: isl.b, hb, th, isl, W, Ws, Wp, cont, axisFillets,
+      idx, id: b.id, name, role: 'branche', Oc: O, Rgc: Rg, lobe: lob?.k || 0, theta, u, n, a, ai, x0, xT, xEnd, h, b: isl.b, hb, th, isl, W, Ws, Wp, cont, axisFillets,
       entry: side(en, 1, wIn), exit: side(ex, -1, wOut),
       island, cross, yieldStart: yl?.a, yieldEnd: yl?.b, exitStart: xl?.a, exitEnd: xl?.b, gis: fmtGis(theta, unit),
       farAxis: cont ? G.segEnd(cont[cont.length - 1]) : W({ x: xEnd, y: a }),
@@ -166,12 +187,19 @@ function buildRoundabout(prj, ext = {}) {
     };
     bd.entry.phiTc = ang(sub(bd.entry.Tc, O));
     bd.exit.phiTc = ang(sub(bd.exit.Tc, O));
+    if (lob) {
+      // Raccordement sur l'arc libre du lobe (hors des cols).
+      const sw = G.ccwSweep(lob.a[0], lob.a[1]), inArc = (phi) => G.ccwSweep(lob.a[0], phi) <= sw + 1e-6;
+      if (!inArc(bd.exit.phiTc) || !inArc(bd.entry.phiTc)) issues.push({ lvl: 'err', bi: idx, msg: `${name} : raccordée au lobe ${lob.k} en partie dans un col (Re / Rs hors de l'arc circulaire du lobe) — orientez la branche vers l'extrémité du lobe ou modifiez l'entraxe / l'orientation.` });
+      bd.sRing = projectOnPath(shape.path(0), W({ x: x0, y: a })).s;
+    }
     bds.push(bd);
   });
 
-  bds.sort((p, q) => G.normAng(p.theta) - G.normAng(q.theta));
+  if (shape) bds.sort((p, q) => p.sRing - q.sRing);
+  else bds.sort((p, q) => G.normAng(p.theta) - G.normAng(q.theta));
   D.ok = true;
-  D.zoomR = Rpo + Math.max(Rg, ...bds.map((bd) => bd.h)) + 15;
+  D.zoomR = Rpo + (shape ? shape.e / 2 + Math.max(0, D.Rg2 - Rg) : 0) + Math.max(Rg, ...bds.map((bd) => bd.h)) + 15;
   D.mini = prj.context === 'urbain' && Rg < 12;
 
   // Déflexion (méthode des trois points) : trajectoire passant, au droit de la rive de l'anneau, à 2 m de la
@@ -187,14 +215,33 @@ function buildRoundabout(prj, ext = {}) {
     if (!to) continue;
     const P1 = bd.W({ x: bd.x0, y: bd.entry.H.y + (bd.entry.wRing ?? bd.entry.w) - 2 });
     const P3 = to.W({ x: to.x0, y: to.exit.H.y - (to.exit.wRing ?? to.exit.w) + 2 });
-    const phi1 = ang(sub(P1, O)), phi3 = ang(sub(P3, O));
-    const sw = G.ccwSweep(phi1, phi3);
-    if (sw > 1.25 * Math.PI || sw < 0.2) continue;
-    const P2 = polar(O, Ri + 1.5, phi1 + sw / 2);
+    let P2;
+    if (shape) {
+      // Point à 1,50 m de la rive intérieure le plus saillant vers l'extérieur par rapport à la corde P1P3 (pour un
+      // cercle : le point à mi-angle) — l'arc des trois points contourne ainsi tout l'îlot.
+      const path = shape.path(tRi + 1.5), Lt = G.pathLen(path), s1 = projectOnPath(path, P1).s, s3 = projectOnPath(path, P3).s;
+      const span = (((s3 - s1) % Lt) + Lt) % Lt, sw = (span / Lt) * G.TAU;
+      if (sw > 1.25 * Math.PI || sw < 0.2) continue;
+      const right = G.neg(rot90(norm(sub(P3, P1))));
+      let best = -Infinity;
+      for (let k = 1; k < 200; k++) { const q = pointNormalAt(path, s1 + (span * k) / 200).p, h = dot(sub(q, P1), right); if (h > best) { best = h; P2 = q; } }
+    } else {
+      const phi1 = ang(sub(P1, O)), phi3 = ang(sub(P3, O));
+      const sw = G.ccwSweep(phi1, phi3);
+      if (sw > 1.25 * Math.PI || sw < 0.2) continue;
+      P2 = polar(O, Ri + 1.5, phi1 + sw / 2);
+    }
     const cc = G.circumcircle(P1, P2, P3);
     if (!cc) continue;
     const ccw = G.cross(sub(P2, P1), sub(P3, P2)) > 0;
     bd.defl = { R: cc.r, to: to.name, arc: A(cc.c, cc.r, ang(sub(P1, cc.c)), ang(sub(P3, cc.c)), ccw), pts: [P1, P2, P3] };
+    if (shape) {
+      // Cacahuète : si l'arc des trois points sort de l'anneau au droit d'un col (à moins de 1 m de la rive
+      // extérieure, hors des abords des points P1 / P3), la trajectoire est contrainte en S par le col : la méthode
+      // des trois points ne s'applique pas.
+      const q = G.samplePath([bd.defl.arc], 0.5), n = q.length;
+      bd.defl.sCurve = q.slice(Math.floor(n * 0.2), Math.ceil(n * 0.8)).some((p) => signedOffset(shape, p).off > -1);
+    }
   }
 
   // ================= Primitives de dessin =================
@@ -205,24 +252,40 @@ function buildRoundabout(prj, ext = {}) {
 
   // Anneau : rives peintes (Rg entre les branches, Ri) et bords de chaussée (Rg + BDD, Ri − BDG).
   const ringEdge = [];
+  // Ligne fermée de l'anneau au décalage t de la rive extérieure (cercle de rayon Rg + t, ou contour de la cacahuète).
+  const loop = (t) => (shape ? shape.path(t) : [{ t: 'C', c: O, r: Rg + t }]);
+  const loopPrim = (L_, t, extra = {}) => P(shape ? { k: 'path', L: L_, segs: shape.path(t), closed: true, ...extra } : { k: 'circle', L: L_, c: O, r: Rg + t, ...extra });
   if (!bds.length) {
-    P({ k: 'circle', L: 'BORDURE', c: O, r: Rpo });
-    if (sec.rive) P({ k: 'circle', L: 'MARQUAGE', c: O, r: Rg, wm: 0.15 });
+    loopPrim('BORDURE', tRpo);
+    if (sec.rive) loopPrim('MARQUAGE', 0, { wm: 0.15 });
   }
+  const pathPo = shape?.path(tRpo), path0 = shape?.path(0), Lpo = pathPo ? G.pathLen(pathPo) : 0;
+  const mod = (v) => (((v % Lpo) + Lpo) % Lpo);
   bds.forEach((bd, i) => {
     const nx = bds[(i + 1) % bds.length];
+    if (shape) {
+      const sA = (q) => projectOnPath(pathPo, q).s;
+      const span = bds.length === 1 ? Lpo : mod(sA(nx.W({ x: nx.x0, y: nx.a })) - sA(bd.W({ x: bd.x0, y: bd.a })));
+      const s0 = sA(bd.entry.Tc), s1 = sA(nx.exit.Tc), gap = mod(s1 - s0);
+      if (gap < span && gap > 1e-3) {
+        ringEdge[i] = subPath(pathPo, s0, s1);
+        const r0 = projectOnPath(path0, bd.entry.Tc).s, r1 = projectOnPath(path0, nx.exit.Tc).s;
+        rive(subPath(path0, r0, r1));
+      } else issues.push({ lvl: 'err', msg: `${bd.name} / ${nx.name} : branches trop proches, les raccordements Re/Rs se chevauchent sur l'anneau.` });
+      return;
+    }
     const span = bds.length === 1 ? G.TAU : G.ccwSweep(bd.theta, nx.theta);
     const gap = G.ccwSweep(bd.entry.phiTc, nx.exit.phiTc);
     if (gap < span && gap > 1e-4) {
-      ringEdge[i] = A(O, Rpo, bd.entry.phiTc, nx.exit.phiTc, true);
+      ringEdge[i] = [A(O, Rpo, bd.entry.phiTc, nx.exit.phiTc, true)];
       rive([A(O, Rg, bd.entry.phiTc, nx.exit.phiTc, true)]);
     } else {
       issues.push({ lvl: 'err', msg: `${bd.name} / ${nx.name} : branches trop proches, les raccordements Re/Rs se chevauchent sur l'anneau.` });
     }
   });
-  if (sec.rive) P({ k: 'circle', L: 'MARQUAGE', c: O, r: Ri, wm: 0.15 });
-  P({ k: 'circle', L: 'BORDURE', c: O, r: Rpi });
-  if (bf > 0 && Rb > 0) P({ k: 'circle', L: 'ILOT_CENTRAL', c: O, r: Rb });
+  if (sec.rive) loopPrim('MARQUAGE', tRi, { wm: 0.15 });
+  loopPrim('BORDURE', tRpi);
+  if (bf > 0 && Rb > 0) loopPrim('ILOT_CENTRAL', tRb);
 
   // Voies directes de tourne-à-droite (case « TAD ») : de la branche i à la suivante.
   const bpFrom = new Map(), bpTo = new Set();
@@ -254,19 +317,19 @@ function buildRoundabout(prj, ext = {}) {
   const sectors = bds.map((bd, i) => {
     const nx = bds[(i + 1) % bds.length];
     if (bpFrom.has(i)) return [...G.revPath(bd.entry.edgeCont), ...bpFrom.get(i).right, ...nx.exit.edgeCont];
-    return [...bd.entry.edgeW, ...(ringEdge[i] ? [ringEdge[i]] : []), ...G.revPath(nx.exit.edgeW)];
+    return [...bd.entry.edgeW, ...(ringEdge[i] || []), ...G.revPath(nx.exit.edgeW)];
   });
 
   // Remplissage chaussée (règle pair-impair : trous = îlots).
   const outer = [];
   bds.forEach((bd, i) => outer.push(L(bd.exit.F, bd.entry.F), ...sectors[i]));
-  const rings = bds.length ? [outer] : [[{ t: 'C', c: O, r: Rpo }]];
-  rings.push([{ t: 'C', c: O, r: Rpi }]);
+  const rings = bds.length ? [outer] : [loop(tRpo)];
+  rings.push(loop(tRpi));
   bds.forEach((bd) => { if (bd.island?.outline) rings.push(...(bd.island.pieces || [bd.island.outline])); });
   for (const r of bpFrom.values()) rings.push(r.island);
   P({ k: 'fill', L: 'CHAUSSEE', rings, role: 'chaussee' });
-  if (bf > 0 && Rb > 0) P({ k: 'fill', L: 'ILOT_CENTRAL', rings: [[{ t: 'C', c: O, r: Rpi }], [{ t: 'C', c: O, r: Rb }]], role: 'franchissable' });
-  P({ k: 'fill', L: 'ILOT_CENTRAL', rings: [[{ t: 'C', c: O, r: Math.max(0, Rb) }]], role: 'ilot' });
+  if (bf > 0 && Rb > 0) P({ k: 'fill', L: 'ILOT_CENTRAL', rings: [loop(tRpi), loop(tRb)], role: 'franchissable' });
+  if (Rb > 0) P({ k: 'fill', L: 'ILOT_CENTRAL', rings: [loop(tRb)], role: 'ilot' });
 
   // Bords de chaussée et abords (caniveau, bordure, trottoir, contre-bordure / berme).
   const bands = sideBands(prj, sec), bandLayer = prj.context === 'urbain' ? 'TROTTOIR' : 'ACCOTEMENT';
@@ -320,7 +383,7 @@ function buildRoundabout(prj, ext = {}) {
       const t1 = W({ x: x0, y: ai + isl.b / 2 }), t2 = W({ x: xT, y: ai }), t3 = W({ x: x0, y: ai - isl.b / 2 });
       P({ k: 'path', L: 'CONSTRUCTION', segs: [L(t1, t2), L(t2, t3), L(t3, t1)] });
     }
-    if (bd.defl) {
+    if (bd.defl && !bd.defl.sCurve) {
       P({ k: 'path', L: 'CONSTRUCTION', segs: [bd.defl.arc], dash: [1.5, 1] });
       const m = G.segAt(bd.defl.arc, 0.5);
       text('CONSTRUCTION', add(m, mul(norm(sub(m, bd.defl.arc.c)), TH)), `déflexion R ≈ ${fmt(bd.defl.R, 0)} m`, ang(sub(m, bd.defl.arc.c)) + Math.PI / 2, 'center', TH * 0.7);
@@ -343,7 +406,7 @@ function buildRoundabout(prj, ext = {}) {
     // Marquage : cédez-le-passage, ligne axiale d'approche, voies multiples
     if (bd.yieldStart && bd.yieldEnd) {
       const a0 = ang(bd.yieldStart) + bd.theta, a1 = ang(bd.yieldEnd) + bd.theta;
-      P({ k: 'path', L: 'MARQUAGE', segs: [A(O, Rg + 0.25, a0, a1, true)], wm: 0.5, dash: [0.5, 0.5], lt: 'CLP' });
+      P({ k: 'path', L: 'MARQUAGE', segs: [A(bd.Oc, bd.Rgc + 0.25, a0, a1, true)], wm: 0.5, dash: [0.5, 0.5], lt: 'CLP' });
     }
     if (!bd.th) {
       const xs = bd.island ? xT : x0;
@@ -392,11 +455,13 @@ function buildRoundabout(prj, ext = {}) {
   D.vis = [];
   if (sec.visOn) {
     const visPick = prj.section?.visBranch; // branche dont la zone est dessinée (toutes si vide)
-    const inSector = (p, a0, span) => {
-      const r = G.dist(p, O), s = G.ccwSweep(a0, ang(sub(p, O)));
-      return r >= Ri - 1e-6 && r <= Rg + 1e-6 && (s <= span + 1e-6 || s >= G.TAU - 1e-6);
-    };
     for (const bd of bds) {
+      // Cacahuète : quart gauche évalué sur le cercle du lobe de la branche (approximation au voisinage de l'entrée).
+      const O = bd.Oc, Rg = bd.Rgc, Ri = Rg - la, Rpi = Ri - sec.bdgRing;
+      const inSector = (p, a0, span) => {
+        const r = G.dist(p, O), s = G.ccwSweep(a0, ang(sub(p, O)));
+        return r >= Ri - 1e-6 && r <= Rg + 1e-6 && (s <= span + 1e-6 || s >= G.TAU - 1e-6);
+      };
       const { W, x0, xT, a, ai, hb, th } = bd, xo = x0 + sec.visObs;
       const out = cutAtX(bd.entry.curb, xo);
       if (!out || xo > bd.xEnd) continue;
@@ -445,8 +510,31 @@ function buildRoundabout(prj, ext = {}) {
       if (span > best) { best = span; phi = bd.theta + span / 2; }
     });
   }
-  dims.radial(O, Rg, phi + 0.18, `Rg = ${fmt(Rg, 2)}`);
-  dims.radial(O, Ri, phi - 0.18, `Ri = ${fmt(Ri, 2)}`);
+  // Cacahuète : cotes de chaque lobe dans la partie la plus dégagée de son arc libre ; chaîne radiale sur le lobe 1.
+  let Oc = O;
+  if (shape) {
+    for (const lb of shape.lobes) {
+      const sw = G.ccwSweep(lb.a[0], lb.a[1]), th = bds.filter((bd) => bd.lobe === lb.k).map((bd) => bd.theta);
+      let bestPhi = lb.a[0] + sw / 2, bestD = -1;
+      for (let k = 1; k < 24; k++) {
+        const ph = lb.a[0] + (sw * k) / 24, dmin = Math.min(Math.PI, ...th.map((t) => Math.min(G.ccwSweep(t, ph), G.ccwSweep(ph, t))));
+        if (dmin > bestD) { bestD = dmin; bestPhi = ph; }
+      }
+      dims.radial(lb.c, lb.R, bestPhi + 0.18, `Rg${lb.k} = ${fmt(lb.R, 2)}`);
+      dims.radial(lb.c, lb.R - la, bestPhi - 0.18, `Ri${lb.k} = ${fmt(lb.R - la, 2)}`);
+      P({ k: 'cross', L: 'AXE', p: lb.c, size: 1.2 });
+      if (lb.k === 1) { phi = bestPhi; Oc = lb.c; }
+    }
+    dims.aligned(shape.C1, shape.C2, 0, `entraxe e = ${fmt(shape.e, 2)}`, { side: 1 });
+    for (const W of shape.waists) {
+      if (W.kind !== 'A') continue;
+      const mid = G.segAt(shape.path(0)[W.s > 0 ? 1 : 3], 0.5);
+      dims.radius(mid, norm(sub(W.P, mid)), `col R = ${fmt(W.Rw, 2)}`, { len: 3 * TH });
+    }
+  } else {
+    dims.radial(O, Rg, phi + 0.18, `Rg = ${fmt(Rg, 2)}`);
+    dims.radial(O, Ri, phi - 0.18, `Ri = ${fmt(Ri, 2)}`);
+  }
   const radii = [], labels = [];
   const push = (r, lab) => { radii.push(r); if (lab) labels.push(lab); };
   push(bf > 0 ? Rb : Rpi);
@@ -457,12 +545,20 @@ function buildRoundabout(prj, ext = {}) {
   let rr = Rpo;
   for (const [nm, w] of bands) { rr += w; push(rr, `${nm} ${fmt(w, 2)}`); }
   const e = G.unit(phi);
-  dims.chain(radii.map((r) => add(O, mul(e, r))), -2.2 * TH, labels);
+  dims.chain(radii.map((r) => add(Oc, mul(e, r))), -2.2 * TH, labels);
   P({ k: 'cross', L: 'AXE', p: O, size: 1.5 });
 
   // ================= Points d'implantation =================
   const pt = (name, p, bi = null, kind = '') => points.push({ n: points.length + 1, name, p, bi, kind });
-  pt('Centre du giratoire', O, null, 'centre');
+  pt(shape ? 'Centre du carrefour (milieu des lobes)' : 'Centre du giratoire', O, null, 'centre');
+  if (shape) {
+    for (const lb of shape.lobes) {
+      pt(`Lobe ${lb.k} : centre (Rg ${fmt(lb.R, 2)})`, lb.c, null, 'centre');
+      pt(`Lobe ${lb.k} : début de l'arc libre (rive Rg)`, polar(lb.c, lb.R, lb.a[0]), null, 'rive');
+      pt(`Lobe ${lb.k} : fin de l'arc libre (rive Rg)`, polar(lb.c, lb.R, lb.a[1]), null, 'rive');
+    }
+    for (const W of shape.waists) if (W.kind === 'A') pt(`Col ${W.s > 0 ? 'gauche' : 'droit'} : centre (R ${fmt(W.Rw, 2)} à la rive Rg)`, W.P, null, 'centre');
+  }
   for (const bd of bds) {
     const nm = bd.name;
     pt(`${nm} · axe à la rive de l'anneau`, bd.W({ x: bd.x0, y: bd.a }), bd.idx, 'axe');
