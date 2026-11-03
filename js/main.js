@@ -3686,8 +3686,13 @@ function drawHydro() {
       acc += d;
     }
   }
-  for (const c of R.crossings || []) {
-    for (const ring of c.ring || []) { P({ k: 'fill', L: 'BASSINS', rings: [segs([...ring, ring[0]])], role: 'bv' }); P({ k: 'path', L: 'BASSINS', segs: segs([...ring, ring[0]]) }); }
+  // remplissage : une teinte par bassin (angle d'or → bassins voisins bien contrastés), transparence 50 % ; les plus
+  // grands d'abord, pour qu'un bassin emboîté (double franchissement) reste visible par-dessus celui qui l'englobe
+  const bvList = R.crossings || [];
+  bvList.map((c, i) => ({ c, col: bvColor(i) })).sort((a, b) => (b.c.totalKm2 || 0) - (a.c.totalKm2 || 0))
+    .forEach(({ c, col }) => { for (const ring of c.ring || []) P({ k: 'fill', L: 'BASSINS', rings: [segs([...ring, ring[0]])], role: 'bv', color: col }); });
+  for (const c of bvList) {
+    for (const ring of c.ring || []) P({ k: 'path', L: 'BASSINS', segs: segs([...ring, ring[0]]) });
     const r = S.hyRes?.byId?.[c.id];
     P({ k: 'circle', L: 'BASSINS', c: { x: c.x, y: c.y }, r: TH * 0.8 });
     P({ k: 'text', L: 'BASSINS', p: { x: c.x + TH * 1.2, y: c.y + TH * 1.2 }, s: `${c.id} · ${fmt(c.totalKm2, 2)} km²${r?.Q ? ` · Q${r.T} ${fmt(r.Q, 2)} m³/s` : ''}${r?.size ? ` · ${r.size}` : ''}`, rot: 0, align: 'left', h: TH * 1.1 });
@@ -4138,6 +4143,11 @@ function bindZinv(root) {
   });
 }
 // Nouvel identifiant libre BV-nn.
+/** Couleur de remplissage du i-ième bassin : teintes espacées de l'angle d'or (137,5°), saturation et luminosité alternées, opacité 50 %. */
+function bvColor(i) {
+  const h = (i * 137.508 + 200) % 360, sat = [72, 58, 85][i % 3], lum = [52, 42, 62][Math.floor(i / 3) % 3];
+  return `hsla(${h.toFixed(1)}, ${sat}%, ${lum}%, 0.5)`;
+}
 function bvNewId(R) { const used = new Set(R.crossings.map((c) => c.id)); for (let k = 1; ; k++) { const id = `BV-${String(k).padStart(2, '0')}`; if (!used.has(id)) return id; } }
 // Abscisse sur l'axe du franchissement d'un exutoire : projection si l'exutoire est à moins de max(100 m, 3 cellules)
 // de l'axe (BVTrace PkFor), sinon PK hérité.

@@ -177,7 +177,7 @@ export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
     for (const pr of D.prims) {
       if (pr.L !== layer) continue;
       if (pr.k === 'fill') {
-        const col = typeof st.fill === 'string' ? st.fill : st.fill?.[pr.role];
+        const col = pr.color || (typeof st.fill === 'string' ? st.fill : st.fill?.[pr.role]);
         if (!col) continue;
         ctx.beginPath();
         for (const ring of pr.rings) { tracePath(ctx, v, ring, true); ctx.closePath(); }
