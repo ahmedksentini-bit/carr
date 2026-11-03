@@ -234,9 +234,16 @@ ou sur un fond topographique DXF.
   en plus des branches du carrefour. Points d'inflexion et raccordements paraboliques, proposition depuis le MNT.
   Extrémités des bretelles calées sur la chaussée hôte (cote de l'hôte au raccordement, dévers 2,5 % sur le décalage),
   sur la voie secondaire pour une extrémité libre (carrefour à compléter) ou sur la cote zC du giratoire. Contrôles :
-  pente maximale et rayons saillants / rentrants de la catégorie (ICTAAL, guide des échangeurs, ARP). Tirant d'air
-  sous chaque passage supérieur (voie portée − tablier − autoroute ≥ gabarit) dans la fiche de l'ouvrage, avec un
-  bouton qui relève la voie portée au gabarit (sommet placé au droit de l'ouvrage, voisins dégagés, rayon adapté).
+  pente maximale et rayons saillants / rentrants de la catégorie (ICTAAL, guide des échangeurs, ARP). **Tirant d'air**
+  (js/gabarit.js) : minimum, sur toute la largeur revêtue de la voie franchie située sous l'emprise du tablier
+  (chaussée, BAU / BDD, BDG), de l'écart entre l'intrados (surface de la voie portée, profil en long et dévers, moins
+  l'épaisseur du tablier) et la surface de la voie franchie (profil en long et dévers) — soit, pour un intrados
+  horizontal, l'intrados moins le point le plus haut de la voie franchie ; contrôlé sous les passages supérieurs, sous
+  les tiges de trompette (S-semi et boucle portées) pour toutes les voies franchies (autoroute, bretelles passant sous
+  le tablier) et aux croisements dénivelés sans tablier implanté (bretelle sur bretelle ou sur voie secondaire,
+  épaisseur supposée 1,00 m). Le point critique (voie, côté, abscisse) est donné dans la fiche de l'ouvrage, avec un
+  bouton qui relève la voie portée au gabarit (sommet placé au droit de l'ouvrage, voisins dégagés, rayon adapté) ; les
+  profils en long de toutes ces voies, bretelles et boucles comprises, montrent le tablier, ses appuis et le gabarit.
 - **Profils types, dévers, coupes et cubatures des axes de l'échangeur** (onglet Profils en travers, liste « Axe ») :
   coupes aux profils implantés sur l'autoroute, les voies secondaires et les bretelles. Profil type tiré des
   paramètres de chaque axe (TPC, BDG, voies, BAU/BDD, bermes ; bretelle : voie, BDG, BDD) ; dévers d'alignement
