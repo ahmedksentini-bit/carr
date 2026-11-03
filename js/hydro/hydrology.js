@@ -1203,6 +1203,7 @@ function normalizeBasin(inb, hyp, notes) {
     RunoffCoeff: Number.isFinite(n(inb.runoffCoeff)) ? n(inb.runoffCoeff) : null,
     VegetationCoverPct: Number.isFinite(n(inb.vegetationCoverPct)) ? n(inb.vegetationCoverPct) : null,
     VegetationIndex: Number.isFinite(n(inb.vegetationIndex)) ? n(inb.vegetationIndex) : null,
+    VegetationSource: inb.vegetationCoverSource ?? null,
     Intensity: z(n(inb.intensityMmH)),
     DrainageDensity: Number.isFinite(n(inb.drainageDensity)) ? n(inb.drainageDensity) : null,
     Kr10Pct: Number.isFinite(n(inb.kr10Pct)) ? n(inb.kr10Pct) : null,
@@ -1634,7 +1635,7 @@ function explainBasin(B, hyp, v, w) {
       V('T', 'période de retour', T, 'ans', 0), V('Pan', 'pluie annuelle moyenne', hyp.pan, 'mm', 0),
       V('P10', 'pluie journalière décennale', hyp.p10, 'mm', 0), V('P100', 'pluie journalière centennale', hyp.p100, 'mm', 0),
       ...(tn ? [V('P0', 'seuil de ruissellement', hyp.p0, 'mm', 0)] : []),
-      ...(B.VegetationCoverPct != null ? [V('Cv', 'couverture végétale', B.VegetationCoverPct, '%', 1)] : []),
+      ...(B.VegetationCoverPct != null ? [V('Cv', `couverture végétale${B.VegetationSource ? ` — ${B.VegetationSource}` : ''}`, B.VegetationCoverPct, '%', 1)] : []),
     ],
   });
 
@@ -1696,7 +1697,7 @@ function explainBasin(B, hyp, v, w) {
     id: 'C', group: 'Ruissellement', title: 'Coefficient de ruissellement C (abaque pente × végétation)',
     formula: 'C lu sur l\'abaque : pente ≤ 8 % → 0,40 / 0,50 / 0,60 ; pente > 8 % → 0,50 / 0,60 / 0,70 (indice de végétation 1 / 2 / 3)',
     status: rc ? 'ok' : 'nc',
-    vars: rc ? [V('I', 'pente', rc.slopePct, '%', 2), V('classe', '', rc.slopeClass || '', ''), V('Iv', 'indice de végétation (> 50 % couvert → 1 ; 30–50 % → 2 ; < 30 % → 3)', String(rc.vegetationIndex ?? '—'), '')] : [],
+    vars: rc ? [V('I', 'pente', rc.slopePct, '%', 2), V('classe', '', rc.slopeClass || '', ''), ...(B.VegetationCoverPct != null ? [V('Cv', B.VegetationSource || 'couverture végétale', B.VegetationCoverPct, '%', 1)] : []), V('Iv', 'indice de végétation (> 50 % couvert → 1 ; 30–50 % → 2 ; < 30 % → 3)', String(rc.vegetationIndex ?? '—'), '')] : [],
     result: rc ? { v: frn(rc.C, 2), u: '' } : null, notes: rc ? [] : notesOf('Abaque C', 'C saisi'),
   });
   else sec({ id: 'C', group: 'Ruissellement', title: 'Coefficient de ruissellement C (saisi)', status: rc ? 'ok' : 'nc', result: rc ? { v: frn(rc.C, 2), u: '' } : null, notes: rc ? [] : ['C non saisi : méthode rationnelle non calculée'] });

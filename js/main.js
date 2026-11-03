@@ -26,6 +26,7 @@ import { axisSections, axisType, typeParams, typeText, axisPlatform } from './pt
 import { demFromSRTM, demFromTIN } from './hydro/dem.js';
 import { delineate } from './hydro/watershed.js';
 import { splitCells, mergeCells, basinOf } from './hydro/basinedit.js';
+import { createWorldCover } from './hydro/worldcover.js';
 import { computeAll as hydroComputeAll, defaultHypotheses, listMontanaStations, TC_FORMULAS, FRANCOU_RODIER_REGIONS, suggestCiehRegressions, OPTION_LISTS, resolveMontanaStation, montanaAfricaIdf, KR10_GEOLOGY_CATEGORIES } from './hydro/hydrology.js';
 import { sizeCulvert, culvertHydraulics, inletsForShape, defaultInletFor, slopeAboveCritical } from './hydro/culvert.js';
 import { DCAT, planChecks, platformChecks, catText, designCatOf, clothoidNeed } from './roadcat.js';
@@ -3771,6 +3772,8 @@ async function runHydro() {
     S.hySig = null; update();
     info(`${h.res.crossings.length} franchissement(s) — ${grid.source}.`);
     toast(`${h.res.crossings.length} bassins versants délimités${R.warnings.length ? ` (${R.warnings.length} avertissement(s))` : ''}.`);
+    // couverture végétale mesurée d'office (jeu Tunisie : elle fixe C) ; un échec laisse la valeur saisie
+    if (S.crs.geo && (h.hyp.methodSet || 'tunisie') !== 'fao54') measureCovers(null, { quiet: true });
   } catch (e) { console.error(e); info(''); toast(`Hydrologie : ${e.message}`, 'err'); }
   finally { btn.disabled = false; }
 }
@@ -3780,11 +3783,11 @@ function computeHydro() {
   if (!R?.crossings?.length) { S.hyRes = null; return null; }
   const zRoad = (c) => { const A = S.axpl?.get(c.key); return A?.defined ? A.PL.zAt(c.pk) : null; };
   const linkOf = (c) => (S.prj.cadres || []).find((q) => q.hydro?.id === c.id && q.axis === c.key);
-  const sig = JSON.stringify([R.date, R.rev, h.hyp, h.hyd, h.upstream, !!S.tn, R.crossings.map((c) => [c.id, zRoad(c)]), (S.cadres || []).filter((g) => g.c.hydro).map((g) => [g.c.id, g.c.zam, g.c.zav, g.K?.Lm, g.K?.Lp, g.K?.type, g.K?.spans, g.K?.n, g.K?.B, g.K?.H, g.K?.L, g.K?.ang, g.K?.inlet, g.s])]);
+  const sig = JSON.stringify([R.date, R.rev, h.hyp, h.hyd, h.upstream, !!S.tn, R.crossings.map((c) => [c.id, zRoad(c), c.cover?.pct]), (S.cadres || []).filter((g) => g.c.hydro).map((g) => [g.c.id, g.c.zam, g.c.zav, g.K?.Lm, g.K?.Lp, g.K?.type, g.K?.spans, g.K?.n, g.K?.B, g.K?.H, g.K?.L, g.K?.ang, g.K?.inlet, g.s])]);
   if (S.hyRes && S.hySig === sig) return S.hyRes;
   const hyp = { ...h.hyp };
   const ids = new Set(R.crossings.map((c) => c.id));
-  const basins = R.crossings.map((c) => ({ uid: c.id, name: c.id, areaKm2: c.totalKm2, ...c.m, slopePct: c.m.slopePct, zOutletM: c.m.zOutlet, lon: c.lon, lat: c.lat, vegetationCoverPct: h.hyd.coverPct, upstreamUids: (h.upstream?.[c.id] || []).filter((u) => ids.has(u) && u !== c.id) }));
+  const basins = R.crossings.map((c) => ({ uid: c.id, name: c.id, areaKm2: c.totalKm2, ...c.m, slopePct: c.m.slopePct, zOutletM: c.m.zOutlet, lon: c.lon, lat: c.lat, vegetationCoverPct: c.cover?.pct ?? h.hyd.coverPct, vegetationCoverSource: c.cover ? wcSourceText(c.cover) : (Number.isFinite(h.hyd.coverPct) ? 'valeur globale saisie (non mesurée)' : null), upstreamUids: (h.upstream?.[c.id] || []).filter((u) => ids.has(u) && u !== c.id) }));
   const res = hydroComputeAll(basins, hyp);
   const out = { list: [], byId: {} };
   R.crossings.forEach((c, i) => {
@@ -3843,7 +3846,8 @@ function hyHypHtml(h, stations, opt) {
       `<p class="note">I (mm/h) = a / (t + c)<sup>b</sup>, t en heures${st ? ` — ${esc(findMontanaStationName(hy.montanaStationCode))}, T = ${hy.returnPeriod} ans${st.tabulated ? '' : ` : période non tabulée, valeurs de T = ${st.tUsed} ans`}` : ' — sans station, intensité calculée avec a, b, c saisis'}.</p>` +
       '<h4>Régionalisations et ruissellement</h4>' +
       `<div class="row">${sel('ghorbelZone', 'Ghorbel', OPTION_LISTS.ghorbelZones, hy.ghorbelZone)}${sel('kallelRegion', 'Kallel', OPTION_LISTS.kallelRegions, hy.kallelRegion)}${sel('fersiSector', 'Fersi', OPTION_LISTS.fersiSectors, hy.fersiSector)}${sel('friguiRegion', 'Frigui', OPTION_LISTS.friguiRegions, hy.friguiRegion)}</div>` +
-      `<div class="row"><label class="fld"><span class="lb">Couvert végétal</span><input data-hyd="coverPct" type="text" inputmode="decimal" value="${v(h.hyd.coverPct)}"><span class="un">%</span></label>` +
+      `<div class="row"><label class="fld" title="Valeur appliquée aux bassins non mesurés sur ESA WorldCover"><span class="lb">Couvert végétal à défaut de mesure</span><input data-hyd="coverPct" type="text" inputmode="decimal" value="${v(h.hyd.coverPct)}"><span class="un">%</span></label>` +
+      `<button data-wc="all" title="Part de chaque bassin couverte de végétation (forêt, arbustes, prairies, cultures, zones humides…) d'après la carte d'occupation du sol ESA WorldCover 10 m (2021) ; elle fixe l'indice de végétation de l'abaque C">Mesurer la couverture (ESA WorldCover)</button><span id="hyWcInfo" class="note">${esc(wcSummary(h))}</span></div><div class="row">` +
       `<label class="fld"><span class="lb">Francou-Rodier</span><select data-hy="francouRodierRegion">${opt('', 'non appliquée', hy.francouRodierRegion ?? '')}${FRANCOU_RODIER_REGIONS.map((r) => opt(r.id, `${r.label} (K ≈ ${r.suggestedK})`, hy.francouRodierRegion ?? '')).join('')}</select></label>` +
       `<label class="chk"><input type="checkbox" data-hy="dgpc1054"${hy.dgpc1054 ? ' checked' : ''}> Note DGPC 1054 (période de retour)</label></div>` +
       (hy.dgpc1054 ? `<div class="row">${sel('roadCategory', 'Catégorie de route', OPTION_LISTS.roadCategories, hy.roadCategory)}${sel('structureType', 'Type d\'ouvrage', OPTION_LISTS.structureTypes, hy.structureType)}${num('tjma', 'TJMA', 'v/j')}</div>` : '');
@@ -4008,6 +4012,44 @@ function renderHydro() {
 // Clic sur un bassin du plan (ou bouton « Fiche » du tableau) : propriétés physiques, courbe hypsométrique, profil de
 // l'écoulement principal, calcul hydrologique complet et hydraulique de l'ouvrage (cotes fil d'eau amont / aval, ligne
 // d'eau, contrôle, vitesses, revanche) ; actions couper / fusionner / supprimer (basinedit.js, session de calcul).
+// ─── Couverture végétale des bassins : ESA WorldCover 10 m (hydro/worldcover.js) ───
+let WC = null; // client (capabilities découvertes une fois par session)
+const wcSourceText = (cv) => `ESA WorldCover 10 m, ${fmt(cv.pct, 1)} % (${(cv.breakdown || []).slice(0, 4).map(([l, p]) => `${l.toLowerCase()} ${fmt(p, 0)} %`).join(', ')})`;
+function wcSummary(h) {
+  const L = h.res?.crossings || []; if (!L.length) return '';
+  const n = L.filter((c) => c.cover).length;
+  return n ? `${n}/${L.length} bassin(s) mesuré(s)${n < L.length ? ` — les autres prennent ${Number.isFinite(h.hyd.coverPct) ? fmt(h.hyd.coverPct, 0) + ' %' : 'aucune valeur'}` : ''}.` : `Aucun bassin mesuré : ${Number.isFinite(h.hyd.coverPct) ? `${fmt(h.hyd.coverPct, 0)} % appliqué partout (valeur saisie)` : 'pas de couverture, pas de C'}.`;
+}
+/** Mesure la couverture de bassins (tous, ou ceux de ids). Rien n'est écrit en cas d'échec. */
+async function measureCovers(ids = null, { redo = true, quiet = false } = {}) {
+  const h = hyCfg(), R = h.res;
+  if (!R?.crossings?.length) { if (!quiet) toast('Aucun bassin : délimitez-les d\'abord.', 'warn'); return; }
+  if (!S.crs.geo) { if (!quiet) toast('Système de coordonnées local : la couverture se mesure sur un projet géoréférencé.', 'warn'); return; }
+  if (S.wcBusy) return;
+  S.wcBusy = true;
+  const msg = (t) => { const el = $('#hyWcInfo'); if (el) el.textContent = t; };
+  const errs = []; let ok = 0;
+  try {
+    WC = WC || createWorldCover();
+    msg('WorldCover : connexion au service…');
+    if (!(await WC.discover())) { const t = `WorldCover injoignable — ${WC.log.join(' ; ')}`; msg(t); if (!quiet) toast(t, 'err'); WC = null; return; }
+    const list = R.crossings.filter((c) => (!ids || ids.includes(c.id)) && (redo || !c.cover));
+    for (let k = 0; k < list.length; k++) {
+      const c = list[k];
+      const rings = (c.ring || []).map((r) => r.map((q) => { const ll = S.crs.toLL(q.x, q.y); return { lon: ll.lon, lat: ll.lat }; }));
+      const res = await WC.measure(rings, (d, n) => msg(`WorldCover : ${c.id} (${k + 1}/${list.length}) — tuiles ${d}/${n}`));
+      if (!res.ok) { errs.push(`${c.id} : ${res.reason}`); continue; }
+      const ecart = c.totalKm2 > 0 ? Math.abs(res.sampledKm2 - c.totalKm2) / c.totalKm2 * 100 : 0;
+      c.cover = { pct: Math.round(res.coverPct * 10) / 10, breakdown: res.breakdown.map((b) => [b.label, Math.round(b.pct * 10) / 10, b.veg ? 1 : 0]), sampledKm2: Math.round(res.sampledKm2 * 1e4) / 1e4, pixels: res.pixels, unknownPct: Math.round(res.unknownPct * 10) / 10, source: res.source, date: new Date().toISOString().slice(0, 10) };
+      if (ecart > 10) errs.push(`${c.id} : surface échantillonnée ${fmt(res.sampledKm2, 3)} km² contre ${fmt(c.totalKm2, 3)} km² (${fmt(ecart, 0)} % d'écart)`);
+      ok++;
+    }
+    S.hySig = null; update();
+    msg(`${wcSummary(h)}${errs.length ? ' ' + errs.join(' · ') : ''}`);
+    if (!quiet || errs.length) toast(`Couverture végétale mesurée sur ${ok} bassin(s)${errs.length ? ` — ${errs.length} problème(s)` : ''}.`, errs.length ? 'warn' : '');
+  } catch (e) { console.error(e); msg(`WorldCover : ${e.message}`); }
+  finally { S.wcBusy = false; }
+}
 // ─── Détail des calculs hydrologiques (note de calcul) : v.detail de hydrology.js ───
 const HY_ST = { ok: '', nc: 'non calculé', excl: 'exclue', info: '' };
 /** Une étape : formule, données, application numérique, résultat, motifs. open = déplié. */
@@ -4119,6 +4161,7 @@ function renderBvSheet() {
     bvRow('Période de retour', `${o.T ?? v.returnPeriod ?? '—'} ans`),
     bvRow('Pluies', `Pan ${f2(h.hyp.pan, 0)} mm · P10 ${f2(h.hyp.p10, 0)} mm · P100 ${f2(h.hyp.p100, 0)} mm${tn ? ` · P0 ${f2(h.hyp.p0, 0)} mm` : ''}`),
     bvRow('Intensité', v.intensityMmH != null ? `<b>${fmt(v.intensityMmH, 2)} mm/h</b> (${esc(v.intensitySource || '')}${mt ? ` — ${esc(mt.stationName || mt.station || '')} a ${f2(mt.a, 3)}, b ${f2(mt.b, 3)}${mt.c != null ? `, c ${f2(mt.c, 3)}` : ''}${mt.tabulated === false ? `, T = ${mt.tUsed} ans` : ''}` : ''})` : '—'),
+    tn ? bvRow('Couverture végétale', c.cover ? `<b>${fmt(c.cover.pct, 1)} %</b> — ESA WorldCover 10 m : ${esc(c.cover.breakdown.map(([l, p]) => `${l.toLowerCase()} ${fmt(p, 1)} %`).join(', '))} · ${fmt(c.cover.sampledKm2, 3)} km² échantillonnés (${esc(c.cover.date || '')}) <button class="mini" data-bvact="cover">Remesurer</button>` : `${Number.isFinite(h.hyd.coverPct) ? `${fmt(h.hyd.coverPct, 0)} % (valeur globale saisie, non mesurée)` : '—'} <button class="mini" data-bvact="cover">Mesurer (ESA WorldCover)</button>`) : '',
     rc ? bvRow('Coefficient de ruissellement C', `${f2(rc.C, 3)} (${esc([rc.source, rc.slopeClass, rc.vegetationIndex != null ? `couvert ${rc.vegetationIndex}` : ''].filter(Boolean).join(' · '))})`) : '',
     v.orstomZone ? bvRow('Zone Orstom', `${esc(v.orstomZone.id)} (${esc(v.orstomZone.source || '')})`) : '',
     v.pm10 ? bvRow('Pluie moyenne Pm10 (abattement)', `${f2(v.pm10.value, 1)} mm (× ${f2(v.pm10.abattement, 3)})`) : '',
@@ -4277,6 +4320,7 @@ function bindBvSheet() {
     else if (act === 'cut') bvStartCut(id);
     else if (act === 'merge') { const other = $('#bvMergeSel')?.value; if (other) bvMerge(id, other); }
     else if (act === 'del') bvDelete(id);
+    else if (act === 'cover') measureCovers([id]).then(() => { if ($('#dlgBV').open) openBvSheet(id); });
   });
 }
 // Bassin sous le point (monde) : plus petit bassin dont un contour contient le point.
@@ -4303,6 +4347,7 @@ function bindHydro() {
   $('#btnHyRun').addEventListener('click', runHydro);
   for (const id of ['hyDem', 'hyMargin', 'hyCell', 'hyMin']) $('#' + id).addEventListener('change', (e) => { const h = hyCfg(), k = { hyDem: 'dem', hyMargin: 'margin', hyCell: 'cell', hyMin: 'minKm2' }[id]; h[k] = id === 'hyDem' ? e.target.value : parseNum(e.target.value) || undefined; });
   $('#hyAxes').addEventListener('change', (e) => { const k = e.target.dataset.hyax; if (!k) return; const h = hyCfg(); const cur = new Set(h.axes || hyAxes().filter((a) => hyAxisChecked(h, a)).map((a) => a.key)); if (e.target.checked) cur.add(k); else cur.delete(k); h.axes = [...cur]; });
+  $('#hyHyp').addEventListener('click', (e) => { if (e.target.closest('[data-wc]')) measureCovers(null, { redo: true }); });
   $('#hyHyp').addEventListener('change', (e) => {
     const k = e.target.dataset.hy, kd = e.target.dataset.hyd; if (!k && !kd) return;
     if (kd) { hySet(['hyd', kd], parseNum(e.target.value)); return; }
