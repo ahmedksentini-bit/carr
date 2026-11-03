@@ -473,3 +473,20 @@ details.pl-pts summary { cursor: pointer; margin: 8px 0 4px; font-weight: 600; f
 #tab-pl .ple-plot { flex: none; height: 280px; }
 #tab-pl .ple-cmd { font-size: 11px; }
 .plsvg .pl-oamark { fill: rgba(251,191,36,0.10); stroke: #f59e0b; stroke-width: 1; stroke-dasharray: 5 4; }
+
+/* détail des calculs hydrologiques */
+.hy-group h5 { margin: 10px 0 3px; font-size: 11.5px; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; }
+details.hy-step { border: 1px solid var(--line2); border-radius: 6px; margin: 3px 0; padding: 3px 8px; font-size: 12.5px; }
+details.hy-step > summary { display: flex; justify-content: space-between; gap: 12px; cursor: pointer; font-weight: 500; }
+details.hy-step.st-nc > summary, details.hy-step.st-excl > summary { color: var(--muted); }
+details.hy-step.on > summary { color: var(--accent); font-weight: 600; }
+details.hy-step .hy-res { white-space: nowrap; font-family: ui-monospace, Consolas, monospace; }
+details.hy-step .muted { color: var(--muted); font-weight: 400; }
+.hy-f { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; background: var(--panel2); border-radius: 4px; padding: 4px 6px; margin: 5px 0; }
+.hy-calc { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; border-left: 3px solid var(--accent); padding: 2px 6px; margin: 5px 0; overflow-x: auto; }
+.hy-calc > div, .hy-f > div { white-space: pre-wrap; }
+table.hy-vars th { width: 70px; }
+table.hy-tab th, table.hy-tab td { width: auto; text-align: center; }
+ul.hy-notes { margin: 4px 0 2px 16px; padding: 0; color: var(--warn, #b45309); font-size: 12px; }
+details.hy-tabdetail { margin: 8px 0; }
+details.hy-tabdetail > summary { cursor: pointer; font-weight: 600; }
