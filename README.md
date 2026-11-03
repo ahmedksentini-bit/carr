@@ -350,6 +350,13 @@ ou sur un fond topographique DXF.
     plan (la moitié qui garde le franchissement garde l'identifiant, l'autre reçoit son exutoire D8 et un nouvel
     identifiant, ajoutée aux bassins amont), fusion de deux bassins, suppression (listes amont et liens des ouvrages
     réécrits) ; couper et fusionner demandent la grille de la délimitation faite dans la session ;
+  - **cotes fil d'eau amont / aval** de chaque cadre ou buse : automatiques (TN du MNT au droit des têtes, sens de
+    l'écoulement du bassin lié ; à défaut pente du thalweg, ou radier tiré de la chaussée) ou **saisies** dans la fiche de
+    l'ouvrage, la fiche du bassin ou le détail de l'onglet Hydrologie (champ vide : automatique) ; elles fixent la pente
+    du radier du calcul hydraulique, le radier dessiné au profil en long et le remblai sur traverse qui en résulte ;
+    inscrites au droit des têtes sur le plan (FE amont / aval). Alertes : pente du radier inférieure à la pente critique
+    de l'ouvrage vérifié (écoulement fluvial, contrôle par l'aval, dépôts ; pente conseillée), contre-pente, traverse
+    au-dessus de la chaussée ;
   - têtes d'ouvrage HDS-5 (clés 1 à 6 des dalots, 101 à 302 des buses) appliquées aux ouvrages placés et dessinées
     (murette, murs en aile selon la famille d'angles) ; une tête, murette comprise, en deçà de l'entrée en terre du
     talus de la voie portée (EET interpolée entre trois coupes successives au droit de la tête) est dessinée en rouge
