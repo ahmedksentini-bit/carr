@@ -48,13 +48,16 @@ export function deversOfRadius(R, cat) {
 export const LI = { 130: 470, 110: 310, 90: 234 };
 export const J14_W = 2.0; // emprise de la balise J14 au musoir, déduite du schéma 6-1 (5,20 − 2,50 − 0,70)
 
+// Voie principale : autoroute (catégories ICTAAL, par défaut) ou route non autoroutière (catégorie de conception
+// roadcat.js : ARP R1 / R2 / artère 110, VSA 90 / 110, AU 70, libre ; 2×1 voies, BDD 2,00 m, berme 0,75 m par défaut,
+// comme les voies secondaires « route ordinaire »).
 export function hwyParams(prj) {
-  const h = prj.hwy || {};
+  const h = prj.hwy || {}, auto = h.kind !== 'route';
   const cat = HWY_CAT[h.cat] || HWY_CAT.L2;
   return {
-    on: !!h.on, name: h.name || 'Autoroute', cat: HWY_CAT[h.cat] ? h.cat : 'L2', C: cat, V: num(h.V, cat.V),
-    lanes: Math.max(1, Math.round(num(h.lanes, 2))), wLane: num(h.wLane, 3.5), bau: num(h.bau, 2.5), bdg: num(h.bdg, 1.0),
-    median: num(h.median, 3.0), berme: num(h.berme, 1.0), z0: num(h.z0, 100), pente: num(h.pente, 0), pk0: num(h.pk0, 0),
+    on: !!h.on, kind: auto ? 'autoroute' : 'route', name: h.name || (auto ? 'Autoroute' : 'Voie principale'), cat: HWY_CAT[h.cat] ? h.cat : 'L2', dcat: auto ? '' : DCAT[h.dcat] ? h.dcat : 'R1', C: cat, V: num(h.V, auto ? cat.V : 90),
+    lanes: Math.max(1, Math.round(num(h.lanes, auto ? 2 : 1))), wLane: num(h.wLane, 3.5), bau: num(h.bau, auto ? 2.5 : 2.0), bdg: num(h.bdg, auto ? 1.0 : 0),
+    median: num(h.median, auto ? 3.0 : 0), berme: num(h.berme, auto ? 1.0 : 0.75), z0: num(h.z0, 100), pente: num(h.pente, 0), pk0: num(h.pk0, 0),
     axis: (h.axis || []).map((p) => ({ x: +p.x, y: +p.y, r: +p.r || 0, a: p.a === '' || p.a == null || !isFinite(+p.a) ? null : +p.a })),
   };
 }
@@ -237,13 +240,13 @@ export function buildEchangeur(prj, D) {
   // --- Sections courantes (autoroute et route transversale) ----------------------------------
   const XPs = crossList(prj).map((_, k) => crossParams(prj, k)), roads = ['hwy', ...XPs.map((_, k) => `cross${k}`)];
   const dn = num(prj.pt?.dev, 2.5);
-  const axisPaths = { hwy: H.axis.length >= 2 ? roadAlignment({ ...H, kind: 'autoroute' }, dn).path : null };
+  const axisPaths = { hwy: H.axis.length >= 2 ? roadAlignment(H, dn).path : null };
   XPs.forEach((X, k) => { axisPaths[`cross${k}`] = X.on && X.axis.length >= 2 ? roadAlignment(X, dn).path : null; });
   const drawRoad = (key, H, rg = null) => {
-    const { path, fit, al, cat } = roadAlignment(key === 'hwy' ? { ...H, kind: 'autoroute' } : H, dn, issues);
+    const { path, fit, al, cat } = roadAlignment(H, dn, issues);
     // Rayons saisis non applicables : tangentes plus longues que les côtés disponibles (partagés avec les sommets voisins).
     for (const f of fit) if (f.r < f.req - 0.005) issues.push({ lvl: 'warn', msg: `${H.name} : sommet ${f.i}, rayon saisi ${fmt(f.req)} m non applicable — tangente nécessaire ${fmt(f.Tneed)} m, disponible ${fmt(f.T)} m entre les sommets voisins ; rayon appliqué ${fmt(f.r)} m. Déplacez les sommets ${f.i - 1} / ${f.i + 1} ou réduisez le rayon d'un sommet voisin.` });
-    const sEnd = G.pathLen(path), isRoute = key !== 'hwy' && H.kind === 'route';
+    const sEnd = G.pathLen(path), isRoute = H.kind === 'route'; // voie principale ou secondaire non autoroutière
     const E0 = H.median / 2 + H.bdg, E1 = E0 + H.lanes * H.wLane, E2 = E1 + H.bau;
     // Partie dessinée [sA, sB] (voie secondaire d'une trompette : seulement au-delà de l'extrémité de la tige) ; l'axe
     // complet reste la référence des abscisses et des raccordements.

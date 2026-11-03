@@ -31,7 +31,7 @@ export function typeParams(prj) {
 export function axisType(prj, D, key) {
   if (key === 'hwy' || key.startsWith('x:')) {
     let H, C, name;
-    if (key === 'hwy') { H = { ...hwyParams(prj), kind: 'autoroute' }; name = 'autoroute'; }
+    if (key === 'hwy') { H = hwyParams(prj); name = H.kind === 'autoroute' ? 'autoroute' : 'route'; }
     else { const k = crossList(prj).findIndex((c) => `x:${c.id}` === key); H = crossParams(prj, Math.max(0, k)); name = H.kind === 'autoroute' ? 'autoroute' : 'route'; }
     const cat = designCatOf(H), Dc = DCAT[cat];
     C = { Rm: Dc.Rm, Rdn: Dc.noSuper ? Infinity : Dc.Rdn, cat };
