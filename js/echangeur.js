@@ -177,12 +177,66 @@ export function rampParams(prj, r0) {
     const tpl = num(e.tpl, Math.round((h.bau + J14_W + Math.max(bdg, 0.7)) * 100) / 100);
     const Lm = Math.max(0, (tpl - 1) / p);
     const ins = role === 'conv' ? num(e.ins, isH || h.lanes >= 2 ? 200 : 100) : 0;
-    return { role, ref: e.ref, host: h, isHwy: isH, s: num(e.s, 0), biseau, p, tpl, Lm, ins };
+    return { role, ref: e.ref, host: h, isHwy: isH, s: num(e.s, 0), biseau, p, tpl, Lm, ins, Rt: Math.max(0, num(e.Rt, 0)), Lt: Math.max(0, num(e.Lt, 0)) };
   };
   const from = end(r.from, 'div'), to = end(r.to, 'conv');
   const auto = (e) => e.isHwy && e.host.roadKind === 'autoroute';
   const label = [from ? (auto(from) ? 'sortie Sd1' : 'sortie depuis ' + from.host.name) : '', to ? (auto(to) ? 'entrée Ei1' : (to.isHwy ? 'entrée sur ' : 'entrée Eb11 sur ') + to.host.name) : ''].filter(Boolean).join(' → ') || 'bretelle libre';
   return { r, name: r.name || 'B', cat: RAMP_CAT[r.cat] ? r.cat : 'b50', C: cat, lanes, w, bdd, bdg, berme, pente: num(r.pente, 0), from, to, label, pis: Array.isArray(r.pis) ? r.pis : [] };
+}
+
+// Extrémité d'une bretelle à l'intérieur d'une chaussée en courbe : la droite d'obliquité issue du point A recouperait la
+// chaussée dès que la flèche de la rive (λ²/2R) dépasse l'écartement p·λ (λ ≈ 2 R p, soit 90 m pour R = 1 500 m et 3 %).
+// L'obliquité est alors tenue par rapport à la rive en courbe : la bretelle quitte (ou rejoint) A par un arc de rayon
+// Rr, parallèle à la chaussée et tourné de l'obliquité p autour de A (l'écart à la rive croît de p par mètre), puis
+// une droite tangente jusqu'au premier raccordement. Rend Rr (rayon de l'axe de la bretelle, centre du côté de la
+// bretelle) ou 0 : chaussée droite (R > 20 km) ou bretelle à l'extérieur du virage (la droite s'écarte plus vite).
+// Courbure moyenne de l'axe hôte sur 200 m en amont (convergent) ou en aval (divergent) du point S/E.1,00 ; yAx : décalage
+// de l'axe de la bretelle en A par rapport à l'axe hôte.
+export function termBendR(path, sEnd, s, sd, role, yAx, W = 200) {
+  const s1 = Math.max(0, Math.min(sEnd, s + (role === 'div' ? 1 : -1) * sd * W)), Lw = Math.abs(s1 - s);
+  if (!(Lw >= 50)) return 0;
+  const t = (x) => { const v = pathTangentAt(path, Math.max(0, Math.min(sEnd, x))); return sd === 1 ? v : neg(v); };
+  const [a, b] = role === 'div' ? [t(s), t(s1)] : [t(s1), t(s)];
+  const dl = Math.atan2(G.cross(a, b), G.dot(a, b)); // rotation dans le sens de circulation (> 0 : à gauche)
+  if (!(dl < 0)) return 0; // bretelle (à droite de la chaussée) à l'extérieur du virage, ou alignement droit
+  const Rh = Lw / -dl;
+  return Rh > 20000 ? 0 : Math.max(0, Rh - yAx);
+}
+// Arc d'extrémité de rayon Rr, tangent en A à la direction d'obliquité dir et tournant à droite (centre du côté de la
+// bretelle) : parcouru depuis A (divergent) ou jusqu'à A (convergent). P : sommet voisin (premier / dernier sommet).
+// keep : P est imposé (gabarit construit sur l'arc, ex. boucle de trompette) → T est le point de l'arc dont la tangente
+// passe par P ; sinon T est tel que P se projette à dT de T sur la tangente (dT = tangente du raccordement suivant + 2 m)
+// et P est ramené sur cette tangente. Lfix : longueur d'arc imposée (gabarit qui a construit l'arc : P conservé).
+// Rend { PI (sommet de l'arc), P, T, t (direction de circulation en T), len } ou null.
+export function termArc(A, dir, Rr, role, P, dT, keep = false, Lfix = 0) {
+  if (!(Rr > 0)) return null;
+  const sg = role === 'div' ? -1 : 1, eta = role === 'div' ? 1 : -1, Ch = add(A, mul(neg(rot90(dir)), Rr));
+  const rot = (v, a) => ({ x: v.x * Math.cos(a) - v.y * Math.sin(a), y: v.x * Math.sin(a) + v.y * Math.cos(a) });
+  const at = (f) => ({ T: add(Ch, rot(sub(A, Ch), sg * f)), t: rot(dir, sg * f) });
+  const g = keep ? (f) => { const { T, t } = at(f); return -G.cross(t, sub(P, T)); } : (f) => { const { T, t } = at(f); return eta * G.dot(sub(P, T), t) - dT; };
+  const fMax = Math.min(Math.PI / 3, (2.5 * dist(A, P) + 100) / Rr);
+  let f = Lfix > 0 ? Lfix / Rr : 0;
+  if (!(Lfix > 0)) {
+    let a = 0, b = fMax;
+    if (!(g(a) > 0) || !(g(b) < 0)) return null;
+    for (let k = 0; k < 60; k++) { const m = (a + b) / 2; if (g(m) > 0) a = m; else b = m; }
+    f = (a + b) / 2;
+  }
+  if (f < 1e-3) return null;
+  const { T, t } = at(f), Ta = Rr * Math.tan(f / 2);
+  // longueur imposée : P (calculé sur cette tangente par le gabarit) y est recalé, à quelques millimètres près
+  const Pq = keep && Lfix > 0 ? add(T, mul(t, G.dot(sub(P, T), t))) : keep ? P : add(T, mul(t, eta * dT));
+  // P en deçà du point de tangence (longueur imposée : le sommet d'une boucle, de tangente négative, peut le dépasser)
+  if (keep && !(Lfix > 0) && eta * G.dot(sub(Pq, T), t) < 0) return null;
+  return { PI: add(A, mul(dir, eta * Ta)), P: Pq, T, t, len: Rr * f, R: Rr };
+}
+// Longueur de l'alignement d'extrémité (droite et arc d'extrémité éventuel) au début ou à la fin d'un axe.
+export function termLen(al, atEnd = false) {
+  const els = atEnd ? [...al.elems].reverse() : al.elems;
+  let l = 0;
+  for (const e of els) { if (e.kind === 'L' || e.term) l += e.len; else break; }
+  return l;
 }
 
 // Repère d'une extrémité sur sa chaussée hôte : S.1,00 / E.1,00, point A de l'axe, direction de circulation de la
@@ -482,21 +536,36 @@ export function buildEchangeur(prj, D) {
     let lamT = Ft && up.length ? Math.max(10, G.dot(sub(up[up.length - 1], Ft.A), neg(Ft.dir))) : 0;
     let X = null;
     if (both1) { const I = G.lineLine(Fs.A, Fs.dir, Ft.A, neg(Ft.dir)); if (I && I.t > 10 && G.dot(sub(I.p, Ft.A), neg(Ft.dir)) > 10) X = I.p; else warn('les lignes d\'obliquité des deux extrémités ne se coupent pas en avant : ajoutez un sommet.'); }
-    let al;
+    // Bretelle à l'intérieur d'une chaussée en courbe : arc d'extrémité au lieu de la droite d'obliquité (termBendR). Un
+    // sommet imposé à l'intérieur de cette droite (gabarit construit sur l'arc) est conservé : la tangente y passe.
+    const bendOf = (h, F, e) => (!both1 && up.length && h?.kind === 'hwy' ? e.Rt || termBendR(h.path, h.sEnd, F.s, h.sd, e.role, h.edgeOff(F.s) + 1 + rp.w / 2) : 0);
+    const bS = Fs ? bendOf(hF, Fs, rp.from) : 0, bT = Ft ? bendOf(hT, Ft, rp.to) : 0;
+    const inside = (F, P) => -G.cross(F.dir, sub(P, F.A)) > 0.5;
+    const keepS = bS && inside(Fs, up[0]) ? { x: up[0].x, y: up[0].y } : null, keepT = bT && inside(Ft, up[up.length - 1]) ? { x: up[up.length - 1].x, y: up[up.length - 1].y } : null;
+    let al, tinS = 0, tinT = 0;
     for (let pass = 0; pass < 10; pass++) {
+      let tS = null, tT = null;
       if (both1) up[0] = { ...up[0], ...(X || add(Fs.A, mul(Fs.dir, lamS))) };
       else {
         if (Fs && up.length) up[0] = { ...up[0], ...add(Fs.A, mul(Fs.dir, lamS)) };
         if (Ft && up.length) up[up.length - 1] = { ...up[up.length - 1], ...sub(Ft.A, mul(Ft.dir, lamT)) };
+        // 1er passage en droite : tangentes des raccordements voisins, qui fixent la longueur des arcs d'extrémité
+        if (bS && pass > 0) tS = termArc(Fs.A, Fs.dir, bS, 'div', keepS || up[0], tinS + 2, !!keepS, keepS ? rp.from.Lt : 0);
+        if (bT && pass > 0) tT = termArc(Ft.A, Ft.dir, bT, 'conv', keepT || up[up.length - 1], tinT + 2, !!keepT, keepT ? rp.to.Lt : 0);
+        if (tS) up[0] = { ...up[0], ...tS.P };
+        if (tT) up[up.length - 1] = { ...up[up.length - 1], ...tT.P };
       }
-      const pts = [...(Fs ? [{ ...Fs.A, R: 0, A: 0 }] : []), ...up, ...(Ft ? [{ ...Ft.A, R: 0, A: 0 }] : [])];
+      const pts = [...(Fs ? [{ ...Fs.A, R: 0, A: 0 }] : []), ...(tS ? [{ ...tS.PI, R: tS.R, A: 0, term: true }] : []), ...up,
+        ...(tT ? [{ ...tT.PI, R: tT.R, A: 0, term: true }] : []), ...(Ft ? [{ ...Ft.A, R: 0, A: 0 }] : [])];
       al = buildAlignment(pts, { name });
       R.pts = pts;
       if (both1 || al.elems.length < 2) break;
-      let again = false;
-      const e0 = al.elems[0], eN = al.elems[al.elems.length - 1];
-      if (Fs && up.length) { const l0 = e0.kind === 'L' ? e0.len : 0; if (l0 < rp.from.Lm - 1e-6) { lamS += (rp.from.Lm - l0) * 1.5 + 0.5; again = true; } }
-      if (Ft && up.length) { const lN = eN.kind === 'L' ? eN.len : 0; if (lN < rp.to.Lm - 1e-6) { lamT += (rp.to.Lm - lN) * 1.5 + 0.5; again = true; } }
+      const iS = tS ? 2 : 1, iT = pts.length - 2 - (tT ? 1 : 0);
+      tinS = al.tangents.find((q) => q.i === iS)?.T ?? 0; tinT = al.tangents.find((q) => q.i === iT)?.To ?? 0;
+      let again = (bS || bT) && pass < 2;
+      const l0 = termLen(al), lN = termLen(al, true);
+      if (Fs && up.length && !keepS && l0 < rp.from.Lm - 1e-6) { lamS += (rp.from.Lm - l0) * 1.5 + 0.5; again = true; }
+      if (Ft && up.length && !keepT && lN < rp.to.Lm - 1e-6) { lamT += (rp.to.Lm - lN) * 1.5 + 0.5; again = true; }
       if (!again) break;
     }
     R.pis = up; R.al = al; R.length = al.length;
@@ -519,6 +588,7 @@ export function buildEchangeur(prj, D) {
     // à plusieurs rayons (courbe composée) ; R = plus petit rayon, Rs = rayons successifs.
     const curves = [];
     for (const t of al.tangents) {
+      if (t.term) continue; // arc d'extrémité (chaussée en courbe) : prolongement de l'obliquité, pas une courbe de la bretelle
       const g = curves[curves.length - 1];
       if (g && t.link && t.sg === g.sg) { g.defl += t.defl; g.L2 = t.L2; g.last = t.i; g.loop = g.loop || t.loop; g.R = Math.min(g.R, t.R); g.Rs.push(t.R); g.Rlast = t.R; }
       else curves.push({ i: t.i, last: t.i, R: t.R, Rs: [t.R], Rfirst: t.R, Rlast: t.R, sg: t.sg, defl: t.defl, L1: t.L1, L2: t.L2, A: t.A, loop: t.loop, semi: t.semi, linkIn: !!t.link });
@@ -540,7 +610,7 @@ export function buildEchangeur(prj, D) {
         if (c.loop) {
           if (rp.from.host.roadKind !== 'autoroute') { /* sortie en boucle depuis une route ordinaire : pas de restriction */ } else {
           warn(`sortie en boucle : à titre exceptionnel et sur justification (§ 6.2.4).`);
-          const l0 = al.elems[0]?.kind === 'L' ? al.elems[0].len : 0;
+          const l0 = termLen(al);
           if (l0 < rp.from.Lm + 60 - 1e-6) err(`sortie en boucle : collectrice de ${fmt(l0 - rp.from.Lm)} m au-delà du tpl < 60 m (§ 6.2.4).`);
           }
         } else if (Rr < C.Rfirst) (C.branche ? warn : err)(`premier rayon de sortie Ri = ${fmt(Rr)} m < ${C.Rfirst} m (${C.branche ? '1,5 Rdn, branche' : '100 m hors boucle, bretelle'} ; § 3.2.2).`);
@@ -577,7 +647,7 @@ export function buildEchangeur(prj, D) {
     // bretelle à deux voies, 50 km/h depuis une bretelle à une voie (§ 4.3).
     const grade = rp.pente / 100, first = curves[0], last = curves[curves.length - 1];
     const e0 = al.elems[0], eN = al.elems[al.elems.length - 1];
-    R.lad = e0.kind === 'L' ? e0.len : 0; R.ladE = eN.kind === 'L' ? eN.len : 0;
+    R.lad = termLen(al); R.ladE = termLen(al, true);
     if (Fs) {
       if (R.lad + 1e-6 < rp.from.Lm) err(`alignement droit depuis S.1,00 m de ${fmt(R.lad)} m < Lm = ${fmt(rp.from.Lm)} m (§ 6.1).`);
       const VsF = rp.from.isHwy && rp.from.host.roadKind === 'route' ? vsaRules(rp.from.host.dcat, rp.from.host.lanes) : null;
@@ -823,7 +893,7 @@ export function buildEchangeur(prj, D) {
     if (!Ft) pt(`${name} · extrémité`, al.pointAt(L));
     // Cotations : R, A, dévers des courbes ; nom et type ; BDD / BDG.
     al.elems.forEach((el) => {
-      if (el.kind !== 'A') return;
+      if (el.kind !== 'A' || el.term) return;
       const m = el.pointAt(el.len / 2), hd = el.headAt(el.len / 2), n = rot90(unit(hd));
       const side = el.sg > 0 ? -1 : 1, tg = al.tangents.find((t) => Math.abs(t.R - el.R) < 1e-9);
       text('COTATION', add(m, mul(n, side * (half + rp.bdd + 2))), `${tg?.loop ? 'boucle ' : ''}R ${fmt(el.R)} m (Ri ${fmt(R.rIn(el.R))}) · A ${fmt(tg?.A || 0)} · d ${fmt(deversOfRadius(R.rIn(el.R), C), 1)} %${R.rIn(el.R) < 100 ? ` · surl. ${fmt((50 * rp.lanes) / R.rIn(el.R))}` : ''} · Lc ${fmt(el.len)} m · Δ ${fmtA(el.len / el.R)}`, hd, 'center', TH * 0.8);
@@ -1082,12 +1152,49 @@ export function deriveTrumpet(prj, D, semi, prev, opt = {}) {
   { let x0 = xE, x1 = xE + 10, f0 = gap0(x0), f1 = gap0(x1);
     for (let k = 0; k < 30 && Math.abs(f1) > 1e-4 && Math.abs(f1 - f0) > 1e-12; k++) { const x2 = x1 - (f1 * (x1 - x0)) / (f1 - f0); x0 = x1; f0 = f1; x1 = x2; f1 = gap0(x1); }
     if (Number.isFinite(x1) && Math.abs(f1) < 0.01) xE = x1; }
-  const CV = convAt(xE);
-  const PIl = G.lineLine(Lp, u, CV.E, CV.d)?.p;
+  let CV = convAt(xE), PIl = G.lineLine(Lp, u, CV.E, CV.d)?.p;
+  // Boucle à l'intérieur de l'autoroute en courbe : la droite d'obliquité tangente à la boucle recoupe la chaussée (flèche
+  // de la rive > écartement à 3 %). Le convergent se termine alors par un arc d'extrémité de rayon Rt (même construction
+  // que le calcul des bretelles : termArc, sommet de la boucle conservé) : obliquité de 3 % au point E.1,00, croissante en
+  // amont. On retient le point E.1,00 le plus proche de l'ouvrage, puis le plus grand rayon (le plus proche de la droite),
+  // pour lesquels la sortie de la boucle (tangente commune à son cercle et à l'arc) laisse un alignement d'extrémité
+  // ≥ Lm + 10 m et une plate-forme hors de la chaussée.
+  const half0 = half + RAMP_CAT.b50.bdg, L2 = (Al * Al) / Rl, need = Lconv + L2 / 2 + 5;
+  const clear = (pts) => Math.min(...pts.map((q) => { const w = W(q), pr = pathProject(hw.path, w); return pr ? Math.abs(pr.off) - hw.E1 - half0 : 1e9; }));
+  const along = (P, Q, n) => Array.from({ length: n + 1 }, (_, i) => G.lerp(P, Q, i / n));
+  let Rt = 0, Lt = 0;
+  {
+    const Tl0 = add(Cl, mul(rot90(CV.d), rhoL)); // point de tangence (cercle décalé) sur la droite d'obliquité
+    const Rc = termBendR(hw.path, hw.sEnd, Math.max(0, Math.min(hw.sEnd, s0 + Cl.x * sgn)), sgn, 'conv', yA, 600);
+    if (Rc > 0 && (!PIl || !(xE - PIl.x >= 100 && xE - PIl.x <= 300) || clear(along(Tl0, CV.E, 40)) < 0.3)) {
+      const rotV = (v, a) => ({ x: v.x * Math.cos(a) - v.y * Math.sin(a), y: v.x * Math.sin(a) + v.y * Math.cos(a) });
+      const geo = (x, Rr) => {
+        const { E, d } = convAt(x), Ch = add(E, mul(neg(rot90(d)), Rr)), dl = sub(Ch, Cl), Dd = Math.hypot(dl.x, dl.y), c = (Rr - rhoL) / Dd;
+        if (!(c < 1)) return null;
+        let best = null;
+        for (const sgA of [1, -1]) {
+          const am = Math.atan2(dl.y, dl.x) + sgA * Math.acos(c), m = { x: Math.cos(am), y: Math.sin(am) }, t = rot90(m);
+          const f = Math.atan2(G.cross(d, t), G.dot(d, t));
+          if (f > 1e-4 && f < Math.PI / 3 && (!best || f < best.f)) best = { m, t, f };
+        }
+        if (!best) return null;
+        const T1 = sub(Ch, mul(best.m, Rr)), Tl = sub(Cl, mul(best.m, rhoL)), run = G.dot(sub(T1, Tl), best.t), P = G.lineLine(Lp, u, T1, best.t)?.p;
+        if (!P || run < L2 / 2 + 2 || run + Rr * best.f < need) return null;
+        const arc = Array.from({ length: 31 }, (_, i) => add(Ch, rotV(sub(E, Ch), (best.f * i) / 30)));
+        if (clear([...along(Tl, T1, 20), ...arc]) < 0.3) return null;
+        return { x, Rr, P, Lt: Rr * best.f };
+      };
+      let sol = null;
+      for (let x = Cl.x + 60; x <= Cl.x + 700 && !sol; x += 5)
+        for (let j = 0; j <= 40 && !sol; j++) sol = geo(x, 40000 * Math.pow(250 / 40000, j / 40));
+      if (!sol) return { err: 'Boucle impossible à raccorder sans empiéter sur l\'autoroute en courbe (convergent à l\'intérieur du virage) : agrandissez R2 de la S-semi ou déplacez l\'ouvrage.' };
+      xE = sol.x; CV = convAt(xE); PIl = sol.P; Rt = sol.Rr; Lt = sol.Lt;
+    }
+  }
   if (!PIl || -yA - Cl.y < rhoL * nn + 0.5 || xE - PIl.x < 100) return { err: 'La boucle déduite ne tient pas sous la chaussée : la grande courbe de la S-semi est trop proche de l\'autoroute.' };
   if (xE - PIl.x > 300) return { err: `Grande courbe de la S-semi trop éloignée de l'autoroute : la boucle, concentrique, ne rejoindrait la chaussée qu'à ${fmt(xE - PIl.x, 0)} m de l'ouvrage.` };
   const loopPis = [W(tStart), { ...W(PIl), R: Rl, A: Al, loop: true }];
-  const boucle = { ...base, ...prev.boucle, from: { ref: 'free' }, to: { ...(prev.boucle?.to || {}), ref: far, s: st(xE) }, pis: loopPis };
+  const boucle = { ...base, ...prev.boucle, from: { ref: 'free' }, to: { ...(prev.boucle?.to || {}), ref: far, s: st(xE), Rt: Rt ? +Rt.toFixed(3) : '', Lt: Lt ? +Lt.toFixed(3) : '' }, pis: loopPis };
   // Bretelles directes (mêmes règles qu'à la création).
   const Ld = opt.Ldir || 300, Rd = opt.Rd || 120, Ad = opt.Ad || 80;
   const PId = onTige(add(Rp, mul(r, 15)), yA + 10), PIe = onTige(add(Lp, mul(r, -15)), yA + 10);
