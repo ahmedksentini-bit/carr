@@ -31,7 +31,8 @@ import { sizeCulvert, culvertHydraulics, inletsForShape, defaultInletFor } from 
 import { DCAT, planChecks, platformChecks, catText, designCatOf, clothoidNeed } from './roadcat.js';
 import { isVsa } from './vsa.js';
 import { ringFrames } from './ringshape.js';
-import { buildAxisProfiles, axisPlChecks, clearanceChecks, axisTerrainLine, axisFromTerrain, buildNodes, axisLimits } from './axpl.js';
+import { clearanceChecks, worstClearance } from './gabarit.js';
+import { buildAxisProfiles, axisPlChecks, axisTerrainLine, axisFromTerrain, buildNodes, axisLimits } from './axpl.js';
 import { chausseeOverlaps } from './overlap.js';
 import { autoProfile, newProfile, cloneProfile, findProfile } from './ptype.js';
 import { openTypeEditor } from './pttedit.js';
@@ -331,7 +332,7 @@ function update({ commit = true, panels = true } = {}) {
       for (const q of planChecks(ax.cat, ax.al, ax.H, ax.name, Math.max(0, +(S.prj.pt?.dev ?? 2.5) || 2.5))) S.checks.push({ ...q, group: 'Tracé en plan' });
       for (const q of platformChecks(ax.cat, ax.H, ax.name)) S.checks.push({ ...q, group: 'Tracé en plan' });
     }
-    S.clear = clearanceChecks(S.prj, S.axpl, axes, S.ouvr?.list || []);
+    S.clear = clearanceChecks(S.prj, S.D, S.axpl, axes, S.ouvr?.list || [], { gab: S.ouvr?.list?.[0]?.gab ?? (+S.prj.ouvr?.gab || 4.75) });
     for (const q of S.clear) if (q.lvl === 'err') S.checks.push({ lvl: 'err', group: 'Ouvrages', msg: q.msg });
   } catch (e) { console.error(e); }
   for (const id of S.rampKinks || []) { const r = S.prj.ramps.find((q) => q.id === id); if (r) S.checks.push({ lvl: 'err', group: 'Échangeur', msg: `${r.name} : arrivée au giratoire non tangente (la courbe se termine dans la branche) — allongez le dernier alignement ou déplacez le dernier sommet dans l'axe de la branche.` }); }
@@ -518,8 +519,8 @@ function renderOuvr() {
     ['Dalle', `PSI-${o.type}, h ≈ ${fmt(o.h, 2)} m ; about ≥ ${fmt(o.about, 2)} m`],
     ['Axe des piles de rive', `à ${fmt(o.yP, 2)} m de l'axe de l'autoroute`],
     ['Talus 3/2 sous culée', `hauteur ${fmt(o.Ht, 2)} m, emprise ${fmt(1.5 * o.Ht, 2)} m`],
-    ...(() => { const q = (S.clear || []).find((c) => c.ouvr === o.name); return q ? [['Tirant d\'air (profils en long)', `${fmt(q.ta, 2)} m ${q.lvl === 'err' ? `< gabarit ${fmt(o.gab, 2)} m ✖` : `≥ ${fmt(o.gab, 2)} m ✔`}`]] : [['Tirant d\'air', 'profils en long de l\'autoroute et de la voie portée à saisir (onglet Profil en long)']]; })(),
-  ]) + (() => { const q = (S.clear || []).find((c) => c.ouvr === o.name); return q && q.lvl === 'err' ? `<div class="row"><button data-raise="${esc(o.name)}" title="Place un point d'inflexion sur la voie portée, au droit de l'ouvrage, à la cote assurant le gabarit + 0,10 m (les points à moins de 40 m sont remplacés)">Relever ${esc(S.axpl?.get(q.key)?.name || 'la voie portée')} au gabarit (z = ${fmt(q.zNeed, 2)} m)</button></div>` : ''; })() + `<div class="row"><a class="btn primary" data-psidalink="${esc(o.key)}" href="${esc(o.curved ? PSIDA_URL : psidaLink(o, S.prj))}" target="_blank" rel="noopener" title="Ouvre psida.ksr-infra.org (onglet Conception) avec la travure, la largeur, l'épaisseur, le biais, le tirant d'air et les appuis de cet ouvrage">Ouvrir dans PSIDA ↗</a><button class="mini" data-psidajson="${esc(o.name)}" title="Projet PSIDA (.json) à ouvrir avec le bouton Ouvrir de PSIDA">Exporter (.json)</button></div>` + `<p class="note">${esc(o.hText)}</p><ul class="ouvr-items">${o.items.map((it) => `<li class="${lvlCls[it.level] || ''}">${esc(it.text)}</li>`).join('')}</ul></div>`).join('');
+    ...(() => { const q = worstClearance(S.clear, o.name); return q ? [['Tirant d\'air (profils en long, dévers compris)', `${fmt(q.ta, 2)} m ${q.lvl === 'err' ? `< gabarit ${fmt(o.gab, 2)} m ✖` : `≥ ${fmt(o.gab, 2)} m ✔`} — point le plus haut de ${S.axpl?.get(q.lower)?.name || q.lower} sous le tablier (${Math.abs(q.crit.yLow) < 0.3 ? 'sur l\'axe' : `${fmt(Math.abs(q.crit.yLow), 2)} m ${q.crit.yLow > 0 ? 'à gauche' : 'à droite'} de l\'axe`}, s = ${fmt(q.crit.sLow, 1)} m)${(S.clear || []).filter((c) => c.ouvr === o.name).length > 1 ? ` ; voies franchies : ${(S.clear || []).filter((c) => c.ouvr === o.name).map((c) => `${S.axpl?.get(c.lower)?.name || c.lower} ${fmt(c.ta, 2)} m`).join(', ')}` : ''}`]] : [['Tirant d\'air', 'profils en long de la voie portée et de la voie franchie à saisir (onglet Profil en long)']]; })(),
+  ]) + (() => { const q = worstClearance(S.clear, o.name); return q && q.lvl === 'err' ? `<div class="row"><button data-raise="${esc(o.name)}" title="Place un point d'inflexion sur la voie portée, au droit de l'ouvrage, à la cote assurant le gabarit + 0,10 m (les points à moins de 40 m sont remplacés)">Relever ${esc(S.axpl?.get(q.key)?.name || 'la voie portée')} au gabarit (z = ${fmt(q.zNeed, 2)} m)</button></div>` : ''; })() + `<div class="row"><a class="btn primary" data-psidalink="${esc(o.key)}" href="${esc(o.curved ? PSIDA_URL : psidaLink(o, S.prj))}" target="_blank" rel="noopener" title="Ouvre psida.ksr-infra.org (onglet Conception) avec la travure, la largeur, l'épaisseur, le biais, le tirant d'air et les appuis de cet ouvrage">Ouvrir dans PSIDA ↗</a><button class="mini" data-psidajson="${esc(o.name)}" title="Projet PSIDA (.json) à ouvrir avec le bouton Ouvrir de PSIDA">Exporter (.json)</button></div>` + `<p class="note">${esc(o.hText)}</p><ul class="ouvr-items">${o.items.map((it) => `<li class="${lvlCls[it.level] || ''}">${esc(it.text)}</li>`).join('')}</ul></div>`).join('');
 }
 // Fiche d'un cadre PICF / PIPO : paramètres modifiables (vides = valeurs automatiques), grandeurs, lien PSIDA.
 function renderCadreEdit(o) {
@@ -1390,7 +1391,7 @@ function bindEch() {
   $('#ouvrOut').addEventListener('click', (e) => { // projet PSIDA (.json) de l'ouvrage
     const br = e.target.closest('[data-raise]');
     if (br) {
-      const q = (S.clear || []).find((c) => c.ouvr === br.dataset.raise); if (!q) return;
+      const q = worstClearance(S.clear, br.dataset.raise); if (!q) return;
       S.prj.axpl = S.prj.axpl || {}; const st = (S.prj.axpl[q.key] = S.prj.axpl[q.key] || { pis: [] });
       // dégagement : les points voisins sont retirés sur la distance nécessaire pour rattraper la hausse à pente ≤ max
       const lim = axisLimits(S.prj, q.key), cur = S.axpl?.get(q.key);
@@ -3137,7 +3138,7 @@ function refreshPLAxis(c) {
       return `<tr class="${i === S.plPi ? 'on' : ''}"><td>PI ${i + 1}</td>` + ['s', 'z', 'R'].map((f) => `<td><input data-pi="${i}" data-f="${f}" type="text" inputmode="decimal" value="${showNum(q[f] ?? '')}"></td>`).join('') +
         `<td class="mono">${seg ? fmt(seg.g * 100, 2) + ' %' : '—'}</td><td class="act"><button data-pidel="${i}" title="Supprimer ce point">×</button></td></tr>`;
     }).join('') + '</tbody>';
-  const checks = [...axisPlChecks(S.prj, A), ...(S.clear || []).filter((q) => (S.ouvr?.list || []).some((o) => o.name === q.ouvr && o.key.startsWith(key + ':')) || key === 'hwy')];
+  const checks = [...axisPlChecks(S.prj, A), ...(S.clear || []).filter((q) => q.lower === key || q.uppers.includes(key)).map((q) => ({ ...q, lvl: q.lvl === 'ok' ? 'ok' : q.lvl }))];
   $('#plChecks').innerHTML = (checks.length ? '<ul class="checks">' + checks.map((q) => `<li class="${q.lvl}"><span class="ic">${{ err: '✖', warn: '!', info: 'i', ok: '✔' }[q.lvl] || 'i'}</span><span>${esc(q.msg)}</span></li>`).join('') + '</ul>' : '')
     + `<p class="note">${A.defined ? '' : 'Aucun profil saisi. '}Limites : ${esc(lim.label)}.${key.startsWith('r:') ? ' Les extrémités se calent sur la chaussée hôte (dévers 2,5 %) dès qu\'elle a un profil, ou sur la cote zC du giratoire.' : ''}</p>`;
   const step = parseNum($('#plStep').value) || 10;
@@ -3181,23 +3182,32 @@ function plDeversBand(ax) {
 // de l'autoroute), gabarit et intrados vus depuis l'autoroute, cadres et buses sous la chaussée de l'axe.
 function plAxisOverlay(key, ax, PL) {
   const items = [], zs = [];
-  const Hp = S.axpl?.get('hwy'), hwyZ = (sH) => (Hp?.defined ? Hp.PL.zAt(sH) : null);
-  const clr = (o) => (S.clear || []).find((q) => q.ouvr === o.name);
-  const halfHwy = S.D?.hwy?.E2 || 12;
-  for (const o of S.ouvr?.list || []) {
-    const sin = Math.max(0.3, Math.sin(((o.psi || 100) * Math.PI) / 200)), q = clr(o), bad = q?.lvl === 'err';
-    if (key === 'hwy') { // vu depuis l'autoroute : gabarit au-dessus de la chaussée, intrados du tablier
-      const zH = PL.zAt(o.sX), hw = o.width / 2 / sin;
-      items.push({ t: 'gab', s0: o.sX - hw, s1: o.sX + hw, z0: zH, z1: zH + o.gab, bad, label: `${o.name}${q ? ` · TA ${fmt(q.ta, 2)} m` : ''}` });
-      zs.push(zH + o.gab);
-      if (q) { const zS = zH + q.ta; items.push({ t: 'deck', s0: o.sX - hw, s1: o.sX + hw, z0: zS, z1: zS + o.h, bad }); zs.push(zS + o.h); }
-    } else if (o.key.startsWith(key + ':') && o.supRel?.length) { // voie portée : tablier et appuis
-      const sC = q?.key === key ? q.sX : ax.project(o.P)?.s;
-      if (sC == null) continue;
-      const ds = o.supRel.map((r) => r.d), a = Math.min(...ds) - (o.about || 0.5), b = Math.max(...ds) + (o.about || 0.5);
-      items.push({ t: 'span', s0: sC + a, s1: sC + b, h: o.h, sup: o.supRel.map((r) => ({ kind: r.kind, s: sC + r.d })), zH: hwyZ(o.sX), bad, label: `${o.name} · ${o.spans.map((v) => fmt(v, 1)).join(' + ')} m${q ? ` · TA ${fmt(q.ta, 2)} m` : ''}` });
-      const zH = hwyZ(o.sX);
-      if (zH != null) { const hw = halfHwy / sin; items.push({ t: 'gab', s0: sC - hw, s1: sC + hw, z0: zH, z1: zH + o.gab, bad }); zs.push(zH); }
+  // Ouvrages de franchissement (gabarit.js) : vu depuis la voie franchie, gabarit au-dessus du point le plus haut de la
+  // chaussée sous le tablier et intrados au point critique ; vu depuis la voie portée (voie secondaire, S-semi et boucle
+  // d'une tige, bretelle sur bretelle), tablier sous la ligne rouge, appuis et gabarit de la voie franchie.
+  const spans = new Set();
+  for (const q of S.clear || []) {
+    const bad = q.lvl === 'err', o = q.okey ? (S.ouvr?.list || []).find((x) => x.key === q.okey) : null, lowName = S.axpl?.get(q.lower)?.name || q.lower;
+    if (q.lower === key) {
+      const [s0, s1] = q.rLow;
+      if (!(s1 >= s0)) continue;
+      items.push({ t: 'gab', s0, s1, z0: q.zLowMax, z1: q.zLowMax + q.gab, bad, label: `${q.ouvr} · TA ${fmt(q.ta, 2)} m` });
+      items.push({ t: 'deck', s0, s1, z0: q.crit.zInt, z1: q.crit.zInt + q.h, bad });
+      zs.push(q.zLowMax + q.gab, q.crit.zInt + q.h);
+    } else if (q.uppers.includes(key)) {
+      const [a, b] = q.rUp[key] || [];
+      if (!(b >= a)) continue;
+      const sk = `${q.okey || q.ouvr}`;
+      if (!spans.has(sk)) {
+        spans.add(sk);
+        const sC = o ? ax.project(o.P)?.s : null;
+        if (o?.supRel?.length && sC != null) {
+          const ds = o.supRel.map((r) => r.d), s0 = sC + Math.min(...ds) - (o.about || 0.5), s1 = sC + Math.max(...ds) + (o.about || 0.5);
+          items.push({ t: 'span', s0: Math.max(0, s0), s1: Math.min(ax.len, s1), h: q.h, sup: o.supRel.map((r) => ({ kind: r.kind, s: sC + r.d })).filter((r) => r.s >= 0 && r.s <= ax.len), zH: q.zLowMax, bad, label: `${q.ouvr} · ${o.spans.map((v) => fmt(v, 1)).join(' + ')} m · TA ${fmt(q.ta, 2)} m` });
+        } else items.push({ t: 'span', s0: Math.max(0, a - 2), s1: Math.min(ax.len, b + 2), h: q.h, sup: [], zH: q.zLowMax, bad, label: `${q.ouvr}${q.generic ? ' (non implanté)' : ''} · TA ${fmt(q.ta, 2)} m` });
+      }
+      items.push({ t: 'gab', s0: a, s1: b, z0: q.zLowMax, z1: q.zLowMax + q.gab, bad, label: lowName });
+      zs.push(q.zLowMax);
     }
   }
   for (const g of S.cadres || []) {
