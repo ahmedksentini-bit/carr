@@ -203,6 +203,22 @@ export function termBendR(path, sEnd, s, sd, role, yAx, W = 200) {
   const Rh = Lw / -dl;
   return Rh > 20000 ? 0 : Math.max(0, Rh - yAx);
 }
+// Variante de termBendR pour une chaussée à courbes successives (de sens contraires, ou commençant loin du point A) :
+// rive comparée à sa tangente en A sur 10 à W m, flèche f du côté de la bretelle à la distance λ → R = λ² / 2f ; le plus
+// petit rayon est retenu (la courbure moyenne, qui s'annule sur une courbe en S, ne voit pas l'empiètement).
+export function termBendRmin(path, sEnd, s, sd, role, yAx, W = 300) {
+  const cl = (x) => Math.max(0, Math.min(sEnd, x));
+  const t0 = norm(sd === 1 ? pathTangentAt(path, cl(s)) : neg(pathTangentAt(path, cl(s)))), rn = neg(rot90(t0)), P0 = G.pathPointAt(path, cl(s));
+  const dirS = (role === 'div' ? 1 : -1) * sd;
+  let Rh = Infinity;
+  for (let lam = 10; lam <= W + 1e-9; lam += 5) {
+    const x = s + dirS * lam;
+    if (x < 0 || x > sEnd) break;
+    const v = sub(G.pathPointAt(path, x), P0), a = Math.abs(G.dot(v, t0)), f = G.dot(v, rn);
+    if (f > 1e-3 && a > 5) Rh = Math.min(Rh, (a * a) / (2 * f));
+  }
+  return Rh > 20000 ? 0 : Math.max(0, Rh - yAx);
+}
 // Arc d'extrémité de rayon Rr, tangent en A à la direction d'obliquité dir et tournant à droite (centre du côté de la
 // bretelle) : parcouru depuis A (divergent) ou jusqu'à A (convergent). P : sommet voisin (premier / dernier sommet).
 // keep : P est imposé (gabarit construit sur l'arc, ex. boucle de trompette) → T est le point de l'arc dont la tangente
@@ -538,13 +554,51 @@ export function buildEchangeur(prj, D) {
     if (both1) { const I = G.lineLine(Fs.A, Fs.dir, Ft.A, neg(Ft.dir)); if (I && I.t > 10 && G.dot(sub(I.p, Ft.A), neg(Ft.dir)) > 10) X = I.p; else warn('les lignes d\'obliquité des deux extrémités ne se coupent pas en avant : ajoutez un sommet.'); }
     // Bretelle à l'intérieur d'une chaussée en courbe : arc d'extrémité au lieu de la droite d'obliquité (termBendR). Un
     // sommet imposé à l'intérieur de cette droite (gabarit construit sur l'arc) est conservé : la tangente y passe.
-    const bendOf = (h, F, e) => (!both1 && up.length && h?.kind === 'hwy' ? e.Rt || termBendR(h.path, h.sEnd, F.s, h.sd, e.role, h.edgeOff(F.s) + 1 + rp.w / 2) : 0);
+    const bendOf = (h, F, e) => (!both1 && up.length && h?.kind === 'hwy' ? e.Rt || termBendRmin(h.path, h.sEnd, F.s, h.sd, e.role, h.edgeOff(F.s) + 1 + rp.w / 2, 300) : 0);
     const bS = Fs ? bendOf(hF, Fs, rp.from) : 0, bT = Ft ? bendOf(hT, Ft, rp.to) : 0;
     const inside = (F, P) => -G.cross(F.dir, sub(P, F.A)) > 0.5;
     const keepS = bS && inside(Fs, up[0]) ? { x: up[0].x, y: up[0].y } : null, keepT = bT && inside(Ft, up[up.length - 1]) ? { x: up[up.length - 1].x, y: up[up.length - 1].y } : null;
+    // Une seule courbe entre deux extrémités (sommet X à l'intersection des deux obliquités) dont l'une est raccordée à
+    // l'intérieur d'une chaussée en courbe : la droite X → A recouperait la chaussée (cas des directes d'une trompette sur
+    // autoroute en courbe en S). Guide des échangeurs (2013, version 2015) § 6.2 et 6.3, schémas 6-3, 6-4, 6-11, 6-12 :
+    // le bord gauche de la bretelle prolonge l'obliquité par une courbe de même rayon que le bord droit de la chaussée.
+    // On retient l'arc d'extrémité le plus court qui laisse la plate-forme hors de la chaussée ; X est repris à
+    // l'intersection de sa tangente et de l'obliquité de l'autre extrémité.
+    let b1 = null;
+    if (both1 && X) {
+      const halfP = rp.w / 2 + rp.bdg;
+      // écart de la plate-forme à la rive, là où la bretelle longe la chaussée (angle < 25° : un franchissement par
+      // ouvrage, près de la tige, n'est pas un empiètement)
+      const gap = (h, q, d) => { const pr = pathProject(h.path, q); if (!pr) return 1e9; if (Math.abs(G.cross(norm(pathTangentAt(h.path, pr.s)), d)) > Math.sin((25 * Math.PI) / 180)) return 1e9; return Math.abs(pr.off) - h.edgeOff(pr.s) - halfP; };
+      const clearOf = (h, A, pts) => Math.min(1e9, ...pts.filter((q) => dist(q.p, A) > 8).map((q) => gap(h, q.p, q.d)));
+      const segPts = (P, Q, n = 40) => { const d = norm(sub(Q, P)); return Array.from({ length: n + 1 }, (_, i) => ({ p: G.lerp(P, Q, i / n), d })); };
+      const tryEnd = (h, F, e, role, O) => {
+        if (h?.kind !== 'hwy' || !h.path) return null;
+  
+        if (clearOf(h, F.A, segPts(X, F.A, 80)) >= -0.05) return null; // la droite d'obliquité tient hors de la chaussée
+        const Rr = e.Rt || termBendRmin(h.path, h.sEnd, F.s, h.sd, role, h.edgeOff(F.s) + 1 + rp.w / 2, 500);
+        if (!(Rr > 0)) return null;
+        for (let L = 10; L <= Math.min(700, Rr * 0.9); L += 5) {
+          const a = termArc(F.A, F.dir, Rr, role, F.A, 0, true, L);
+          if (!a) continue;
+          // obliquité de l'autre extrémité : O.A + λ·dir (divergent) ou O.A − λ·dir (convergent), λ > 10 m
+          const I = G.lineLine(O.A, role === 'conv' ? O.dir : neg(O.dir), a.T, a.t);
+          if (!I || I.t < 10) continue;
+          const run = role === 'conv' ? G.dot(sub(a.T, I.p), a.t) : G.dot(sub(I.p, a.T), a.t);
+          if (run < 20) continue;
+          const arc = Array.from({ length: 9 }, (_, i) => termArc(F.A, F.dir, Rr, role, F.A, 0, true, (L * (i + 1)) / 10)).filter(Boolean).map((q) => ({ p: q.T, d: q.t }));
+          if (clearOf(h, F.A, [...segPts(I.p, a.T), ...arc]) < -0.05) continue;
+          return { end: role, X: I.p, arc: a };
+        }
+        warn(`extrémité ${role === 'conv' ? 'aval' : 'amont'} à l'intérieur d'une chaussée en courbe : aucun arc d'extrémité ne laisse la plate-forme hors de la chaussée — ajoutez un sommet.`);
+        return null;
+      };
+      b1 = tryEnd(hT, Ft, rp.to, 'conv', Fs) || tryEnd(hF, Fs, rp.from, 'div', Ft);
+      if (b1) X = b1.X;
+    }
     let al, tinS = 0, tinT = 0;
     for (let pass = 0; pass < 10; pass++) {
-      let tS = null, tT = null;
+      let tS = b1?.end === 'div' ? b1.arc : null, tT = b1?.end === 'conv' ? b1.arc : null;
       if (both1) up[0] = { ...up[0], ...(X || add(Fs.A, mul(Fs.dir, lamS))) };
       else {
         if (Fs && up.length) up[0] = { ...up[0], ...add(Fs.A, mul(Fs.dir, lamS)) };
