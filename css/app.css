@@ -472,3 +472,4 @@ details.pl-pts summary { cursor: pointer; margin: 8px 0 4px; font-weight: 600; f
 #tab-pl .ple { height: auto; }
 #tab-pl .ple-plot { flex: none; height: 280px; }
 #tab-pl .ple-cmd { font-size: 11px; }
+.plsvg .pl-oamark { fill: rgba(251,191,36,0.10); stroke: #f59e0b; stroke-width: 1; stroke-dasharray: 5 4; }

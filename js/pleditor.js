@@ -132,7 +132,7 @@ export function createPlEditor(host, hooks) {
       }
       o += `<path class="ple-cut" d="${cut}"/><path class="ple-fill" d="${fill}"/>`;
     }
-    if (ctx.overlay) o += ctx.overlay({ X, Y, vis: Y, m: { l: M.l, r: M.r, t: M.t, b: G.H - M.t - G.ph }, w: W, h: H, sMax: v.s1 });
+    if (ctx.overlay) o += ctx.overlay({ X, Y, vis: Y, m: { l: M.l, r: M.r, t: M.t, b: G.H - M.t - G.ph }, ph: G.ph, w: W, h: H, sMax: v.s1 });
     if (tn.length > 1) o += `<path class="ple-tn" d="${tn.map(([s, z], i) => `${i ? 'L' : 'M'}${X(s).toFixed(1)},${Y(z).toFixed(1)}`).join('')}"/>`;
     // ligne rouge : polygone des tangentes (sommets) puis courbe
     if (ctx.defined || PL.nodes.length > 1) {
