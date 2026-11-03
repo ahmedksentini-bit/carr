@@ -177,7 +177,7 @@ export function rampParams(prj, r0) {
     const tpl = num(e.tpl, Math.round((h.bau + J14_W + Math.max(bdg, 0.7)) * 100) / 100);
     const Lm = Math.max(0, (tpl - 1) / p);
     const ins = role === 'conv' ? num(e.ins, isH || h.lanes >= 2 ? 200 : 100) : 0;
-    return { role, ref: e.ref, host: h, isHwy: isH, s: num(e.s, 0), biseau, p, tpl, Lm, ins, Rt: Math.max(0, num(e.Rt, 0)), Lt: Math.max(0, num(e.Lt, 0)) };
+    return { role, ref: e.ref, host: h, isHwy: isH, s: num(e.s, 0), biseau, p, tpl, Lm, ins, Rt: num(e.Rt, 0), Lt: Math.max(0, num(e.Lt, 0)) };
   };
   const from = end(r.from, 'div'), to = end(r.to, 'conv');
   const auto = (e) => e.isHwy && e.host.roadKind === 'autoroute';
@@ -219,6 +219,22 @@ export function termBendRmin(path, sEnd, s, sd, role, yAx, W = 300) {
   }
   return Rh > 20000 ? 0 : Math.max(0, Rh - yAx);
 }
+// Bretelle à l'extérieur du virage : rayon de l'axe de la bretelle parallèle à la rive (R de l'axe hôte + yAx), d'après
+// la flèche de la rive du côté opposé à la bretelle (la plus forte sur W m) ; 0 si la chaussée est droite ou tourne vers
+// la bretelle.
+export function termBendROut(path, sEnd, s, sd, role, yAx, W = 300) {
+  const cl = (x) => Math.max(0, Math.min(sEnd, x));
+  const t0 = norm(sd === 1 ? pathTangentAt(path, cl(s)) : neg(pathTangentAt(path, cl(s)))), rn = neg(rot90(t0)), P0 = G.pathPointAt(path, cl(s));
+  const dirS = (role === 'div' ? 1 : -1) * sd;
+  let Rh = Infinity;
+  for (let lam = 10; lam <= W + 1e-9; lam += 5) {
+    const x = s + dirS * lam;
+    if (x < 0 || x > sEnd) break;
+    const v = sub(G.pathPointAt(path, x), P0), a = Math.abs(G.dot(v, t0)), f = -G.dot(v, rn);
+    if (f > 1e-3 && a > 5) Rh = Math.min(Rh, (a * a) / (2 * f));
+  }
+  return Rh > 20000 ? 0 : Rh + yAx;
+}
 // Arc d'extrémité de rayon Rr, tangent en A à la direction d'obliquité dir et tournant à droite (centre du côté de la
 // bretelle) : parcouru depuis A (divergent) ou jusqu'à A (convergent). P : sommet voisin (premier / dernier sommet).
 // keep : P est imposé (gabarit construit sur l'arc, ex. boucle de trompette) → T est le point de l'arc dont la tangente
@@ -226,11 +242,15 @@ export function termBendRmin(path, sEnd, s, sd, role, yAx, W = 300) {
 // et P est ramené sur cette tangente. Lfix : longueur d'arc imposée (gabarit qui a construit l'arc : P conservé).
 // Rend { PI (sommet de l'arc), P, T, t (direction de circulation en T), len } ou null.
 export function termArc(A, dir, Rr, role, P, dT, keep = false, Lfix = 0) {
-  if (!(Rr > 0)) return null;
-  const sg = role === 'div' ? -1 : 1, eta = role === 'div' ? 1 : -1, Ch = add(A, mul(neg(rot90(dir)), Rr));
+  // Rr < 0 : arc tournant à gauche (bretelle à l'extérieur du virage, centre du côté de la chaussée ; guide des
+  // échangeurs, schémas 6-4 et 6-12 : courbe à gauche de même rayon que le bord droit de la chaussée)
+  if (!(Math.abs(Rr) > 0)) return null;
+  const side = Rr < 0 ? -1 : 1;
+  Rr = Math.abs(Rr);
+  const sg = (role === 'div' ? -1 : 1) * side, eta = role === 'div' ? 1 : -1, Ch = add(A, mul(neg(rot90(dir)), side * Rr));
   const rot = (v, a) => ({ x: v.x * Math.cos(a) - v.y * Math.sin(a), y: v.x * Math.sin(a) + v.y * Math.cos(a) });
   const at = (f) => ({ T: add(Ch, rot(sub(A, Ch), sg * f)), t: rot(dir, sg * f) });
-  const g = keep ? (f) => { const { T, t } = at(f); return -G.cross(t, sub(P, T)); } : (f) => { const { T, t } = at(f); return eta * G.dot(sub(P, T), t) - dT; };
+  const g = keep ? (f) => { const { T, t } = at(f); return -side * G.cross(t, sub(P, T)); } : (f) => { const { T, t } = at(f); return eta * G.dot(sub(P, T), t) - dT; };
   const fMax = Math.min(Math.PI / 3, (2.5 * dist(A, P) + 100) / Rr);
   let f = Lfix > 0 ? Lfix / Rr : 0;
   if (!(Lfix > 0)) {
@@ -556,8 +576,8 @@ export function buildEchangeur(prj, D) {
     // sommet imposé à l'intérieur de cette droite (gabarit construit sur l'arc) est conservé : la tangente y passe.
     const bendOf = (h, F, e) => (!both1 && up.length && h?.kind === 'hwy' ? e.Rt || termBendRmin(h.path, h.sEnd, F.s, h.sd, e.role, h.edgeOff(F.s) + 1 + rp.w / 2, 300) : 0);
     const bS = Fs ? bendOf(hF, Fs, rp.from) : 0, bT = Ft ? bendOf(hT, Ft, rp.to) : 0;
-    const inside = (F, P) => -G.cross(F.dir, sub(P, F.A)) > 0.5;
-    const keepS = bS && inside(Fs, up[0]) ? { x: up[0].x, y: up[0].y } : null, keepT = bT && inside(Ft, up[up.length - 1]) ? { x: up[up.length - 1].x, y: up[up.length - 1].y } : null;
+    const inside = (F, P, b) => -Math.sign(b) * G.cross(F.dir, sub(P, F.A)) > 0.5;
+    const keepS = bS && inside(Fs, up[0], bS) ? { x: up[0].x, y: up[0].y } : null, keepT = bT && inside(Ft, up[up.length - 1], bT) ? { x: up[up.length - 1].x, y: up[up.length - 1].y } : null;
     // Une seule courbe entre deux extrémités (sommet X à l'intersection des deux obliquités) dont l'une est raccordée à
     // l'intérieur d'une chaussée en courbe : la droite X → A recouperait la chaussée (cas des directes d'une trompette sur
     // autoroute en courbe en S). Guide des échangeurs (2013, version 2015) § 6.2 et 6.3, schémas 6-3, 6-4, 6-11, 6-12 :
@@ -1069,7 +1089,7 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
   R2 = Math.round(R2 * 10) / 10;
   // Rayons comparés au bord intérieur (axe − 1,75 m) : Ri1 ≥ 100 m et Ri1 < 2·Ri2 (§ 3.2.2).
   const R1 = opt.R1 || Math.max(100, Math.min(Math.floor((2 * (R2 - half) - 1) / 5) * 5, 150)) + half, A1 = opt.A1 || Amin(R1);
-  let best = null;
+  const cands = [];
   for (let deg = 20; deg <= 75; deg += 5) { // angle de la droite entre R1 et R2 : le plus compact (divergent le plus proche)
     const f = (deg * Math.PI) / 180, uf = { x: Math.cos(f), y: -Math.sin(f) };
     const Tp = sub(Q, mul(rot90(uf), rho)); // tangence de la droite sur le cercle effectif (courbe à gauche)
@@ -1079,30 +1099,37 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
     const lam1 = 140 + T1 + 10, P1y = -yA - p3 * lam1;
     if (P1y <= Tp.y) continue;
     const P1 = add(Tp, mul(uf, (P1y - Tp.y) / uf.y));
-    if (dist(P1, P2) >= T1 + T2 + (opt.semiMargin ?? 5) && (!best || P1.x - lam1 > best.xS)) best = { P1, P2, xS: P1.x - lam1, deg, Tp, uf, T2 };
+    if (dist(P1, P2) >= T1 + T2 + (opt.semiMargin ?? 5)) cands.push({ P1, P2, xS: P1.x - lam1, deg, Tp, uf, T2 });
   }
-  if (!best) return { err: 'Gabarit impossible avec ces rayons.' };
+  if (!cands.length) return { err: 'Gabarit impossible avec ces rayons.' };
+  cands.sort((a, b) => b.xS - a.xS); // le plus compact d'abord (divergent le plus proche)
   // Autoroute en courbe : le premier sommet est placé sur la ligne d'obliquité réelle (chaussée courbe) et S.1,00 m est
   // déplacé pour garder l'alignement ≥ Lm ; la droite tangente à la grande courbe ne bouge pas, donc la grande courbe
   // (et la boucle concentrique) restent exactement celles qui seront dessinées.
-  {
+  // Chaque candidat est recalé sur la chaussée réelle ; on retient le plus compact dont les raccordements R1 / R2 ne se
+  // chevauchent pas une fois recalé (sur une courbe à gauche de petit rayon, la déflexion réelle en R1 croît).
+  let best = null;
+  for (const cand of cands) {
     const Lc0 = (q) => { const v = sub(q, P0); return { x: G.dot(v, tL), y: G.dot(v, nL) }; };
-    let xS = best.xS, P1 = best.P1;
+    let xS = cand.xS, P1 = cand.P1, okA = true;
     for (let k = 0; k < 12; k++) {
       const sx = Math.max(0, Math.min(hw.sEnd, st(xS))), tw = pathTangentAt(hw.path, sx), tLs = sgn > 0 ? tw : neg(tw), nLs = rot90(tLs);
       const S1 = Lc0(add(G.pathPointAt(hw.path, sx), mul(nLs, -yA))), dw = norm(sub(tLs, mul(nLs, p3))), d = { x: G.dot(dw, tL), y: G.dot(dw, nL) };
-      const I = G.lineLine(S1, d, best.Tp, best.uf);
+      const I = G.lineLine(S1, d, cand.Tp, cand.uf);
       if (!I) break;
       P1 = I.p;
       // alignement réel S.1,00 → début du raccordement R1 (même construction que le calcul des bretelles), ≥ Lm + 2 m
       const LmS = ((hw.H?.bau ?? 2.5) + J14_W + 0.7 - 1) / p3;
-      const alT = buildAlignment([S1, { ...P1, R: R1, A: A1 }, { ...best.P2, R: R2, A: A2 }, add(Rp, mul(u, Ys))]);
+      const alT = buildAlignment([S1, { ...P1, R: R1, A: A1 }, { ...cand.P2, R: R2, A: A2 }, add(Rp, mul(u, Ys))]);
+      okA = !alT.issues?.some((i) => i.lvl === 'err');
       const l0 = alT.elems[0]?.kind === 'L' ? alT.elems[0].len : 0, need = LmS + 2 + 10;
       if (Math.abs(need - l0) < 0.05) break;
       xS -= need - l0;
     }
-    if (dist(P1, best.P2) >= best.T2 + 5) { best.P1 = P1; best.xS = xS; }
+    if (dist(P1, cand.P2) >= cand.T2 + 5) { cand.P1 = P1; cand.xS = xS; } else okA = false;
+    if (okA) { best = cand; break; }
   }
+  if (!best) best = cands[0]; // aucun candidat recalé sans chevauchement : le message d'erreur de la S-semi suivra
   const sEnd = add(Rp, mul(u, Ys));
   const B2 = { ...base, id: ids[1], name: 'S-semi', from: { ref: far, s: st(best.xS), biseau: '', obl: '', tpl: '' }, to: { ref: 'free' },
     pis: [{ ...W(best.P1), R: R1, A: A1 }, { ...W(best.P2), R: R2, A: A2, semi: true }, W(sEnd)] };
@@ -1243,6 +1270,34 @@ export function deriveTrumpet(prj, D, semi, prev, opt = {}) {
         for (let j = 0; j <= 40 && !sol; j++) sol = geo(x, 40000 * Math.pow(250 / 40000, j / 40));
       if (!sol) return { err: 'Boucle impossible à raccorder sans empiéter sur l\'autoroute en courbe (convergent à l\'intérieur du virage) : agrandissez R2 de la S-semi ou déplacez l\'ouvrage.' };
       xE = sol.x; CV = convAt(xE); PIl = sol.P; Rt = sol.Rr; Lt = sol.Lt;
+    }
+    // Boucle à l'extérieur du virage : la rive s'écarte de la boucle plus vite que l'obliquité (x / R > 3 % au-delà de
+    // 3 % · R) et la droite tangente à la boucle rejoint la chaussée trop près de l'ouvrage. Le convergent se termine par un
+    // arc tournant à gauche, de rayon proche de celui de la rive (guide des échangeurs, schéma 6-12), relié à la boucle
+    // par leur tangente commune intérieure (courbes de sens contraires) ; Rt < 0 note ce sens.
+    const Ro = Rc > 0 ? 0 : termBendROut(hw.path, hw.sEnd, Math.max(0, Math.min(hw.sEnd, s0 + Cl.x * sgn)), sgn, 'conv', yA, 600);
+    if (!Rt && Ro > 0 && (!PIl || !(xE - PIl.x >= 100 && xE - PIl.x <= 300) || clear(along(Tl0, CV.E, 40)) < 0.3)) {
+      const rotV = (v, a) => ({ x: v.x * Math.cos(a) - v.y * Math.sin(a), y: v.x * Math.sin(a) + v.y * Math.cos(a) });
+      const geoL = (x, Rr) => {
+        const { E, d } = convAt(x), Ch = add(E, mul(rot90(d), Rr)), dl = sub(Ch, Cl), Dd = Math.hypot(dl.x, dl.y), c = (Rr + rhoL) / Dd;
+        if (!(c < 1)) return null;
+        let best = null;
+        for (const sgA of [1, -1]) {
+          const am = Math.atan2(dl.y, dl.x) + sgA * Math.acos(c), m = { x: Math.cos(am), y: Math.sin(am) }, t = neg(rot90(m));
+          const f = Math.atan2(G.cross(t, d), G.dot(t, d));
+          if (f > 1e-4 && f < Math.PI / 3 && (!best || f < best.f)) best = { m, t, f };
+        }
+        if (!best) return null;
+        const T1 = sub(Ch, mul(best.m, Rr)), Tl = add(Cl, mul(best.m, rhoL)), run = G.dot(sub(T1, Tl), best.t), P = G.lineLine(Lp, u, T1, best.t)?.p;
+        if (!P || run < L2 / 2 + 2 || run + Rr * best.f < need || !(x - P.x >= 100 && x - P.x <= 300)) return null;
+        const arc = Array.from({ length: 31 }, (_, i) => add(Ch, rotV(sub(E, Ch), (-best.f * i) / 30)));
+        if (clear([...along(Tl, T1, 20), ...arc]) < 0.3) return null;
+        return { x, Rr, P, Lt: Rr * best.f };
+      };
+      let sol = null;
+      for (let x = Cl.x + 60; x <= Cl.x + 700 && !sol; x += 5)
+        for (let j = 0; j <= 30 && !sol; j++) sol = geoL(x, Ro * Math.pow(4, j / 30));
+      if (sol) { xE = sol.x; CV = convAt(xE); PIl = sol.P; Rt = -sol.Rr; Lt = sol.Lt; }
     }
   }
   if (!PIl || -yA - Cl.y < rhoL * nn + 0.5 || xE - PIl.x < 100) return { err: 'La boucle déduite ne tient pas sous la chaussée : la grande courbe de la S-semi est trop proche de l\'autoroute.' };
@@ -1461,7 +1516,9 @@ export function halfCloverleaf(prj, D, click, mkId, opt = {}) {
   const E2c = X.median / 2 + X.bdg + X.lanes * X.wLane + X.bau, Lm = (Hm.bau + J14_W + 0.7 - 1) / p;
   const Rl = opt.Rl || 56, Al = opt.Al || 45, yA = hw.E1 + 1 + half, xJ = -(E2c + X.berme + 25), xE = -(E2c + X.berme + 10);
   const [Tai, Tao] = tangentLengths(Rl, Al, 0, Math.PI / 2), [Tbi, Tbo] = tangentLengths(Rl, 0, Al, Math.PI / 2 - Math.atan(p));
-  const lamB = Lm + Tbo + 3, PIb = { x: xE - lamB / n, y: -yA - (p * lamB) / n }, PIa = { x: PIb.x, y: PIb.y - (Tao + Tbi) };
+  // loopSlack : marge entre les deux sommets de la boucle (autoroute en courbe : le repère curviligne ouvre la déflexion
+  // et allonge les tangentes ; main.js relance avec une marge croissante tant que les raccordements se chevauchent)
+  const lamB = Lm + Tbo + 3, PIb = { x: xE - lamB / n, y: -yA - (p * lamB) / n }, PIa = { x: PIb.x, y: PIb.y - (Tao + Tbi + Math.max(0, opt.loopSlack || 0)) };
   const alL = buildAlignment([{ x: xJ, y: PIa.y }, { ...PIa, R: Rl, A: Al }, { ...PIb, R: Rl, A: Al, link: true }, { x: xE, y: -yA }]);
   const arc = alL.elems.find((e) => e.kind === 'A'), Q = arc.C, rhoL = Q.y - PIa.y; // rayon effectif de la boucle
   // Sortie : grande courbe à gauche concentrique à la boucle, à 4,50 m + surlargeur ; Ri1 ≥ 100 m et Ri1 < 2·Ri2.

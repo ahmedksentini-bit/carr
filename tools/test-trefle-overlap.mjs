@@ -96,6 +96,28 @@ for (const [kind, label] of [['half', 'demi-trèfle'], ['cloverleaf', 'trèfle']
   }
 }
 
+// --- Boucles sur autoroute en courbe : raccordements sans chevauchement (marge des boucles relancée comme main.js) ---
+for (const [kind, label] of [['half', 'demi-trèfle'], ['cloverleaf', 'trèfle']]) {
+  for (const R of [1500, -1500, 1000, -1000]) {
+    const prj = project(R), D0 = { prims: [], points: [] };
+    buildEchangeur(prj, D0);
+    let id = 0, errs = ['non construit'];
+    for (const sl of [0, 2, 4, 7, 11, 16, 22, 30]) {
+      const T = (kind === 'half' ? halfCloverleaf : cloverleaf)(prj, D0, { x: 0, y: 0 }, () => `r${++id}`, { crossK: 0, loopSlack: sl });
+      if (T.err) { errs = [T.err]; break; }
+      const D2 = { prims: [], points: [] };
+      buildEchangeur({ ...prj, crosses: [{ ...prj.crosses[0], axis: T.crossAxis || prj.crosses[0].axis }], ramps: T.ramps }, D2);
+      errs = D2.echIssues.filter((i) => i.lvl === 'err').map((i) => i.msg);
+      if (!errs.length) break;
+    }
+    check(`${label}, autoroute R = ${R} : boucles construites sans erreur`, !errs.length, errs.join(' | '));
+  }
+}
+for (const R of [-1000, -1500]) {
+  const g = generate('trumpet', R);
+  check(`trompette, autoroute R = ${R} (virage à gauche) : construite`, !g.err, g.err || '');
+}
+
 // --- Cas signalé : trompette sur autoroute à courbes successives (R 1 500 m en S), projet enregistré -------------------
 // La directe d'entrée n'a qu'un sommet (intersection des deux obliquités) : sa droite finale recoupait la chaussée sur
 // 104 m (courbure moyenne nulle sur la courbe en S, rayon local de la rive 1 500 m).
