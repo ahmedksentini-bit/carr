@@ -314,7 +314,26 @@ ou sur un fond topographique DXF.
     fenêtre (bouton Supprimer pour un cadre) ;
   - « Créer les ouvrages sur le plan » : un PICF (ou une buse) par franchissement, biais tiré de la direction de
     l'écoulement, remblai sur traverse tiré du profil en long ; numérotation OA, export PSIDA des dalots ;
-  - tests : `node tools/test-watershed.mjs`, `node tools/test-hydrology.mjs`, `node tools/test-culvert.mjs`.
+  - hypothèses de BVTrace selon le jeu choisi (la liste bascule les champs) : Tunisie — Pan, P10, P100, P0, station
+    Montana (table 18) ou a, b, c saisis, régionalisations Ghorbel / Kallel / Fersi / Frigui, couvert végétal,
+    Francou-Rodier, note DGPC 1054 ; FAO 54 — Pan, P10, P100, IDF d'une station Montana CIEH (plage) ou a, b saisis,
+    régressions CIEH, zone Orstom (déduite de Pan ou imposée), Kr10 de secours, α10 ; T = 10 ans en FAO 54 ;
+  - **fiche du bassin** (clic sur un bassin du plan, ou « Fiche complète » du tableau) : propriétés physiques
+    (surface, périmètre, Gravelius, rectangle équivalent, plus long chemin, pentes brute / équivalente / retenue, Ig,
+    altitudes, H5 / H95), courbe hypsométrique, profil de l'écoulement principal, temps de concentration, débits par
+    méthode, dispersion, débit retenu et cumul amont ; hydraulique de l'ouvrage : fil d'eau amont / aval (TN au droit
+    des têtes de l'ouvrage placé, sinon pente du thalweg à l'exutoire), pente du radier prise en compte, contrôle, HW,
+    cote de l'eau en amont et à la sortie, tirants normal / critique, vitesses, revanche ;
+  - **couper, fusionner, supprimer un bassin** (fiche du bassin, comme BVTrace) : coupe par une ligne tracée sur le
+    plan (la moitié qui garde le franchissement garde l'identifiant, l'autre reçoit son exutoire D8 et un nouvel
+    identifiant, ajoutée aux bassins amont), fusion de deux bassins, suppression (listes amont et liens des ouvrages
+    réécrits) ; couper et fusionner demandent la grille de la délimitation faite dans la session ;
+  - têtes d'ouvrage HDS-5 (clés 1 à 6 des dalots, 101 à 302 des buses) appliquées aux ouvrages placés et dessinées
+    (murette, murs en aile selon la famille d'angles) ; une tête, murette comprise, en deçà de l'entrée en terre du
+    talus de la voie portée (EET interpolée entre trois coupes successives au droit de la tête) est dessinée en rouge
+    et signalée avec l'allongement nécessaire du demi-ouvrage ;
+  - tests : `node tools/test-watershed.mjs`, `node tools/test-hydrology.mjs`, `node tools/test-culvert.mjs`,
+    `node tools/test-basinedit.mjs`.
 - **Ouvrages numérotés** : passages supérieurs, tiges, anneaux de giratoire dénivelé et cadres sont numérotés OA1, OA2…
   dans l'ordre des abscisses de l'autoroute (numéro cerclé sur le plan) ; le nom de chaque ouvrage se modifie dans
   l'onglet Ouvrages. **+ Passage supérieur** : dessinez une voie secondaire qui franchit l'autoroute, l'ouvrage est

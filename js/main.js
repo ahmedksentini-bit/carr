@@ -21,11 +21,12 @@ import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
 import { buildOuvrages, W_CLASSES, psidaLink, psidaProject, psidaWarnings, PSIDA_URL } from './ouvrage.js';
 import { buildProfils, listAxes, nearestAxis, profParams, profilsCsv } from './profils.js';
-import { cadreGeoms, drawCadre, cadreChecks, cadreLink, cadreProject, CADRE_DEF, PP_TYPES, parseSpansTxt, poutresSupports } from './cadres.js';
+import { cadreGeoms, drawCadre, cadreChecks, cadreLink, cadreProject, CADRE_DEF, PP_TYPES, parseSpansTxt, poutresSupports, cadreHeadPolys, HEAD_TYPES } from './cadres.js';
 import { axisSections, axisType, typeParams, typeText, axisPlatform } from './ptaxes.js';
 import { demFromSRTM, demFromTIN } from './hydro/dem.js';
 import { delineate } from './hydro/watershed.js';
-import { computeAll as hydroComputeAll, defaultHypotheses, listMontanaStations, TC_FORMULAS, FRANCOU_RODIER_REGIONS, suggestCiehRegressions } from './hydro/hydrology.js';
+import { splitCells, mergeCells, basinOf } from './hydro/basinedit.js';
+import { computeAll as hydroComputeAll, defaultHypotheses, listMontanaStations, TC_FORMULAS, FRANCOU_RODIER_REGIONS, suggestCiehRegressions, OPTION_LISTS, resolveMontanaStation, montanaAfricaIdf, KR10_GEOLOGY_CATEGORIES } from './hydro/hydrology.js';
 import { sizeCulvert, culvertHydraulics, inletsForShape, defaultInletFor } from './hydro/culvert.js';
 import { DCAT, planChecks, platformChecks, catText, designCatOf, clothoidNeed } from './roadcat.js';
 import { isVsa } from './vsa.js';
@@ -303,10 +304,14 @@ function update({ commit = true, panels = true } = {}) {
   } catch (e) { console.error(e); }
   if (S.D) { // cadres PICF / PIPO (numérotés avec les passages supérieurs)
     const TH = (S.prj.opts?.textH || 0.8) * 1.2;
+    // profils en long des axes porteurs (pour l'entrée en terre au droit des têtes)
+    let AXP = null;
+    if (CG.some((g) => g.ax && !g.err && g.K?.type !== 'poutres' && !g.ax.key.startsWith('b:'))) try { AXP = buildAxisProfiles(S.prj, S.D, listAxes(S.prj, S.D).filter((a) => !a.key.startsWith('b:')), junctionsZ(), S.tn?.tin || null); } catch (e) { console.error(e); }
     CG.forEach((g, i) => {
       const name = S.ouvr?.cadreNames?.get(g.c.id) || String(g.c.name || '').trim() || `OA${(S.ouvr?.list?.length || 0) + i + 1}`;
       if (g.err) { S.checks.push({ lvl: 'warn', group: 'Ouvrages', msg: `${name} : ${g.err}.` }); S.cadres.push({ ...g, name }); return; }
       let dr = null;
+      try { const tc = cadreHeadTalus(g, name, AXP); g.headBad = tc.bad; for (const q of tc.checks) S.checks.push({ ...q, group: 'Ouvrages' }); } catch (e) { console.error(e); }
       try { dr = drawCadre(g, name, (o) => S.D.prims.push(o), TH); } catch (e) { console.error(e); }
       for (const q of cadreChecks(g, name)) S.checks.push({ ...q, group: 'Ouvrages' });
       S.cadres.push({ ...g, name, nameAuto: S.ouvr?.cadreAuto?.get(g.c.id), poly: dr?.poly });
@@ -441,6 +446,38 @@ function axisDeversPrims(axes) {
 }
 
 // Carrefours et leur cote zC (calage des extrémités de bretelles qui y aboutissent).
+// Têtes d'ouvrage et talus : la tête entière — murette (mur de tête) et murs en aile compris — doit se trouver au-delà
+// de l'entrée en terre du talus de l'axe porteur (EET des profils en travers, ptaxes.js), sans quoi elle est noyée dans
+// le remblai. L'EET est lue sur au moins deux coupes successives encadrant la tête (abscisses extrêmes de ses points
+// sur l'axe, plus une coupe intermédiaire) et interpolée entre elles ; chaque sommet de la tête est comparé à l'EET de
+// son côté à son abscisse. Rend { bad: [tête −d, tête +d], checks }.
+function cadreHeadTalus(g, name, AXP) {
+  const out = { bad: [false, false], checks: [] }, K = g.K, ax = g.ax, tin = S.tn?.tin;
+  if (!K || K.type === 'poutres' || !ax || ax.key.startsWith('b:')) return out;
+  const A = AXP?.get(ax.key);
+  if (!tin || !A?.defined) { out.checks.push({ lvl: 'info', msg: `${name} : position des têtes par rapport au talus non vérifiée — ${!tin ? 'MNT absent (onglet Terrain)' : `profil en long de ${ax.name} à définir`}.` }); return out; }
+  const polys = cadreHeadPolys(g), m = G.rot90(g.d), E = [G.add(g.p, G.mul(g.d, -K.Lm)), G.add(g.p, G.mul(g.d, K.Lp))];
+  const sinA = Math.max(0.2, Math.abs(G.cross(g.t, g.d)));
+  [0, 1].forEach((k) => {
+    // sommets de la tête : contours (murette, ailes) et, à défaut, angles de l'ouvrage sur la ligne de tête
+    const corners = [K.W / 2, -K.W / 2].map((w) => { const a = G.add(g.p, G.mul(m, w)), den = G.cross(g.d, g.t); if (Math.abs(den) < 1e-9) return null; const q = G.cross(G.sub(E[k], a), g.t) / den; return G.add(a, G.mul(g.d, q)); }).filter(Boolean);
+    const pts = [...corners, ...(polys[k] || []).flat()].map((q) => ({ q, pr: ax.project(q) })).filter((o) => o.pr);
+    if (!pts.length) return;
+    const sg = Math.sign(pts.reduce((acc, o) => acc + o.pr.off, 0)) || 1;
+    const s0 = Math.max(0, Math.min(...pts.map((o) => o.pr.s))), s1 = Math.min(ax.len, Math.max(...pts.map((o) => o.pr.s)));
+    const st = [s0, (s0 + s1) / 2, s1 > s0 + 0.5 ? s1 : s0 + 1].map((s) => ({ s: Math.min(ax.len, s), name: '' }));
+    const secs = axisSections(S.prj, S.D, ax, A, st, tin).list.map((cs) => { const e = [cs.endL, cs.endR].find((q) => q && Math.sign(q.y) === sg); return e ? { s: cs.s, y: Math.abs(e.y), br: e.br } : null; }).filter(Boolean);
+    if (secs.length < 2) { out.checks.push({ lvl: 'info', msg: `${name} : entrée en terre introuvable au droit d'une tête (TN hors du MNT ou talus non fermé) — position de la tête non vérifiée.` }); return; }
+    const eetAt = (s) => { if (s <= secs[0].s) return secs[0].y; for (let i = 1; i < secs.length; i++) if (s <= secs[i].s) { const a = secs[i - 1], b = secs[i]; return a.y + ((b.y - a.y) * (s - a.s)) / Math.max(1e-9, b.s - a.s); } return secs[secs.length - 1].y; };
+    let worst = Infinity, eetW = 0;
+    for (const o of pts) { if (Math.sign(o.pr.off) !== sg) continue; const mg = Math.abs(o.pr.off) - eetAt(o.pr.s); if (mg < worst) { worst = mg; eetW = eetAt(o.pr.s); } }
+    if (!(worst < -0.01)) return;
+    out.bad[k] = true;
+    const left = (k === 1) === !!K.leftP, dL = Math.ceil((-worst / sinA) * 4) / 4;
+    out.checks.push({ lvl: 'err', msg: `${name} : tête côté ${left ? 'gauche' : 'droit'} de ${ax.name} dans le talus — ${K.murette ? 'la murette' : 'la tête'} est à ${fmt(-worst, 2)} m en deçà de l'entrée en terre (EET à ${fmt(eetW, 2)} m de l'axe, ${secs[0].br === 'D' ? 'déblai' : 'remblai'}, ${secs.length} coupes) ; allongez la demi-longueur ${left ? 'gauche' : 'droite'} d'au moins ${fmt(dL, 2)} m (tête dessinée en rouge).` });
+  });
+  return out;
+}
 function junctionsZ() {
   const out = [];
   // cote zC d'un carrefour : ignorée si elle s'écarte de plus de 30 m du terrain naturel (valeur par défaut jamais réglée)
@@ -498,7 +535,10 @@ function renderCadreEdit(o) {
       `<div class="row">${inp('n', 'Cellules', '1', '')}${inp('B', 'Ouverture B', '3,00')}${inp('H', 'Hauteur intérieure H', '2,50')}${inp('Hr', 'Remblai sur traverse', '1,50')}</div>` +
       `<div class="row">${inp('biais', 'Orientation (20 à 180, 100 = droit)', '100', 'gr')}${inp('Lg', 'Demi-longueur côté gauche', `${fmt((+c.L || K?.Lauto || 0) / 2, 2)} (auto)`)}${inp('Ld', 'côté droit', `${fmt((+c.L || K?.Lauto || 0) / 2, 2)} (auto)`)}${inp('s', 'Abscisse sur l\'axe porteur', '')}</div>` +
       `<div class="row">${inp('ep', 'Piédroits', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('et', 'Traverse', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('er', 'Radier', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}${inp('ei', 'Voiles intermédiaires', `${fmt(K?.eAuto ?? 0, 2)} (auto)`)}</div>` +
-      `<div class="row">${inp('wingA', 'Murs en aile : angle', '30', '°')}${inp('wingL', 'longueur', `${fmt(K?.wingL ?? 0, 2)} (auto)`)}</div>` +
+      (() => { const buse = c.type === 'buse', cur = String(K?.inlet ?? (buse ? 101 : 4)), opts = inletsForShape(buse ? 'circular' : 'box');
+        return `<div class="row"><label class="fld">Tête (configuration d'entrée HDS-5)<select data-cf="inlet">${opts.map((q) => `<option value="${q.key}"${String(q.key) === cur ? ' selected' : ''}>${esc(q.label)}${q.detail ? ` — ${esc(q.detail)}` : ''}</option>`).join('')}</select></label></div>` +
+          (buse ? '<p class="note">Une buse n\'a pas de mur en aile : mur de tête (murette) ou extrémité sans mur selon la tête choisie.</p>'
+            : K?.wingL > 0 || !K ? `<div class="row">${inp('wingA', `Murs en aile : angle${K?.head?.fix != null ? ' (imposé)' : K?.head?.range ? ` (${K.head.range[0]} à ${K.head.range[1]}°)` : K?.head?.set ? ` (${K.head.set.join(' ou ')}°)` : ''}`, String(K?.wingA ?? 45), '°')}${inp('wingL', 'longueur', `${fmt(K?.wingL ?? 0, 2)} (auto)`)}</div>` : '<p class="note">Mur frontal sans mur en aile.</p>'); })() +
       `<div class="row"><button id="cdZoom">Voir sur le plan</button><button id="cdDel">Supprimer l'ouvrage</button></div>` +
       `<p class="note">Orientation : angle de l'axe de l'ouvrage avec la voie portée, mesuré à gauche (100 gr = perpendiculaire ; en dessous et au-dessus de 100, biais d'un côté ou de l'autre ; biais ψ = min(angle, 200 − angle)) ; les têtes restent parallèles à la voie portée. Sur le plan : poignée ronde pleine au-delà d'une tête pour orienter, poignée centrale pour déplacer le long de l'axe, poignée carrée pour la longueur. Épaisseurs automatiques : e ≈ 0,15 + B/20 (ordre de grandeur des cadres Sétra PICF), à confirmer dans PSIDA. Longueur automatique : plate-forme + talus 3/2 jusqu'au niveau de la traverse, divisée par le sinus du biais.</p>`;
   }
@@ -509,7 +549,9 @@ function renderCadreEdit(o) {
     ['Traverse / radier', `${fmt(K.et, 2)} / ${K.type === 'pipo' ? 'semelles' : `${fmt(K.er, 2)} m`}`],
     ['Longueur', `${fmt(K.L, 2)} m = ${fmt(K.Lg, 2)} (côté gauche de la voie) + ${fmt(K.Ld, 2)} (côté droit)${+c.L || c.Lg != null || c.Ld != null ? '' : ' (automatique)'} ; orientation ${fmt(K.ang, 0)} gr, biais ψ ${fmt(K.psi, 1)} gr`],
     ['Remblai sur traverse', `${fmt(K.Hr, 2)} m`],
-    ['Murs en aile', K.wingL > 0.1 ? `${fmt(K.wingL, 2)} m à ${fmt(K.wingA, 0)}°` : 'sans'],
+    ['Tête', `${K.head?.label || ''}${K.murette ? ` ; murette ${fmt(0.3, 2)} m, débord 0,50 m` : ''}`],
+    ['Murs en aile', K.wingL > 0.1 ? `${fmt(K.wingL, 2)} m à ${fmt(K.wingA, 0)}° de l'axe de l'ouvrage` : 'sans'],
+    ...(g.headBad?.some(Boolean) ? [['Position des têtes', '⚠ tête dans le talus (dessinée en rouge) — voir Contrôles']] : []),
     ['Voie portée', `${esc(g.ax?.name || '')}, abscisse ${fmt(g.s, 2)} m`],
   ]) + (K.type === 'buse' ? '' : `<div class="row"><a class="btn primary" href="${esc(cadreLink(g, o.name, S.prj))}" target="_blank" rel="noopener" title="Ouvre psida.ksr-infra.org (onglet Cadres et portiques) avec le type, les dimensions, le biais, la longueur et le remblai de cet ouvrage">Ouvrir dans PSIDA ↗</a><button class="mini" data-cadrejson="${esc(c.id)}" title="Projet PSIDA (.json) à ouvrir avec le bouton Ouvrir de PSIDA">Exporter (.json)</button></div>`) + `</div>`;
 }
@@ -1530,6 +1572,7 @@ function drawOverlay(ctx, v, T) {
     for (const p of pts) { const [x, y] = v.w2s(p.x, p.y); ctx.fillRect(x - 3, y - 3, 6, 6); }
   };
   if (S.tool === 'axis' && S.draft.length) poly(cur ? [...S.draft, cur] : S.draft, T.rubber);
+  if (S.tool === 'bvcut' && S.bvCut?.pts.length) poly(cur ? [...S.bvCut.pts, cur] : S.bvCut.pts, '#f43f5e');
   if (S.tool === 'measure' && S.meas.length) poly(S.meas.length === 1 && cur ? [S.meas[0], cur] : S.meas, T.rubber);
   if (S.tool === 'profser' && S.profA) { const [x, y] = v.w2s(S.profA.p.x, S.profA.p.y); ctx.strokeStyle = T.rubber; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.stroke(); }
   if (S.snap) {
@@ -1537,7 +1580,7 @@ function drawOverlay(ctx, v, T) {
     ctx.strokeStyle = T.snap; ctx.lineWidth = 2; ctx.strokeRect(x - 6, y - 6, 12, 12);
   }
   // Surbrillance de l'élément survolé et de celui dont la fenêtre est ouverte.
-  for (const [el, a] of [[S.pop, 0.28], [S.hoverEl, 0.4], [S.osel && !S.pop && !$('#tab-ouvrages').hidden ? { type: 'ouvr', i: S.osel } : null, 0.3]]) {
+  for (const [el, a] of [[S.pop, 0.28], [S.bvSel ? { type: 'bv', i: S.bvSel } : null, 0.3], [S.hoverEl, 0.4], [S.osel && !S.pop && !$('#tab-ouvrages').hidden ? { type: 'ouvr', i: S.osel } : null, 0.3]]) {
     const g = el && elGeom(el);
     if (!g) continue;
     ctx.save(); ctx.globalAlpha = a; ctx.strokeStyle = T.sel; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.setLineDash([]);
@@ -1551,6 +1594,7 @@ function drawOverlay(ctx, v, T) {
 // Géométrie de surbrillance d'un élément : polylignes (monde) et demi-largeur (m).
 function elGeom(el) {
   const D = S.D;
+  if (el.type === 'bv') { const c = S.prj.hydro?.res?.crossings?.find((q) => q.id === el.i); return c?.ring?.length ? { lines: c.ring.map((r) => [...r, r[0]]), half: 0.8 } : null; }
   if (el.type === 'ouvr') { const p = ouvrPoly(el.i); return p?.length > 2 ? { lines: [[...p, p[0]]], half: 0.6 } : null; }
   if (el.type === 'ramp') { const R = D?.ramps?.[el.i]; return R?.al?.path ? { lines: [G.samplePath(R.al.path, 2)], half: R.rp.w / 2 + R.rp.bdd } : null; }
   if (el.type === 'hwy' || el.type === 'cross') { const r = el.type === 'hwy' ? D?.hwy : D?.crosses?.[el.i]; return r?.ok ? { lines: [G.samplePath(r.path, 4)], half: r.E2 + r.H.berme } : null; }
@@ -1597,6 +1641,7 @@ function hitElement(px, py) {
   const wq = { x: viewer.s2w(px, py)[0], y: viewer.s2w(px, py)[1] };
   for (const o of S.ouvr?.list || []) if (o.poly?.length > 2 && (inPolyW(wq, o.poly) || polyDist([...o.poly, o.poly[0]]) < 6)) cands.push({ type: 'ouvr', i: o.key, sc: -300 });
   for (const g of S.cadres || []) if (g.poly?.length > 2 && (inPolyW(wq, g.poly) || polyDist([...g.poly, g.poly[0]]) < 6)) cands.push({ type: 'ouvr', i: `c:${g.c.id}`, sc: -310 });
+  if (!cands.length) { const id = bvAt(wq); if (id) cands.push({ type: 'bv', i: id, sc: 5000 }); } // bassin versant : seulement hors des éléments du projet
   cands.sort((a, b) => a.sc - b.sc);
   return cands[0] ? { type: cands[0].type, i: cands[0].i } : null;
 }
@@ -1621,6 +1666,7 @@ function popTitle(el) {
 }
 function openPop(el, px, py) {
   closePop(false);
+  if (el.type === 'bv') { openBvSheet(el.i); return; }
   if (el.type === 'junction') { switchJunction(el.i, { zoom: false }); el = { type: 'ring', i: 0 }; }
   if (el.type === 'ramp') { S.rsel = el.i; refreshPanels(); }
   if (el.type === 'branch') selectBranch(el.i);
@@ -1722,6 +1768,7 @@ const PROMPTS = {
   pickx: 'Échangeur : cliquez la voie secondaire au croisement (trompette : du côté de la voirie ordinaire), ou dessinez une nouvelle voie secondaire en commençant du côté de la voirie ordinaire — Entrée / clic droit pour terminer.',
   trumpet: 'Trompette : cliquez au croisement de la route transversale (ou sur l\'autoroute à l\'endroit de l\'ouvrage), du côté de la voirie ordinaire.',
   measure: 'Mesure : cliquez deux points.',
+  bvcut: 'Couper un bassin : cliquez les points d\'une ligne en travers du bassin, en débordant de son contour — double-clic ou Entrée pour couper, Échap pour annuler.',
 };
 
 function setTool(t) {
@@ -1730,6 +1777,7 @@ function setTool(t) {
   if (!['ramp', 'trumpet', 'trefle', 'demitrefle'].includes(t)) S.rampKind = null;
   if (!['pickx', 'axis'].includes(t)) S.pendingTpl = null;
   if (t !== 'profser') S.profA = null;
+  if (t !== 'bvcut') S.bvCut = null;
   $$('.tools [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
   updateCursor(); setPrompt(); viewer.invalidate();
 }
@@ -2083,6 +2131,7 @@ function bindCanvas() {
     }
     if (e.button === 2) {
       if (S.tool === 'axis') finishAxis();
+      else if (S.tool === 'bvcut') bvFinishCut();
       else if (S.tool === 'measure') { S.meas = []; viewer.invalidate(); }
       else if (S.tool !== 'select') setTool('select');
       return;
@@ -2095,6 +2144,7 @@ function bindCanvas() {
     else if (S.tool === 'pickx') pickSecondary(w, px, py);
     else if (['profser', 'profone', 'cadre', 'poutres'].includes(S.tool)) pickOnAxis(w);
     else if (S.tool === 'measure') { S.meas.push(w); if (S.meas.length > 2) S.meas = [w]; showMeasure(); }
+    else if (S.tool === 'bvcut' && S.bvCut) { const q = S.bvCut.pts[S.bvCut.pts.length - 1]; if (!q || G.dist(q, w) > 0.01) S.bvCut.pts.push(w); }
     else if (S.tool === 'select') {
       const h = hitHandle(px, py);
       if (h?.kind === 'plus') { startExtend(h.e); return; }
@@ -2120,7 +2170,7 @@ function bindCanvas() {
       autosave();
     }
   });
-  cv.addEventListener('dblclick', () => { if (S.tool === 'axis') finishAxis(); });
+  cv.addEventListener('dblclick', () => { if (S.tool === 'axis') finishAxis(); else if (S.tool === 'bvcut') bvFinishCut(); });
   cv.addEventListener('pointerleave', () => { S.hoverEl = null; S.mouse = null; S.cursorW = null; S.snap = null; $('#tip').hidden = true; viewer.invalidate(); });
 }
 
@@ -2206,7 +2256,7 @@ function bindKeys() {
     if ($('#dlgHelp').open) return;
     switch (e.key) {
       case 'Escape': if (S.pop) { closePop(); return; } cancelTool(); return;
-      case 'Enter': if (S.tool === 'axis') finishAxis(); return;
+      case 'Enter': if (S.tool === 'axis') finishAxis(); else if (S.tool === 'bvcut') { e.preventDefault(); bvFinishCut(); } return; // sans preventDefault, l'appui atteindrait le premier bouton de la fiche rouverte
       case 'Backspace': if (S.tool === 'axis' && S.draft.length) { e.preventDefault(); S.draft.pop(); setPrompt(); viewer.invalidate(); } return;
       case 'Delete': if (S.pop) { popDelete(); return; } if (S.sel >= 0) deleteBranch(S.sel); return;
       case 'F3': e.preventDefault(); toggle('snap'); return;
@@ -3624,6 +3674,25 @@ function hyRdp(pts, tol) {
   return pts.filter((_, i) => keep[i]);
 }
 const hyThin = (ring, max = 1500, tol = 5) => { let r = ring, t = tol; for (let k = 0; k < 8 && r.length > max; k++, t *= 2) r = hyRdp(ring, t); return r.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 })); };
+// Enregistrement d'un bassin (projet) : identité, franchissement, morphométrie complète (BVTrace : fiche du bassin),
+// courbe hypsométrique (21 points) et profil de l'écoulement principal simplifié, contour simplifié.
+function hyRec(c, m, polys, grid) {
+  const ll = S.crs.geo ? S.crs.toLL(c.x, c.y) : null, r2 = (v, k = 2) => (Number.isFinite(v) ? Math.round(v * 10 ** k) / 10 ** k : v);
+  return {
+    id: c.id, key: c.key, traceName: c.traceName, pk: Math.round(c.pk * 100) / 100, x: c.x, y: c.y, flowDir: c.flowDir, totalKm2: c.totalKm2 ?? m.areaKm2, partitionKm2: c.partitionKm2, incrementalKm2: c.incrementalKm2, contains: c.contains || [], touchesEdge: c.touchesEdge ?? m.touchesEdge,
+    lon: ll?.lon ?? null, lat: ll?.lat ?? null, ncell: m.cells,
+    m: { perimeterKm: m.perimeterKm, lengthM: m.lengthM, dropM: m.dropM, slopePct: m.slopeTcPct ?? m.slopeEqPct ?? m.slopePct, slopeRawPct: m.slopePct, slopeEqPct: m.slopeEqPct, hMax: m.hMax, hMin: m.hMin, hMean: m.hMean, hMedian: m.hMedian, h5: m.h5, h95: m.h95, meanReliefM: m.meanReliefM, deltaHM: m.deltaHM, zOutlet: m.zOutlet, gravelius: m.gravelius, rectL: m.rectLengthKm, rectW: m.rectWidthKm, igMPerKm: m.globalSlope,
+      hyp: (m.hypsometry || []).map((q) => [r2(q.areaPct, 1), r2(q.z)]), prof: hyThinProf(m.profile || []), stream: m.streamPath ? hyThin(m.streamPath, 300, grid.cell * 0.5) : null },
+    ring: polys.map((poly) => hyThin(poly[0], 1500, grid.cell * 0.25)).filter((r) => r.length > 2),
+  };
+}
+// Profil de l'écoulement principal [{ d, z }] : au plus 80 points (Ramer-Douglas-Peucker en cote).
+function hyThinProf(pf) {
+  if (pf.length <= 80) return pf.map((q) => ({ d: Math.round(q.d * 10) / 10, z: Math.round(q.z * 100) / 100 }));
+  let tol = 0.2, out = pf;
+  for (let k = 0; k < 10 && out.length > 80; k++, tol *= 2) out = hyRdp(pf.map((q) => ({ x: q.d, y: q.z * 10 })), tol).map((q) => ({ d: q.x, z: q.y / 10 }));
+  return out.map((q) => ({ d: Math.round(q.d * 10) / 10, z: Math.round(q.z * 100) / 100 }));
+}
 async function runHydro() {
   const h = hyCfg(), axes = hyAxes().filter((ax) => hyAxisChecked(h, ax));
   if (!axes.length) { toast('Cochez au moins un axe.', 'warn'); return; }
@@ -3648,17 +3717,13 @@ async function runHydro() {
       margin *= 2;
     }
     h.res = {
-      date: new Date().toISOString(), dem: grid.source, cell: grid.cell, margin, minKm2,
-      crossings: R.crossings.map((c) => {
-        const m = c.metrics || {}, ll = S.crs.geo ? S.crs.toLL(c.x, c.y) : null;
-        return { id: c.id, key: c.key, traceName: c.traceName, pk: Math.round(c.pk * 100) / 100, x: c.x, y: c.y, flowDir: c.flowDir, totalKm2: c.totalKm2, partitionKm2: c.partitionKm2, incrementalKm2: c.incrementalKm2, contains: c.contains, touchesEdge: c.touchesEdge,
-          lon: ll?.lon ?? null, lat: ll?.lat ?? null,
-          m: { perimeterKm: m.perimeterKm, lengthM: m.lengthM, dropM: m.dropM, slopePct: m.slopeTcPct ?? m.slopeEqPct ?? m.slopePct, hMax: m.hMax, hMin: m.hMin, hMean: m.hMean, hMedian: m.hMedian, meanReliefM: m.meanReliefM, deltaHM: m.deltaHM, zOutlet: m.zOutlet, gravelius: m.gravelius, igMPerKm: m.globalSlope },
-          ring: (c.polygonTotal || []).map((poly) => hyThin(poly[0], 1500, grid.cell * 0.25)).filter((r) => r.length > 2) };
-      }),
+      date: new Date().toISOString(), rev: 0, dem: grid.source, cell: grid.cell, margin, minKm2,
+      crossings: R.crossings.map((c) => hyRec(c, c.metrics || {}, c.polygonTotal || [], grid)),
       streams: (R.streams || []).filter((st) => st.accKm2 >= Math.max(minKm2, 0.2)).map((st) => ({ pts: hyThin(st.pts, 600, grid.cell * 0.3), accKm2: st.accKm2 })),
       warnings: R.warnings,
     };
+    // session d'édition des bassins (couper, fusionner) : grille, hydrologie D8 et cellules de chaque bassin
+    S.hyWork = { date: h.res.date, grid, H: R.hydro, cells: new Map(R.crossings.map((c, k) => [c.id, R.rasters.totalCells[k]])), seeds: new Map(R.crossings.map((c) => [c.id, c.memberCells])) };
     S.hySig = null; update();
     info(`${h.res.crossings.length} franchissement(s) — ${grid.source}.`);
     toast(`${h.res.crossings.length} bassins versants délimités${R.warnings.length ? ` (${R.warnings.length} avertissement(s))` : ''}.`);
@@ -3671,7 +3736,7 @@ function computeHydro() {
   if (!R?.crossings?.length) { S.hyRes = null; return null; }
   const zRoad = (c) => { const A = S.axpl?.get(c.key); return A?.defined ? A.PL.zAt(c.pk) : null; };
   const linkOf = (c) => (S.prj.cadres || []).find((q) => q.hydro?.id === c.id && q.axis === c.key);
-  const sig = JSON.stringify([R.date, h.hyp, h.hyd, h.upstream, R.crossings.map((c) => [c.id, zRoad(c)]), (S.cadres || []).filter((g) => g.c.hydro).map((g) => [g.c.id, g.K?.type, g.K?.spans, g.K?.n, g.K?.B, g.K?.H, g.K?.L, g.K?.ang])]);
+  const sig = JSON.stringify([R.date, R.rev, h.hyp, h.hyd, h.upstream, !!S.tn, R.crossings.map((c) => [c.id, zRoad(c)]), (S.cadres || []).filter((g) => g.c.hydro).map((g) => [g.c.id, g.K?.type, g.K?.spans, g.K?.n, g.K?.B, g.K?.H, g.K?.L, g.K?.ang, g.K?.inlet, g.s])]);
   if (S.hyRes && S.hySig === sig) return S.hyRes;
   const hyp = { ...h.hyp };
   const ids = new Set(R.crossings.map((c) => c.id));
@@ -3686,25 +3751,85 @@ function computeHydro() {
     const zr = zRoad(c), zt = c.m.zOutlet;
     const half = (ax?.half || 6) + 1, L = Math.ceil(((2 * (half + 1.5 * 1.0 + 0.5)) / Math.sin((biais * Math.PI) / 200)) * 2) / 2;
     let sz = null, linked = linkOf(c), lg = linked ? (S.cadres || []).find((g) => g.c.id === linked.id) : null, verif = null;
+    // Cotes fil d'eau (radier) amont et aval : TN du MNT au droit des deux têtes de l'ouvrage placé (sens de
+    // l'écoulement au franchissement), sinon cote au franchissement ± pente du thalweg (fin de l'écoulement principal,
+    // bornée à 0,5 – 5 %) sur la demi-longueur ; la pente du radier qui en résulte entre dans le calcul hydraulique.
+    const inv = hyInverts(c, lg, lg?.K?.L ?? L, zt);
     const bridge = lg?.K?.type === 'poutres'; // pont à poutres placé : pas de calcul de dalot (revanche sous poutres sur la ligne d'eau du lit)
     if (Q > 0 && lg?.K && !bridge) { // ouvrage déjà placé (éventuellement modifié par l'utilisateur) : vérification de sa section
       const K = lg.K, section = K.type === 'buse' ? { shape: 'circular', diameter: K.B, cells: K.n } : { shape: 'box', width: K.B, height: K.H, cells: K.n };
-      const params = { length: K.L, StricklerK: h.hyd.StricklerK, ...(h.hyd.inlet && (K.type === 'buse') === (h.hyd.shape === 'circular') ? { inlet: h.hyd.inlet } : {}), ...(Number.isFinite(zt) ? { upstreamInvert: zt } : {}), ...(zr != null && Number.isFinite(zt) ? { roadLevel: zr, minFreeboard: h.hyd.minFreeboard, maxHeadwater: Math.max(0.5, zr - h.hyd.minFreeboard - zt) } : {}) };
+      const params = { length: K.L, StricklerK: h.hyd.StricklerK, inlet: K.inlet ?? h.hyd.inlet, ...(inv ? { upstreamInvert: inv.zam, slope: inv.J } : {}), ...(zr != null && inv ? { roadLevel: zr, minFreeboard: h.hyd.minFreeboard, maxHeadwater: Math.max(0.5, zr - h.hyd.minFreeboard - inv.zam) } : {}) };
       try { verif = culvertHydraulics(section, Q, params); } catch (e) { verif = { warnings: [e.message] }; }
     }
     if (Q > 0 && !verif && !bridge) {
-      const params = { length: L, StricklerK: h.hyd.StricklerK, ...(h.hyd.inlet ? { inlet: h.hyd.inlet } : {}), ...(Number.isFinite(zt) ? { upstreamInvert: zt } : {}), ...(zr != null && Number.isFinite(zt) ? { roadLevel: zr, minFreeboard: h.hyd.minFreeboard } : {}) };
-      try { sz = sizeCulvert(Q, { shape: h.hyd.shape, maxHeadwaterRatio: h.hyd.maxHeadwaterRatio, ...(zr != null && Number.isFinite(zt) ? { maxHeadwater: Math.max(0.5, zr - h.hyd.minFreeboard - zt) } : {}) }, params); } catch (e) { sz = { error: e.message }; }
+      const params = { length: L, StricklerK: h.hyd.StricklerK, ...(h.hyd.inlet ? { inlet: h.hyd.inlet } : {}), ...(inv ? { upstreamInvert: inv.zam, slope: inv.J } : {}), ...(zr != null && inv ? { roadLevel: zr, minFreeboard: h.hyd.minFreeboard } : {}) };
+      try { sz = sizeCulvert(Q, { shape: h.hyd.shape, maxHeadwaterRatio: h.hyd.maxHeadwaterRatio, ...(zr != null && inv ? { maxHeadwater: Math.max(0.5, zr - h.hyd.minFreeboard - inv.zam) } : {}) }, params); } catch (e) { sz = { error: e.message }; }
     }
     let ret = sz?.retained, rr = ret?.result;
     if (verif) { const K = lg.K; ret = { cells: K.n, width: K.B, height: K.H, diameter: K.type === 'buse' ? K.B : undefined }; rr = verif; biais = K.ang; }
     if (bridge) biais = lg.K.ang;
     const size = bridge ? `${lg.name || ''} pont à poutres ${lg.K.spans.map((v) => fmt(v, 1)).join(' + ')}`.trim() : verif ? `${lg.name || ''} ${lg.K.type === 'buse' ? `${lg.K.n > 1 ? `${lg.K.n} × ` : ''}Ø ${fmt(lg.K.B, 2)}` : `${lg.K.n > 1 ? `${lg.K.n} × ` : ''}${fmt(lg.K.B, 2)} × ${fmt(lg.K.H, 2)}`}`.trim() : ret ? (h.hyd.shape === 'circular' ? `${ret.cells > 1 ? `${ret.cells} × ` : ''}Ø ${fmt(ret.width ?? ret.diameter ?? ret.section?.diameter, 2)}` : `${ret.cells > 1 ? `${ret.cells} × ` : ''}${fmt(ret.width, 2)} × ${fmt(ret.height, 2)}`) : null;
-    const o = { c, r, Q, Qp, linked, lg, verif: !!verif, ok: rr ? !(rr.headwaterOk === false) && (rr.valid !== false) && !((rr.velocities?.outlet ?? rr.velocities?.full ?? 0) > 3.0001) && !(rr.freeboard != null && rr.freeboard < h.hyd.minFreeboard - 1e-6) : null, up: basins[i].upstreamUids, T: r.values?.returnPeriod ?? hyp.returnPeriod, biais, L, zr, zt, sz, ret, rr, size, hw: rr?.headwater, v: rr?.velocities?.outlet ?? rr?.velocities?.full ?? null };
+    const o = { c, r, Q, Qp, linked, lg, verif: !!verif, ok: rr ? !(rr.headwaterOk === false) && (rr.valid !== false) && !((rr.velocities?.outlet ?? rr.velocities?.full ?? 0) > 3.0001) && !(rr.freeboard != null && rr.freeboard < h.hyd.minFreeboard - 1e-6) : null, up: basins[i].upstreamUids, T: r.values?.returnPeriod ?? hyp.returnPeriod, biais, L, zr, zt, inv, sz, ret, rr, size, hw: rr?.headwater, v: rr?.velocities?.outlet ?? rr?.velocities?.full ?? null };
     out.list.push(o); out.byId[c.id] = o;
   });
   S.hyRes = out; S.hySig = sig;
   return out;
+}
+// Hypothèses hydrologiques (reprises des panneaux de BVTrace) : jeu Tunisie XOR FAO 54 — les champs basculent avec le
+// jeu. Tunisie : pluies Pan, P0, P10, P100 (SOGREAH, Ghorbel, Fersi), IDF Montana (station de la table 18, sinon a, b, c
+// saisis — aperçu quand une station est rattachée), régionalisations Ghorbel / Kallel / Fersi / Frigui, couvert végétal
+// (coefficient C), Francou-Rodier, note DGPC 1054. FAO 54 : Pan, P10, P100, régressions CIEH, zone et Kr10 Orstom,
+// coefficient de pointe, IDF (station Montana CIEH ou a, b saisis).
+function hyHypHtml(h, stations, opt) {
+  const hy = h.hyp, tn = hy.methodSet !== 'fao54';
+  const v = (x) => (x == null || x === '' ? '' : esc(String(x).replace('.', ',')));
+  const num = (k, lb, un = '', ph = '', title = '') => `<label class="fld"${title ? ` title="${esc(title)}"` : ''}><span class="lb">${lb}</span><input data-hy="${k}" type="text" inputmode="decimal" value="${v(hy[k])}"${ph ? ` placeholder="${esc(ph)}"` : ''}>${un ? `<span class="un">${un}</span>` : ''}</label>`;
+  const sel = (k, lb, list, cur) => `<label class="fld"><span class="lb">${lb}</span><select data-hy="${k}">${list.map((q) => opt(q.id, q.label, cur ?? '')).join('')}</select></label>`;
+  let out = `<div class="row"><label class="fld"><span class="lb">Jeu de méthodes</span><select data-hy="methodSet">${opt('tunisie', 'Tunisie (rationnelle, SOGREAH, Ghorbel, Kallel, Fersi, Frigui, Francou-Rodier)', hy.methodSet)}${opt('fao54', 'FAO 54 (CIEH, Orstom) — Afrique de l\'Ouest', hy.methodSet)}</select></label>` +
+    `<label class="fld"><span class="lb">Période de retour</span><select data-hy="returnPeriod"${tn ? '' : ' disabled title="FAO 54 : méthode CIEH décennale, T = 10 ans"'}>${HY_T.map((T) => opt(T, `${T} ans`, hy.returnPeriod)).join('')}</select></label>` +
+    `<label class="fld"><span class="lb">tc retenu (IDF)</span><select data-hy="tcFormula">${TC_FORMULAS.map((f) => opt(f.id, `${f.id} (${f.unit})`, hy.tcFormula)).join('')}</select></label></div>`;
+  if (tn) {
+    const st = hy.montanaStationCode ? resolveMontanaStation(hy.montanaStationCode, hy.returnPeriod) : null;
+    out += '<h4>Pluie</h4>' +
+      `<div class="row">${num('pan', 'Pluie annuelle moyenne Pan', 'mm', '', 'Ghorbel, Fersi, SOGREAH (domaine ≤ 500 mm)')}${num('p10', 'Pluie journalière décennale P10', 'mm', '', 'SOGREAH : pluie de période T interpolée entre P10 et P100')}${num('p100', 'Pluie journalière centennale P100', 'mm')}${num('p0', 'Seuil de ruissellement P0', 'mm', '', 'SOGREAH')}</div>` +
+      `<div class="row"><label class="fld"><span class="lb">Station Montana (table 18)</span><select data-hy="montanaStationCode">${opt('', 'aucune — a, b, c saisis', hy.montanaStationCode ?? '')}${stations.map((q) => opt(q.code, `${q.name}${q.d != null ? ` — ${fmt(q.d, 0)} km` : ''}`, hy.montanaStationCode ?? '')).join('')}</select></label>` +
+      ['montanaA', 'montanaB', 'montanaC'].map((k, i) => `<label class="fld"><span class="lb">${'abc'[i]}${i ? '' : ' (mm/h)'}</span><input data-hy="${k}" type="text" inputmode="decimal" value="${st ? esc(fmt([st.a, st.b, st.c][i], 3)) : v(hy[k] || '')}"${st ? ' disabled title="aperçu de la station rattachée (résolue bassin par bassin d\'après la période de retour)"' : ''}></label>`).join('') + '</div>' +
+      `<p class="note">I (mm/h) = a / (t + c)<sup>b</sup>, t en heures${st ? ` — ${esc(findMontanaStationName(hy.montanaStationCode))}, T = ${hy.returnPeriod} ans${st.tabulated ? '' : ` : période non tabulée, valeurs de T = ${st.tUsed} ans`}` : ' — sans station, intensité calculée avec a, b, c saisis'}.</p>` +
+      '<h4>Régionalisations et ruissellement</h4>' +
+      `<div class="row">${sel('ghorbelZone', 'Ghorbel', OPTION_LISTS.ghorbelZones, hy.ghorbelZone)}${sel('kallelRegion', 'Kallel', OPTION_LISTS.kallelRegions, hy.kallelRegion)}${sel('fersiSector', 'Fersi', OPTION_LISTS.fersiSectors, hy.fersiSector)}${sel('friguiRegion', 'Frigui', OPTION_LISTS.friguiRegions, hy.friguiRegion)}</div>` +
+      `<div class="row"><label class="fld"><span class="lb">Couvert végétal</span><input data-hyd="coverPct" type="text" inputmode="decimal" value="${v(h.hyd.coverPct)}"><span class="un">%</span></label>` +
+      `<label class="fld"><span class="lb">Francou-Rodier</span><select data-hy="francouRodierRegion">${opt('', 'non appliquée', hy.francouRodierRegion ?? '')}${FRANCOU_RODIER_REGIONS.map((r) => opt(r.id, `${r.label} (K ≈ ${r.suggestedK})`, hy.francouRodierRegion ?? '')).join('')}</select></label>` +
+      `<label class="chk"><input type="checkbox" data-hy="dgpc1054"${hy.dgpc1054 ? ' checked' : ''}> Note DGPC 1054 (période de retour)</label></div>` +
+      (hy.dgpc1054 ? `<div class="row">${sel('roadCategory', 'Catégorie de route', OPTION_LISTS.roadCategories, hy.roadCategory)}${sel('structureType', 'Type d\'ouvrage', OPTION_LISTS.structureTypes, hy.structureType)}${num('tjma', 'TJMA', 'v/j')}</div>` : '');
+  } else {
+    const afr = listMontanaStations().afrique, ma = hy.montanaAfrica, idf = ma ? montanaAfricaIdf(ma) : null;
+    out += '<h4>Pluie</h4>' +
+      `<div class="row">${num('pan', 'Pluie annuelle moyenne Pan', 'mm', '', 'régressions CIEH, zone Orstom (limite 850 mm), abattement')}${num('p10', 'Pluie journalière décennale P10', 'mm')}${num('p100', 'Pluie journalière centennale P100', 'mm')}</div>` +
+      `<div class="row"><label class="fld"><span class="lb">IDF : station Montana CIEH</span><select data-hy="montanaAfrica">${opt('', 'aucune — a, b saisis', ma?.station ?? '')}${afr.map((q) => opt(q.key, q.key, ma?.station ?? '')).join('')}</select></label>` +
+      (ma ? `<label class="fld"><span class="lb">Plage</span><select data-hy="montanaAfricaRange">${(afr.find((q) => q.key === ma.station)?.ranges || []).map((r, i) => opt(i, r.label, ma.range ?? 0)).join('')}</select></label>` : '') +
+      `<label class="fld"><span class="lb">a (mm/h)</span><input data-hy="idfA" type="text" inputmode="decimal" value="${idf?.ok ? esc(fmt(idf.a, 3)) : v(hy.idfA || '')}"${idf?.ok ? ' disabled' : ''}></label><label class="fld"><span class="lb">b</span><input data-hy="idfB" type="text" inputmode="decimal" value="${idf?.ok ? esc(fmt(idf.b, 3)) : v(hy.idfB || '')}"${idf?.ok ? ' disabled' : ''}></label></div>` +
+      `<p class="note">i (mm/h) = a · tc<sup>b</sup>, tc en minutes${idf?.ok ? ` — ${esc(idf.source)}` : idf ? ` — ${esc(idf.reason)}` : ''}.</p>` +
+      '<h4>CIEH et Orstom</h4>' +
+      `<div class="row"><label class="fld"><span class="lb">Régressions CIEH (n°)</span><input data-hy="ciehRegressionIds" type="text" value="${esc((hy.ciehRegressionIds || []).join(' ; '))}" placeholder="vide : proposées selon Pan et la longitude"></label>` +
+      `<label class="fld"><span class="lb">Zone Orstom</span><select data-hy="orstomZoneSel">${opt('auto', 'déduite de Pan (850 mm)', hy.orstomZoneAuto ? 'auto' : hy.orstomZone)}${opt('sahelienne', 'sahélienne', hy.orstomZoneAuto ? 'auto' : hy.orstomZone)}${opt('tropicale', 'tropicale', hy.orstomZoneAuto ? 'auto' : hy.orstomZone)}</select></label>` +
+      `<label class="fld"><span class="lb">Kr10 de secours (géologie)</span><select data-hy="kr10Geology">${opt('', 'aucun', hy.kr10Geology ?? '')}${KR10_GEOLOGY_CATEGORIES.map((q) => opt(q.categorie, q.categorie, hy.kr10Geology ?? '')).join('')}</select></label>` +
+      `${num('alpha10', 'Coefficient de pointe α10', '', '2,6')}</div>`;
+  }
+  return out;
+}
+const findMontanaStationName = (code) => listMontanaStations().tunisie.find((q) => q.code === code)?.name || code;
+function hyInverts(c, lg, L, zt) {
+  if (!Number.isFinite(zt)) return null;
+  const pf = c.m?.prof;
+  let i = 0.01, src = 'pente du thalweg par défaut (1 %)';
+  if (pf?.length >= 2) { const b = pf[pf.length - 1]; let a = pf[0]; for (let k = pf.length - 2; k >= 0; k--) { a = pf[k]; if (b.d - a.d >= 30) break; } const g = (a.z - b.z) / Math.max(1, b.d - a.d); if (g > 0) { i = Math.max(0.005, Math.min(0.05, g)); src = `pente du thalweg à l'exutoire (${fmt(g * 100, 2)} %${g < 0.005 || g > 0.05 ? `, bornée à ${fmt(i * 100, 2)} %` : ''})`; } }
+  let zam = zt + (i * L) / 2, zav = zt - (i * L) / 2;
+  if (lg?.K && S.tn?.tin && c.flowDir) {
+    const E = [G.add(lg.p, G.mul(lg.d, -lg.K.Lm)), G.add(lg.p, G.mul(lg.d, lg.K.Lp))], z = E.map((q) => tinZ(S.tn.tin, q.x, q.y));
+    const down = G.dot(lg.d, c.flowDir) > 0 ? 1 : 0; // tête aval : celle vers laquelle s'écoule l'eau
+    if (z.every((q) => q != null) && z[1 - down] - z[down] > 0.002 * L) { zam = z[1 - down]; zav = z[down]; src = 'TN du MNT au droit des têtes'; }
+  }
+  return { zam, zav, J: Math.max(0.002, (zam - zav) / Math.max(1, L)), L, src };
 }
 function renderHydro() {
   const tab = $('#tab-hydro'); if (!tab) return;
@@ -3721,20 +3846,13 @@ function renderHydro() {
   // station Montana : la plus proche du projet par défaut (projet géoréférencé)
   if (tn && hy.montanaStationCode == null && !h.montanaAsked && LL && stations[0]?.d != null) { hy.montanaStationCode = stations[0].code; h.montanaAsked = true; S.hySig = null; }
   const hsig = JSON.stringify([hy, h.hyd, stations.length ? stations[0].code : '']);
-  if ($('#hyHyp').dataset.sig !== hsig && !$('#hyHyp').contains(document.activeElement) && !$('#hyHyd').contains(document.activeElement)) {
+  // re-rendu sauf pendant une saisie au clavier (une liste ou une case garde le focus après son changement : le
+  // panneau doit tout de même basculer, par exemple de Tunisie à FAO 54)
+  const typing = (el) => el.contains(document.activeElement) && document.activeElement.matches('input[type=text], input:not([type])');
+  if ($('#hyHyp').dataset.sig !== hsig && !typing($('#hyHyp')) && !typing($('#hyHyd'))) {
     $('#hyHyp').dataset.sig = hsig;
     const opt = (v, t, cur) => `<option value="${esc(String(v))}"${String(cur) === String(v) ? ' selected' : ''}>${esc(t)}</option>`;
-    $('#hyHyp').innerHTML =
-      `<div class="row"><label class="fld"><span class="lb">Jeu de méthodes</span><select data-hy="methodSet">${opt('tunisie', 'Tunisie (rationnelle, SOGREAH, Ghorbel, Kallel, Fersi, Frigui, Francou-Rodier)', hy.methodSet)}${opt('fao54', 'FAO 54 (CIEH, Orstom) — Afrique de l\'Ouest', hy.methodSet)}</select></label>` +
-      `<label class="fld"><span class="lb">Période de retour</span><select data-hy="returnPeriod">${HY_T.map((T) => opt(T, `${T} ans`, hy.returnPeriod)).join('')}</select></label>` +
-      `<label class="fld"><span class="lb">tc retenu</span><select data-hy="tcFormula">${TC_FORMULAS.map((f) => opt(f.id, `${f.id} (${f.unit})`, hy.tcFormula)).join('')}</select></label></div>` +
-      (tn ? `<div class="row"><label class="fld"><span class="lb">Station Montana</span><select data-hy="montanaStationCode">${opt('', 'aucune (intensité non calculée)', hy.montanaStationCode ?? '')}${stations.map((st) => opt(st.code, `${st.name}${st.d != null ? ` — ${fmt(st.d, 0)} km` : ''}`, hy.montanaStationCode ?? '')).join('')}</select></label>` +
-        `<label class="fld"><span class="lb">Couvert végétal</span><input data-hyd="coverPct" type="text" inputmode="decimal" value="${esc(String(h.hyd.coverPct).replace('.', ','))}"><span class="un">%</span></label>` +
-        `<label class="fld"><span class="lb">Francou-Rodier</span><select data-hy="francouRodierRegion">${opt('', 'non appliquée', hy.francouRodierRegion ?? '')}${FRANCOU_RODIER_REGIONS.map((r) => opt(r.id, `${r.label} (K ≈ ${r.suggestedK})`, hy.francouRodierRegion ?? '')).join('')}</select></label>` +
-        `<label class="chk"><input type="checkbox" data-hy="dgpc1054"${hy.dgpc1054 ? ' checked' : ''}> Note DGPC 1054 (période de retour)</label></div>`
-        : `<div class="row"><label class="fld"><span class="lb">Pluie annuelle Pan</span><input data-hy="pan" type="text" inputmode="decimal" value="${esc(String(hy.pan))}"><span class="un">mm</span></label>` +
-        `<label class="fld"><span class="lb">Pluie journalière décennale P10</span><input data-hy="p10" type="text" inputmode="decimal" value="${esc(String(hy.p10))}"><span class="un">mm</span></label>` +
-        `<label class="fld"><span class="lb">Régressions CIEH (n°)</span><input data-hy="ciehRegressionIds" type="text" value="${esc((hy.ciehRegressionIds || []).join(' ; '))}" placeholder="vide : proposées selon Pan et la longitude"></label></div>`);
+    $('#hyHyp').innerHTML = hyHypHtml(h, stations, opt);
     const inl = inletsForShape(h.hyd.shape === 'circular' ? 'circular' : 'box');
     $('#hyHyd').innerHTML = `<div class="row"><label class="fld"><span class="lb">Type</span><select data-hyd="shape">${opt('box', 'dalots (n × B × H)', h.hyd.shape)}${opt('circular', 'buses (n × Ø)', h.hyd.shape)}</select></label>` +
       `<label class="fld"><span class="lb">Tête d'entrée</span><select data-hyd="inlet">${inl.map((q) => opt(q.key, q.label, h.hyd.inlet ?? defaultInletFor(h.hyd.shape === 'circular' ? 'circular' : 'box'))).join('')}</select></label>` +
@@ -3761,7 +3879,8 @@ function renderHydro() {
       ['Débit propre', sel.Qp > 0 ? `${fmt(sel.Qp, 2)} m³/s (${esc(sel.r.retained.method || '')})` : '—'],
       ['Bassins amont', sel.up?.length ? `${esc(sel.up.join(', '))} → débit cumulé ${sel.r.cumulative?.Q != null ? `${fmt(sel.r.cumulative.Q, 2)} m³/s` : esc(sel.r.cumulative?.error || '—')}` : `aucun${sel.c.contains?.length ? ` (amont hydrologique détecté : ${esc(sel.c.contains.join(', '))} — à saisir dans le tableau s'il se déverse dans cet ouvrage)` : ''}`],
       ['Débit retenu pour l\'ouvrage', sel.Q > 0 ? `${fmt(sel.Q, 2)} m³/s` : '—'],
-      ['Ouvrage', sel.size ? `${esc(sel.size)} m, L ${fmt(sel.L, 1)} m, biais ${sel.biais} gr — ${esc(sel.sz?.message || '')}` : esc(sel.sz?.message || sel.sz?.error || '—')],
+      ['Ouvrage', sel.size ? `${esc(sel.size)} m, L ${fmt(sel.lg?.K?.L ?? sel.L, 1)} m, biais ${sel.biais} gr — ${esc(sel.sz?.message || '')}` : esc(sel.sz?.message || sel.sz?.error || '—')],
+      ['Fil d\'eau amont / aval', sel.inv ? `${fmt(sel.inv.zam, 2)} / ${fmt(sel.inv.zav, 2)} m, pente ${fmt(sel.inv.J * 100, 2)} % (${sel.inv.src})${sel.rr?.upstreamWaterElev ? ` — eau en amont ${fmt(sel.rr.upstreamWaterElev, 2)} m` : ''}` : '—'],
       ['Cotes', `chaussée ${sel.zr != null ? fmt(sel.zr, 2) : 'à définir (profil en long)'} · TN au franchissement ${fmt(sel.zt, 2)} m${sel.zr != null && Number.isFinite(sel.zt) && sel.zr - sel.zt < 2 ? ` — chaussée à ${fmt(sel.zr - sel.zt, 2)} m seulement au-dessus du fil d'eau : relevez le profil en long pour loger l'ouvrage (hauteur + traverse + remblai + revanche)` : ''}`],
     ]) + (() => {
       const K = sel.lg?.K, r0 = sel.ret || {};
@@ -3781,15 +3900,238 @@ function renderHydro() {
         `<label class="fld">Orientation (gr, 100 = droit)<input data-hyoh="biais" type="text" inputmode="decimal" value="${val(K ? K.ang : sel.biais)}"></label></div>` +
         `<div class="row"><button data-hyohapply="${esc(sel.c.id)}" class="primary">${sel.linked ? 'Mettre à jour l\'ouvrage' : 'Placer cet ouvrage'}</button>${sel.linked ? `<button data-hyohreset="${esc(sel.c.id)}" title="Remet les dimensions et l'orientation proposées par le dimensionnement">Revenir à la proposition</button><button data-hyohgo="${esc(sel.linked.id)}">Fiche de l'ouvrage</button>` : ''}</div>` +
         `<p class="note">Sur le plan, l'ouvrage s'oriente par la poignée ronde pleine au-delà de sa tête, se déplace le long de l'axe par sa poignée centrale et s'allonge par la poignée carrée ; la section placée est vérifiée ici (HW, vitesse, revanche).</p>`);
-    })() + `<ul class="checks">${[...(sel.r.warnings || []), ...(sel.rr?.warnings || [])].map((w) => `<li class="warn"><span class="ic">!</span><span>${esc(w)}</span></li>`).join('')}</ul><div class="row"><button data-hyzoom="${esc(sel.c.id)}">Voir sur le plan</button></div>`;
+    })() + `<ul class="checks">${[...(sel.r.warnings || []), ...(sel.rr?.warnings || [])].map((w) => `<li class="warn"><span class="ic">!</span><span>${esc(w)}</span></li>`).join('')}</ul><div class="row"><button data-hyzoom="${esc(sel.c.id)}">Voir sur le plan</button><button class="primary" data-bvopen="${esc(sel.c.id)}">Fiche complète du bassin (propriétés, hypsométrie, cotes, couper / fusionner)</button></div>`;
   })() : '';
   const R = h.res;
   $('#hyNote').textContent = `${R.dem}, marge ${fmt(R.margin / 1000, 1)} km, bassin minimal ${fmt(R.minKm2, 2)} km². ${R.crossings.some((c) => c.touchesEdge) ? 'Des bassins (⚠) touchent le bord du MNT : élargissez la marge. ' : ''}${(R.warnings || []).join(' ')}`;
 }
+// --------------------------------------------------------- Fiche d'un bassin versant (BVTrace : panneau du bassin)
+// Clic sur un bassin du plan (ou bouton « Fiche » du tableau) : propriétés physiques, courbe hypsométrique, profil de
+// l'écoulement principal, calcul hydrologique complet et hydraulique de l'ouvrage (cotes fil d'eau amont / aval, ligne
+// d'eau, contrôle, vitesses, revanche) ; actions couper / fusionner / supprimer (basinedit.js, session de calcul).
+const bvRow = (k, v) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`;
+const bvTab = (rows) => `<table class="bv-kv"><tbody>${rows.filter(Boolean).join('')}</tbody></table>`;
+const f2 = (v, k = 2) => (v == null || !Number.isFinite(+v) ? '—' : fmt(+v, k));
+// Courbe simple (SVG) : pts [[x, y]], axes gradués, repères horizontaux optionnels [{ y, label }].
+function bvChart(pts, { xl, yl, w = 460, h = 230, marks = [], xMax } = {}) {
+  if (!pts?.length) return '<p class="note">Donnée absente.</p>';
+  const m = { l: 52, r: 12, t: 10, b: 34 }, xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const x0 = Math.min(0, ...xs), x1 = xMax ?? Math.max(...xs), yMin = Math.min(...ys, ...marks.map((q) => q.y)), yMax = Math.max(...ys, ...marks.map((q) => q.y));
+  const nice = (span) => { const r = span / 5, p = 10 ** Math.floor(Math.log10(r || 1)); return [1, 2, 2.5, 5, 10].map((k) => k * p).find((k) => k >= r) || p * 10; };
+  const sy = nice(yMax - yMin || 1), y0 = Math.floor(yMin / sy) * sy, y1 = Math.ceil(yMax / sy) * sy || y0 + sy, sx = nice(x1 - x0 || 1);
+  const X = (x) => m.l + ((x - x0) / (x1 - x0 || 1)) * (w - m.l - m.r), Y = (y) => h - m.b - ((y - y0) / (y1 - y0 || 1)) * (h - m.t - m.b);
+  let o = `<svg class="bv-chart" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">`;
+  for (let y = y0; y <= y1 + 1e-9; y += sy) o += `<line class="gr" x1="${m.l}" x2="${w - m.r}" y1="${Y(y)}" y2="${Y(y)}"/><text class="ax" x="${m.l - 4}" y="${Y(y) + 4}" text-anchor="end">${fmt(y, sy < 1 ? 1 : 0)}</text>`;
+  for (let x = Math.ceil(x0 / sx) * sx; x <= x1 + 1e-9; x += sx) o += `<line class="gr" y1="${m.t}" y2="${h - m.b}" x1="${X(x)}" x2="${X(x)}"/><text class="ax" x="${X(x)}" y="${h - m.b + 14}" text-anchor="middle">${fmt(x, sx < 1 ? 1 : 0)}</text>`;
+  for (const q of marks) o += `<line class="mk" x1="${m.l}" x2="${w - m.r}" y1="${Y(q.y)}" y2="${Y(q.y)}"/><text class="mk" x="${w - m.r - 2}" y="${Y(q.y) - 3}" text-anchor="end">${esc(q.label)}</text>`;
+  o += `<polyline class="ln" points="${pts.map((p) => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(' ')}"/>`;
+  o += `<text class="ax" x="${(m.l + w - m.r) / 2}" y="${h - 4}" text-anchor="middle">${esc(xl)}</text><text class="ax" transform="translate(12 ${(m.t + h - m.b) / 2}) rotate(-90)" text-anchor="middle">${esc(yl)}</text>`;
+  return o + '</svg>';
+}
+// Session de calcul (grille + D8) utilisable pour l'édition : même délimitation que le projet.
+function bvWork() {
+  const R = hyCfg().res, W = S.hyWork;
+  return W && R && W.date === R.date && R.crossings.every((c) => W.cells.has(c.id)) ? W : null;
+}
+function openBvSheet(id) {
+  const R = hyCfg().res; if (!R?.crossings?.some((c) => c.id === id)) return;
+  S.bvSel = id; S.hySel = id;
+  renderBvSheet();
+  const dlg = $('#dlgBV'); if (!dlg.open) dlg.showModal();
+  viewer.invalidate();
+}
+function renderBvSheet() {
+  const dlg = $('#dlgBV'); if (!dlg) return;
+  const h = hyCfg(), HR = computeHydro(), o = HR?.byId?.[S.bvSel];
+  if (!o) { if (dlg.open) dlg.close(); return; }
+  const c = o.c, mm = c.m || {}, r = o.r || {}, v = r.values || {}, tn = (v.methodSet || h.hyp.methodSet) !== 'fao54';
+  $('#bvTitle').textContent = `Bassin ${c.id} — ${c.traceName}, PK ${fmt(c.pk, 0)}`;
+  const others = h.res.crossings.filter((q) => q.id !== c.id);
+  const W = bvWork();
+  // --- propriétés physiques
+  const phys = bvTab([
+    bvRow('Surface totale', `${f2(c.totalKm2, 3)} km²${c.partitionKm2 != null && Math.abs(c.partitionKm2 - c.totalKm2) > 1e-4 ? ` (partition ${f2(c.partitionKm2, 3)} km²)` : ''}${c.incrementalKm2 != null && Math.abs(c.incrementalKm2 - c.totalKm2) > 1e-4 ? ` · surface propre ${f2(c.incrementalKm2, 3)} km²` : ''}`),
+    bvRow('Périmètre', `${f2(mm.perimeterKm, 2)} km`),
+    bvRow('Indice de compacité de Gravelius', f2(mm.gravelius, 3)),
+    bvRow('Rectangle équivalent', mm.rectL != null ? `${f2(mm.rectL, 2)} × ${f2(mm.rectW, 2)} km` : '—'),
+    bvRow('Plus long chemin hydraulique', `${f2((mm.lengthM || 0) / 1000, 3)} km`),
+    bvRow('Dénivelée le long du chemin', `${f2(mm.dropM, 1)} m`),
+    bvRow('Pente (brute / équivalente / retenue)', `${f2(mm.slopeRawPct, 2)} / ${f2(mm.slopeEqPct, 2)} / <b>${f2(mm.slopePct, 2)}</b> %`),
+    bvRow('Indice de pente global Ig', mm.igMPerKm != null ? `${f2(mm.igMPerKm, 1)} m/km` : v.igMPerKm != null ? `${f2(v.igMPerKm, 1)} m/km (déduit)` : '—'),
+    bvRow('Altitudes max / min / moyenne / médiane', `${f2(mm.hMax, 1)} / ${f2(mm.hMin, 1)} / ${f2(mm.hMean, 1)} / ${f2(mm.hMedian, 1)} m`),
+    bvRow('H5 % / H95 % (dénivelée utile)', `${f2(mm.h5, 1)} / ${f2(mm.h95, 1)} m (ΔH ${f2(mm.deltaHM ?? (mm.h5 - mm.h95), 1)} m)`),
+    bvRow('Exutoire (franchissement)', `X ${fmt(c.x, 2)}, Y ${fmt(c.y, 2)}, Z TN ${f2(mm.zOutlet, 2)} m${c.lat != null ? ` · ${fmt(c.lat, 5)}°, ${fmt(c.lon, 5)}°` : ''}`),
+    bvRow('Cellules du MNT', `${c.ncell ?? '—'} (${esc(h.res.dem || '')}, pas ${f2(h.res.cell, 1)} m)${c.touchesEdge ? ' — <span class="err">touche le bord du MNT : bassin tronqué, élargissez la marge</span>' : ''}`),
+  ]);
+  const hyp = (mm.hyp || []).map((q) => [q[0], q[1]]);
+  const hypSvg = bvChart(hyp, { xl: 'surface au-dessus de la cote (%)', yl: 'cote (m)', xMax: 100, marks: [mm.h5 != null ? { y: mm.h5, label: 'H5' } : null, mm.hMedian != null ? { y: mm.hMedian, label: 'H50' } : null, mm.h95 != null ? { y: mm.h95, label: 'H95' } : null].filter(Boolean) });
+  const prof = (mm.prof || []).map((q) => [q.d / 1000, q.z]);
+  const profSvg = bvChart(prof, { xl: 'distance depuis l\'amont (km)', yl: 'cote (m)' });
+  // --- hydrologie
+  const tcRows = v.tc ? Object.entries(v.tc).map(([k, q]) => `<tr${v.tcRetained?.formula === k ? ' class="on"' : ''}><td>${esc(k)}</td><td class="mono">${q?.value != null ? fmt(q.value, 2) : '—'} ${esc(q?.unit || '')}</td><td class="mono">${q?.minutes != null ? fmt(q.minutes, 1) : '—'} min</td></tr>`).join('') : '';
+  const DL = { rational: 'Rationnelle', sogreah: 'SOGREAH', ghorbel: 'Ghorbel', kallel: 'Kallel', fersi: 'Fersi', frigui: 'Frigui', francouRodier: 'Francou-Rodier', orstom: 'Orstom', cieh: 'CIEH' };
+  const qRows = Object.entries(v.discharges || {}).map(([k, q]) => {
+    const val = q != null && typeof q === 'object' ? q.Q ?? q.value : q;
+    return `<tr><td>${esc(DL[k] || k)}</td><td class="mono">${val != null && Number.isFinite(+val) ? fmt(+val, 2) : '—'}</td></tr>`;
+  }).join('');
+  const mt = v.montana, rc = v.runoffCoeff, st = v.stats;
+  const hydro = bvTab([
+    bvRow('Jeu de méthodes', tn ? 'Tunisie' : 'FAO 54 (CIEH, Orstom)'),
+    bvRow('Période de retour', `${o.T ?? v.returnPeriod ?? '—'} ans`),
+    bvRow('Pluies', `Pan ${f2(h.hyp.pan, 0)} mm · P10 ${f2(h.hyp.p10, 0)} mm · P100 ${f2(h.hyp.p100, 0)} mm${tn ? ` · P0 ${f2(h.hyp.p0, 0)} mm` : ''}`),
+    bvRow('Intensité', v.intensityMmH != null ? `<b>${fmt(v.intensityMmH, 2)} mm/h</b> (${esc(v.intensitySource || '')}${mt ? ` — ${esc(mt.stationName || mt.station || '')} a ${f2(mt.a, 3)}, b ${f2(mt.b, 3)}${mt.c != null ? `, c ${f2(mt.c, 3)}` : ''}${mt.tabulated === false ? `, T = ${mt.tUsed} ans` : ''}` : ''})` : '—'),
+    rc ? bvRow('Coefficient de ruissellement C', `${f2(rc.C, 3)} (${esc([rc.source, rc.slopeClass, rc.vegetationIndex != null ? `couvert ${rc.vegetationIndex}` : ''].filter(Boolean).join(' · '))})`) : '',
+    v.orstomZone ? bvRow('Zone Orstom', `${esc(v.orstomZone.id)} (${esc(v.orstomZone.source || '')})`) : '',
+    v.pm10 ? bvRow('Pluie moyenne Pm10 (abattement)', `${f2(v.pm10.value, 1)} mm (× ${f2(v.pm10.abattement, 3)})`) : '',
+    v.kr10 ? bvRow('Kr10', `${f2(v.kr10.value ?? v.kr10, 1)} %`) : '',
+    st ? bvRow('Dispersion des méthodes', `n ${st.n} · min ${f2(st.min)} · médiane ${f2(st.median)} · max ${f2(st.max)} m³/s · CV ${f2(st.cvPct, 0)} %`) : '',
+    bvRow('Débit propre retenu', o.Qp > 0 ? `<b>${fmt(o.Qp, 2)} m³/s</b> (${esc(r.retained?.method || '')})` : `— ${esc(v.recommendation || '')}`),
+    bvRow('Bassins amont', o.up?.length ? `${esc(o.up.join(', '))} → débit cumulé ${r.cumulative?.Q != null ? `${fmt(r.cumulative.Q, 2)} m³/s` : esc(r.cumulative?.error || '—')}` : 'aucun'),
+    bvRow('Débit de dimensionnement', o.Q > 0 ? `<b>${fmt(o.Q, 2)} m³/s</b>` : '—'),
+  ]);
+  // --- hydraulique
+  const rr = o.rr, inv = o.inv;
+  const yOut = rr ? (rr.control === 'inlet' ? rr.normalDepth : (rr.profileOutletDepth > 0 ? rr.profileOutletDepth : Math.max(rr.criticalDepth || 0, rr.tailwaterDepth || 0))) : null;
+  const zAv = rr?.downstreamInvert != null && Number.isFinite(rr.downstreamInvert) && rr.downstreamInvert !== 0 ? rr.downstreamInvert : inv?.zav;
+  const hydra = bvTab([
+    bvRow('Ouvrage', o.size ? `${esc(o.size)} m${o.verif ? ' (placé — vérification)' : ' (proposé)'}${o.verif ? (o.ok ? ' ✔' : ' ✖') : ''}` : esc(o.sz?.error || o.sz?.message || '—')),
+    bvRow('Longueur, biais', `${f2(o.lg?.K?.L ?? o.L, 2)} m · ${o.biais} gr`),
+    bvRow('Cote de la chaussée', o.zr != null ? `${fmt(o.zr, 2)} m` : 'profil en long de l\'axe à définir'),
+    bvRow('Fil d\'eau amont / aval', inv ? `<b>${fmt(inv.zam, 2)} / ${fmt(inv.zav, 2)} m</b> — pente ${fmt(inv.J * 100, 2)} % (${esc(inv.src)})` : '—'),
+    rr ? bvRow('Contrôle', `${esc(rr.labels?.control || rr.control || '')} · ${esc(rr.labels?.inletRegime || '')}`) : '',
+    rr ? bvRow('HW (charge amont / radier)', `${f2(rr.headwater, 3)} m (entrée ${f2(rr.hwInlet, 3)}, sortie ${f2(rr.hwOutlet, 3)})${rr.cellHeight > 0 ? ` · HW/D ${f2(rr.headwater / rr.cellHeight, 2)}` : ''}`) : '',
+    rr ? bvRow('Cote de l\'eau en amont (PHE)', `<b>${f2(rr.upstreamWaterElev, 2)} m</b>`) : '',
+    rr && zAv != null ? bvRow('Cote de l\'eau à la sortie', `<b>${f2(zAv + (yOut || 0), 2)} m</b> (radier aval ${f2(zAv, 2)} + ${f2(yOut, 3)} m)`) : '',
+    rr ? bvRow('Condition aval', esc(rr.labels?.outletCondition || rr.outletCondition || '')) : '',
+    rr ? bvRow('Tirants normal / critique', `${f2(rr.normalDepth, 3)} / ${f2(rr.criticalDepth, 3)} m · régime ${esc(rr.flowRegime || '')}${rr.criticalSlopePct != null ? ` · Ic ${f2(rr.criticalSlopePct, 2)} %` : ''}`) : '',
+    rr ? bvRow('Remplissage', `${f2(rr.fillRatioPct, 0)} %`) : '',
+    rr ? bvRow('Vitesses', `sortie <b>${f2(rr.velocities?.outlet, 2)} m/s</b>${rr.velocities?.outletBasis ? ` (${esc(rr.velocities.outletBasis)})` : ''} · pleine section ${f2(rr.velocities?.full, 2)} · critique ${f2(rr.velocities?.critical, 2)} m/s${(rr.velocities?.outlet ?? 0) > 3 ? ' — <span class="err">> 3 m/s : protection aval (enrochements, bassin de dissipation)</span>' : ''}`) : '',
+    rr ? bvRow('Revanche', rr.freeboard != null ? `${f2(rr.freeboard, 2)} m — ${esc(rr.labels?.freeboardCompliance || '')}${rr.freeboard < h.hyd.minFreeboard ? ` <span class="err">< ${fmt(h.hyd.minFreeboard, 2)} m</span>` : ''}` : 'cote de chaussée inconnue') : '',
+    rr?.bceom ? bvRow('Abaques BCEOM', esc(rr.bceomNote || '')) : '',
+  ]);
+  const warns = [...(r.warnings || []), ...(rr?.warnings || [])];
+  const chk = v.checklist?.journal?.length ? `<p class="note">Check-list FAO 54 : ${esc(v.checklist.journal.join(' ; '))}</p>` : '';
+  const acts = `<div class="row bv-acts">
+    <button data-bvact="zoom">Voir sur le plan</button>
+    <button data-bvact="table">Tableau et ouvrage</button>
+    <button data-bvact="cut" style="margin-left:auto"${W ? '' : ' disabled'} title="Tracez sur le plan une ligne en travers du bassin (clics, double-clic ou Entrée pour finir, Échap pour annuler) : la moitié qui contient le franchissement garde ${esc(c.id)}, l'autre devient un nouveau bassin avec son propre exutoire">✂ Couper</button>
+    <label class="fld inl">Fusionner avec <select id="bvMergeSel"${W ? '' : ' disabled'}>${others.map((q) => `<option value="${esc(q.id)}">${esc(q.id)} (${fmt(q.totalKm2, 3)} km²)</option>`).join('')}</select></label>
+    <button data-bvact="merge"${W && others.length ? '' : ' disabled'} title="Réunit les deux bassins ; l'identifiant du premier dans l'ordre est conservé">Fusionner</button>
+    <button data-bvact="del" class="danger" title="Retire le bassin (et son lien hydrologique avec un ouvrage placé)">Supprimer</button>
+  </div>${W ? '' : '<p class="note">Couper et fusionner demandent la grille de calcul : relancez « Délimiter les bassins versants » dans cette session (la suppression reste possible).</p>'}`;
+  $('#bvBody').innerHTML = acts + `<div class="bv-grid">
+    <section><h4>Propriétés physiques</h4>${phys}</section>
+    <section><h4>Courbe hypsométrique</h4>${hypSvg}<h4>Profil de l'écoulement principal</h4>${profSvg}</section>
+    <section><h4>Temps de concentration</h4><table class="bv-kv tc"><thead><tr><th>Formule</th><th>valeur</th><th></th></tr></thead><tbody>${tcRows}</tbody></table>${v.tcRetained ? `<p class="note">Retenu : ${esc(v.tcRetained.formula)} — ${fmt(v.tcRetained.minutes, 1)} min (choix « tc retenu » des hypothèses).</p>` : ''}
+      <h4>Débits Q${o.T ?? ''} par méthode (m³/s)</h4><table class="bv-kv"><tbody>${qRows || '<tr><td class="note">aucune méthode calculable</td></tr>'}</tbody></table></section>
+    <section><h4>Hydrologie</h4>${hydro}${chk}</section>
+    <section class="wide"><h4>Hydraulique de l'ouvrage</h4>${hydra}</section>
+  </div>` + (warns.length ? `<ul class="checks">${warns.map((w) => `<li class="warn"><span class="ic">!</span><span>${esc(w)}</span></li>`).join('')}</ul>` : '');
+}
+// Nouvel identifiant libre BV-nn.
+function bvNewId(R) { const used = new Set(R.crossings.map((c) => c.id)); for (let k = 1; ; k++) { const id = `BV-${String(k).padStart(2, '0')}`; if (!used.has(id)) return id; } }
+// Abscisse sur l'axe du franchissement d'un exutoire : projection si l'exutoire est à moins de max(100 m, 3 cellules)
+// de l'axe (BVTrace PkFor), sinon PK hérité.
+function bvPkOf(c, P, cell) {
+  const ax = hyAxes().find((a) => a.key === c.key), pr = ax?.project(P);
+  if (!pr) return c.pk;
+  const q = ax.at(pr.s).p;
+  return G.dist(q, P) <= Math.max(100, 3 * cell) ? pr.s : c.pk;
+}
+function bvCommit(msg) {
+  const h = hyCfg(); h.res.rev = (h.res.rev || 0) + 1;
+  S.hySig = null; S.hyRes = null; update(); renderBvSheet(); toast(msg);
+}
+function bvSplit(id, pts) {
+  const h = hyCfg(), R = h.res, W = bvWork(), k = R.crossings.findIndex((c) => c.id === id);
+  if (!W || k < 0) { toast('Session de calcul absente : relancez la délimitation des bassins.', 'warn'); return; }
+  const c = R.crossings[k], seeds = W.seeds.get(id) || [];
+  const sp = splitCells(W.grid, W.cells.get(id), pts, seeds);
+  if (sp.error) { toast(`Coupe de ${id} : ${sp.error}`, 'warn'); return; }
+  const bA = basinOf(W.grid, W.H, sp.A, seeds.filter((s) => sp.A.includes(s))), bB = basinOf(W.grid, W.H, sp.B);
+  const nid = bvNewId(R), P = bB.outletXY;
+  const recA = hyRec({ ...c, totalKm2: bA.m.areaKm2, partitionKm2: bA.m.areaKm2, incrementalKm2: bA.m.areaKm2, touchesEdge: bA.m.touchesEdge }, bA.m, bA.polygons, W.grid);
+  const recB = hyRec({ ...c, id: nid, x: P.x, y: P.y, pk: bvPkOf(c, P, W.grid.cell), flowDir: bB.flowDir, totalKm2: bB.m.areaKm2, partitionKm2: bB.m.areaKm2, incrementalKm2: bB.m.areaKm2, contains: [], touchesEdge: bB.m.touchesEdge }, bB.m, bB.polygons, W.grid);
+  R.crossings.splice(k, 1, recA, recB);
+  W.cells.set(id, sp.A); W.cells.set(nid, sp.B); W.seeds.set(id, seeds.filter((s) => sp.A.includes(s))); W.seeds.set(nid, [bB.outlet]);
+  // la moitié amont se déverse dans celle qui garde le franchissement : proposée comme bassin amont (cumul des débits)
+  const dz = (recB.m.zOutlet ?? 0) - (recA.m.zOutlet ?? 0);
+  if (dz >= 0) { h.upstream = h.upstream || {}; h.upstream[id] = [...new Set([...(h.upstream[id] || []), nid])]; }
+  bvCommit(`${id} coupé : ${id} ${fmt(recA.totalKm2, 3)} km² et ${nid} ${fmt(recB.totalKm2, 3)} km²${dz >= 0 ? ` (${nid} ajouté aux bassins amont de ${id})` : ''}.`);
+}
+function bvMerge(id, other) {
+  const h = hyCfg(), R = h.res, W = bvWork();
+  const ia = R.crossings.findIndex((c) => c.id === id), ib = R.crossings.findIndex((c) => c.id === other);
+  if (!W || ia < 0 || ib < 0 || ia === ib) { toast('Fusion impossible : session de calcul absente ou bassin inconnu.', 'warn'); return; }
+  const [keep, drop] = ia < ib ? [R.crossings[ia], R.crossings[ib]] : [R.crossings[ib], R.crossings[ia]];
+  const cells = mergeCells(W.cells.get(keep.id), W.cells.get(drop.id)), seeds = W.seeds.get(keep.id) || [];
+  const b = basinOf(W.grid, W.H, cells, seeds);
+  const rec = hyRec({ ...keep, totalKm2: b.m.areaKm2, partitionKm2: b.m.areaKm2, incrementalKm2: b.m.areaKm2, contains: [...new Set([...(keep.contains || []), ...(drop.contains || [])])].filter((q) => q !== drop.id && q !== keep.id), touchesEdge: b.m.touchesEdge }, b.m, b.polygons, W.grid);
+  R.crossings[R.crossings.indexOf(keep)] = rec; R.crossings.splice(R.crossings.indexOf(drop), 1);
+  W.cells.set(keep.id, cells); W.cells.delete(drop.id); W.seeds.delete(drop.id);
+  bvRename(drop.id, keep.id);
+  S.bvSel = keep.id;
+  bvCommit(`${drop.id} fusionné dans ${keep.id} : ${fmt(rec.totalKm2, 3)} km².`);
+}
+// Références à un bassin disparu : listes amont réécrites (ou purgées), ouvrages liés rattachés ou détachés.
+function bvRename(from, to) {
+  const h = hyCfg(), up = h.upstream || {};
+  if (up[from]) { if (to) up[to] = [...new Set([...(up[to] || []), ...up[from]])]; delete up[from]; }
+  for (const k of Object.keys(up)) { up[k] = [...new Set(up[k].map((q) => (q === from ? to : q)).filter((q) => q && q !== k))]; if (!up[k].length) delete up[k]; }
+  for (const c of S.prj.cadres || []) if (c.hydro?.id === from) { if (to && !(S.prj.cadres || []).some((q) => q !== c && q.hydro?.id === to && q.axis === c.axis)) c.hydro = { ...c.hydro, id: to }; else delete c.hydro; }
+}
+function bvDelete(id) {
+  const h = hyCfg(), R = h.res, k = R.crossings.findIndex((c) => c.id === id);
+  if (k < 0 || !confirm(`Supprimer le bassin ${id} ? Les ouvrages qui lui sont liés restent en place, sans lien hydrologique.`)) return;
+  R.crossings.splice(k, 1); S.hyWork?.cells.delete(id); S.hyWork?.seeds.delete(id);
+  bvRename(id, null);
+  if (S.hySel === id) S.hySel = null;
+  $('#dlgBV').close(); S.bvSel = null;
+  bvCommit(`${id} supprimé.`);
+}
+// Outil de coupe : polyligne sur le plan (S.bvCut = { id, pts }).
+function bvStartCut(id) {
+  $('#dlgBV').close();
+  setTool('bvcut'); S.bvCut = { id, pts: [] };
+  showTab('hydro');
+  toast(`Coupe de ${id} : cliquez une ligne en travers du bassin, en débordant de son contour ; double-clic ou Entrée pour couper, Échap pour annuler.`);
+}
+function bvFinishCut() {
+  const cut = S.bvCut; S.bvCut = null; setTool('select');
+  if (!cut || cut.pts.length < 2) { toast('Coupe annulée (au moins deux points).', 'warn'); return; }
+  bvSplit(cut.id, cut.pts);
+  openBvSheet(cut.id);
+}
+function bindBvSheet() {
+  $('#bvClose').addEventListener('click', () => $('#dlgBV').close());
+  $('#dlgBV').addEventListener('close', () => { S.bvSel = null; viewer.invalidate(); });
+  $('#dlgBV').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) { e.currentTarget.close(); return; }
+    const b = e.target.closest('[data-bvact]'); if (!b) return;
+    const id = S.bvSel, act = b.dataset.bvact, o = S.hyRes?.byId?.[id];
+    if (act === 'zoom' && o) { $('#dlgBV').close(); viewer.cx = o.c.x; viewer.cy = o.c.y; viewer.s = Math.max(viewer.s, 1.5); viewer.invalidate(); }
+    else if (act === 'table') { $('#dlgBV').close(); S.hySel = id; showTab('hydro'); renderHydro(); $('#hyDetail')?.scrollIntoView({ block: 'nearest' }); }
+    else if (act === 'cut') bvStartCut(id);
+    else if (act === 'merge') { const other = $('#bvMergeSel')?.value; if (other) bvMerge(id, other); }
+    else if (act === 'del') bvDelete(id);
+  });
+}
+// Bassin sous le point (monde) : plus petit bassin dont un contour contient le point.
+function bvAt(w) {
+  const R = S.prj.hydro?.res; if (!R?.crossings?.length || S.prj.opts?.vis?.BASSINS === false) return null;
+  const inside = (ring) => { let c = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const a = ring[i], b = ring[j]; if ((a.y > w.y) !== (b.y > w.y) && w.x < ((b.x - a.x) * (w.y - a.y)) / (b.y - a.y) + a.x) c = !c; } return c; };
+  let best = null;
+  for (const c of R.crossings) if ((c.ring || []).some(inside) && (!best || c.totalKm2 < best.totalKm2)) best = c;
+  return best?.id || null;
+}
 function hySet(path, v) {
-  const h = hyCfg(), [grp, k] = path;
+  const h = hyCfg(), [grp, k] = path, prevSet = h.hyp.methodSet;
   if (v === '' || v == null || (typeof v === 'number' && !Number.isFinite(v))) delete h[grp][k]; else h[grp][k] = v;
-  if (grp === 'hyp' && k === 'methodSet') h.hyp = { ...defaultHypotheses(v), returnPeriod: v === 'fao54' ? 10 : h.hyp.returnPeriod };
+  // Pan, P10 et P100 sont une seule grandeur chacune, partagées par les deux jeux (BVTrace, hydrologie-commune) ;
+  // FAO 54 : T forcée à 10 ans (CIEH décennale).
+  if (grp === 'hyp' && k === 'methodSet') { const o = h.hyp; h.hyp = { ...defaultHypotheses(v), pan: o.pan, p10: o.p10, p100: o.p100, tcFormula: o.tcFormula, returnPeriod: v === 'fao54' ? 10 : prevSet === 'fao54' ? 100 : o.returnPeriod }; }
+  // Tête d'entrée : appliquée aux ouvrages hydrauliques déjà placés de la même forme (dessin des têtes, vérification).
+  if (grp === 'hyd' && k === 'inlet') for (const c of S.prj.cadres || []) if (c.hydro && c.type !== 'poutres' && (c.type === 'buse') === (h.hyd.shape === 'circular')) c.inlet = v;
   if (grp === 'hyp' && k === 'francouRodierRegion') { const rg = FRANCOU_RODIER_REGIONS.find((r) => r.id === v); h.hyp.francouRodierK = rg ? rg.suggestedK : 0; }
   if (grp === 'hyd' && k === 'shape') delete h.hyd.inlet;
   S.hySig = null; $('#hyHyp').dataset.sig = ''; update();
@@ -3802,9 +4144,14 @@ function bindHydro() {
     const k = e.target.dataset.hy, kd = e.target.dataset.hyd; if (!k && !kd) return;
     if (kd) { hySet(['hyd', kd], parseNum(e.target.value)); return; }
     let v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
-    if (['returnPeriod', 'pan', 'p10'].includes(k)) v = parseNum(v);
+    if (['returnPeriod', 'pan', 'p0', 'p10', 'p100', 'montanaA', 'montanaB', 'montanaC', 'tjma', 'idfA', 'idfB', 'alpha10'].includes(k)) v = parseNum(v);
     if (k === 'ciehRegressionIds') v = String(v).split(/[;,\s]+/).map((x) => parseInt(x, 10)).filter((x) => x > 0);
     if (k === 'montanaStationCode' && !v) v = null;
+    const h = hyCfg();
+    if (k === 'montanaAfrica') { h.hyp.montanaAfrica = v ? { station: v, range: 0, T: 10 } : null; if (v) { h.hyp.idfA = 0; h.hyp.idfB = 0; } hySet(['hyp', '_'], null); return; }
+    if (k === 'montanaAfricaRange') { if (h.hyp.montanaAfrica) h.hyp.montanaAfrica = { ...h.hyp.montanaAfrica, range: +v }; hySet(['hyp', '_'], null); return; }
+    if (k === 'orstomZoneSel') { h.hyp.orstomZoneAuto = v === 'auto'; if (v !== 'auto') h.hyp.orstomZone = v; hySet(['hyp', '_'], null); return; }
+    if (k === 'kr10Geology' && !v) v = null;
     hySet(['hyp', k], v);
   });
   $('#hyHyd').addEventListener('change', (e) => { const kd = e.target.dataset.hyd; if (!kd) return; hySet(['hyd', kd], ['shape', 'inlet'].includes(kd) ? (kd === 'inlet' && /^\d+$/.test(e.target.value) ? +e.target.value : e.target.value) : parseNum(e.target.value)); });
@@ -3831,7 +4178,8 @@ function bindHydro() {
     const B = +(over.B ?? o.ret?.width ?? o.ret?.diameter ?? o.ret?.section?.diameter ?? 2), H = buse ? B : +(over.H ?? o.ret?.height ?? 2);
     const ax = hyAxes().find((a) => a.key === o.c.key), et = buse ? 0.08 + B / 12 : 0.15 + B / 20;
     const Hr = o.zr != null && Number.isFinite(o.zt) ? Math.max(0.3, Math.round((o.zr - o.zt - H - et) * 100) / 100) : 1;
-    const data = { type: buse ? 'buse' : 'picf', usage: 'eau', axis: o.c.key, axisName: ax?.name || o.c.traceName, s: o.c.pk, n: Math.max(1, Math.round(+(over.n ?? o.ret?.cells ?? 1))), B, H, biais: +(over.biais ?? o.biais), Hr, hydro: { id: o.c.id, Q: o.Q, T: o.T, hw: o.hw, v: o.v } };
+    const hyd = hyCfg().hyd, inlet = hyd.inlet != null && buse === (hyd.shape === 'circular') ? hyd.inlet : undefined;
+    const data = { type: buse ? 'buse' : 'picf', usage: 'eau', axis: o.c.key, axisName: ax?.name || o.c.traceName, s: o.c.pk, n: Math.max(1, Math.round(+(over.n ?? o.ret?.cells ?? 1))), B, H, biais: +(over.biais ?? o.biais), Hr, hydro: { id: o.c.id, Q: o.Q, T: o.T, hw: o.hw, v: o.v }, ...(inlet != null ? { inlet } : {}) };
     S.prj.cadres = S.prj.cadres || [];
     const ex = S.prj.cadres.find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key);
     if (ex) { const keep = { s: ex.s, L: ex.L, Lg: ex.Lg, Ld: ex.Ld, name: ex.name }; Object.assign(ex, data, over.keepPos === false ? {} : { s: keep.s }); if (over.keepL !== false) for (const f of ['L', 'Lg', 'Ld']) if (keep[f] != null) ex[f] = keep[f]; } else S.prj.cadres.push({ id: uid(), ...data });
@@ -3848,6 +4196,7 @@ function bindHydro() {
     hyPlace(o, over); if (S.hyohType) delete S.hyohType[o.c.id]; S.hySig = null; update(); toast(`${o.c.id} : ouvrage ${o.linked ? 'mis à jour' : 'placé'} — section vérifiée dans le tableau.`);
   });
   $('#hyDetail').addEventListener('change', (e) => { const el = e.target.closest('[data-hyoh="type"]'); if (!el || !S.hySel) return; S.hyohType = { ...(S.hyohType || {}), [S.hySel]: el.value }; renderHydro(); });
+  $('#hyDetail').addEventListener('click', (e) => { const b = e.target.closest('[data-bvopen]'); if (b) openBvSheet(b.dataset.bvopen); });
   $('#hyDetail').addEventListener('click', (e) => { const b = e.target.closest('[data-hyzoom]'); const o = b && S.hyRes?.byId?.[b.dataset.hyzoom]; if (!o) return; viewer.cx = o.c.x; viewer.cy = o.c.y; viewer.s = Math.max(viewer.s, 1.5); viewer.invalidate(); });
   $('#btnHyClear').addEventListener('click', () => { if (S.prj.hydro) delete S.prj.hydro.res; S.hyRes = null; update(); });
   $('#btnHyCsv').addEventListener('click', () => {
@@ -4177,7 +4526,8 @@ function bindUI() {
   bindTerrain();
   bindPL();
   bindPT();
-  bindHydro();
+  bindHydro(); bindBvSheet();
+  if (/[?&]debug\b/.test(location.search)) window.__gira = { S, get viewer() { return viewer; } }; // tests de navigateur (?debug)
   bind3D();
   bindEch();
   $('#btnImportDxf').addEventListener('click', () => $('#fileDxf').click());
