@@ -222,6 +222,12 @@ ou sur un fond topographique DXF.
   losange) est rendu rectiligne (perpendiculaire à l'autoroute pour le trèfle et le demi-trèfle, dans la direction du
   croisement pour le losange) et raccordé de part et d'autre au tracé saisi par une courbe (250 m sur route, Rdn
   au moins sur autoroute) ; le sens du tracé et les abscisses des raccordements sont conservés.
+- **Bretelles sur chaussée en courbe** (guide des échangeurs 2013, version 2015, § 6.2 et 6.3, schémas 6-3, 6-4, 6-11,
+  6-12) : à l'intérieur du virage, le bord gauche de la bretelle prolonge l'obliquité par une courbe de même rayon que le
+  bord droit de la chaussée (arc d'extrémité) au lieu d'une droite qui recouperait la chaussée. Le rayon est celui de la
+  rive vue depuis le point S / E.1,00 (flèche la plus forte sur 300 m), y compris sur une autoroute à courbes
+  successives de sens contraires ; une bretelle à un seul sommet (directe de trompette) reçoit l'arc le plus court qui
+  laisse sa plate-forme hors de la chaussée.
 - **Trompette sur autoroute en courbe** : la S-semi est recalculée avec un alignement intermédiaire plus long si ses
   deux raccordements se chevauchent une fois le premier sommet reporté sur la ligne d'obliquité réelle ; les trompettes
   d'un projet ouvert sont recalculées dès l'ouverture.

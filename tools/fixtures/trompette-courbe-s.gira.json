@@ -1,0 +1,263 @@
+{
+ "app": "GIRA",
+ "version": 1,
+ "name": "Trompette sur autoroute en courbe en S (cas signalé)",
+ "context": "urbain",
+ "kind": "giratoire",
+ "hwy": {
+  "on": true,
+  "name": "A1",
+  "cat": "L2",
+  "V": "",
+  "lanes": 2,
+  "wLane": "",
+  "bau": "",
+  "bdg": "",
+  "median": "",
+  "berme": "",
+  "pk0": "",
+  "axis": [
+   {
+    "x": 666102.2364362902,
+    "y": 3937840.7095910897,
+    "r": ""
+   },
+   {
+    "x": 665906.8549574463,
+    "y": 3938022.628776898,
+    "r": 1500
+   },
+   {
+    "x": 665739.0753380214,
+    "y": 3938137.991003802,
+    "r": 1500
+   },
+   {
+    "x": 665397.860272618,
+    "y": 3938325.1976745185,
+    "r": 1500
+   },
+   {
+    "x": 665300.3018164841,
+    "y": 3938378.9110270464,
+    "r": 1500
+   },
+   {
+    "x": 664856.980271496,
+    "y": 3938698.874332661,
+    "r": ""
+   }
+  ]
+ },
+ "ramps": [
+  {
+   "cat": "b50",
+   "lanes": 1,
+   "pente": "",
+   "id": "bmw0f56nrj",
+   "name": "E-boucle",
+   "from": {
+    "ref": "free"
+   },
+   "to": {
+    "ref": "hwy2",
+    "s": 549.54,
+    "ins": "",
+    "biseau": "",
+    "obl": "",
+    "tpl": "",
+    "Rt": "",
+    "Lt": ""
+   },
+   "pis": [
+    {
+     "x": 665794.149,
+     "y": 3938625.943
+    },
+    {
+     "x": 665533.965,
+     "y": 3938231.578,
+     "R": 56.4,
+     "A": 45,
+     "loop": true
+    }
+   ],
+   "gen": "trompette",
+   "grp": "bmw0f56nrk",
+   "role": "boucle"
+  },
+  {
+   "cat": "b50",
+   "lanes": 1,
+   "pente": "",
+   "id": "bmw0f56nrk",
+   "name": "S-semi",
+   "from": {
+    "ref": "hwy2",
+    "s": 1084.98,
+    "biseau": "",
+    "obl": "",
+    "tpl": ""
+   },
+   "to": {
+    "ref": "free"
+   },
+   "pis": [
+    {
+     "x": 665377.088,
+     "y": 3938300.135,
+     "R": 116.75,
+     "A": 70
+    },
+    {
+     "x": 665406.624,
+     "y": 3938030.394,
+     "R": 62,
+     "A": 45,
+     "semi": true
+    },
+    {
+     "x": 665797.905,
+     "y": 3938623.465
+    }
+   ],
+   "gen": "trompette",
+   "grp": "bmw0f56nrk",
+   "role": "semi",
+   "tp": {
+    "crossK": 0,
+    "click": {
+     "x": 665727.901,
+     "y": 3938521.445
+    },
+    "R2": 62,
+    "gap": 0,
+    "tpc": 1,
+    "Ys": "",
+    "P0": {
+     "x": 665545.122,
+     "y": 3938244.403
+    },
+    "u": {
+     "x": 0.550699,
+     "y": 0.834704
+    }
+   }
+  },
+  {
+   "cat": "b50",
+   "lanes": 1,
+   "pente": "",
+   "id": "bmw0f56nrl",
+   "name": "S-directe",
+   "from": {
+    "ref": "hwy1",
+    "s": 359.77,
+    "biseau": "",
+    "obl": "",
+    "tpl": ""
+   },
+   "to": {
+    "ref": "bmw0f56nrk",
+    "s": 794,
+    "ins": "",
+    "biseau": "",
+    "obl": "",
+    "tpl": ""
+   },
+   "pis": [
+    {
+     "x": 665572.589,
+     "y": 3938254.712,
+     "R": 120,
+     "A": 80
+    }
+   ],
+   "gen": "trompette",
+   "grp": "bmw0f56nrk",
+   "role": "sdir"
+  },
+  {
+   "cat": "b50",
+   "lanes": 1,
+   "pente": "",
+   "id": "bmw0f56nrm",
+   "name": "E-directe",
+   "from": {
+    "ref": "bmw0f56nrj",
+    "s": 210.61,
+    "biseau": "",
+    "obl": "",
+    "tpl": ""
+   },
+   "to": {
+    "ref": "hwy1",
+    "s": 999.41,
+    "ins": "",
+    "biseau": "",
+    "obl": "",
+    "tpl": ""
+   },
+   "pis": [
+    {
+     "x": 665542.242,
+     "y": 3938271.362,
+     "R": 120,
+     "A": 80
+    }
+   ],
+   "gen": "trompette",
+   "grp": "bmw0f56nrk",
+   "role": "edir"
+  }
+ ],
+ "crosses": [
+  {
+   "id": "bmw0f56n4i",
+   "on": true,
+   "kind": "route",
+   "name": "Voie secondaire 1",
+   "cat": "L2",
+   "V": "",
+   "lanes": "",
+   "wLane": "",
+   "bau": "",
+   "bdg": "",
+   "median": "",
+   "berme": "",
+   "pk0": "",
+   "axis": [
+    {
+     "x": 665727.9011179085,
+     "y": 3938521.444797018,
+     "r": ""
+    },
+    {
+     "x": 665521.418,
+     "y": 3938208.475
+    }
+   ]
+  }
+ ],
+ "ring": {
+  "Rg": 15,
+  "la": 7,
+  "bf": 1.5,
+  "zC": 100,
+  "devers": 1.5,
+  "pente": 0,
+  "gisPente": 0,
+  "mode": "aci"
+ },
+ "opts": {
+  "angleUnit": "gon",
+  "textH": 0.8,
+  "theme": "dark",
+  "vis": {
+   "VISIBILITE": false,
+   "IMPLANTATION": true,
+   "SIGNALISATION": true
+  },
+  "dxfOpacity": 0.9
+ }
+}

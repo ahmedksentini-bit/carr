@@ -96,5 +96,16 @@ for (const [kind, label] of [['half', 'demi-trèfle'], ['cloverleaf', 'trèfle']
   }
 }
 
+// --- Cas signalé : trompette sur autoroute à courbes successives (R 1 500 m en S), projet enregistré -------------------
+// La directe d'entrée n'a qu'un sommet (intersection des deux obliquités) : sa droite finale recoupait la chaussée sur
+// 104 m (courbure moyenne nulle sur la courbe en S, rayon local de la rive 1 500 m).
+{
+  const { readFileSync } = await import('node:fs');
+  const prj = JSON.parse(readFileSync(new URL('./fixtures/trompette-courbe-s.gira.json', import.meta.url), 'utf8'));
+  const D = { prims: [], points: [] };
+  buildEchangeur(prj, D);
+  for (const Rm of D.ramps) { if (!Rm?.al) continue; const o = overlap(D, Rm); check(`trompette en S (projet) : ${Rm.name} hors de la chaussée`, o.bad === 0, `empiètement ${o.bad} m, écart mini ${o.worst.toFixed(2)} m`); }
+}
+
 console.log(`\n${n - fails}/${n} contrôles réussis.`);
 process.exit(fails ? 1 : 0);
