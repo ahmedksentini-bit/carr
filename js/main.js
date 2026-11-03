@@ -1502,6 +1502,7 @@ function renderScene(ctx, v, exp = null) {
   }
   drawAxes(ctx, v, T, !!exp);
   drawEch(ctx, v, T, !!exp);
+  if (!exp) drawLineGrips(ctx, v, T);
   if (!exp) drawCadreHandles(ctx, v, T);
   if (!exp) drawOverlay(ctx, v, T);
   drawHud(ctx, v, theme, northAngle(v), imagery ? PROVIDERS[S.prj.bg.provider].attr + (places ? ' · ' + PROVIDERS.places.attr : '') : '');
@@ -1530,14 +1531,6 @@ function drawAxes(ctx, v, T, exp) {
     if (sel || hov) {
       ctx.fillStyle = sel ? T.sel : T.hover;
       for (const p of b.axis) { const [x, y] = v.w2s(p.x, p.y); ctx.fillRect(x - 3.5, y - 3.5, 7, 7); }
-    }
-    if (sel) {
-      // Poignées de milieu de segment : déplacent le segment (sommets voisins compris).
-      ctx.strokeStyle = T.sel; ctx.lineWidth = 1.5;
-      for (let k = 0; k + 1 < b.axis.length; k++) {
-        const [x, y] = v.w2s((b.axis[k].x + b.axis[k + 1].x) / 2, (b.axis[k].y + b.axis[k + 1].y) / 2);
-        ctx.beginPath(); ctx.moveTo(x, y - 5); ctx.lineTo(x + 5, y); ctx.lineTo(x, y + 5); ctx.lineTo(x - 5, y); ctx.closePath(); ctx.stroke();
-      }
     }
   });
   // « + » au bout extérieur de chaque axe : prolonge la saisie.
@@ -2056,7 +2049,7 @@ function pickPoint(px, py) {
   if (S.tog.snap && S.tool !== 'pan') {
     let best = null, bd = 10 / viewer.s;
     const consider = (p, kind) => { const d = Math.hypot(p.x - x, p.y - y); if (d < bd) { bd = d; best = { x: p.x, y: p.y, kind }; } };
-    const dragged = (i, k) => S.drag?.bi === i && (S.drag.kind === 'vertex' ? S.drag.vi === k : S.drag.kind === 'seg' && (k === S.drag.vi || k === S.drag.vi + 1));
+    const dragged = (i, k) => (S.drag?.kind === 'tline' ? S.drag.ref.t === 'br' && S.drag.ref.i === i && (k === S.drag.k || k === S.drag.k + 1) : S.drag?.bi === i && (S.drag.kind === 'vertex' ? S.drag.vi === k : S.drag.kind === 'seg' && (k === S.drag.vi || k === S.drag.vi + 1)));
     S.prj.branches.forEach((b, i) => b.axis.forEach((p, k) => { if (!dragged(i, k)) consider(p, 'sommet'); }));
     S.draft.forEach((p) => consider(p, 'sommet'));
     if (S.D && S.drag?.kind !== 'center') { S.D.points.forEach((q) => consider(q.p, 'point')); if (S.D.O) consider(S.D.O, 'centre'); }
@@ -2067,6 +2060,103 @@ function pickPoint(px, py) {
   const last = S.tool === 'axis' ? S.draft[S.draft.length - 1] : S.tool === 'measure' && S.meas.length === 1 ? S.meas[0] : null;
   if (S.tog.ortho && last) { if (Math.abs(x - last.x) > Math.abs(y - last.y)) y = last.y; else x = last.x; }
   return { x, y };
+}
+
+// ─── Poignées aux points de tangence des alignements droits (axe autoroute, voies secondaires, axes de branches) ───
+// Chaque droite k (entre les sommets k et k+1) porte deux poignées rondes à ses points de tangence et une poignée
+// losange en son milieu. Glisser une poignée de tangence fait PIVOTER la droite autour de son autre point de tangence ;
+// glisser le losange la TRANSLATE. Les droites voisines gardent leur ligne (direction et position) : les sommets
+// k et k+1 glissent le long d'elles. Seule la droite concernée change ; aux extrémités de l'axe, le point
+// d'extrémité est projeté sur la nouvelle droite.
+const axRefArr = (ref) => (ref.t === 'hwy' ? S.prj.hwy?.axis : ref.t === 'cross' ? (S.prj.crosses || [])[ref.i]?.axis : S.prj.branches[ref.i]?.axis);
+const tgCache = new Map();
+/** Longueurs de tangente d'entrée / de sortie à chaque sommet, d'après l'alignement réel (rayons, clothoïdes). */
+function tangentLens(ref) {
+  const ax = axRefArr(ref) || [], n = ax.length, key = `${ref.t}${ref.i ?? ''}`, sig = JSON.stringify(ax.map((p) => [p.x, p.y, p.r || 0, p.a ?? null]));
+  const c = tgCache.get(key); if (c?.sig === sig) return c.v;
+  const Ti = new Array(n).fill(0), To = new Array(n).fill(0);
+  try {
+    if (ref.t === 'br') {
+      for (let i = 1; i < n - 1; i++) {
+        const r = +ax[i].r || 0; if (!(r > 0)) continue;
+        const d1 = G.norm(G.sub(ax[i], ax[i - 1])), d2 = G.norm(G.sub(ax[i + 1], ax[i])), dl = Math.atan2(Math.abs(G.cross(d1, d2)), G.dot(d1, d2));
+        Ti[i] = To[i] = r * Math.tan(dl / 2);
+      }
+    } else {
+      const P = ref.t === 'hwy' ? hwyParams(S.prj) : crossParams(S.prj, ref.i), dn = Math.max(0, +(S.prj.pt?.dev ?? 2.5) || 2.5);
+      for (const t of roadAlignment(P, dn).al?.tangents || []) { Ti[t.i] = t.T; To[t.i] = t.To; }
+    }
+  } catch { /* alignement incalculable : poignées aux sommets */ }
+  const v = { Ti, To }; tgCache.set(key, { sig, v }); return v;
+}
+/** Poignées de toutes les droites d'un axe : { ref, k, end: 'A'|'B'|'M', p }. */
+function axisLineGrips(ref) {
+  const ax = axRefArr(ref) || [], out = [];
+  if (ax.length < 2) return out;
+  const { Ti, To } = tangentLens(ref);
+  for (let k = 0; k + 1 < ax.length; k++) {
+    const L = G.dist(ax[k], ax[k + 1]); if (!(L > 1e-6)) continue;
+    const u = G.mul(G.sub(ax[k + 1], ax[k]), 1 / L), a = To[k] || 0, b = Ti[k + 1] || 0;
+    if (a + b > L - 1e-3) { out.push({ ref, k, end: 'M', p: G.lerp(ax[k], ax[k + 1], 0.5) }); continue; } // pas d'alignement droit : translation seule
+    const A = G.add(ax[k], G.mul(u, a)), B = G.sub(ax[k + 1], G.mul(u, b));
+    if (k > 0 || a > 0) out.push({ ref, k, end: 'A', p: A });
+    if (k + 2 < ax.length || b > 0) out.push({ ref, k, end: 'B', p: B });
+    out.push({ ref, k, end: 'M', p: G.lerp(A, B, 0.5) });
+  }
+  return out;
+}
+/** Axes dont on montre les poignées de droites (outil sélection). */
+function gripAxes() {
+  if (S.tool !== 'select') return [];
+  const L = [];
+  if (S.prj.hwy?.on && (S.prj.hwy.axis || []).length >= 2) L.push({ t: 'hwy' });
+  (S.prj.crosses || []).forEach((X, i) => { if (X.on !== false && (X.axis || []).length >= 2) L.push({ t: 'cross', i }); });
+  if (S.sel >= 0 && (S.prj.branches[S.sel]?.axis || []).length >= 2) L.push({ t: 'br', i: S.sel });
+  return L;
+}
+function drawLineGrips(ctx, v, T) {
+  if (S.prj.opts.vis.AXE_SAISI === false) return;
+  ctx.lineWidth = 1.5;
+  for (const ref of gripAxes()) {
+    const col = ref.t === 'br' ? T.sel : T.L.AXE_SAISI.stroke;
+    ctx.strokeStyle = col; ctx.fillStyle = T.bg || '#111';
+    for (const g of axisLineGrips(ref)) {
+      const [x, y] = v.w2s(g.p.x, g.p.y);
+      ctx.beginPath();
+      if (g.end === 'M') { ctx.moveTo(x, y - 5); ctx.lineTo(x + 5, y); ctx.lineTo(x, y + 5); ctx.lineTo(x - 5, y); ctx.closePath(); }
+      else ctx.arc(x, y, 4.5, 0, 2 * Math.PI);
+      ctx.fill(); ctx.stroke();
+    }
+  }
+}
+function hitLineGrip(px, py) {
+  for (const ref of gripAxes()) for (const g of axisLineGrips(ref)) {
+    const [x, y] = viewer.w2s(g.p.x, g.p.y);
+    if (Math.hypot(px - x, py - y) < 7) {
+      const all = axisLineGrips(ref).filter((q) => q.k === g.k);
+      const other = all.find((q) => q.end === (g.end === 'A' ? 'B' : 'A'));
+      const ax = axRefArr(ref);
+      return { kind: 'tline', ref, k: g.k, end: g.end, p0: g.p, pivot: other ? other.p : g.end === 'A' ? ax[g.k + 1] : ax[g.k], orig: ax.map((q) => ({ ...q })) };
+    }
+  }
+  return null;
+}
+/** Nouvelle position des sommets k et k+1 pour la droite (Q, u) ; null si la géométrie devient incohérente. */
+function moveAxisLine(orig, k, Q, u) {
+  const n = orig.length, P = orig;
+  const meet = (i0, i1) => { // intersection avec la ligne (P[i0], P[i1])
+    const d = G.sub(P[i1], P[i0]), den = G.cross(u, d);
+    if (Math.abs(den) < 1e-9 * G.len(d)) return null;
+    const t = G.cross(G.sub(P[i0], Q), d) / den;
+    return G.add(Q, G.mul(u, t));
+  };
+  const proj = (p) => G.add(Q, G.mul(u, G.dot(G.sub(p, Q), u)));
+  const a = k > 0 ? meet(k - 1, k) : proj(P[0]), b = k + 2 < n ? meet(k + 1, k + 2) : proj(P[n - 1]);
+  if (!a || !b) return null;
+  if (G.dot(G.sub(b, a), u) < 1) return null; // la droite garde son sens et une longueur
+  if (k > 0 && G.dot(G.sub(a, P[k - 1]), G.sub(P[k], P[k - 1])) < 1) return null; // la droite voisine ne se retourne pas
+  if (k + 2 < n && G.dot(G.sub(P[k + 2], b), G.sub(P[k + 2], P[k + 1])) < 1) return null;
+  return [a, b];
 }
 
 function hitHandle(px, py) {
@@ -2081,14 +2171,11 @@ function hitHandle(px, py) {
   if (S.sel >= 0) {
     const h = vtx(S.sel);
     if (h) return h;
-    const ax = S.prj.branches[S.sel].axis;
-    for (let k = 0; k + 1 < ax.length; k++) {
-      const [x, y] = viewer.w2s((ax[k].x + ax[k + 1].x) / 2, (ax[k].y + ax[k + 1].y) / 2);
-      if (Math.hypot(px - x, py - y) < 7) return { kind: 'seg', bi: S.sel, vi: k, orig: [ax[k], ax[k + 1]] };
-    }
   }
   const eh = hitEchHandle(px, py);
   if (eh) return eh;
+  const lg = hitLineGrip(px, py);
+  if (lg) return lg;
   const ch = hitCadreHandle(px, py);
   if (ch) return ch;
   for (let i = 0; i < S.prj.branches.length; i++) {
@@ -2174,7 +2261,7 @@ function bindCanvas() {
     const d = S.drag;
     S.drag = null; updateCursor();
     if (!d) return;
-    if (['vertex', 'seg', 'center', 'rpi', 'hvx', 'cvx', 'tige', 'cadm', 'cadr', 'cadl'].includes(d.kind) && d.moved) { syncInputs(); update(); if (d.kind === 'center') centerPlaced(); }
+    if (['vertex', 'seg', 'tline', 'center', 'rpi', 'hvx', 'cvx', 'tige', 'cadm', 'cadr', 'cadl'].includes(d.kind) && d.moved) { syncInputs(); update(); if (d.kind === 'center') centerPlaced(); }
     else if (['cadm', 'cadr', 'cadl'].includes(d.kind) && !d.moved) { const [px, py] = viewer.w2s(d.start.x, d.start.y); openPop({ type: 'ouvr', i: `c:${d.id}` }, px, py); } // simple clic sur une poignée : fiche de l'ouvrage
     else if (d.kind === 'pan') {
       if (!d.moved && d.clickEl) openPop(d.clickEl, d.cpx, d.cpy);
@@ -2201,6 +2288,14 @@ function onMove(px, py) {
     const ax = S.prj.branches[d.bi].axis, dv = G.sub(w, d.start);
     ax[d.vi] = { ...G.add(d.orig[0], dv), r: d.orig[0].r }; ax[d.vi + 1] = { ...G.add(d.orig[1], dv), r: d.orig[1].r };
     d.moved = true; update({ commit: false, panels: false });
+  }
+  else if (d?.kind === 'tline') {
+    const ax = axRefArr(d.ref), o = d.orig, u0 = G.norm(G.sub(o[d.k + 1], o[d.k]));
+    let Q, u;
+    if (d.end === 'M') { Q = G.add(d.p0, G.sub(w, d.start)); u = u0; }
+    else { const v2 = d.end === 'A' ? G.sub(d.pivot, w) : G.sub(w, d.pivot); if (G.len(v2) < 0.5) return; u = G.norm(v2); if (G.dot(u, u0) <= 0) return; Q = d.pivot; }
+    const r = moveAxisLine(o, d.k, Q, u);
+    if (r) { ax[d.k] = { ...o[d.k], x: r[0].x, y: r[0].y }; ax[d.k + 1] = { ...o[d.k + 1], x: r[1].x, y: r[1].y }; d.moved = true; update({ commit: false, panels: false }); }
   }
   else if (d?.kind === 'tige') { const tp = S.prj.ramps[d.ri].tp; if (tp?.P0 && tp.u) { tp.Ys = Math.round(Math.max(250, G.dot(G.sub(w, tp.P0), tp.u))); d.moved = true; update({ commit: false, panels: false }); } }
   else if (d?.kind === 'rpi') { const q = S.prj.ramps[d.ri].pis[d.k]; S.prj.ramps[d.ri].pis[d.k] = { ...q, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
@@ -4772,7 +4867,7 @@ function bindUI() {
   bindPL();
   bindPT();
   bindHydro(); bindBvSheet();
-  if (/[?&]debug\b/.test(location.search)) window.__gira = { S, get viewer() { return viewer; } }; // tests de navigateur (?debug)
+  if (/[?&]debug\b/.test(location.search)) window.__gira = { S, get viewer() { return viewer; }, lineGrips: () => gripAxes().flatMap(axisLineGrips) }; // tests de navigateur (?debug)
   bind3D();
   bindEch();
   $('#btnImportDxf').addEventListener('click', () => $('#fileDxf').click());
