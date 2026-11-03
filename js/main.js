@@ -1145,13 +1145,13 @@ function rectifyCross(k, P0, dirIn, Lneed, ramps, Lc) {
   }
   return { kept: before.length + after.length, L: Math.round(2 * Lneed + SA.J + SB.J) };
 }
-// Trèfle contrôlé par un calcul d'essai (voie secondaire supposée rectiligne, comme après rectification) : sur une
-// autoroute en courbe, si une boucle ne tient pas entre ses sommets, on lui donne un peu de marge (alignements courts).
+// Trèfle et demi-trèfle contrôlés par un calcul d'essai (voie secondaire supposée rectiligne, comme après rectification) :
+// sur une autoroute en courbe, si une boucle ne tient pas entre ses sommets, on lui donne un peu de marge (alignements courts).
 function cloverChecked(kind, P, k) {
   let T = null;
-  for (const sl of [0, 2, 4, 7, 11]) {
+  for (const sl of [0, 2, 4, 7, 11, 16, 22, 30]) { // trèfle et demi-trèfle
     T = (kind === 'trefle' ? cloverleaf : halfCloverleaf)(S.prj, S.D, P, uid, { crossK: k, loopSlack: sl });
-    if (T.err || kind !== 'trefle') return T;
+    if (T.err) return T;
     const names = new Set(T.ramps.map((r) => r.name)), D2 = { prims: [], points: [] };
     const crosses = (S.prj.crosses || []).map((c, i) => (i === k ? { ...c, axis: T.crossAxis } : c));
     try { buildEchangeur({ ...S.prj, crosses, ramps: T.ramps }, D2); } catch (e) { console.error(e); return T; }

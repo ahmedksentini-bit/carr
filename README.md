@@ -228,6 +228,12 @@ ou sur un fond topographique DXF.
   rive vue depuis le point S / E.1,00 (flèche la plus forte sur 300 m), y compris sur une autoroute à courbes
   successives de sens contraires ; une bretelle à un seul sommet (directe de trompette) reçoit l'arc le plus court qui
   laisse sa plate-forme hors de la chaussée.
+- **Boucles sur autoroute en courbe** : trompette dont la boucle est à l'extérieur du virage (la rive s'écarte de la
+  boucle plus vite que l'obliquité de 3 %) — convergent terminé par un arc tournant à gauche de rayon proche de celui de
+  la rive (guide des échangeurs, schéma 6-12), relié à la boucle par leur tangente commune ; trompette sur courbe à
+  gauche de petit rayon — la S-semi est recalée sur la chaussée réelle avant d'être retenue ; demi-trèfle sur autoroute
+  en courbe — marge entre les deux sommets de chaque boucle relancée jusqu'à ce que les raccordements ne se chevauchent
+  plus (comme le trèfle).
 - **Trompette sur autoroute en courbe** : la S-semi est recalculée avec un alignement intermédiaire plus long si ses
   deux raccordements se chevauchent une fois le premier sommet reporté sur la ligne d'obliquité réelle ; les trompettes
   d'un projet ouvert sont recalculées dès l'ouverture.
