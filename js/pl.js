@@ -156,10 +156,12 @@ export function plElements(PL, sEnd = PL.sEnd) {
   for (const c of cs) paras.push({ s0: c.sA, s1: c.sB, R: c.R, g1: c.g1, g2: c.g2, type: c.type });
   return { lines, paras };
 }
-const cartH = () => CART_ROWS.reduce((t, r) => t + r.h, 0);
+export const cartH = () => CART_ROWS.reduce((t, r) => t + r.h, 0);
 // Cartouche SVG (fond clair, comme BVTrace) entre y0 et y0 + cartH() ; colonne des intitulés dans la marge gauche.
 // stations : [{ num, s, z (TN ou null) }] ; valeurs écrites à la verticale, stations trop serrées éclaircies.
-function plCartSVG(PL, stations, { X, m, w, y0, sMax }) {
+// clip : identifiant d'un clipPath limitant les stations et cellules à la zone de dessin (éditeur zoomé) ;
+// noRed : aucun profil projet (cote projet et éléments laissés vides) ; sMin : abscisse de début.
+export function plCartSVG(PL, stations, { X, m, w, y0, sMax, sMin = 0, clip = null, noRed = false }) {
   const x0 = 2, x1 = w - 2, H = cartH(), tops = [];
   let y = y0; for (const r of CART_ROWS) { tops.push(y); y += r.h; }
   let o = `<rect class="pc-bg" x="${x0}" y="${y0}" width="${x1 - x0}" height="${H}"/>`;
@@ -169,8 +171,9 @@ function plCartSVG(PL, stations, { X, m, w, y0, sMax }) {
     o += r.lines ? `<text class="pc-lb" x="6" y="${cy - 2}"><tspan x="6">${r.lines[0]}</tspan><tspan x="6" dy="10">${r.lines[1]}</tspan></text>` : `<text class="pc-lb" x="6" y="${cy + 3.5}">${r.label}</text>`;
   });
   o += `<line class="pc-rl" x1="${m.l}" y1="${y0}" x2="${m.l}" y2="${y0 + H}"/>`;
+  if (clip) o += `<g clip-path="url(#${clip})">`;
   // stations retenues : au moins 12 px entre deux filets (valeurs verticales)
-  const vis = stations.filter((q) => q.s >= -1e-6 && q.s <= sMax + 1e-6), keep = [];
+  const vis = stations.filter((q) => q.s >= sMin - 1e-6 && q.s <= sMax + 1e-6), keep = [];
   for (const q of vis) if (!keep.length || X(q.s) - X(keep[keep.length - 1].s) >= 12) keep.push(q);
   if (vis.length && keep[keep.length - 1] !== vis[vis.length - 1]) { const L = vis[vis.length - 1]; if (keep.length > 1 && X(L.s) - X(keep[keep.length - 1].s) < 12) keep.pop(); keep.push(L); }
   const yStn = tops[5], vtxt = (x, t, r, v) => `<text class="pc-v" x="${x.toFixed(1)}" y="${(t + r.h - 3).toFixed(1)}" transform="rotate(-90 ${x.toFixed(1)} ${(t + r.h - 3).toFixed(1)})">${v}</text>`;
@@ -181,18 +184,20 @@ function plCartSVG(PL, stations, { X, m, w, y0, sMax }) {
     if (k) { const xp = X(keep[k - 1].s); o += vtxt((xp + x) / 2 + 3, tops[1], CART_ROWS[1], fmt(q.s - keep[k - 1].s, 2)); }
     o += vtxt(x + 3.5, tops[2], CART_ROWS[2], fmt(q.s, 2));
     o += vtxt(x + 3.5, tops[3], CART_ROWS[3], q.z == null || !Number.isFinite(q.z) ? '—' : fmt(q.z, 2));
-    o += vtxt(x + 3.5, tops[4], CART_ROWS[4], fmt(zp, 2));
+    o += vtxt(x + 3.5, tops[4], CART_ROWS[4], noRed ? '—' : fmt(zp, 2));
   });
+  if (noRed) { if (clip) o += '</g>'; o += `<rect class="pc-fr" x="${x0}" y="${y0}" width="${x1 - x0}" height="${H}"/>`; return { svg: o, keep }; }
   // cellules fusionnées sur l'emprise des éléments
   const { lines, paras } = plElements(PL, sMax);
   const cell = (t, r, a, b, label, cls) => {
-    const A = Math.max(0, a), B = Math.min(sMax, b); if (!(B > A + 1e-6)) return '';
+    const A = Math.max(sMin, a), B = Math.min(sMax, b); if (!(B > A + 1e-6)) return '';
     const xa = X(A), xb = X(B), wd = xb - xa, fs = Math.max(6.5, Math.min(9, wd / Math.max(8, label.length * 0.58)));
     return `<g><rect class="pc-${cls}" x="${xa.toFixed(1)}" y="${t + 1}" width="${wd.toFixed(1)}" height="${r.h - 2}"/><text class="pc-${cls}-t" x="${((xa + xb) / 2).toFixed(1)}" y="${(t + r.h * 0.66).toFixed(1)}" text-anchor="middle" font-size="${fs.toFixed(1)}">${wd >= 28 ? label : ''}</text><title>${label}</title></g>`;
   };
   const pc = (v) => `${v >= 0 ? '+' : '−'}${fmt(Math.abs(v) * 100, 2)}`;
   for (const l of lines) o += cell(tops[5], CART_ROWS[5], l.s0, l.s1, `i = ${pc(l.g)} % · L = ${fmt(l.s1 - l.s0, 2)} m`, 'seg');
   for (const c of paras) o += cell(tops[6], CART_ROWS[6], c.s0, c.s1, `R = ${fmt(c.R, 0)} m · L = ${fmt(c.s1 - c.s0, 2)} m · i ${pc(c.g1)} → ${pc(c.g2)} %`, 'para');
+  if (clip) o += '</g>';
   o += `<rect class="pc-fr" x="${x0}" y="${y0}" width="${x1 - x0}" height="${H}"/>`;
   return { svg: o, keep };
 }
@@ -274,7 +279,7 @@ export function plChartSVG(PL, tnLine, sEnd, opts = {}) {
   return out;
 }
 // Bandeaux sous le profil : diagramme des courbures du tracé en plan, puis pentes transversales gauche / droite.
-function plStrips(opts, { X, m, w, h, sMax, stripH }) {
+export function plStrips(opts, { X, m, w, h, sMax, stripH }) {
   if (!stripH) return '';
   let out = '', y0 = h - stripH + 6;
   const x0 = m.l, x1 = w - m.r;
@@ -348,4 +353,61 @@ export function plDXF(PL, tnLine, stations, title, ve = 5) {
   for (const c of paras) { w.line('GIRA_PL_CARTOUCHE', { x: c.s0, y: tops[6] }, { x: c.s0, y: yB }); w.line('GIRA_PL_CARTOUCHE', { x: c.s1, y: tops[6] }, { x: c.s1, y: yB }); w.text('GIRA_PL_COTES', { x: (c.s0 + c.s1) / 2, y: tops[6] - RH[6] / 2 - Ht / 2 }, Ht * 0.9, 0, `R = ${fmt(c.R, 0)} m L = ${fmt(c.s1 - c.s0, 2)} m`, 'center'); }
   w.text('GIRA_PL_COTES', { x: xL, y: Y(Math.max(...PL.nodes.map((q) => q.z), ...tnLine.map((q) => q[1]))) + 12 }, Ht * 1.6, 0, `${title} — H 1/1000 · V 1/${Math.round(1000 / ve)} (exagération × ${ve})`);
   return w.toString();
+}
+
+// --------------------------------------------------------------------------- Proposition depuis le TN
+// Rasante « draft » (démarche de BVTrace, map.html plDraft*) : ligne du TN décalée de dz (+ remblai), simplifiée
+// par Ramer-Douglas-Peucker en relevant la tolérance jusqu'à respecter l'espacement minimal des sommets, pentes
+// bornées (rampe gUp, pente gDown) en corrigeant les cotes de proche en proche, puis rayon de chaque sommet pris
+// dans [Rmin, Rmax] du type (saillant / rentrant) et réduit pour que les tangentes T = R·|Δi|/2 tiennent dans la
+// moitié des intervalles voisins. tn : [[s, z]] ; start / end : { s, z } imposés (ou null : cote du TN + dz).
+// Rend { pis: [{ s, z, R }] (sommets intérieurs et extrémité libre), notes: [texte] }.
+export function plDraft(tn, o) {
+  const notes = [], pts = tn.filter(([s]) => s >= o.s0 - 1e-6 && s <= o.s1 + 1e-6).map(([s, z]) => ({ s, z: z + o.dz }));
+  if (pts.length < 2) return { pis: [], notes: ['terrain naturel absent sur l\'axe'] };
+  // lissage léger (moyenne glissante sur ~ minSpan / 4) pour ne pas suivre le bruit du MNT
+  const half = Math.max(1, o.minSpan / 8), sm = pts.map((p) => { const w = pts.filter((q) => Math.abs(q.s - p.s) <= half); return { s: p.s, z: w.reduce((a, q) => a + q.z, 0) / w.length }; });
+  if (o.start) sm[0] = { s: o.start.s, z: o.start.z }; else sm[0] = { ...sm[0] };
+  if (o.end) sm[sm.length - 1] = { s: o.end.s, z: o.end.z };
+  const rdp = (a, b, tol, out) => {
+    let md = -1, k = -1;
+    for (let i = a + 1; i < b; i++) { const zl = sm[a].z + ((sm[b].z - sm[a].z) * (sm[i].s - sm[a].s)) / (sm[b].s - sm[a].s), d = Math.abs(sm[i].z - zl); if (d > md) { md = d; k = i; } }
+    if (md <= tol || k < 0) { out.push(b); return; }
+    rdp(a, k, tol, out); rdp(k, b, tol, out);
+  };
+  let tol = 0.15, idx = [];
+  for (let it = 0; it < 30; it++) {
+    idx = [0]; rdp(0, sm.length - 1, tol, idx);
+    let ok = true; for (let j = 1; j < idx.length; j++) if (sm[idx[j]].s - sm[idx[j - 1]].s < o.minSpan - 1e-6) { ok = false; break; }
+    if (ok) break;
+    tol *= 1.4;
+  }
+  const nodes = idx.map((i) => ({ ...sm[i] }));
+  // fusion des intervalles encore trop courts (sommet supprimé)
+  for (let j = 1; j < nodes.length - 1; j++) if (nodes[j].s - nodes[j - 1].s < o.minSpan - 1e-6) { nodes.splice(j, 1); j--; }
+  if (nodes.length > 2 && nodes[nodes.length - 1].s - nodes[nodes.length - 2].s < o.minSpan - 1e-6) nodes.splice(nodes.length - 2, 1);
+  // pentes bornées, de l'amont vers l'aval (extrémité imposée : corrigée en remontant si besoin)
+  const clampG = (g) => Math.max(-o.gDown, Math.min(o.gUp, g));
+  for (let j = 1; j < nodes.length; j++) {
+    if (j === nodes.length - 1 && o.end) break;
+    const ds = nodes[j].s - nodes[j - 1].s, g = (nodes[j].z - nodes[j - 1].z) / ds, gc = clampG(g);
+    if (Math.abs(gc - g) > 1e-9) nodes[j].z = nodes[j - 1].z + gc * ds;
+  }
+  if (o.end && nodes.length > 2) {
+    for (let j = nodes.length - 2; j >= 1; j--) { const ds = nodes[j + 1].s - nodes[j].s, g = (nodes[j + 1].z - nodes[j].z) / ds, gc = clampG(g); if (Math.abs(gc - g) > 1e-9) nodes[j].z = nodes[j + 1].z - gc * ds; }
+    const g0 = (nodes[1].z - nodes[0].z) / (nodes[1].s - nodes[0].s);
+    if (Math.abs(clampG(g0) - g0) > 1e-6) notes.push(`pente de ${fmt(g0 * 100, 2)} % au départ : extrémités imposées trop éloignées en cote pour la pente maximale`);
+  }
+  // rayons
+  for (let j = 1; j < nodes.length - 1; j++) {
+    const g1 = (nodes[j].z - nodes[j - 1].z) / (nodes[j].s - nodes[j - 1].s), g2 = (nodes[j + 1].z - nodes[j].z) / (nodes[j + 1].s - nodes[j].s), dg = g2 - g1;
+    if (Math.abs(dg) < 1e-5) { nodes[j].R = 0; continue; }
+    const conv = dg < 0, [Rmin, Rmax] = conv ? [o.RsMin, o.RsMax] : [o.RrMin, o.RrMax];
+    const room = Math.min(nodes[j].s - nodes[j - 1].s, nodes[j + 1].s - nodes[j].s) / 2, Rfit = (2 * room) / Math.abs(dg);
+    let R = Math.min(Rmax, Math.max(Rmin, Math.min(Rfit, (Rmin + Rmax) / 2)));
+    if (R > Rfit) { R = Rfit; notes.push(`sommet à s = ${fmt(nodes[j].s, 0)} m : rayon ${conv ? 'saillant' : 'rentrant'} réduit à ${fmt(R, 0)} m (< ${fmt(Rmin, 0)} m) faute de place`); }
+    nodes[j].R = Math.max(0, Math.floor(R / 50) * 50);
+  }
+  const out = nodes.slice(1).filter((q, j, a) => !(o.end && j === a.length - 1)).map((q) => ({ s: Math.round(q.s * 10) / 10, z: Math.round(q.z * 100) / 100, R: q.R || 0 }));
+  return { pis: out, notes };
 }

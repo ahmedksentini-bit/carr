@@ -15,7 +15,8 @@ import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerra
 import { tinZ } from './tin.js';
 import { upright } from './common.js';
 import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF, crossSectionFrom, mainPlatform } from './pt.js';
-import { plParams, plBuild, plStations, plTerrainLine, plFromTerrain, plChartSVG, plChartPick, plDXF, plChecks, axisLength, axisPointAt } from './pl.js';
+import { plParams, plBuild, plStations, plTerrainLine, plDXF, plChecks, axisLength, axisPointAt, PL_LIMITS } from './pl.js';
+import { createPlEditor } from './pleditor.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
 import { buildOuvrages, W_CLASSES, psidaLink, psidaProject, psidaWarnings, PSIDA_URL } from './ouvrage.js';
@@ -3059,17 +3060,26 @@ function axStations(ax, PL, tin, step, defined) {
 function refreshPLAxis(c) {
   const { A, ax, key, store } = c;
   const tnLine = axisTerrainLine(ax, S.tn?.tin || null);
-  const ve = +($('#plVe').value || 0);
   const PL = A.defined ? A.PL : buildNodes(A.tied.length ? A.tied : [{ s: 0, z: tnLine[0]?.[1] ?? 0, R: 0 }]);
-  const info = (i, nd) => {
-    const t = A.tied.find((q) => Math.abs(q.s - nd.s) < 1e-6);
-    if (t) return { fixed: true, pi: -1, label: `calé sur ${t.why}` };
-    const k = store.pis.findIndex((q) => Math.abs(+q.s - nd.s) < 1e-6);
-    return { fixed: k < 0, pi: k, label: `PI ${k + 1}` };
-  };
+
   const ov = plAxisOverlay(key, ax, PL);
-  $('#plChart').innerHTML = plChartSVG(PL, tnLine, ax.len, { ve, sel: S.plPi, nodeInfo: info, noRed: !A.defined, axisLabel: `s (m) le long de ${ax.name} · z (m)`, pxm: 1, cart: A.defined ? { stations: plCartStations(key, ax, PL) } : null, overlay: ov.draw, zExtra: ov.z, plan: plPlanBand(ax), devers: plDeversBand(ax) });
   const lim = axisLimits(S.prj, key);
+  // Éditeur : points saisis triés (l'indice d'un point est son rang dans cette liste).
+  const pis = normPis(store.pis), tEnd = A.tied.find((t) => t.end === 1), tSt = A.tied.find((t) => t.end === 0);
+  const infoE = (i, nd) => {
+    const t = A.tied.find((q) => Math.abs(q.s - nd.s) < 1e-6);
+    if (t) return { fixed: true, pi: -1, label: `calé (${t.end ? 'fin' : 'début'})` };
+    const k = pis.findIndex((q) => Math.abs(q.s - nd.s) < 1e-6);
+    return k < 0 ? { fixed: true, pi: -1, label: '' } : { fixed: false, pi: k, label: `PI ${k + 1}` };
+  };
+  $('#plChart').hidden = false;
+  plEditor().render({
+    key, name: ax.name, PL, defined: A.defined, tn: tnLine, pis, nodeInfo: infoE, sMin: 0, sEnd: ax.len,
+    stations: plCartStations(key, ax, PL), overlay: ov.draw, zExtra: ov.z, plan: plPlanBand(ax), devers: plDeversBand(ax),
+    limits: lim, defaultR: lim.Rconv, endFixed: tEnd ? { s: tEnd.s, z: tEnd.z } : null, startFixed: tSt ? { s: tSt.s, z: tSt.z } : null,
+    note: A.defined ? '' : `Aucune ligne rouge sur ${ax.name} : outil « Point » (clic) ou « Draft TN… »${A.tied.length ? ' — extrémités calées sur les chaussées hôtes' : ''}.`,
+  });
+  S.plPi = S.plEd.sel;
   $('#plTable').innerHTML = '<thead><tr><th>Point</th><th>s (m)</th><th>z (m)</th><th>R (m)</th><th>pente aval</th><th></th></tr></thead><tbody>' +
     A.tied.map((t) => `<tr><td>calé (${t.end ? 'fin' : 'début'})</td><td class="mono">${fmt(t.s, 2)}</td><td class="mono">${fmt(t.z, 3)}</td><td class="mono">—</td><td class="mono" colspan="2">${esc(t.why)}</td></tr>`).join('') +
     store.pis.map((q, i) => {
@@ -3183,6 +3193,24 @@ function plAxisOverlay(key, ax, PL) {
   };
   return { draw: items.length ? draw : null, z: zs };
 }
+// Éditeur interactif du profil en long (pleditor.js, ergonomie BVTrace) : créé une fois dans #plChart ; il remplace
+// la liste des points saisis de l'axe affiché et l'historique d'annulation reste celui du projet.
+const normPis = (pis) => (Array.isArray(pis) ? pis : []).map((q) => ({ s: parseNum(q.s), z: parseNum(q.z), R: Math.max(0, parseNum(q.R) || 0) }))
+  .filter((q) => Number.isFinite(q.s) && Number.isFinite(q.z)).sort((a, b) => a.s - b.s);
+function plEditor() {
+  if (S.plEd) return S.plEd;
+  S.plEd = createPlEditor($('#plChart'), {
+    setPis(pis, { commit = true } = {}) {
+      const ac = plAxisCtx();
+      if (ac) ac.store.pis = pis;
+      else { const d = plData(); if (!d) return; d.br.pl = { ...(d.br.pl || {}), pis }; }
+      update({ commit });
+    },
+    commit: () => commitHistory(),
+    undo, redo, toast,
+  });
+  return S.plEd;
+}
 function plData() {
   const bd = plBranch();
   if (!bd) return null;
@@ -3205,16 +3233,23 @@ function refreshPL() {
   const ac = plAxisCtx();
   if (ac) { sel.value = ac.key; refreshPLAxis(ac); return; }
   const d = plData();
-  if (!d) { $('#plChart').innerHTML = '<p class="note">Dessinez les branches pour afficher leur profil en long.</p>'; $('#plTable').innerHTML = ''; $('#plStations').innerHTML = ''; $('#plChecks').innerHTML = ''; return; }
+  if (!d) { $('#plChart').hidden = true; $('#plTable').innerHTML = ''; $('#plStations').innerHTML = ''; $('#plChecks').innerHTML = '<p class="note">Dessinez les branches (ou les axes de l\'échangeur) pour afficher leur profil en long.</p>'; return; }
   sel.value = `b:${d.bd.idx}`;
   const { bd, PL, sEnd, br } = d;
   const tnLine = S.tn ? plTerrainLine(bd, S.tn.tin, Math.max(sEnd, PL.sEnd)) : [];
-  const ve = +($('#plVe').value || 0);
   // cartouche (BVTrace) : profils en travers implantés sur la branche, sinon tous les 10 m
   const impB = (S.prof?.list || []).filter((q) => q.axis === `b:${bd.id}`).sort((a, b) => a.s - b.s);
   const cartSt = impB.length >= 2 ? impB.map((q) => { const { p } = axisPointAt(bd, q.s); return { num: q.name, s: q.s, z: S.tn ? tinZ(S.tn.tin, p.x, p.y) : null }; })
     : plStations(bd, PL, S.tn?.tin, sEnd, 10).filter((q) => Math.abs(q.s / 10 - Math.round(q.s / 10)) < 1e-6 || Math.abs(q.s - sEnd) < 1e-6).map((q, i) => ({ num: i + 1, s: q.s, z: q.zTN }));
-  $('#plChart').innerHTML = plChartSVG(PL, tnLine, sEnd, { ve, sel: S.plPi, cart: d.defined ? { stations: cartSt } : null });
+  const lim = PL_LIMITS[S.prj.context] || PL_LIMITS.interurbain, pisB = plParams(br).pis;
+  $('#plChart').hidden = false;
+  plEditor().render({
+    key: `b:${bd.idx}`, name: bd.name, PL, defined: d.defined, tn: tnLine, pis: pisB,
+    nodeInfo: (i) => (i === 0 ? { fixed: true, pi: -1, label: 'anneau' } : d.defined ? { fixed: false, pi: i - 1, label: `PI ${i}` } : { fixed: true, pi: -1, label: 'pente courante' }),
+    sMin: 0, sEnd, stations: cartSt, limits: lim, defaultR: S.prj.context === 'urbain' ? 800 : 3000, endFixed: null, startFixed: { s: 0, z: d.db.z0 },
+    note: d.defined ? '' : `Pas de ligne rouge saisie : pente constante de l'onglet Branches (tiretés). Outil « Point » (clic) ou « Draft TN… » pour la créer.`,
+  });
+  S.plPi = S.plEd.sel;
   // Tableau des PI
   const pis = br.pl?.pis || [];
   $('#plTable').innerHTML = '<thead><tr><th>PI</th><th>s (m)</th><th>z (m)</th><th>R (m)</th><th>pente aval</th><th></th></tr></thead><tbody>' +
@@ -3272,52 +3307,6 @@ function bindPL() {
   $('#dlgPL').addEventListener('close', () => { plPopBack(); refreshPL(); });
   $('#dlgPL').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); }); // clic sur le fond
   $('#plStep').addEventListener('change', refreshPL);
-  const chart = $('#plChart');
-  const pick = (e) => {
-    const svg = chart.querySelector('svg'); if (!svg) return null;
-    const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
-    const py = ((e.clientY - r.top) / r.height) * vb.height;
-    if (!S.plDrag && py > +svg.dataset.hh - +svg.dataset.mb) return null; // clic dans les bandeaux plan / dévers
-    return plChartPick(svg, ((e.clientX - r.left) / r.width) * vb.width, py);
-  };
-  chart.addEventListener('pointerdown', (e) => {
-    const h = e.target.closest('.pl-pi'); if (!h || h.classList.contains('fixed')) return;
-    S.plPi = +h.dataset.pi; S.plDrag = { moved: false };
-    chart.setPointerCapture?.(e.pointerId); e.preventDefault();
-  });
-  chart.addEventListener('pointermove', (e) => {
-    if (!S.plDrag) return;
-    const q = pick(e); if (!q) return;
-    S.plDrag.moved = true;
-    plSetPi(S.plPi, 's', Math.max(0.5, Math.round(q.s * 10) / 10)); plSetPi(S.plPi, 'z', Math.round(q.z * 100) / 100);
-    update({ commit: false });
-  });
-  chart.addEventListener('pointerup', (e) => {
-    if (S.plDrag) { const moved = S.plDrag.moved; S.plDrag = null; const ac = plAxisCtx(); if (ac && moved) { const q0 = ac.store.pis[S.plPi]; ac.store.pis.sort((a, b) => +a.s - +b.s); S.plPi = ac.store.pis.indexOf(q0); } if (moved) { commitHistory(); refreshPL(); } else refreshPL(); return; }
-    const ac = plAxisCtx();
-    if (ac) { const q = pick(e); if (q && q.s >= 0 && q.s <= ac.ax.len) plAddPi(q.s, q.z); return; }
-    const d = plData(), q = pick(e); if (!d || !q || q.s <= 0.5) return;
-    plAddPi(q.s, q.z);
-  });
-  $('#btnPlAdd').addEventListener('click', () => {
-    const ac = plAxisCtx();
-    if (ac) { const last = ac.store.pis.length ? +ac.store.pis[ac.store.pis.length - 1].s : 0, s1 = Math.min(ac.ax.len, ac.store.pis.length ? last + 100 : 0); const { p } = ac.ax.at(s1); const z = ac.A.defined ? ac.A.PL.zAt(s1) : (S.tn ? tinZ(S.tn.tin, p.x, p.y) : null) ?? 0; plAddPi(s1, z, ac.store.pis.length ? undefined : 0); return; }
-    const d = plData(); if (!d) return; const s = Math.min(d.sEnd, (d.PL.sEnd || 0) + 40); plAddPi(s, d.PL.zAt(s), 0); });
-  $('#btnPlTn').addEventListener('click', () => {
-    const ac = plAxisCtx();
-    if (ac) {
-      if (!S.tn) { toast('Construisez d\'abord le MNT (onglet Terrain).', 'warn'); return; }
-      const pis = axisFromTerrain(ac.ax, S.tn.tin, { R: axisLimits(S.prj, ac.key).Rconv, tied: ac.A.tied });
-      if (!pis.length) { toast(`${ac.ax.name} est hors du MNT.`, 'warn'); return; }
-      ac.store.pis = pis; S.plPi = -1; update(); toast(`Profil de ${ac.ax.name} proposé depuis le TN (${pis.length} points) : ajustez les points pour équilibrer déblais et remblais et respecter le tirant d'air des ouvrages.`); return;
-    }
-    const d = plData(); if (!d) return;
-    if (!S.tn) { toast('Construisez d\'abord le MNT (onglet Terrain).', 'warn'); return; }
-    const pis = plFromTerrain(d.bd, S.tn.tin, d.sEnd, { R: S.prj.context === 'urbain' ? 800 : 3000, z0: d.db.z0 });
-    if (!pis.length) { toast('La branche est hors du MNT.', 'warn'); return; }
-    d.br.pl = { ...d.br.pl, pis }; S.plPi = -1; update();
-  });
-  $('#btnPlClear').addEventListener('click', () => { const ac = plAxisCtx(); if (ac) { ac.store.pis = []; S.plPi = -1; update(); return; } const d = plData(); if (!d) return; if (d.br.pl) d.br.pl.pis = []; S.plPi = -1; update(); });
   $('#plTable').addEventListener('input', (e) => { const t = e.target; if (t.dataset.pi == null) return; plSetPi(+t.dataset.pi, t.dataset.f, parseNum(t.value)); update({ commit: false }); });
   $('#plTable').addEventListener('change', (e) => { const ac = plAxisCtx(); if (ac && e.target.dataset.pi != null) { ac.store.pis.sort((a, b) => +a.s - +b.s); commitHistory(); refreshPL(); return; } if (e.target.dataset.pi != null) { const br = S.prj.branches[plBranch()?.idx]; if (br?.pl) br.pl.pis.sort((a, b) => +a.s - +b.s); commitHistory(); refreshPL(); } });
   $('#plTable').addEventListener('click', (e) => { const b = e.target.closest('[data-pidel]'); if (!b) return; const ac = plAxisCtx(); if (ac) { ac.store.pis.splice(+b.dataset.pidel, 1); S.plPi = -1; update(); return; } const br = S.prj.branches[plBranch()?.idx]; if (!br?.pl) return; br.pl.pis.splice(+b.dataset.pidel, 1); S.plPi = -1; update(); });
