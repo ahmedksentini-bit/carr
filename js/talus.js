@@ -12,7 +12,7 @@
 //   • P dans le talus de déblai d'un autre axe plus bas que zK (K en déblai) : masqué, le déblai le plus profond
 //     l'emporte (enveloppe inférieure) ;
 //   • K en déblai sous le remblai d'un autre axe : masqué (le remblai est mis en place sur l'emprise).
-// Les lignes s'arrêtent donc sur la ligne de rencontre des deux surfaces. Barbules (comme BVTrace) : une longue de
+// Les lignes s'arrêtent donc sur la ligne de rencontre des deux surfaces, qui est dessinée (meetLines). Barbules (comme BVTrace) : une longue de
 // la crête au pied puis trois courtes (34 % de la longueur) partant de la crête — bord de plate-forme en remblai,
 // entrée en terre en déblai —, à l'espacement esp le long de la crête.
 import * as G from './geom.js';
@@ -77,13 +77,14 @@ class Regions {
     for (let gx = x0; gx <= x1; gx++) for (let gy = y0; gy <= y1; gy++) { const key = gx + ',' + gy; if (!this.grid.has(key)) this.grid.set(key, []); this.grid.get(key).push(i); }
   }
   quad(a, b, c, d, kind, cid) { this.add(a, b, c, kind, cid); this.add(a, c, d, kind, cid); }
-  // Le point (x, y) du talus de l'axe cid, de cote z et de nature br, est-il apparent ?
-  visible(x, y, z, br, cid) {
+  // Le point (x, y) du talus de l'axe cid, de cote z et de nature br, est-il apparent ? (cid2 : second axe ignoré,
+  // pour la ligne de rencontre de deux talus)
+  visible(x, y, z, br, cid, cid2 = cid) {
     const list = this.grid.get(Math.floor(x / this.cell) + ',' + Math.floor(y / this.cell));
     if (!list) return true;
     for (const i of list) {
       const t = this.tris[i];
-      if (t.cid === cid) continue;
+      if (t.cid === cid || t.cid === cid2) continue;
       const zt = inTri(t, x, y);
       if (zt == null) continue;
       if (t.kind === 'P') return false;
@@ -96,10 +97,10 @@ class Regions {
 }
 
 // Parties apparentes du segment a → b (points { x, y, z }) : [[p, q], …].
-function clipSeg(R, a, b, br, cid) {
+function clipSeg(R, a, b, br, cid, cid2 = cid) {
   const len = Math.hypot(b.x - a.x, b.y - a.y);
   if (!(len > 1e-6)) return [];
-  const n = Math.max(1, Math.ceil(len / 0.3)), vis = (t) => { const p = lerp(a, b, t); return R.visible(p.x, p.y, p.z, br, cid); };
+  const n = Math.max(1, Math.ceil(len / 0.3)), vis = (t) => { const p = lerp(a, b, t); return R.visible(p.x, p.y, p.z, br, cid, cid2); };
   const out = [];
   let prevT = 0, prevV = vis(0), start = prevV ? 0 : null;
   const edge = (t0, t1, v0) => { for (let i = 0; i < 12; i++) { const m = (t0 + t1) / 2; if (vis(m) === v0) t0 = m; else t1 = m; } return (t0 + t1) / 2; };
@@ -115,9 +116,74 @@ function clipSeg(R, a, b, br, cid) {
   return out;
 }
 
+// ------------------------------------------------------------------------------------------------ rencontre de deux talus
+// Plan z = a·x + b·y + c d'un triangle (null s'il est vertical ou dégénéré).
+function planeOf(t) {
+  const { a, b, c } = t, ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z, vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+  const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+  if (!(Math.abs(nz) > 1e-9)) return null;
+  return { a: -nx / nz, b: -ny / nz, c: a.z + (nx * a.x + ny * a.y) / nz };
+}
+// Polygone convexe poly découpé par le triangle t (Sutherland-Hodgman).
+function clipByTri(poly, t) {
+  let P = poly;
+  const V = [t.a, t.b, t.c], sg = Math.sign((t.b.x - t.a.x) * (t.c.y - t.a.y) - (t.b.y - t.a.y) * (t.c.x - t.a.x)) || 1;
+  for (let k = 0; k < 3 && P.length; k++) {
+    const A = V[k], B = V[(k + 1) % 3], f = (p) => sg * ((B.x - A.x) * (p.y - A.y) - (B.y - A.y) * (p.x - A.x));
+    const out = [];
+    for (let i = 0; i < P.length; i++) {
+      const p = P[i], q = P[(i + 1) % P.length], fp = f(p), fq = f(q);
+      if (fp >= -1e-9) out.push(p);
+      if ((fp >= -1e-9) !== (fq >= -1e-9)) { const u = fp / (fp - fq); out.push({ x: p.x + (q.x - p.x) * u, y: p.y + (q.y - p.y) * u }); }
+    }
+    P = out;
+  }
+  return P;
+}
+// Ligne de rencontre des talus de deux axes différents de même nature (remblai / remblai : arête de l'enveloppe
+// supérieure ; déblai / déblai : arête de l'enveloppe inférieure) : pour chaque paire de triangles qui se recouvrent en
+// plan, la droite où leurs plans ont la même cote, limitée à la partie commune ; on ne garde que les parties apparentes
+// vis-à-vis des autres axes (plates-formes, tabliers, autres talus). Un remblai posé sur un déblai masque celui-ci : la
+// limite est alors l'entrée en terre du remblai, déjà dessinée.
+function meetLines(R) {
+  const out = [], seen = new Set(), N = R.tris.length, planes = new Map();
+  const pl = (i) => { if (!planes.has(i)) planes.set(i, planeOf(R.tris[i])); return planes.get(i); };
+  for (const list of R.grid.values()) {
+    for (let x = 0; x < list.length; x++) for (let y = x + 1; y < list.length; y++) {
+      const i = Math.min(list[x], list[y]), j = Math.max(list[x], list[y]), t1 = R.tris[i], t2 = R.tris[j];
+      if (t1.cid === t2.cid || t1.cid < 0 || t2.cid < 0 || t1.kind === 'P' || t1.kind !== t2.kind) continue;
+      if (Math.max(t1.a.x, t1.b.x, t1.c.x) < Math.min(t2.a.x, t2.b.x, t2.c.x) || Math.max(t2.a.x, t2.b.x, t2.c.x) < Math.min(t1.a.x, t1.b.x, t1.c.x)
+        || Math.max(t1.a.y, t1.b.y, t1.c.y) < Math.min(t2.a.y, t2.b.y, t2.c.y) || Math.max(t2.a.y, t2.b.y, t2.c.y) < Math.min(t1.a.y, t1.b.y, t1.c.y)) continue;
+      const key = i * N + j;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const p1 = pl(i), p2 = pl(j);
+      if (!p1 || !p2) continue;
+      const A = p1.a - p2.a, B = p1.b - p2.b, C = p1.c - p2.c;
+      if (Math.hypot(A, B) < 1e-6) continue; // talus parallèles
+      const poly = clipByTri([t1.a, t1.b, t1.c], t2);
+      if (poly.length < 3) continue;
+      const d = (p) => A * p.x + B * p.y + C, pts = [];
+      for (let k = 0; k < poly.length; k++) {
+        const p = poly[k], q = poly[(k + 1) % poly.length], dp = d(p), dq = d(q);
+        if (dp === 0) pts.push(p);
+        else if (dp * dq < 0) { const u = dp / (dp - dq); pts.push({ x: p.x + (q.x - p.x) * u, y: p.y + (q.y - p.y) * u }); }
+      }
+      if (pts.length < 2) continue;
+      let a = pts[0], b = pts[1];
+      for (const p of pts) for (const q of pts) if (Math.hypot(q.x - p.x, q.y - p.y) > Math.hypot(b.x - a.x, b.y - a.y)) { a = p; b = q; }
+      if (Math.hypot(b.x - a.x, b.y - a.y) < 1e-3) continue;
+      const Z = (p) => ({ x: p.x, y: p.y, z: p1.a * p.x + p1.b * p.y + p1.c });
+      out.push(...clipSeg(R, Z(a), Z(b), t1.kind, t1.cid, t2.cid));
+    }
+  }
+  return out;
+}
+
 // ------------------------------------------------------------------------------------------------ dessin
 // corridors : [{ id, rows: [{ L, R }], closed, plat (contour de plate-forme, facultatif) }] ; masks : polygones [{ x, y }] (tabliers) ; opts : { esp }.
-// Rend { prims, n: { barbules } } : hachures TALUS (rôle R ou D), bords TALUS (rôle crete) et EET (calque EET).
+// Rend { prims, n: { barbules, meet } } : hachures TALUS (rôle R ou D), bords TALUS (rôle crete), rencontre de deux
+// talus (TALUS, rôle inter) et EET (calque EET).
 export function talusPrims(corridors, masks = [], opts = {}) {
   const esp = Math.max(0.5, +opts.esp || 2), R = new Regions(10);
   corridors.forEach((K, cid) => {
@@ -158,11 +224,13 @@ export function talusPrims(corridors, masks = [], opts = {}) {
       }
     }
   });
+  const meet = meetLines(R);
   const strip = (l) => l.map(([p, q]) => [{ x: p.x, y: p.y }, { x: q.x, y: q.y }]);
   const prims = [];
+  if (meet.length) prims.push({ k: 'hatch', L: 'TALUS', role: 'inter', lines: strip(meet), wm: 0.06 });
   if (barb.R.length) prims.push({ k: 'hatch', L: 'TALUS', role: 'R', lines: strip(barb.R), wm: 0.04 });
   if (barb.D.length) prims.push({ k: 'hatch', L: 'TALUS', role: 'D', lines: strip(barb.D), wm: 0.04 });
   if (bord.length) prims.push({ k: 'hatch', L: 'TALUS', role: 'crete', lines: strip(bord), wm: 0.06 });
   if (eet.length) prims.push({ k: 'hatch', L: 'EET', lines: strip(eet), wm: 0.06 });
-  return { prims, n: { barbules: nb } };
+  return { prims, n: { barbules: nb, meet: meet.length } };
 }
