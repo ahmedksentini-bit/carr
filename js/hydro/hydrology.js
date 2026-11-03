@@ -1600,6 +1600,280 @@ function computeFao54(B, hyp, w, v) {
   v.design = { Q: roundNet(qDesign, 2), method: designMethod };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Détail des calculs (note de calcul) : formule, données, application numérique, résultat, motif de refus
+// ═══════════════════════════════════════════════════════════════════════════
+// Couche de présentation seulement : relit les grandeurs déjà calculées (v) et rejoue les formules pour
+// l'application numérique ; ne modifie rien au résultat. Nombres en virgule décimale (affichage français).
+
+const frn = (x, d = 2) => (Number.isFinite(x) ? x.toFixed(d).replace('.', ',') : '—');
+/** Nombre à 4 chiffres significatifs (petites valeurs, coefficients). */
+const frg = (x) => {
+  if (!Number.isFinite(x)) return '—';
+  if (x === 0) return '0';
+  const e = Math.floor(Math.log10(Math.abs(x)));
+  return x.toFixed(Math.max(0, Math.min(6, 3 - e))).replace('.', ',');
+};
+const optLabel = (list, id) => list.find((o) => o.id === id)?.label ?? id;
+
+function explainBasin(B, hyp, v, w) {
+  const out = [];
+  const T = v.returnPeriod, tn = v.methodSet !== 'fao54', d = v.discharges || {};
+  const notesOf = (...prefixes) => w.filter((x) => prefixes.some((p) => x.toLowerCase().startsWith(p.toLowerCase())));
+  const V = (s, desc, val, unit, k = 2) => ({ s, desc, v: typeof val === 'string' ? val : (k === 'g' ? frg(val) : frn(val, k)), u: unit || '' });
+  const sec = (o) => { out.push({ status: 'ok', vars: [], calc: [], notes: [], ...o }); };
+
+  // ── données
+  sec({
+    id: 'data', group: 'Données', title: 'Données du bassin et hypothèses', status: 'info',
+    vars: [
+      V('S', 'surface du bassin', B.Area, 'km²', 3), V('P', 'périmètre', B.Perimeter, 'km', 2),
+      V('L', 'plus long chemin hydraulique', B.Length, 'km', 3), V('D', 'dénivelée le long de ce chemin', B.Drop, 'm', 1),
+      V('I', 'pente équivalente du chemin', B.Slope, '%', 2), V('Ig', 'indice de pente global', B.GlobalSlope > 0 ? B.GlobalSlope : (v.igMPerKm ?? NaN), 'm/km', 1),
+      V('Hmoy', 'altitude moyenne − altitude minimale', B.MeanRelief, 'm', 1), V('ΔH', 'altitude médiane − altitude à l\'exutoire', B.DeltaH, 'm', 1),
+      V('T', 'période de retour', T, 'ans', 0), V('Pan', 'pluie annuelle moyenne', hyp.pan, 'mm', 0),
+      V('P10', 'pluie journalière décennale', hyp.p10, 'mm', 0), V('P100', 'pluie journalière centennale', hyp.p100, 'mm', 0),
+      ...(tn ? [V('P0', 'seuil de ruissellement', hyp.p0, 'mm', 0)] : []),
+      ...(B.VegetationCoverPct != null ? [V('Cv', 'couverture végétale', B.VegetationCoverPct, '%', 1)] : []),
+    ],
+  });
+
+  // ── Gravelius
+  if (v.gravelius != null) sec({
+    id: 'kc', group: 'Forme', title: 'Indice de compacité de Gravelius', formula: 'Kc = P / (2 · √(π · S))',
+    calc: [`Kc = ${frn(B.Perimeter, 2)} / (2 × √(π × ${frn(B.Area, 3)})) = ${frn(v.gravelius, 3)}`], result: { v: frn(v.gravelius, 3), u: '' },
+  });
+
+  // ── temps de concentration
+  const tc = v.tc || {}, ret = v.tcRetained?.formula;
+  const tcSec = (id, formula, calc, unit) => {
+    const t = tc[id], ok = t && t.value > 0;
+    sec({
+      id: 'tc-' + id, group: 'Temps de concentration', title: `${id}${ret === id ? ' — retenu' : ''}`, formula,
+      status: ok ? 'ok' : 'nc', retained: ret === id,
+      calc: ok ? calc(t) : [], result: ok ? { v: unit === 'h' ? `${frn(t.value, 2)} h = ${frn(t.minutes, 1)}` : frn(t.value, 2), u: 'min' } : null,
+      notes: ok ? [] : (notesOf(id).length ? notesOf(id) : ['données insuffisantes pour cette formule']),
+    });
+  };
+  tcSec('Kirpich', 'tc = 0,0195 · (L³ / D)^0,385   (L, D en m ; tc en min)',
+    (t) => [`tc = 0,0195 × (${frn(B.Length * 1000, 0)}³ / ${frn(B.Drop, 1)})^0,385 = ${frn(t.value, 2)} min`]);
+  tcSec('Ventura', 'tc = 76 · √(S / I)   (S en km², I en % ; tc en min)',
+    (t) => [`tc = 76 × √(${frn(B.Area, 3)} / ${frn(B.Slope, 2)}) = ${frn(t.value, 2)} min`]);
+  tcSec('Passini', 'tc = 0,108 · (S · L)^(1/3) / √(I / 100)   (S km², L km, I % ; tc en h)',
+    (t) => [`tc = 0,108 × (${frn(B.Area, 3)} × ${frn(B.Length, 3)})^(1/3) / √(${frn(B.Slope, 2)} / 100) = ${frn(t.value, 2)} h`], 'h');
+  tcSec('Giandotti', 'tc = (4 √S + 1,5 L) / (0,8 √Hmoy)   (S km², L km, Hmoy m ; tc en h)',
+    (t) => [`tc = (4 × √${frn(B.Area, 3)} + 1,5 × ${frn(B.Length, 3)}) / (0,8 × √${frn(B.MeanRelief, 1)}) = ${frn(t.value, 2)} h`], 'h');
+
+  // ── intensité
+  if (v.intensitySource === 'montana' && v.montana) {
+    const m = v.montana, t = v.tcRetained;
+    sec({
+      id: 'i', group: 'Pluie', title: `Intensité de pluie — Montana${m.stationName ? ` (station ${m.stationName})` : ''}`,
+      formula: 'i = a / (t / 60 + c)^b   (t en min ; i en mm/h)',
+      vars: [V('a', '', m.a, '', 'g'), V('b', '', m.b, '', 'g'), V('c', '', m.c, '', 'g'),
+        V('T', m.tabulated === false ? `période de retour des coefficients (T demandé ${T} ans non tabulé)` : 'période de retour', m.tUsed ?? T, 'ans', 0),
+        V('t', t ? `durée = tc ${t.formula}${t.idfMinutes > t.minutes + 1e-9 ? ' relevé au minimum tabulé de l\'IDF' : ''}` : 'durée', t?.idfMinutes, 'min', 1)],
+      calc: [`i = ${frg(m.a)} / (${frn(t?.idfMinutes, 1)} / 60 + ${frg(m.c)})^${frg(m.b)} = ${frn(v.intensityMmH, 2)} mm/h`],
+      result: { v: frn(v.intensityMmH, 2), u: 'mm/h' }, notes: notesOf('Montana', 'IDF'), ref: 'Table 18 de la DRE (stations pluviographiques de Tunisie)',
+    });
+  } else if (v.intensitySource === 'idf') {
+    const t = v.tcRetained, hrs = String(hyp.idfTimeUnit ?? 'min').toLowerCase() === 'h';
+    sec({
+      id: 'i', group: 'Pluie', title: 'Intensité de pluie — IDF locale', formula: `i = a · t^b   (t en ${hrs ? 'h' : 'min'} ; i en mm/h)`,
+      vars: [V('a', '', hyp.idfA, '', 'g'), V('b', '', hyp.idfB, '', 'g'), V('t', `durée = tc ${t?.formula || ''}`, hrs ? t?.idfMinutes / 60 : t?.idfMinutes, hrs ? 'h' : 'min', 2)],
+      calc: [`i = ${frg(hyp.idfA)} × ${frn(hrs ? t?.idfMinutes / 60 : t?.idfMinutes, 2)}^${frg(hyp.idfB)} = ${frn(v.intensityMmH, 2)} mm/h`],
+      result: { v: frn(v.intensityMmH, 2), u: 'mm/h' }, notes: notesOf('IDF'), ref: hyp.idfSource || '',
+    });
+  } else if (v.intensitySource === 'saisie') {
+    sec({ id: 'i', group: 'Pluie', title: 'Intensité de pluie — saisie', result: { v: frn(v.intensityMmH, 2), u: 'mm/h' } });
+  } else {
+    sec({ id: 'i', group: 'Pluie', title: 'Intensité de pluie', status: 'nc', notes: notesOf('Montana', 'IDF', 'Rationnelle : i', 'Rationnelle : intensité').length ? notesOf('Montana', 'IDF', 'Rationnelle : i', 'Rationnelle : intensité') : ['ni station Montana, ni IDF, ni intensité saisie'] });
+  }
+
+  // ── coefficient de ruissellement
+  const rc = v.runoffCoeff;
+  if (tn) sec({
+    id: 'C', group: 'Ruissellement', title: 'Coefficient de ruissellement C (abaque pente × végétation)',
+    formula: 'C lu sur l\'abaque : pente ≤ 8 % → 0,40 / 0,50 / 0,60 ; pente > 8 % → 0,50 / 0,60 / 0,70 (indice de végétation 1 / 2 / 3)',
+    status: rc ? 'ok' : 'nc',
+    vars: rc ? [V('I', 'pente', rc.slopePct, '%', 2), V('classe', '', rc.slopeClass || '', ''), V('Iv', 'indice de végétation (> 50 % couvert → 1 ; 30–50 % → 2 ; < 30 % → 3)', String(rc.vegetationIndex ?? '—'), '')] : [],
+    result: rc ? { v: frn(rc.C, 2), u: '' } : null, notes: rc ? [] : notesOf('Abaque C', 'C saisi'),
+  });
+  else sec({ id: 'C', group: 'Ruissellement', title: 'Coefficient de ruissellement C (saisi)', status: rc ? 'ok' : 'nc', result: rc ? { v: frn(rc.C, 2), u: '' } : null, notes: rc ? [] : ['C non saisi : méthode rationnelle non calculée'] });
+
+  // ── méthode rationnelle
+  {
+    const q = d.rational, C = rc?.C;
+    sec({
+      id: 'rational', group: 'Débits', method: 'rational', title: 'Méthode rationnelle', formula: 'Q = 0,278 · C · i · S   (i mm/h, S km² ; domaine S < 4 km²)',
+      status: q != null ? 'ok' : 'nc', calc: q != null ? [`Q = 0,278 × ${frn(C, 2)} × ${frn(v.intensityMmH, 2)} × ${frn(B.Area, 3)} = ${frn(q, 2)} m³/s`] : [],
+      result: q != null ? { v: frn(q, 2), u: 'm³/s' } : null, notes: notesOf('Rationnelle'),
+    });
+  }
+
+  if (tn) explainTunisie(B, hyp, v, w, sec, V, notesOf);
+  else explainFao54(B, hyp, v, w, sec, V, notesOf);
+  return out;
+}
+
+function explainTunisie(B, hyp, v, w, sec, V, notesOf) {
+  const d = v.discharges, T = v.returnPeriod, tk = Math.trunc(T);
+  const used = (q) => (q != null ? 'ok' : 'nc');
+  // SOGREAH
+  {
+    const pt = hyp.p10 > 0 && hyp.p100 > 0 && T > 0 ? formulas.sogreahRainfall(T, hyp.p10, hyp.p100) : NaN;
+    const yT = T > 1 ? gumbelReduced(T) : NaN;
+    sec({
+      id: 'sogreah', group: 'Débits', method: 'sogreah', title: 'SOGREAH',
+      formula: ['P_T = P10 + (y_T − 2,25) / (4,60 − 2,25) · (P100 − P10), avec y_T = −ln(−ln(1 − 1/T))   (P_T = P10 si T ≤ 10, P100 si T ≥ 100)', 'Q = S^0,75 · (P_T − P0) / 12   (domaine Pan ≤ 500 mm)'],
+      status: used(d.sogreah),
+      calc: Number.isFinite(pt) ? [
+        T > 10 && T < 100 ? `y_T = −ln(−ln(1 − 1/${frn(T, 0)})) = ${frn(yT, 3)} ; P_T = ${frn(hyp.p10, 1)} + (${frn(yT, 3)} − 2,25) / 2,35 × (${frn(hyp.p100, 1)} − ${frn(hyp.p10, 1)}) = ${frn(pt, 1)} mm` : `P_T = ${frn(pt, 1)} mm`,
+        ...(d.sogreah != null ? [`Q = ${frn(B.Area, 3)}^0,75 × (${frn(pt, 1)} − ${frn(hyp.p0, 1)}) / 12 = ${frn(d.sogreah, 2)} m³/s`] : []),
+      ] : [],
+      result: d.sogreah != null ? { v: frn(d.sogreah, 2), u: 'm³/s' } : null, notes: notesOf('Sogreah'),
+    });
+  }
+  // Ghorbel
+  {
+    const z = hyp.ghorbelZone, excl = isUnused(z), zone = parseEnum(z, ENUMS.ghorbel);
+    const ratios = zone ? GHORBEL_RATIOS[zone] : null;
+    let qMax = NaN, calc = [], ic = NaN;
+    if (zone === 'IV' || zone === 'V') { qMax = formulas.ghorbelQmaxZone45(B.Area); calc.push(`Qmax = 85 × ln(${frn(B.Area, 3)}) = ${frn(qMax, 2)} m³/s`); }
+    else if (zone && B.Length > 0 && B.Perimeter > 0) {
+      ic = B.Gravelius > 0 ? B.Gravelius : formulas.gravelius(B.Perimeter, B.Area);
+      qMax = formulas.ghorbelQmaxZone123(B.Area, hyp.pan / 1000, B.DeltaH, B.Length, ic);
+      calc.push(`Qmax = ${frn(B.Area, 3)}^0,8 × [1,075 × √(${frn(hyp.pan / 1000, 3)} × ${frn(B.DeltaH, 1)} / ${frn(B.Length, 3)}) / ${frn(ic, 3)} − 0,232] = ${frn(qMax, 2)} m³/s`);
+    }
+    if (d.ghorbel != null && ratios) calc.push(`Q = ${frn(ratios[tk], 2)} × ${frn(qMax, 2)} = ${frn(d.ghorbel, 2)} m³/s`);
+    sec({
+      id: 'ghorbel', group: 'Débits', method: 'ghorbel', title: `Ghorbel${zone ? ` — zone ${zone} (${optLabel(OPTION_LISTS.ghorbelZones, zone)})` : ''}`,
+      formula: zone === 'IV' || zone === 'V' ? ['Qmax = 85 · ln S', 'Q_T = r_T · Qmax'] : ['Qmax = S^0,8 · [1,075 · √(P · ΔH / L) / Kc − 0,232]   (P = Pan en m, ΔH m, L km)', 'Q_T = r_T · Qmax'],
+      vars: zone ? [V('r_T', `rapport de la zone ${zone} pour T = ${tk} ans`, ratios?.[tk], '', 2)] : [],
+      status: excl ? 'excl' : used(d.ghorbel), calc, result: d.ghorbel != null ? { v: frn(d.ghorbel, 2), u: 'm³/s' } : null,
+      notes: excl ? ['méthode exclue (« ne pas utiliser »)'] : notesOf('Ghorbel'),
+      table: ratios ? { head: ['T (ans)', ...Object.keys(ratios)], rows: [['r_T', ...Object.values(ratios).map((x) => frn(x, 2))]] } : null,
+    });
+  }
+  // Kallel
+  {
+    const z = hyp.kallelRegion, excl = isUnused(z), reg = parseEnum(z, ENUMS.kallel);
+    const K = { NordCapBon: [5.5, 0.5], NoyauDorsale: [2.6, 0.8], CentreSahel: [T <= 20 ? 14.3 : 24.7, 0.5], SudEstSudOuest: [12.35, 0.5] }[reg];
+    sec({
+      id: 'kallel', group: 'Débits', method: 'kallel', title: `Kallel${reg ? ` — ${optLabel(OPTION_LISTS.kallelRegions, reg)}` : ''}`,
+      formula: 'Q = k · S^e · T^0,41   (Nord & Cap-Bon k = 5,5, e = 0,5 ; Noyau de la dorsale 2,6 / 0,8 ; Centre & Sahel 14,3 (T ≤ 20) ou 24,7 / 0,5 ; Sud 12,35 / 0,5 ; domaine S ≥ 100 km²)',
+      status: excl ? 'excl' : used(d.kallel),
+      calc: d.kallel != null && K ? [`Q = ${frn(K[0], 2)} × ${frn(B.Area, 3)}^${frn(K[1], 1)} × ${frn(T, 0)}^0,41 = ${frn(d.kallel, 2)} m³/s`] : [],
+      result: d.kallel != null ? { v: frn(d.kallel, 2), u: 'm³/s' } : null, notes: excl ? ['méthode exclue (« ne pas utiliser »)'] : notesOf('Kallel'),
+    });
+  }
+  // Fersi
+  {
+    const z = hyp.fersiSector, excl = isUnused(z), sct = parseEnum(z, ENUMS.fersi);
+    const ig = B.GlobalSlope > 0 ? B.GlobalSlope : B.Slope * 10, fac = sct ? FERSI_FACTORS[sct] : null;
+    const he = formulas.fersiMeanRunoff(hyp.pan, ig), qx = formulas.fersiAnnualMax(he, B.Area);
+    const logTxt = B.Area < 1 ? `log10(${frn(B.Area, 3)} + 2)` : B.Area < 2 ? `log10(${frn(B.Area, 3)} + 1)` : `log10(${frn(B.Area, 3)})`;
+    sec({
+      id: 'fersi', group: 'Débits', method: 'fersi', title: `Fersi${sct ? ` — ${optLabel(OPTION_LISTS.fersiSectors, sct)}` : ''}`,
+      formula: ['He = 0,01639 · Pan · √Ig', 'Qxmoy = 0,266 · He · √S · log10(S)   (S + 2 si S < 1 km², S + 1 si S < 2 km²)', 'Q_T = y_T · (S · Ig / 270)^−0,423 · Qxmoy   (domaine Pan ≤ 400 mm)'],
+      vars: sct ? [V('Ig', B.GlobalSlope > 0 ? 'indice de pente global' : 'déduit de la pente : 10 × I', ig, 'm/km', 1), V('y_T', `facteur du secteur pour T = ${tk} ans`, fac?.[tk], '', 3)] : [],
+      status: excl ? 'excl' : used(d.fersi),
+      calc: d.fersi != null ? [`He = 0,01639 × ${frn(hyp.pan, 0)} × √${frn(ig, 1)} = ${frn(he, 2)} mm`, `Qxmoy = 0,266 × ${frn(he, 2)} × √${frn(B.Area, 3)} × ${logTxt} = ${frn(qx, 3)} m³/s`,
+        `Q = ${frn(fac?.[tk], 3)} × (${frn(B.Area, 3)} × ${frn(ig, 1)} / 270)^−0,423 × ${frn(qx, 3)} = ${frn(d.fersi, 2)} m³/s`] : [],
+      result: d.fersi != null ? { v: frn(d.fersi, 2), u: 'm³/s' } : null, notes: excl ? ['méthode exclue (« ne pas utiliser »)'] : notesOf('Fersi'),
+    });
+  }
+  // Frigui
+  {
+    const z = hyp.friguiRegion, excl = isUnused(z), reg = parseEnum(z, ENUMS.frigui);
+    const p = reg ? FRIGUI_PARAMS[reg] : null, lam = reg ? FRIGUI_LAMBDAS[reg]?.[tk] : null;
+    sec({
+      id: 'frigui', group: 'Débits', method: 'frigui', title: `Frigui${reg ? ` — ${optLabel(OPTION_LISTS.friguiRegions, reg)}` : ''}`,
+      formula: 'Q_T = λ_T · am · S / (S + 1)^n',
+      vars: p ? [V('am', '', p.am, '', 1), V('n', '', p.n, '', 2), V('λ_T', `pour T = ${tk} ans`, lam ?? NaN, '', 2)] : [],
+      status: excl ? 'excl' : used(d.frigui),
+      calc: d.frigui != null ? [`Q = ${frn(lam, 2)} × ${frn(p.am, 1)} × ${frn(B.Area, 3)} / (${frn(B.Area, 3)} + 1)^${frn(p.n, 2)} = ${frn(d.frigui, 2)} m³/s`] : [],
+      result: d.frigui != null ? { v: frn(d.frigui, 2), u: 'm³/s' } : null, notes: excl ? ['méthode exclue (« ne pas utiliser »)'] : notesOf('Frigui'),
+    });
+  }
+  // Francou-Rodier
+  {
+    const reg = francouRodierRegion(hyp.francouRodierRegion);
+    const k = num(hyp.francouRodierK) > 0 ? num(hyp.francouRodierK) : reg?.suggestedK;
+    sec({
+      id: 'francouRodier', group: 'Débits', method: 'francouRodier', title: `Francou-Rodier${reg ? ` — ${reg.label}` : ''}`,
+      formula: 'Q = 10⁶ · (S / 10⁸)^(1 − K/10)   (S km² ; domaine fiable S ≥ 100 km²)',
+      vars: k > 0 ? [V('K', num(hyp.francouRodierK) > 0 ? 'saisi' : 'proposé par la région', k, '', 2)] : [],
+      status: used(d.francouRodier),
+      calc: d.francouRodier != null ? [`Q = 10⁶ × (${frn(B.Area, 3)} / 10⁸)^(1 − ${frn(k, 2)}/10) = ${frn(d.francouRodier, 2)} m³/s`] : [],
+      result: d.francouRodier != null ? { v: frn(d.francouRodier, 2), u: 'm³/s' } : null, notes: notesOf('Francou'),
+    });
+  }
+  // synthèse
+  const st = v.stats;
+  sec({
+    id: 'synth', group: 'Synthèse', title: 'Synthèse des méthodes', status: st ? 'ok' : 'nc',
+    formula: 'Débit de projet par défaut = médiane des débits calculés (sauf méthode choisie)',
+    calc: st ? [`n = ${st.n} · min ${frn(st.min, 2)} · médiane ${frn(st.median, 2)} · max ${frn(st.max, 2)} m³/s · CV ${frn(st.cvPct, 0)} %`] : [],
+    notes: v.recommendation ? [v.recommendation] : [], result: st ? { v: frn(st.median, 2), u: 'm³/s (médiane)' } : null,
+  });
+}
+
+function explainFao54(B, hyp, v, w, sec, V, notesOf) {
+  const r = v.orstom;
+  if (v.pm10) sec({
+    id: 'pm10', group: 'Pluie', title: 'Abattement et pluie moyenne décennale Pm10', formula: ['A = 1 − (161 − 0,042 · Pan) / 1000 · log10 S   (éq. 1.9)', 'Pm10 = A · P10'],
+    calc: [`A = 1 − (161 − 0,042 × ${frn(hyp.pan, 0)}) / 1000 × log10(${frn(B.Area, 3)}) = ${frn(v.pm10.abattement, 3)}`, `Pm10 = ${frn(v.pm10.abattement, 3)} × ${frn(hyp.p10, 1)} = ${frn(v.pm10.value, 1)} mm`],
+    result: { v: frn(v.pm10.value, 1), u: 'mm' },
+  });
+  if (v.checklist?.blocking?.length) sec({ id: 'checklist', group: 'Débits', title: 'Check-list de l\'annexe 1', status: 'nc', notes: v.checklist.blocking });
+  // Orstom
+  if (r) {
+    const ok = r.ok;
+    sec({
+      id: 'orstom', group: 'Débits', method: 'orstom', title: `Méthode Orstom — zone ${v.orstomZone?.id === 'tropicale' ? 'tropicale sèche' : 'sahélienne'}`,
+      formula: ['Kr10 = Kr70 + (Kr100 − Kr70) · (P10 − 70) / 30   (éq. 3.2/3.3, tableaux 1 à 4)', 'Lr10 = Pm10 · Kr10 ;  Vr10 = 1000 · Pm10 · Kr10 · S', 'Qm10 = 16,7 · Pm10 · Kr10 · S / Tb10   (Tb10 en min)', 'Qr10 = α10 · Qm10 ;  Q10 = Qr10 · (1 + r)   (r : part de l\'écoulement retardé)'],
+      status: ok ? 'ok' : 'nc',
+      vars: ok ? [V('Kr10', r.kr10Source, r.kr10Pct, '%', 1), ...(Number.isFinite(r.kr70Pct) ? [V('Kr70 / Kr100', 'lus aux tableaux', `${frn(r.kr70Pct, 1)} / ${frn(r.kr100Pct, 1)}`, '%')] : []),
+        V('Tb10', 'temps de base (tableaux)', r.tb10Min, 'min', 0), V('Tm10', 'temps de montée', r.tm10Min, 'min', 0), V('α10', 'coefficient de pointe', r.alpha10, '', 2), V('r', 'écoulement retardé / ruissellement', r.delayedRatio, '', 3)] : [],
+      calc: ok ? [
+        ...(Number.isFinite(r.kr70Pct) ? [`Kr10 = ${frn(r.kr70Pct, 1)} + (${frn(r.kr100Pct, 1)} − ${frn(r.kr70Pct, 1)}) × (${frn(hyp.p10, 1)} − 70) / 30 = ${frn(r.kr10Pct, 1)} %`] : []),
+        `Lr10 = ${frn(r.pm10Mm, 1)} × ${frn(r.kr10Pct / 100, 3)} = ${frn(r.lr10Mm, 1)} mm ;  Vr10 = ${frn(r.vr10M3, 0)} m³`,
+        `Qm10 = 16,7 × ${frn(r.pm10Mm, 1)} × ${frn(r.kr10Pct / 100, 3)} × ${frn(B.Area, 3)} / ${frn(r.tb10Min, 0)} = ${frn(r.qm10, 2)} m³/s`,
+        `Qr10 = ${frn(r.alpha10, 2)} × ${frn(r.qm10, 2)} = ${frn(r.qr10, 2)} m³/s ;  Q10 = ${frn(r.qr10, 2)} × (1 + ${frn(r.delayedRatio, 3)}) = ${frn(r.q10, 2)} m³/s`,
+        ...(Number.isFinite(r.c100) ? [`Passage à 100 ans (Gradex) : C = 1 + ${frn(r.p100Ratio, 3)} × (${frn(r.tb10Min / 60, 2)} / 24)^0,12 / ${frn(r.kr10Pct / 100, 3)} = ${frn(r.c100, 3)} (${r.p100RatioSource})`] : []),
+      ] : [],
+      result: ok ? { v: frn(r.q10, 2), u: 'm³/s (Q10)' } : null, notes: ok ? r.warnings : [r.reason],
+    });
+  }
+  // CIEH
+  const inp = v.ciehInput || {};
+  for (const row of v.cieh?.rows || []) {
+    const reg = ciehById(row.no), p = inp.pm10Mm;
+    const parts = reg ? [
+      reg.s != null ? `${frn(inp.areaKm2, 3)}^${frg(reg.s)}` : null, reg.ig != null ? `${frn(inp.igMPerKm, 1)}^${frg(reg.ig)}` : null,
+      reg.pm10 != null ? `${frn(p, 1)}^${frg(reg.pm10)}` : null, reg.kr10 != null ? `${frn(inp.kr10Pct, 1)}^${frg(reg.kr10)}` : null,
+      reg.dd != null ? `${frn(inp.ddKmPerKm2, 2)}^${frg(reg.dd)}` : null,
+    ].filter(Boolean) : [];
+    sec({
+      id: 'cieh-' + row.no, group: 'Débits', method: 'cieh', title: `CIEH — régression n° ${row.no}${row.groupe ? ` (${row.groupe})` : ''}`,
+      formula: (row.formula || '').replace(/\./g, ',') + `   (n = ${row.n ?? '—'}, R² = ${row.r2 != null ? frn(row.r2, 2) : '—'})`,
+      vars: row.description ? [V('domaine', row.description, '', '')] : [],
+      status: row.ok ? 'ok' : 'nc',
+      calc: row.ok && reg ? [`Q10 = ${frg(reg.a)} × ${parts.join(' × ')} = ${frn(row.q10, 2)} m³/s${Math.abs((v.checklist?.effect?.qCiehFactor ?? 1) - 1) > 1e-12 ? ' (check-list incluse)' : ''}`] : [],
+      result: row.ok ? { v: frn(row.q10, 2), u: 'm³/s (Q10)' } : null, notes: row.ok ? [] : [row.reason],
+    });
+  }
+  const st = v.stats;
+  sec({
+    id: 'synth', group: 'Synthèse', title: 'Synthèse FAO 54 (CIEH + Orstom)', status: st ? 'ok' : 'nc',
+    formula: 'Q10 de projet = médiane des régressions CIEH et de la méthode Orstom ; Q100 = C · Q10 (Gradex) si T = 100 ans ; incertitude ±50 %',
+    calc: [...(st ? [`n = ${st.n} · min ${frn(st.min, 2)} · médiane ${frn(st.median, 2)} · max ${frn(st.max, 2)} m³/s · CV ${frn(st.cvPct, 0)} %`] : []),
+      ...(v.q100 ? [`Q100 = ${frn(v.q100.c100, 3)} × ${frn(st?.median, 2)} = ${frn(v.q100.value, 2)} m³/s`] : [])],
+    result: v.design ? { v: frn(v.design.Q, 2), u: 'm³/s' } : null, notes: [v.recommendation, ...notesOf('CIEH :', 'T = 100', 'T =')].filter(Boolean),
+  });
+}
+
 /** Classe d'infiltrabilité : sigle (PI, I, RI, P, TP) ou ordinal fractionnaire ; défaut RI (2). */
 function parseInfiltrability(value) {
   if (value == null || String(value).trim() === '') return 2;
@@ -1654,6 +1928,8 @@ export function computeBasin(basin, hypotheses = {}) {
   if (hyp.methodSet === 'fao54') computeFao54(B, hyp, warnings, v);
   else computeTunisie(B, hyp, warnings, v);
   if (v.tc) v.tcFormula = TC_IDS.includes(String(hyp.tcFormula)) ? String(hyp.tcFormula) : 'Kirpich';
+  // note de calcul détaillée (présentation seulement : ne doit jamais faire échouer le calcul)
+  try { v.detail = explainBasin(B, hyp, v, warnings); } catch (e) { v.detail = [{ id: 'err', group: '', title: 'Détail indisponible', status: 'nc', vars: [], calc: [], notes: [String(e?.message || e)] }]; }
 
   // Débit retenu : choix explicite de l'utilisateur, sinon médiane (Tunisie) / crue de projet FAO 54.
   let retained = { Q: null, method: null };
