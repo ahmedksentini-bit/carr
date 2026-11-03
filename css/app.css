@@ -490,3 +490,32 @@ table.hy-tab th, table.hy-tab td { width: auto; text-align: center; }
 ul.hy-notes { margin: 4px 0 2px 16px; padding: 0; color: var(--warn, #b45309); font-size: 12px; }
 details.hy-tabdetail { margin: 8px 0; }
 details.hy-tabdetail > summary { cursor: pointer; font-weight: 600; }
+
+/* carte des stations Montana */
+.mt-wrap { flex: 1; display: flex; min-height: 0; }
+.mt-side { width: 320px; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line2); }
+.mt-side > .note { margin: 10px 12px 4px; font-size: 11.5px; line-height: 1.45; }
+.mt-tools { padding: 0 12px 8px; gap: 8px; align-items: center; }
+.mt-tools input { flex: 1; min-width: 80px; }
+#mtList { flex: 1; overflow: auto; border-top: 1px solid var(--line2); }
+.mt-st { padding: 7px 12px; border-bottom: 1px solid var(--line2); cursor: pointer; }
+.mt-st:hover { background: var(--panel2); }
+.mt-st.on { background: var(--panel2); box-shadow: inset 3px 0 0 var(--ok); }
+.mt-st .nm { font-weight: 600; font-size: 12.5px; }
+.mt-st .meta { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.mt-st.nopos .nm::after { content: " (hors carte)"; color: var(--warn); font-weight: 400; font-size: 10px; }
+.mt-st.atyp .nm::after { content: " ⚠ atypique"; color: var(--warn); font-weight: 400; font-size: 10px; }
+#mtMap { flex: 1; min-height: 300px; }
+#mtMap .leaflet-popup-content { color: #1a2332; font: 12px system-ui, sans-serif; margin: 10px 12px; }
+#mtMap .mt-sub { color: #5b6478; font-size: 11px; margin: 2px 0; }
+#mtMap .mt-warn { color: #9a5b00; font-size: 11px; margin: 3px 0; }
+#mtMap table.mt-tab { border-collapse: collapse; width: 100%; margin: 6px 0; }
+#mtMap table.mt-tab th, #mtMap table.mt-tab td { padding: 2px 5px; border-bottom: 1px solid #e3e7ee; text-align: right; font-variant-numeric: tabular-nums; }
+#mtMap table.mt-tab th:first-child, #mtMap table.mt-tab td:first-child { text-align: left; }
+#mtMap table.mt-tab tr.on td { font-weight: 700; color: #0b5fa5; }
+#mtMap .leaflet-popup-content button { width: 100%; margin-top: 6px; padding: 5px; border: 0; border-radius: 4px; background: #2c7fb8; color: #fff; font-weight: 600; cursor: pointer; }
+#mtMap .leaflet-popup-content button.mini { width: auto; margin: 0; padding: 2px 8px; }
+#mtMap .leaflet-popup-content button:disabled { background: #9aabbc; cursor: not-allowed; }
+#mtMap .mt-label { background: rgba(26,35,50,.82); border: 1px solid rgba(255,255,255,.35); border-radius: 3px; color: #f0f4f8; font: 600 10px/1.2 system-ui, sans-serif; padding: 2px 5px; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+#mtMap .mt-label::before { display: none; }
+@media (max-width: 760px) { .mt-wrap { flex-direction: column; } .mt-side { width: auto; max-height: 40%; border-right: 0; border-bottom: 1px solid var(--line2); } }

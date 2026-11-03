@@ -27,6 +27,7 @@ import { demFromSRTM, demFromTIN } from './hydro/dem.js';
 import { delineate } from './hydro/watershed.js';
 import { splitCells, mergeCells, basinOf } from './hydro/basinedit.js';
 import { createWorldCover } from './hydro/worldcover.js';
+import { openMontanaMap, initMontanaMap } from './montanamap.js';
 import { computeAll as hydroComputeAll, defaultHypotheses, listMontanaStations, TC_FORMULAS, FRANCOU_RODIER_REGIONS, suggestCiehRegressions, OPTION_LISTS, resolveMontanaStation, montanaAfricaIdf, KR10_GEOLOGY_CATEGORIES } from './hydro/hydrology.js';
 import { sizeCulvert, culvertHydraulics, inletsForShape, defaultInletFor, slopeAboveCritical } from './hydro/culvert.js';
 import { DCAT, planChecks, platformChecks, catText, designCatOf, clothoidNeed } from './roadcat.js';
@@ -3841,7 +3842,7 @@ function hyHypHtml(h, stations, opt) {
     const st = hy.montanaStationCode ? resolveMontanaStation(hy.montanaStationCode, hy.returnPeriod) : null;
     out += '<h4>Pluie</h4>' +
       `<div class="row">${num('pan', 'Pluie annuelle moyenne Pan', 'mm', '', 'Ghorbel, Fersi, SOGREAH (domaine ≤ 500 mm)')}${num('p10', 'Pluie journalière décennale P10', 'mm', '', 'SOGREAH : pluie de période T interpolée entre P10 et P100')}${num('p100', 'Pluie journalière centennale P100', 'mm')}${num('p0', 'Seuil de ruissellement P0', 'mm', '', 'SOGREAH')}</div>` +
-      `<div class="row"><label class="fld"><span class="lb">Station Montana (table 18)</span><select data-hy="montanaStationCode">${opt('', 'aucune — a, b, c saisis', hy.montanaStationCode ?? '')}${stations.map((q) => opt(q.code, `${q.name}${q.d != null ? ` — ${fmt(q.d, 0)} km` : ''}`, hy.montanaStationCode ?? '')).join('')}</select></label>` +
+      `<div class="row"><label class="fld"><span class="lb">Station Montana (table 18)</span><select data-hy="montanaStationCode">${opt('', 'aucune — a, b, c saisis', hy.montanaStationCode ?? '')}${stations.map((q) => opt(q.code, `${q.name}${q.d != null ? ` — ${fmt(q.d, 0)} km` : ''}`, hy.montanaStationCode ?? '')).join('')}</select></label><button data-mtmap="tunisie" title="Carte des stations de la table 18 avec le projet et ses bassins : coefficients par période de retour, rattachement d'un clic">🗺 Carte des stations</button>` +
       ['montanaA', 'montanaB', 'montanaC'].map((k, i) => `<label class="fld"><span class="lb">${'abc'[i]}${i ? '' : ' (mm/h)'}</span><input data-hy="${k}" type="text" inputmode="decimal" value="${st ? esc(fmt([st.a, st.b, st.c][i], 3)) : v(hy[k] || '')}"${st ? ' disabled title="aperçu de la station rattachée (résolue bassin par bassin d\'après la période de retour)"' : ''}></label>`).join('') + '</div>' +
       `<p class="note">I (mm/h) = a / (t + c)<sup>b</sup>, t en heures${st ? ` — ${esc(findMontanaStationName(hy.montanaStationCode))}, T = ${hy.returnPeriod} ans${st.tabulated ? '' : ` : période non tabulée, valeurs de T = ${st.tUsed} ans`}` : ' — sans station, intensité calculée avec a, b, c saisis'}.</p>` +
       '<h4>Régionalisations et ruissellement</h4>' +
@@ -3855,7 +3856,7 @@ function hyHypHtml(h, stations, opt) {
     const afr = listMontanaStations().afrique, ma = hy.montanaAfrica, idf = ma ? montanaAfricaIdf(ma) : null;
     out += '<h4>Pluie</h4>' +
       `<div class="row">${num('pan', 'Pluie annuelle moyenne Pan', 'mm', '', 'régressions CIEH, zone Orstom (limite 850 mm), abattement')}${num('p10', 'Pluie journalière décennale P10', 'mm')}${num('p100', 'Pluie journalière centennale P100', 'mm')}</div>` +
-      `<div class="row"><label class="fld"><span class="lb">IDF : station Montana CIEH</span><select data-hy="montanaAfrica">${opt('', 'aucune — a, b saisis', ma?.station ?? '')}${afr.map((q) => opt(q.key, q.key, ma?.station ?? '')).join('')}</select></label>` +
+      `<div class="row"><label class="fld"><span class="lb">IDF : station Montana CIEH</span><select data-hy="montanaAfrica">${opt('', 'aucune — a, b saisis', ma?.station ?? '')}${afr.map((q) => opt(q.key, q.key, ma?.station ?? '')).join('')}</select></label><button data-mtmap="afrique" title="Carte des stations Montana CIEH (Afrique de l'Ouest et centrale) avec le projet et ses bassins">🗺 Carte des stations</button>` +
       (ma ? `<label class="fld"><span class="lb">Plage</span><select data-hy="montanaAfricaRange">${(afr.find((q) => q.key === ma.station)?.ranges || []).map((r, i) => opt(i, r.label, ma.range ?? 0)).join('')}</select></label>` : '') +
       `<label class="fld"><span class="lb">a (mm/h)</span><input data-hy="idfA" type="text" inputmode="decimal" value="${idf?.ok ? esc(fmt(idf.a, 3)) : v(hy.idfA || '')}"${idf?.ok ? ' disabled' : ''}></label><label class="fld"><span class="lb">b</span><input data-hy="idfB" type="text" inputmode="decimal" value="${idf?.ok ? esc(fmt(idf.b, 3)) : v(hy.idfB || '')}"${idf?.ok ? ' disabled' : ''}></label></div>` +
       `<p class="note">i (mm/h) = a · tc<sup>b</sup>, tc en minutes${idf?.ok ? ` — ${esc(idf.source)}` : idf ? ` — ${esc(idf.reason)}` : ''}.</p>` +
@@ -4012,6 +4013,26 @@ function renderHydro() {
 // Clic sur un bassin du plan (ou bouton « Fiche » du tableau) : propriétés physiques, courbe hypsométrique, profil de
 // l'écoulement principal, calcul hydrologique complet et hydraulique de l'ouvrage (cotes fil d'eau amont / aval, ligne
 // d'eau, contrôle, vitesses, revanche) ; actions couper / fusionner / supprimer (basinedit.js, session de calcul).
+// ─── Carte des stations Montana (table 18 Tunisie, CIEH Afrique) : js/montanamap.js ───
+function openMontana(mode) {
+  const h = hyCfg(), toLL = (q) => { const ll = S.crs.toLL(q.x, q.y); return { lat: ll.lat, lon: ll.lon }; };
+  const project = { lines: [], basins: [] };
+  if (S.crs.geo) {
+    for (const ax of hyAxes().filter((a) => hyAxisChecked(h, a))) { const pts = []; const st = Math.max(20, ax.len / 200); for (let s = 0; s <= ax.len; s += st) pts.push(toLL(ax.at(s).p)); pts.push(toLL(ax.at(ax.len).p)); project.lines.push(pts); }
+    (h.res?.crossings || []).forEach((c, i) => project.basins.push({ id: `${c.id} · ${fmt(c.totalKm2, 2)} km²`, rings: (c.ring || []).map((r) => r.map(toLL)), color: `hsl(${((i * 137.508 + 200) % 360).toFixed(0)}, 70%, 52%)` }));
+  }
+  const L = listMontanaStations();
+  openMontanaMap({
+    mode, stations: mode === 'afrique' ? L.afrique : L.tunisie, resolve: resolveMontanaStation, T: h.hyp.returnPeriod || 10, project,
+    current: mode === 'afrique' ? (h.hyp.montanaAfrica ? { station: h.hyp.montanaAfrica.station, range: h.hyp.montanaAfrica.range ?? 0 } : null) : h.hyp.montanaStationCode,
+    onApply: (sel) => {
+      const hh = hyCfg();
+      if (mode === 'afrique') { hh.hyp.montanaAfrica = { station: sel.station, range: sel.range, T: 10 }; hh.hyp.idfA = 0; hh.hyp.idfB = 0; hySet(['hyp', '_'], null); }
+      else { hh.montanaAsked = true; hySet(['hyp', 'montanaStationCode'], sel.code); }
+      toast(mode === 'afrique' ? `Station CIEH rattachée : ${sel.station}.` : `Station Montana rattachée : ${sel.name}.`);
+    },
+  });
+}
 // ─── Couverture végétale des bassins : ESA WorldCover 10 m (hydro/worldcover.js) ───
 let WC = null; // client (capabilities découvertes une fois par session)
 const wcSourceText = (cv) => `ESA WorldCover 10 m, ${fmt(cv.pct, 1)} % (${(cv.breakdown || []).slice(0, 4).map(([l, p]) => `${l.toLowerCase()} ${fmt(p, 0)} %`).join(', ')})`;
@@ -4347,7 +4368,11 @@ function bindHydro() {
   $('#btnHyRun').addEventListener('click', runHydro);
   for (const id of ['hyDem', 'hyMargin', 'hyCell', 'hyMin']) $('#' + id).addEventListener('change', (e) => { const h = hyCfg(), k = { hyDem: 'dem', hyMargin: 'margin', hyCell: 'cell', hyMin: 'minKm2' }[id]; h[k] = id === 'hyDem' ? e.target.value : parseNum(e.target.value) || undefined; });
   $('#hyAxes').addEventListener('change', (e) => { const k = e.target.dataset.hyax; if (!k) return; const h = hyCfg(); const cur = new Set(h.axes || hyAxes().filter((a) => hyAxisChecked(h, a)).map((a) => a.key)); if (e.target.checked) cur.add(k); else cur.delete(k); h.axes = [...cur]; });
-  $('#hyHyp').addEventListener('click', (e) => { if (e.target.closest('[data-wc]')) measureCovers(null, { redo: true }); });
+  $('#hyHyp').addEventListener('click', (e) => {
+    if (e.target.closest('[data-wc]')) measureCovers(null, { redo: true });
+    const mb = e.target.closest('[data-mtmap]'); if (mb) openMontana(mb.dataset.mtmap);
+  });
+  initMontanaMap();
   $('#hyHyp').addEventListener('change', (e) => {
     const k = e.target.dataset.hy, kd = e.target.dataset.hyd; if (!k && !kd) return;
     if (kd) { hySet(['hyd', kd], parseNum(e.target.value)); return; }
