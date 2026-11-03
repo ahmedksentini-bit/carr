@@ -117,8 +117,17 @@ ou sur un fond topographique DXF.
 - **Profil en long** (onglet Profil long) : ligne rouge de chaque branche saisie par points d'inflexion (s depuis le
   carrefour, z, rayon R du raccordement parabolique, T = R·|Δg|/2), depuis la cote imposée du bord de l'anneau (ou de
   la principale) sur l'axe ; terrain naturel du MNT le long de l'axe projet (alignement, raccordement, axe saisi),
-  déblai / remblai, pentes, graphique interactif (clic pour ajouter un PI, glisser pour le déplacer), proposition
-  automatique depuis le TN, stations (TN, projet, écart, pente) en CSV, export DXF du profil (exagération verticale).
+  déblai / remblai, pentes, stations (TN, projet, écart, pente) en CSV, export DXF du profil (exagération verticale).
+  **Éditeur interactif** (`js/pleditor.js`, ergonomie de BVTrace) : le TN est tracé d'emblée avec son cartouche
+  (N° profil, distances, cotes TN et projet, alignements, raccordements) et, pour les axes de l'échangeur, les bandeaux
+  du tracé en plan et des dévers ; outils à gauche — Sélection (glisser un point, glisser le fond), Point (clic,
+  accroché au TN ou à la ligne rouge, rayon ajusté à la place disponible), Pente (depuis un point : pente et longueur ;
+  ou pente imposée à un segment), Rayon, Supprimer, S / Z, Draft TN (écart au TN, rampe / pente maximales, rayons
+  saillant / rentrant, espacement : simplification Ramer-Douglas-Peucker, pentes bornées, rayons ajustés, extrémités
+  imposées respectées), Annuler / Rétablir ; loupes (tout, fenêtre, + / −), molette ancrée au curseur, exagération
+  auto ou imposée, lecture au survol (s, TN, projet, écart, pente), bandes de déblai (rouge) / remblai (jaune),
+  inspecteur du point sélectionné (s, z, R, pentes, T, flèche, calage sur le TN), raccourcis P / I / R / Suppr / F /
+  Échap / Ctrl+Z. Tests : `node tools/test-pl.mjs`.
   La ligne rouge remplace la pente constante de la branche dans le modèle altimétrique (dévers, points d'implantation).
   Contrôles : chevauchement des raccordements, pente maximale et rayons minimaux (ARP catégorie R80 par défaut, valeurs
   urbaines usuelles — à confirmer selon la catégorie ; l'autoroute et les voies secondaires suivent leur catégorie de
