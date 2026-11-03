@@ -255,7 +255,10 @@ ou sur un fond topographique DXF.
   le tablier) et aux croisements dénivelés sans tablier implanté (bretelle sur bretelle ou sur voie secondaire,
   épaisseur supposée 1,00 m). Le point critique (voie, côté, abscisse) est donné dans la fiche de l'ouvrage, avec un
   bouton qui relève la voie portée au gabarit (sommet placé au droit de l'ouvrage, voisins dégagés, rayon adapté) ; les
-  profils en long de toutes ces voies, bretelles et boucles comprises, montrent le tablier, ses appuis et le gabarit.
+  profils en long de toutes ces voies, bretelles et boucles comprises, montrent le tablier, ses appuis et le gabarit ;
+  tant qu'un profil manque, l'emprise de chaque ouvrage est repérée sur le profil en long de chaque axe concerné (voie
+  portée ou franchie, bande verticale) avec le profil à définir. Une voie portée qui repasse sous son propre tablier
+  (boucle de trompette avant son convergent) est contrôlée comme voie franchie.
 - **Profils types, dévers, coupes et cubatures des axes de l'échangeur** (onglet Profils en travers, liste « Axe ») :
   coupes aux profils implantés sur l'autoroute, les voies secondaires et les bretelles. Profil type tiré des
   paramètres de chaque axe (TPC, BDG, voies, BAU/BDD, bermes ; bretelle : voie, BDG, BDD) ; dévers d'alignement

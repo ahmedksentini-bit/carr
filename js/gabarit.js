@@ -53,8 +53,11 @@ function axCtx(prj, D, ax, A, TP) {
 function platformAt(prj, D, C, s) { return axisPlatform(prj, D, C.ax, C.T, s, C.A.PL.zAt(s), C.TP); }
 
 // Cote de la surface de la voie C au point P (projeté sur son axe), bornée à sa plate-forme revêtue.
-function surfaceUnder(prj, D, C, P) {
-  const pr = C.ax.project(P);
+function surfaceUnder(prj, D, C, P, ranges = null) {
+  let pr = null;
+  if (ranges) { // projection limitée aux tronçons portés (une voie portée qui repasse sous son propre tablier)
+    for (const [a, b] of ranges) for (let x = a; x <= b + 1e-9; x += 1) { const q = C.ax.at(x), d = G.dist(q.p, P); if (!pr || d < pr.d) pr = { s: x, d, off: G.cross(q.t, G.sub(P, q.p)) }; }
+  } else pr = C.ax.project(P);
   if (!pr) return null;
   const s = Math.max(0, Math.min(C.ax.len, pr.s)), pf = platformAt(prj, D, C, s), sp = pavedSpan(pf.line);
   const y = Math.max(sp.y0, Math.min(sp.y1, pr.off)), q = lineAt(pf.line, y);
@@ -72,14 +75,18 @@ function genericFootprint(prj, D, C, sC, Lh) {
 }
 
 // Balayage de la chaussée revêtue de la voie basse sous l'emprise F : point critique et plages d'abscisses.
-function sweep(prj, D, low, ups, F, h) {
-  let lo = Infinity, hi = -Infinity;
-  for (const q of F) { const pr = low.ax.project(q); if (pr && pr.d < 200) { lo = Math.min(lo, pr.s); hi = Math.max(hi, pr.s); } }
-  if (!(hi > lo)) return null;
-  lo = Math.max(0, lo - 1); hi = Math.min(low.ax.len, hi + 1);
+function sweep(prj, D, low, ups, F, h, lowR = null, upR = {}) {
+  let spans;
+  if (lowR) spans = lowR.map(([a, b]) => [Math.max(0, a - 15), Math.min(low.ax.len, b + 15)]);
+  else {
+    let lo = Infinity, hi = -Infinity;
+    for (const q of F) { const pr = low.ax.project(q); if (pr && pr.d < 200) { lo = Math.min(lo, pr.s); hi = Math.max(hi, pr.s); } }
+    if (!(hi > lo)) return null;
+    spans = [[Math.max(0, lo - 1), Math.min(low.ax.len, hi + 1)]];
+  }
   let best = null, n = 0, zLowMax = -Infinity;
   const rLow = [Infinity, -Infinity], rUp = Object.fromEntries(ups.map((u) => [u.key, [Infinity, -Infinity]]));
-  for (let s = lo; s <= hi + 1e-9; s += STEP) {
+  for (const [lo, hi] of spans) for (let s = lo; s <= hi + 1e-9; s += STEP) {
     const pf = platformAt(prj, D, low, s), sp = pavedSpan(pf.line);
     for (let y = sp.y0; y <= sp.y1 + 1e-9; y += STEP) {
       const q = lineAt(pf.line, y);
@@ -88,7 +95,7 @@ function sweep(prj, D, low, ups, F, h) {
       if (!inPoly(P, F)) continue;
       // voie portée au droit de P : la plus proche (tige : S-semi ou boucle)
       let U = null;
-      for (const u of ups) { const r = surfaceUnder(prj, D, u, P); if (r && (!U || r.d < U.r.d)) U = { u, r }; }
+      for (const u of ups) { const r = surfaceUnder(prj, D, u, P, upR[u.key] || null); if (r && (!U || r.d < U.r.d)) U = { u, r }; }
       if (!U) continue;
       n++;
       const zInt = U.r.z - h, ta = zInt - q.z;
@@ -101,6 +108,50 @@ function sweep(prj, D, low, ups, F, h) {
   return best ? { ...best, n, rLow, rUp, zLowMax } : null;
 }
 
+// Tronçons d'un axe situés dans un polygone (échantillonnage tous les 1 m) : [{ s0, s1, t }] (t : tangente au milieu).
+export function axisInPoly(ax, poly) {
+  const out = [];
+  let a = null;
+  for (let s = 0; s <= ax.len + 1e-9; s += 1) {
+    const inside = inPoly(ax.at(s).p, poly);
+    if (inside && a == null) a = s;
+    if ((!inside || s + 1 > ax.len + 1e-9) && a != null) { const b = inside ? s : s - 1; if (b - a >= 1) out.push({ s0: a, s1: b, t: ax.at((a + b) / 2).t }); a = null; }
+  }
+  return out;
+}
+const parallel = (t, u) => Math.abs(G.cross(t, u)) < Math.sin((25 * Math.PI) / 180);
+// Analyse d'un tablier implanté : voies portées (clés), direction portée (tangente des voies portées au droit du centre
+// de l'ouvrage), et, pour chaque axe, ses tronçons dans l'emprise — portés (le long du tablier) ou franchis (en travers).
+export function deckAnalysis(prj, axes, o) {
+  const ramps = prj.ramps || [], mx = /^x:([^:]+):/.exec(o.key || ''), mt = /^t:(.+)$/.exec(o.key || '');
+  const upKeys = mx ? [`x:${mx[1]}`] : mt ? [`r:${mt[1]}`, ...ramps.filter((r) => r.role === 'boucle' && r.grp === mt[1]).map((r) => `r:${r.id}`)] : [];
+  const dirs = [];
+  for (const ax of axes) if (upKeys.includes(ax.key) && o.P) { const pr = ax.project(o.P); if (pr && pr.d < 40) dirs.push(ax.at(pr.s).t); }
+  const res = [];
+  for (const ax of axes) {
+    if (!/^(hwy|x:|r:)/.test(ax.key)) continue;
+    const ps = axisInPoly(ax, o.poly);
+    if (!ps.length) continue;
+    const carried = ps.filter((p) => dirs.some((t) => parallel(t, p.t))), crossed = ps.filter((p) => !dirs.some((t) => parallel(t, p.t)));
+    res.push({ ax, key: ax.key, up: upKeys.includes(ax.key), carried, crossed });
+  }
+  return { upKeys, dirs, axes: res };
+}
+// Emprise des tabliers implantés sur chaque axe, sans profil en long : { okey, name, h, key, s0, s1, upper } — l'axe est
+// porté (upper) s'il longe la voie portée dans l'emprise, franchi sinon. Sert au dessin des ouvrages sur les profils en
+// long quand le tirant d'air ne peut pas encore être calculé.
+export function structureSpans(prj, axes, ouvrList) {
+  const out = [];
+  for (const o of ouvrList || []) {
+    if (!(o.poly?.length > 2)) continue;
+    const A = deckAnalysis(prj, axes, o);
+    for (const a of A.axes) {
+      for (const p of a.carried) out.push({ okey: o.key, name: o.name, h: o.h || 0, key: a.key, s0: p.s0, s1: p.s1, upper: true, carried: a.up });
+      for (const p of a.crossed) out.push({ okey: o.key, name: o.name, h: o.h || 0, key: a.key, s0: p.s0, s1: p.s1, upper: false, carried: false });
+    }
+  }
+  return out;
+}
 // Intersections de deux axes (polylignes échantillonnées tous les 2 m) : [{ P, sA, sB }].
 function crossings(A, B) {
   const pa = [], pb = [];
@@ -131,9 +182,10 @@ export function clearanceChecks(prj, D, profiles, axes, ouvrList, { gab = 4.75 }
   const out = [], TP = typeParams(prj), ctx = new Map();
   for (const ax of axes) { const A = profiles.get(ax.key); if (A?.defined && /^(hwy|x:|r:)/.test(ax.key)) try { ctx.set(ax.key, axCtx(prj, D, ax, A, TP)); } catch { /* axe sans profil type */ } }
   const ramps = prj.ramps || [];
-  const push = (o, name, ups, low, F, h, generic, gabO) => {
+  const push = (o, name, ups, low, F, h, generic, gabO, lowR = null, upR = {}) => {
+    if (!ups.length) return;
     let r;
-    try { r = sweep(prj, D, low, ups, F, h); } catch (e) { console.error(e); return; }
+    try { r = sweep(prj, D, low, ups, F, h, lowR, upR); } catch (e) { console.error(e); return; }
     if (!r) return;
     const lvl = r.ta < gabO - 0.005 ? 'err' : 'ok';
     const U = r.up, zU = U.A.PL.zAt(r.sUp), zNeed = zU + (gabO + 0.10 - r.ta);
@@ -143,18 +195,20 @@ export function clearanceChecks(prj, D, profiles, axes, ouvrList, { gab = 4.75 }
       + (lvl === 'err' ? ` < gabarit ${fmt(gabO)} m : relevez ${U.name} (z ≥ ${fmt(zNeed)} m à s = ${fmt(r.sUp, 1)} m) ou abaissez ${low.name}.` : ` ≥ ${fmt(gabO)} m.`);
     out.push({ lvl, ouvr: name, ta: r.ta, gab: gabO, h, key: U.key, sX: r.sUp, zNeed, lower: low.key, uppers: ups.map((u) => u.key), crit: { P: r.P, sLow: r.sLow, yLow: r.yLow, zLow: r.zLow, zInt: r.zInt }, rLow: r.rLow, rUp: r.rUp, zLowMax: r.zLowMax, generic, okey: o?.key ?? null, msg });
   };
-  // 1. tabliers implantés
+  // 1. tabliers implantés : voies portées (leurs tronçons le long du tablier) au-dessus de chaque voie qui traverse
+  // l'emprise — y compris une voie portée qui repasse sous son propre tablier (boucle d'une trompette avant son convergent)
+  const axesL = [...ctx.values()].map((c) => c.ax);
   for (const o of ouvrList || []) {
     if (!(o.poly?.length > 2)) continue;
-    let ups = [];
-    const mx = /^x:([^:]+):/.exec(o.key || ''), mt = /^t:(.+)$/.exec(o.key || '');
-    if (mx) ups = [ctx.get(`x:${mx[1]}`)];
-    else if (mt) { const semi = ramps.find((r) => r.id === mt[1]); const bou = semi && ramps.find((r) => r.role === 'boucle' && r.grp === semi.id); ups = [ctx.get(`r:${mt[1]}`), bou ? ctx.get(`r:${bou.id}`) : null]; }
-    ups = ups.filter(Boolean);
+    const A = deckAnalysis(prj, axesL, o);
+    const ups = A.upKeys.map((k) => ctx.get(k)).filter(Boolean);
     if (!ups.length) continue;
-    for (const low of ctx.values()) {
-      if (ups.some((u) => u.key === low.key)) continue;
-      push(o, o.name, ups, low, o.poly, o.h || 0, false, o.gab ?? gab);
+    const upR = Object.fromEntries(A.axes.filter((a) => a.up && a.carried.length).map((a) => [a.key, a.carried.map((p) => [p.s0, p.s1])]));
+    for (const a of A.axes) {
+      if (!a.crossed.length) continue;
+      const low = ctx.get(a.key);
+      if (!low) continue;
+      push(o, o.name, ups.filter((u) => upR[u.key]), low, o.poly, o.h || 0, false, o.gab ?? gab, a.crossed.map((p) => [p.s0, p.s1]), upR);
     }
   }
   // 2. croisements dénivelés sans tablier implanté (voies secondaires et bretelles entre elles)

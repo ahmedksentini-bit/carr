@@ -31,7 +31,7 @@ import { sizeCulvert, culvertHydraulics, inletsForShape, defaultInletFor, slopeA
 import { DCAT, planChecks, platformChecks, catText, designCatOf, clothoidNeed } from './roadcat.js';
 import { isVsa } from './vsa.js';
 import { ringFrames } from './ringshape.js';
-import { clearanceChecks, worstClearance } from './gabarit.js';
+import { clearanceChecks, worstClearance, structureSpans } from './gabarit.js';
 import { buildAxisProfiles, axisPlChecks, axisTerrainLine, axisFromTerrain, buildNodes, axisLimits } from './axpl.js';
 import { chausseeOverlaps } from './overlap.js';
 import { autoProfile, newProfile, cloneProfile, findProfile } from './ptype.js';
@@ -322,7 +322,7 @@ function update({ commit = true, panels = true } = {}) {
   if (S.D) try { S.prof = buildProfils(S.prj, S.D, (S.prj.opts?.textH || 0.8) * 1.2); for (const q of S.prof.issues) S.checks.push({ ...q, group: 'Profils' }); } catch (e) { console.error(e); }
   if (S.D && S.prj.hydro?.res) try { drawHydro(); } catch (e) { console.error(e); }
   if (S.D) try { axisDeversPrims((S.prof?.axes || listAxes(S.prj, S.D)).filter((a) => /^(hwy|x:|r:)/.test(a.key))); } catch (e) { console.error(e); }
-  S.axpl = null; S.clear = [];
+  S.axpl = null; S.clear = []; S.ospans = [];
   if (S.D?.hwy?.ok) try { // profils en long de l'autoroute, des voies secondaires et des bretelles ; tirant d'air
     const axes = (S.prof?.axes || listAxes(S.prj, S.D)).filter((a) => !a.key.startsWith('b:'));
     S.axpl = buildAxisProfiles(S.prj, S.D, axes, junctionsZ(), S.tn?.tin || null);
@@ -334,6 +334,7 @@ function update({ commit = true, panels = true } = {}) {
     }
     S.clear = clearanceChecks(S.prj, S.D, S.axpl, axes, S.ouvr?.list || [], { gab: S.ouvr?.list?.[0]?.gab ?? (+S.prj.ouvr?.gab || 4.75) });
     for (const q of S.clear) if (q.lvl === 'err') S.checks.push({ lvl: 'err', group: 'Ouvrages', msg: q.msg });
+    S.ospans = structureSpans(S.prj, axes, S.ouvr?.list || []);
   } catch (e) { console.error(e); }
   try { cadreInvertsAll(); } catch (e) { console.error(e); }
   for (const id of S.rampKinks || []) { const r = S.prj.ramps.find((q) => q.id === id); if (r) S.checks.push({ lvl: 'err', group: 'Échangeur', msg: `${r.name} : arrivée au giratoire non tangente (la courbe se termine dans la branche) — allongez le dernier alignement ou déplacez le dernier sommet dans l'axe de la branche.` }); }
@@ -3196,13 +3197,13 @@ function plAxisOverlay(key, ax, PL) {
   const spans = new Set();
   for (const q of S.clear || []) {
     const bad = q.lvl === 'err', o = q.okey ? (S.ouvr?.list || []).find((x) => x.key === q.okey) : null, lowName = S.axpl?.get(q.lower)?.name || q.lower;
-    if (q.lower === key) {
+    if (q.lower === key && q.rLow[1] >= q.rLow[0]) {
       const [s0, s1] = q.rLow;
-      if (!(s1 >= s0)) continue;
       items.push({ t: 'gab', s0, s1, z0: q.zLowMax, z1: q.zLowMax + q.gab, bad, label: `${q.ouvr} · TA ${fmt(q.ta, 2)} m` });
       items.push({ t: 'deck', s0, s1, z0: q.crit.zInt, z1: q.crit.zInt + q.h, bad });
       zs.push(q.zLowMax + q.gab, q.crit.zInt + q.h);
-    } else if (q.uppers.includes(key)) {
+    }
+    if (q.uppers.includes(key)) {
       const [a, b] = q.rUp[key] || [];
       if (!(b >= a)) continue;
       const sk = `${q.okey || q.ouvr}`;
@@ -3218,6 +3219,21 @@ function plAxisOverlay(key, ax, PL) {
       zs.push(q.zLowMax);
     }
   }
+  // Tabliers sans tirant d'air calculable (profil en long d'une des voies à définir) : emprise de l'ouvrage sur l'axe —
+  // tablier sous la ligne rouge si l'axe est porté et a un profil, sinon bande verticale repérée.
+  const pdef = (k) => !!S.axpl?.get(k)?.defined;
+  for (const sp of S.ospans || []) {
+    if (sp.key !== key || (S.clear || []).some((q) => q.okey === sp.okey && (q.lower === key || q.uppers.includes(key)))) continue;
+    const others = (S.ospans || []).filter((q) => q.okey === sp.okey && q.upper !== sp.upper).map((q) => q.key), miss = [...new Set([...(pdef(key) ? [] : [key]), ...others.filter((k) => !pdef(k))])].map((k) => S.axpl?.get(k)?.name || k);
+    const note = miss.length ? ` — tirant d'air : profil en long de ${miss.join(', ')} à définir` : '';
+    const o = (S.ouvr?.list || []).find((q) => q.key === sp.okey), sC = o?.P ? ax.project(o.P)?.s : null;
+    if (sp.upper && pdef(key)) {
+      if (o?.supRel?.length && sp.carried && sC != null) {
+        const ds = o.supRel.map((r) => r.d);
+        items.push({ t: 'span', s0: Math.max(0, sC + Math.min(...ds) - (o.about || 0.5)), s1: Math.min(ax.len, sC + Math.max(...ds) + (o.about || 0.5)), h: sp.h, sup: o.supRel.map((r) => ({ kind: r.kind, s: sC + r.d })).filter((r) => r.s >= 0 && r.s <= ax.len), zH: null, label: `${sp.name} · ${o.spans.map((v) => fmt(v, 1)).join(' + ')} m${note}` });
+      } else items.push({ t: 'span', s0: sp.s0, s1: sp.s1, h: sp.h, sup: [], zH: null, label: `${sp.name}${note}` });
+    } else items.push({ t: 'mark', s0: sp.s0, s1: sp.s1, label: `${sp.name} (${sp.upper ? 'voie portée' : 'voie franchie'})${note}` });
+  }
   for (const g of S.cadres || []) {
     if (g.err || g.ax?.key !== key || !g.K) continue;
     if (g.K.type === 'poutres') { // pont à poutres porté par cet axe : tablier sous le profil, appuis
@@ -3230,10 +3246,14 @@ function plAxisOverlay(key, ax, PL) {
     items.push({ t: 'cad', s: g.s, hw, zT, zI, zB, zF: zB - (K.type === 'pipo' ? 0 : K.er), K, label: `${g.name} · ${K.type === 'buse' ? `buse Ø ${fmt(K.B, 2)}` : `${K.n > 1 ? `${K.n} × ` : ''}${fmt(K.B, 2)} × ${fmt(K.H, 2)}`} · fil d'eau ${g.inv ? `${fmt(g.inv.zam, 2)} → ${fmt(g.inv.zav, 2)} (${fmt(g.inv.J * 100, 2)} %)` : fmt(zB, 2)}` });
     zs.push(zB - K.er);
   }
-  const draw = ({ X, Y, vis }) => {
+  const draw = ({ X, Y, vis, m, ph }) => {
     let o = '';
     for (const it of items) {
-      if (it.t === 'gab') {
+      if (it.t === 'mark') {
+        const y0 = m.t, y1 = m.t + (ph || 200);
+        o += `<rect class="pl-oamark" x="${X(it.s0)}" y="${y0}" width="${Math.max(3, X(it.s1) - X(it.s0))}" height="${Math.max(10, y1 - y0)}"/>`;
+        o += `<text class="pl-ovl" x="${X((it.s0 + it.s1) / 2) + 4}" y="${y0 + 14}" text-anchor="start">${esc(it.label)}</text>`;
+      } else if (it.t === 'gab') {
         o += `<rect class="pl-gab${it.bad ? ' err' : ''}" x="${X(it.s0)}" y="${vis(it.z1)}" width="${Math.max(2, X(it.s1) - X(it.s0))}" height="${Math.max(1, vis(it.z0) - vis(it.z1))}"/>`;
         if (it.label) o += `<text class="pl-ovl" x="${X((it.s0 + it.s1) / 2)}" y="${vis(it.z1) - 4}" text-anchor="middle">${esc(it.label)}</text>`;
       } else if (it.t === 'deck') {
