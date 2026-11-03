@@ -27,6 +27,7 @@ import { delineate } from './hydro/watershed.js';
 import { computeAll as hydroComputeAll, defaultHypotheses, listMontanaStations, TC_FORMULAS, FRANCOU_RODIER_REGIONS, suggestCiehRegressions } from './hydro/hydrology.js';
 import { sizeCulvert, culvertHydraulics, inletsForShape, defaultInletFor } from './hydro/culvert.js';
 import { DCAT, planChecks, platformChecks, catText, designCatOf, clothoidNeed } from './roadcat.js';
+import { isVsa } from './vsa.js';
 import { buildAxisProfiles, axisPlChecks, clearanceChecks, axisTerrainLine, axisFromTerrain, buildNodes, axisLimits } from './axpl.js';
 import { chausseeOverlaps } from './overlap.js';
 import { autoProfile, newProfile, cloneProfile, findProfile } from './ptype.js';
@@ -623,17 +624,18 @@ function buildOuvrFields() {
     '<div class="row">' + fld('ouvr.corn', 'Largeur hors chaussée de chaque côté (corniche, longrine)', 'm', { ph: '0,50' }) + fld('ouvr.fck', 'Béton de la dalle fck', 'MPa', { ph: '30' }) + '</div>';
 }
 // Voie principale : autoroute (ICTAAL) ou route non autoroutière (catégorie de conception ARP, VSA, AU 70…).
+const hwyKindKey = () => { const H = hwyParams(S.prj); return H.kind === 'autoroute' ? 'autoroute' : `route:${H.dcat}`; };
 function renderHwyFields() {
   const box = $('#hwyMain'); if (!box) return;
-  const auto = S.prj.hwy?.kind !== 'route';
-  box.dataset.kind = auto ? 'autoroute' : 'route';
+  const auto = S.prj.hwy?.kind !== 'route', Hp = hwyParams(S.prj), vsa = isVsa(Hp.dcat), f2 = (v) => fmt(v, 2);
+  box.dataset.kind = hwyKindKey();
   box.innerHTML =
     '<div class="row">' + fld('hwy.name', 'Nom', '', { text: true, ph: auto ? 'Autoroute' : 'Voie principale' }) + sel('hwy.kind', 'Type', [['autoroute', 'Autoroute'], ['route', 'Route non autoroutière']], { branch: false }) + '</div>' +
-    '<div class="row">' + (auto ? sel('hwy.cat', 'Catégorie (ICTAAL)', Object.entries(HWY_CAT).map(([k, c]) => [k, c.label]), { branch: false }) : sel('hwy.dcat', 'Catégorie de conception', Object.entries(DCAT).filter(([k]) => !['L1', 'L2'].includes(k)).map(([k, c]) => [k, c.label]), { branch: false })) + fld('hwy.V', 'Vitesse limite', 'km/h', { ph: auto ? '110' : '90' }) + '</div>' +
-    (auto ? '' : `<p class="note">${esc(catText(designCatOf(hwyParams(S.prj))))}. Clothoïdes posées automatiquement aux sommets de rayon < 1,5 Rdn.</p>`) +
-    '<div class="row">' + (auto ? sel('hwy.lanes', 'Voies par sens', [['2', '2'], ['3', '3'], ['4', '4']], { branch: false }) : fld('hwy.lanes', 'Voies par sens', '', { ph: '1' })) + fld('hwy.wLane', 'Largeur de voie', 'm', { ph: '3,50' }) + '</div>' +
-    '<div class="row">' + fld('hwy.bau', auto ? 'BAU' : 'BDD', 'm', auto ? { ph: '2,50', title: '2,50 m ; 3,00 m si plus de 2 000 PL/j (ICTAAL § 4.1.3)' } : { ph: '2,00' }) + fld('hwy.bdg', 'BDG', 'm', { ph: auto ? '1,00' : '0' }) + '</div>' +
-    '<div class="row">' + fld('hwy.median', auto ? 'Bande médiane' : 'Terre-plein central (0 : chaussée unique)', 'm', { ph: auto ? '3,00' : '0' }) + fld('hwy.berme', 'Berme', 'm', { ph: auto ? '1,00' : '0,75' }) + '</div>' +
+    '<div class="row">' + (auto ? sel('hwy.cat', 'Catégorie (ICTAAL)', Object.entries(HWY_CAT).map(([k, c]) => [k, c.label]), { branch: false }) : sel('hwy.dcat', 'Catégorie de conception', Object.entries(DCAT).filter(([k]) => !['L1', 'L2'].includes(k)).map(([k, c]) => [k, c.label]), { branch: false })) + fld('hwy.V', 'Vitesse limite', 'km/h', { ph: String(Hp.V) }) + '</div>' +
+    (auto ? '' : `<p class="note">${esc(catText(designCatOf(Hp)))}. Clothoïdes posées automatiquement aux sommets de rayon < 1,5 Rdn.${vsa ? ' Accès contrôlés selon le guide VSA 90/110 (Cerema 2014, § 6) et, pour les accès rapprochés, le guide « Conception des accès sur VRU A » (Certu 2003) : déboîtement, insertion, vitesses aux nez, enchaînements entrée/sortie, np, da, lc, d1/d1m, entrecroisement 300 à 750 m.' : ''}</p>`) +
+    '<div class="row">' + (auto ? sel('hwy.lanes', 'Voies par sens', [['2', '2'], ['3', '3'], ['4', '4']], { branch: false }) : fld('hwy.lanes', 'Voies par sens', '', { ph: String(Hp.lanes) })) + fld('hwy.wLane', 'Largeur de voie', 'm', { ph: '3,50' }) + '</div>' +
+    '<div class="row">' + fld('hwy.bau', auto || vsa ? 'BAU' : 'BDD', 'm', auto ? { ph: '2,50', title: '2,50 m ; 3,00 m si plus de 2 000 PL/j (ICTAAL § 4.1.3)' } : vsa ? { ph: '2,50', title: '2,50 m ; 3,00 m si plus de 2 000 PL/j ; à défaut BDD ≥ 1,00 m (VSA § 5.3.2)' } : { ph: '2,00' }) + fld('hwy.bdg', 'BDG', 'm', { ph: f2(Hp.bdg) }) + '</div>' +
+    '<div class="row">' + fld('hwy.median', auto ? 'Bande médiane' : 'Terre-plein central (0 : chaussée unique)', 'm', { ph: f2(Hp.median) }) + fld('hwy.berme', 'Berme', 'm', { ph: auto ? '1,00' : '0,75' }) + '</div>' +
     '<div class="row">' + fld('hwy.pk0', auto ? 'PK origine' : 'PR origine', 'm', { ph: '0' }) + '</div>';
 }
 function buildEchFields() {
@@ -653,7 +655,7 @@ function refreshEch() {
   const H = S.prj.hwy, ramps = S.prj.ramps || [], D = S.D;
   if (S.rsel >= ramps.length) S.rsel = ramps.length - 1;
   const r = ramps[S.rsel], R = D?.ramps?.[S.rsel];
-  if ($('#hwyMain') && $('#hwyMain').dataset.kind !== (S.prj.hwy?.kind === 'route' ? 'route' : 'autoroute')) renderHwyFields();
+  if ($('#hwyMain') && $('#hwyMain').dataset.kind !== hwyKindKey()) renderHwyFields();
   const sig = JSON.stringify([S.rsel, S.xsel, H.axis?.length, (S.prj.crosses || []).map((c) => [c.id, c.name, c.kind, c.axis?.length]), ramps.map((q) => [q.id, q.name, q.from?.ref, q.to?.ref, q.pis?.length, q.cat])]);
   if (sig !== S.echSig) {
     S.echSig = sig;

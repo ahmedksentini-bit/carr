@@ -253,6 +253,17 @@ ou sur un fond topographique DXF.
 - **Voie principale** (onglet Échangeur, « Tracer la voie principale ») : autoroute (ICTAAL L1 / L2) ou route non
   autoroutière (catégories de conception ARP R1 / R2 / artère 110, VSA 90 / 110, AU 70, libre ; 2×1 voies, BDD 2,00 m,
   berme 0,75 m par défaut, terre-plein central facultatif) : on peut croiser et raccorder des routes non autoroutières.
+- **Accès sur VSA 90 / 110** (`js/vsa.js`, voie principale ou secondaire de catégorie VSA) : guide Cerema « VSA 90 et
+  110 » (2014, § 4.2, 6.1 à 6.4) complété, pour les accès rapprochés, par le guide Certu « Conception des accès sur VRU
+  de type A » (2003). Section courante par défaut 2×2 voies, BAU 2,50 m, BDG 1,00 m, avec contrôles (chaussées
+  séparées, BDD ≥ 1,00 m, BDG ≥ 0,75 m, berme ≥ 0,75 m). Accès : interdit en courbe déversée (R < Rdn), à éviter sous
+  1,5 Rdn ; déboîtement 150 m (110 m admis sur VSA 90 si S < 650 uvp/h) ; insertion 200 m + biseau 75 m (150 m admis
+  sur VSA 90 si E < 600 uvp/h et BAU en aval) ; vitesse conventionnelle à S.1,00 de 50 km/h (VSA 90) / 70 km/h
+  (VSA 110) pour la longueur de décélération. Enchaînements : entrée – entrée (fin du biseau à da de E.1,00), sortie –
+  sortie (D40 de la seconde à np = 170 m de S.1,00 de la première, avec d1 puis d1m), entrée – sortie (D40 à lc de la
+  fin de l'entrée ; sinon voie d'entrecroisement dessinée, Z de 300 à 750 m, Z ≥ lc + ds + lb hors disposition
+  exceptionnelle ; Z < 300 m → collectrice). D40 / D50 dessinés à d1 (ou d1m) et d (VRU A p. 12 et 39). Les minima
+  liés au trafic sont signalés « admis si … », aucun trafic n'étant saisi. Tests : `node tools/test-vsa.mjs`.
 - **Dévers dans les voies** (calque Dévers) : flèches dans chaque chaussée de la voie principale, des voies secondaires
   et des bretelles, aux points caractéristiques du tracé (début, milieu, fin des droites, clothoïdes et arcs) et au moins
   tous les 100 m, dirigées vers le bas de la pente, avec la valeur (dévers de la catégorie, variation sur les clothoïdes).
