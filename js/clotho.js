@@ -39,7 +39,7 @@ export function cloMinLength(R, dDev, lanes = 1) {
 // Retourne { elems, path, length, pointAt, headAt, curvAt, elemAt, points, issues, tangents }.
 export function buildAlignment(pis, { name = '' } = {}) {
   const issues = [], elems = [], points = [];
-  const P = pis.map((p) => ({ x: +p.x, y: +p.y, R: +p.R || 0, A: +p.A || 0, loop: !!p.loop, link: !!p.link, semi: !!p.semi }));
+  const P = pis.map((p) => ({ x: +p.x, y: +p.y, R: +p.R || 0, A: +p.A || 0, loop: !!p.loop, link: !!p.link, semi: !!p.semi, term: !!p.term }));
   const n = P.length;
   const out = { elems, path: [], length: 0, points, issues, pointAt: null, headAt: null, curvAt: null, tangents: [] };
   if (n < 2) return out;
@@ -70,7 +70,7 @@ export function buildAlignment(pis, { name = '' } = {}) {
     if (Math.abs(det) > 1e-9) { t = cross(E, d2) / det; m = cross(d1, E) / det; }
     else { t = -dot(E, d1) / 2; m = t; } // demi-tour exact : symétrique
     Ti[i] = t; To[i] = m;
-    geo[i] = { d1, d2, defl, sg, R, A: P[i].A, A1, A2, L1, L2, tau1, tau2, th0, th1, sweep, loop: P[i].loop, link: P[i].link, semi: P[i].semi };
+    geo[i] = { d1, d2, defl, sg, R, A: P[i].A, A1, A2, L1, L2, tau1, tau2, th0, th1, sweep, loop: P[i].loop, link: P[i].link, semi: P[i].semi, term: P[i].term };
   }
   for (let i = 1; i < n - 1; i++) {
     const seg = dist(P[i - 1], P[i]);
@@ -97,7 +97,7 @@ export function buildAlignment(pis, { name = '' } = {}) {
     } else if (!g.link) points.push({ name: `TC${i}`, p: TS });
     const C = add(SC, mul(rot90(unit(thSC)), sg * R));
     const sa = ang(sub(SC, C)), p0 = SC, s0 = s;
-    elems.push({ kind: 'A', s0, len: R * sweep, p0, th0: thSC, R, sg, C, pi: i, pointAt: (t) => G.polar(C, R, sa + (sg * t) / R), headAt: (t) => thSC + (sg * t) / R, curvAt: () => sg / R, seg: G.A(C, R, sa, sa + sg * sweep, sg > 0) });
+    elems.push({ kind: 'A', s0, len: R * sweep, p0, th0: thSC, R, sg, C, pi: i, ...(g.term ? { term: true } : {}), pointAt: (t) => G.polar(C, R, sa + (sg * t) / R), headAt: (t) => thSC + (sg * t) / R, curvAt: () => sg / R, seg: G.A(C, R, sa, sa + sg * sweep, sg > 0) });
     s += R * sweep;
     const CS = elems[elems.length - 1].pointAt(R * sweep);
     if (L2 > 0) { // clothoïde de sortie, paramétrée depuis ST à rebours
