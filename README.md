@@ -250,6 +250,12 @@ ou sur un fond topographique DXF.
   VIPP au-delà ; h_p ≈ L/13, L/18, L/17 ; entraxe ≈ 3 m) ; dessin en plan (tablier, poutres, culées, piles), au profil
   en long (tablier et appuis), cotes de chaussée et d'intrados, hauteur libre sur le TN ; lien PSIDA (onglet Ponts à
   poutres : travées, type, nombre et entraxe des poutres, hauteur, hourdis, chaussée, superstructures).
+- **Voie principale** (onglet Échangeur, « Tracer la voie principale ») : autoroute (ICTAAL L1 / L2) ou route non
+  autoroutière (catégories de conception ARP R1 / R2 / artère 110, VSA 90 / 110, AU 70, libre ; 2×1 voies, BDD 2,00 m,
+  berme 0,75 m par défaut, terre-plein central facultatif) : on peut croiser et raccorder des routes non autoroutières.
+- **Dévers dans les voies** (calque Dévers) : flèches dans chaque chaussée de la voie principale, des voies secondaires
+  et des bretelles, aux points caractéristiques du tracé (début, milieu, fin des droites, clothoïdes et arcs) et au moins
+  tous les 100 m, dirigées vers le bas de la pente, avec la valeur (dévers de la catégorie, variation sur les clothoïdes).
 - **Talus en plan** (js/talus.js, calques « Talus » et « Entrées en terre ») : pour tous les axes (autoroute, voies
   secondaires, bretelles ayant un profil en long ; branches, anneau et route principale des carrefours), coupes au
   profil type tous les 5 m (réglable, onglet Profils travers) ; bord de plate-forme côté talus, entrée en terre (EET)

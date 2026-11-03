@@ -9,10 +9,11 @@ import { buildDesign, fmt, fmtGis } from './roundabout.js';
 import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan, SECTION, sectionParams, TAD, SIGNS, signParams } from './norms.js';
 import { GAMMES, CATALOG } from './signs.js';
 import { signSVG, signOutline } from './signicons.js';
-import { rampParams, endFrame, normRamp, buildEchangeur, trumpet, deriveTrumpet, crossingWith, xref, cloverleaf, halfCloverleaf, diamond, gradeRoundabout, HWY_CAT, RAMP_CAT, crossParams, roadAlignment, parseXref } from './echangeur.js';
+import { hwyParams, rampParams, endFrame, normRamp, buildEchangeur, trumpet, deriveTrumpet, crossingWith, xref, cloverleaf, halfCloverleaf, diamond, gradeRoundabout, HWY_CAT, RAMP_CAT, crossParams, roadAlignment, parseXref } from './echangeur.js';
 import { pathProject, pathTangentAt, polySegs } from './clotho.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
+import { upright } from './common.js';
 import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF, crossSectionFrom, mainPlatform } from './pt.js';
 import { plParams, plBuild, plStations, plTerrainLine, plFromTerrain, plChartSVG, plChartPick, plDXF, plChecks, axisLength, axisPointAt } from './pl.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
@@ -311,6 +312,7 @@ function update({ commit = true, panels = true } = {}) {
   S.prof = null;
   if (S.D) try { S.prof = buildProfils(S.prj, S.D, (S.prj.opts?.textH || 0.8) * 1.2); for (const q of S.prof.issues) S.checks.push({ ...q, group: 'Profils' }); } catch (e) { console.error(e); }
   if (S.D && S.prj.hydro?.res) try { drawHydro(); } catch (e) { console.error(e); }
+  if (S.D) try { axisDeversPrims((S.prof?.axes || listAxes(S.prj, S.D)).filter((a) => /^(hwy|x:|r:)/.test(a.key))); } catch (e) { console.error(e); }
   S.axpl = null; S.clear = [];
   if (S.D?.hwy?.ok) try { // profils en long de l'autoroute, des voies secondaires et des bretelles ; tirant d'air
     const axes = (S.prof?.axes || listAxes(S.prj, S.D)).filter((a) => !a.key.startsWith('b:'));
@@ -391,6 +393,45 @@ function scheduleTalus() {
     try { S.talus = computeTalus(); } catch (e) { console.error(e); S.talus = null; }
     viewer.invalidate();
   }, 350);
+}
+
+// Flèches de dévers dans les voies des axes de l'échangeur (voie principale, voies secondaires, bretelles), calque DEVERS :
+// aux points caractéristiques de l'alignement (début, milieu et fin de chaque droite, clothoïde et arc) et au moins tous les
+// 100 m ; une flèche par chaussée (au milieu de ses voies), dirigée vers le bas de la pente, avec sa valeur. Dévers de la
+// catégorie de l'axe (roadcat.js : variation linéaire sur les clothoïdes) ou de la bretelle (rayon en 1/R).
+function axisDeversPrims(axes) {
+  const TP = typeParams(S.prj), TH = +S.prj.opts?.textH || 0.8, P = (o) => S.D.prims.push(o);
+  const pctTxt = (v) => `${fmt(Math.abs(v) * 100, 1)} %`;
+  for (const ax of axes) {
+    const T = axisType(S.prj, S.D, ax.key);
+    // stations : bornes et milieux des éléments, comblées tous les 100 m, à plus de 8 m des extrémités et de 15 m entre elles
+    let ss = [];
+    for (const e of ax.al?.elems || []) ss.push(e.s0, e.s0 + e.len / 2, e.s0 + e.len);
+    if (!ss.length) ss = [0, ax.len / 2, ax.len];
+    ss = [...new Set(ss.map((v) => Math.round(v * 10) / 10))].sort((a, b) => a - b);
+    const fill = [];
+    for (let i = 0; i + 1 < ss.length; i++) { fill.push(ss[i]); const n = Math.floor((ss[i + 1] - ss[i]) / 100); for (let k = 1; k <= n; k++) fill.push(ss[i] + ((ss[i + 1] - ss[i]) * k) / (n + 1)); }
+    fill.push(ss[ss.length - 1]);
+    const st = [];
+    for (const v of fill) { const s = Math.max(8, Math.min(ax.len - 8, v)); if (ax.len > 16 && (!st.length || s - st[st.length - 1] >= 15)) st.push(s); }
+    // milieu des voies de chaque côté : îlot du TPC et BDG franchis, puis la moitié des voies
+    const yLanes = (bands) => { let y = 0; for (const b of bands) { if (/^voie/.test(b.label)) return y + b.w / 2; y += b.w; } return null; };
+    for (const s of st) {
+      let pf; try { pf = axisPlatform(S.prj, S.D, ax, T, s, 0, TP); } catch { continue; }
+      const { p, n, dev } = pf;
+      if (T.single) { // bretelle : dévers unique, une flèche au milieu de la voie
+        const g = dev.left ?? 0, dir = g < 0 ? n : G.neg(n);
+        P({ k: 'arrow', L: 'DEVERS', p: G.add(p, G.mul(dir, -1.5)), dir, len: 3, text: pctTxt(g), h: TH, rot: upright(G.ang(dir)) });
+        continue;
+      }
+      for (const sd of [1, -1]) {
+        const y = yLanes(sd === 1 ? T.left : T.right), g = sd === 1 ? dev.left : dev.right;
+        if (y == null || g == null) continue;
+        const out = G.mul(n, sd), dir = g < 0 ? out : G.neg(out), c = G.add(p, G.mul(out, y));
+        P({ k: 'arrow', L: 'DEVERS', p: G.add(c, G.mul(dir, -1.5)), dir, len: 3, text: pctTxt(g), h: TH, rot: upright(G.ang(dir)) });
+      }
+    }
+  }
 }
 
 // Carrefours et leur cote zC (calage des extrémités de bretelles qui y aboutissent).
@@ -581,14 +622,24 @@ function buildOuvrFields() {
     '<div class="row">' + fld('ouvr.dRet', 'Bord de BAU → face du dispositif de retenue', 'm', { ph: '0' }) + sel('ouvr.Wr', 'Largeur de fonctionnement en rive', Wopts('W4'), { branch: false }) + sel('ouvr.Wt', 'Largeur de fonctionnement dans le TPC', Wopts('W2'), { branch: false }) + '</div>' +
     '<div class="row">' + fld('ouvr.corn', 'Largeur hors chaussée de chaque côté (corniche, longrine)', 'm', { ph: '0,50' }) + fld('ouvr.fck', 'Béton de la dalle fck', 'MPa', { ph: '30' }) + '</div>';
 }
+// Voie principale : autoroute (ICTAAL) ou route non autoroutière (catégorie de conception ARP, VSA, AU 70…).
+function renderHwyFields() {
+  const box = $('#hwyMain'); if (!box) return;
+  const auto = S.prj.hwy?.kind !== 'route';
+  box.dataset.kind = auto ? 'autoroute' : 'route';
+  box.innerHTML =
+    '<div class="row">' + fld('hwy.name', 'Nom', '', { text: true, ph: auto ? 'Autoroute' : 'Voie principale' }) + sel('hwy.kind', 'Type', [['autoroute', 'Autoroute'], ['route', 'Route non autoroutière']], { branch: false }) + '</div>' +
+    '<div class="row">' + (auto ? sel('hwy.cat', 'Catégorie (ICTAAL)', Object.entries(HWY_CAT).map(([k, c]) => [k, c.label]), { branch: false }) : sel('hwy.dcat', 'Catégorie de conception', Object.entries(DCAT).filter(([k]) => !['L1', 'L2'].includes(k)).map(([k, c]) => [k, c.label]), { branch: false })) + fld('hwy.V', 'Vitesse limite', 'km/h', { ph: auto ? '110' : '90' }) + '</div>' +
+    (auto ? '' : `<p class="note">${esc(catText(designCatOf(hwyParams(S.prj))))}. Clothoïdes posées automatiquement aux sommets de rayon < 1,5 Rdn.</p>`) +
+    '<div class="row">' + (auto ? sel('hwy.lanes', 'Voies par sens', [['2', '2'], ['3', '3'], ['4', '4']], { branch: false }) : fld('hwy.lanes', 'Voies par sens', '', { ph: '1' })) + fld('hwy.wLane', 'Largeur de voie', 'm', { ph: '3,50' }) + '</div>' +
+    '<div class="row">' + fld('hwy.bau', auto ? 'BAU' : 'BDD', 'm', auto ? { ph: '2,50', title: '2,50 m ; 3,00 m si plus de 2 000 PL/j (ICTAAL § 4.1.3)' } : { ph: '2,00' }) + fld('hwy.bdg', 'BDG', 'm', { ph: auto ? '1,00' : '0' }) + '</div>' +
+    '<div class="row">' + fld('hwy.median', auto ? 'Bande médiane' : 'Terre-plein central (0 : chaussée unique)', 'm', { ph: auto ? '3,00' : '0' }) + fld('hwy.berme', 'Berme', 'm', { ph: auto ? '1,00' : '0,75' }) + '</div>' +
+    '<div class="row">' + fld('hwy.pk0', auto ? 'PK origine' : 'PR origine', 'm', { ph: '0' }) + '</div>';
+}
 function buildEchFields() {
   $('#hwyFields').innerHTML =
-    '<div class="row">' + fld('hwy.name', 'Nom', '', { text: true }) + sel('hwy.cat', 'Catégorie', Object.entries(HWY_CAT).map(([k, c]) => [k, c.label]), { branch: false }) + '</div>' +
-    '<div class="row">' + fld('hwy.V', 'Vitesse limite', 'km/h', { ph: '110' }) + sel('hwy.lanes', 'Voies par sens', [['2', '2'], ['3', '3'], ['4', '4']], { branch: false }) + '</div>' +
-    '<div class="row">' + fld('hwy.wLane', 'Largeur de voie', 'm', { ph: '3,50' }) + fld('hwy.bau', 'BAU', 'm', { ph: '2,50', title: '2,50 m ; 3,00 m si plus de 2 000 PL/j (ICTAAL § 4.1.3)' }) + '</div>' +
-    '<div class="row">' + fld('hwy.bdg', 'BDG', 'm', { ph: '1,00' }) + fld('hwy.median', 'Bande médiane', 'm', { ph: '3,00' }) + '</div>' +
-    '<div class="row">' + fld('hwy.berme', 'Berme', 'm', { ph: '1,00' }) + fld('hwy.pk0', 'PK origine', 'm', { ph: '0' }) + '</div>' +
-    '';
+    '<div id="hwyMain"></div>';
+  renderHwyFields();
   renderCrossFields();
   buildOuvrFields();
   $('#hwyFields').innerHTML +=
@@ -602,6 +653,7 @@ function refreshEch() {
   const H = S.prj.hwy, ramps = S.prj.ramps || [], D = S.D;
   if (S.rsel >= ramps.length) S.rsel = ramps.length - 1;
   const r = ramps[S.rsel], R = D?.ramps?.[S.rsel];
+  if ($('#hwyMain') && $('#hwyMain').dataset.kind !== (S.prj.hwy?.kind === 'route' ? 'route' : 'autoroute')) renderHwyFields();
   const sig = JSON.stringify([S.rsel, S.xsel, H.axis?.length, (S.prj.crosses || []).map((c) => [c.id, c.name, c.kind, c.axis?.length]), ramps.map((q) => [q.id, q.name, q.from?.ref, q.to?.ref, q.pis?.length, q.cat])]);
   if (sig !== S.echSig) {
     S.echSig = sig;
@@ -1653,7 +1705,7 @@ const PROMPTS = {
   axis1: 'Axe : point suivant vers le carrefour — Entrée / clic droit pour terminer, Retour arrière pour annuler.',
   extend: 'Prolonger l\'axe : cliquez les points suivants vers l\'extérieur — Entrée / clic droit pour terminer, Échap pour annuler.',
   center: 'Centre : cliquez la position du centre de l\'anneau.',
-  hwy: 'Autoroute : cliquez les sommets de l\'axe (milieu du TPC) — Entrée / clic droit pour terminer.',
+  hwy: 'Voie principale : cliquez les sommets de l\'axe (milieu du TPC ou de la chaussée) — Entrée / clic droit pour terminer.',
   cross: 'Voie secondaire : cliquez les sommets de son axe (du côté de la voirie ordinaire vers l\'autoroute) — Entrée / clic droit pour terminer.',
   trefle: 'Trèfle : cliquez sur l\'axe de l\'autoroute à l\'endroit du croisement.',
   demitrefle: 'Demi-trèfle : cliquez sur l\'axe de l\'autoroute à l\'endroit du croisement.',

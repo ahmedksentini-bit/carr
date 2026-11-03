@@ -49,7 +49,7 @@ export function axisLimits(prj, key) {
   // autoroute et voies secondaires : catégorie de conception (roadcat.js, règles reprises de BVTrace)
   if (key === 'hwy' || key.startsWith('x:')) {
     const H = key === 'hwy' ? hwyParams(prj) : crossParams(prj, Math.max(0, crossList(prj).findIndex((c) => `x:${c.id}` === key)));
-    const cat = designCatOf(key === 'hwy' ? { ...H, kind: 'autoroute' } : H), C = DCAT[cat];
+    const cat = designCatOf(H), C = DCAT[cat];
     if (C.libre) return { cat, gMax: Infinity, Rconv: 1000, Rconc: 1000, label: 'conception libre (aucune règle ; rayon proposé 1 000 m)' };
     return { cat, gMax: C.gMax / 100, Rconv: C.Rvs, Rconc: C.Rvr, label: `${C.label} : pente ≤ ${C.gMax} %, Rv saillant ≥ ${fmt(C.Rvs, 0)} m, rentrant ≥ ${fmt(C.Rvr, 0)} m (${C.ref})` };
   }
