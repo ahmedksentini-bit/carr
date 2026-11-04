@@ -99,20 +99,57 @@ function profWidth(prof) {
 
 // Coupe d'un axe à partir de sa plate-forme (repère, dévers) et des deux demi-profils types (ptype.js) : talus jusqu'au
 // TN par la condition D/R, cubatures entre le TN et la ligne de terrassement (arase sous la chaussée, projet ailleurs).
-function typedSection(pf, tin, halfW, zA, L, R) {
+function typedSection(pf, tin, halfW, zA, L, R, clip = null) {
   const tl = terrainLine(tin, pf.p, pf.n, halfW), hasTN = tl.some((q) => q.z != null);
   const S = sectionFromTypes({ p: pf.p, n: pf.n, zA, dev: pf.dev, tl, tnAt, halfW, left: L, right: R });
+  const cutBy = clip && hasTN ? clip(S, pf, tl) : [];
   const ar = hasTN ? areas(S.terr, tl) : { cut: 0, fill: 0 }, arS = hasTN && S.arase.length ? areas(S.proj, tl) : null;
   return {
     s: 0, p: pf.p, n: pf.n, platform: S.platform, proj: S.proj, arase: S.arase, terr: S.terr, tn: tl, cut: ar.cut, fill: ar.fill,
     ...(arS ? { cutS: arS.cut, fillS: arS.fill } : {}), endL: S.endL, endR: S.endR, branch: S.branch, ok: hasTN,
-    zAxe: zA, zTN: tin ? tinZ(tin, pf.p.x, pf.p.y) : null, halfW, types: { left: L.name, right: R.name },
+    zAxe: zA, zTN: tin ? tinZ(tin, pf.p.x, pf.p.y) : null, halfW, types: { left: L.name, right: R.name }, cutBy,
   };
+}
+
+// Talus qui chevauche celui d'un autre axe : la coupe s'arrête à la limite où l'autre axe l'emporte (sa plate-forme,
+// son remblai plus haut, son déblai plus profond, son remblai sur notre déblai), par un talus vertical jusqu'au TN —
+// le terrassement au-delà appartient à l'autre axe et n'est pas compté deux fois. Modifie S (proj, terr, arase, ends) ;
+// rend [{ side, y, by }].
+function clipOverlaps(S, pf, tl, key, idx) {
+  const out = [], W = (y) => ({ x: pf.p.x + pf.n.x * y, y: pf.p.y + pf.n.y * y });
+  const zOn = (L, y) => { for (let i = 1; i < L.length; i++) { const a = L[i - 1], b = L[i]; if ((y - a.y) * (y - b.y) <= 0 && Math.abs(b.y - a.y) > 1e-9) return a.z + ((b.z - a.z) * (y - a.y)) / (b.y - a.y); } return null; };
+  const tn = (y) => tnAt(tl, y);
+  for (const sd of [1, -1]) {
+    const plat = S.platform.filter((q) => Math.sign(q.y) === sd || Math.abs(q.y) < 1e-9), y0 = plat.length ? Math.max(...plat.map((q) => Math.abs(q.y))) : 0;
+    const side = S.proj.filter((q) => Math.sign(q.y) === sd), y1 = side.length ? Math.max(...side.map((q) => Math.abs(q.y))) : 0;
+    if (!(y1 > y0 + 0.05)) continue;
+    const owner = (a) => { const y = sd * a, z = zOn(S.proj, y), t = tn(y); if (z == null || t == null) return null; const w = W(y); return idx.owner(w.x, w.y, z, z >= t ? 'R' : 'D', key); };
+    let prev = y0 + 0.01, by = null, a = prev;
+    for (; a <= y1 + 1e-9; a += 0.25) { by = owner(Math.min(a, y1)); if (by) break; prev = Math.min(a, y1); }
+    if (!by) continue;
+    let lo = prev, hi = Math.min(a, y1);
+    for (let i = 0; i < 14; i++) { const m = (lo + hi) / 2; if (owner(m)) hi = m; else lo = m; }
+    const yc = sd * lo, zt = tn(yc);
+    if (zt == null) continue;
+    const cut = (L) => {
+      if (!L.length) return L;
+      const z = zOn(L, yc); if (z == null) return L;
+      const keep = L.filter((q) => Math.sign(q.y) !== sd || Math.abs(q.y) < lo - 1e-6);
+      const ext = [{ y: yc, z, label: '', m: 'vert' }, { y: yc, z: zt, label: 'talus vertical', m: 'vert', br: z >= zt ? 'R' : 'D' }];
+      return sd > 0 ? [...keep, ...ext] : [...ext.reverse(), ...keep];
+    };
+    S.proj = cut(S.proj); S.terr = cut(S.terr);
+    const e = { y: yc, z: zt, br: zOn(S.proj, yc) >= zt ? 'R' : 'D', vert: true, by };
+    if (sd > 0) S.endR = e; else S.endL = e;
+    out.push({ side: sd > 0 ? 'gauche' : 'droite', y: lo, by });
+  }
+  return out;
 }
 
 // Coupes aux profils implantés d'un axe : [{ name, s, cs, cut, fill, vCut, vFill }] et totaux. Profil type de chaque
 // côté : celui de la bibliothèque affecté à l'axe (ou à la plage d'abscisses), sinon le profil automatique.
-export function axisSections(prj, D, ax, A, profs, tin) {
+// opts.neighbors : earthworkIndex (talus.js) des autres axes — talus vertical à la limite des talus qui se chevauchent.
+export function axisSections(prj, D, ax, A, profs, tin, opts = {}) {
   const P = ptParams(prj), TP = typeParams(prj), T = axisType(prj, D, ax.key), out = [];
   if (!A?.defined) return { list: out, T, err: 'profil en long non défini' };
   const auto = { 1: autoProfile(T, 1, TP, P, 'Automatique'), [-1]: autoProfile(T, -1, TP, P, 'Automatique') };
@@ -122,7 +159,7 @@ export function axisSections(prj, D, ax, A, profs, tin) {
     const L = findProfile(prj, assignedId(prj, ax.key, q.s, 1)) || auto[1], R = findProfile(prj, assignedId(prj, ax.key, q.s, -1)) || auto[-1];
     if (!L.auto) used.add(L.name); if (!R.auto) used.add(R.name);
     const edge = Math.max(profWidth(L), profWidth(R));
-    const cs = typedSection(pf, tin, Math.max(P.halfW, edge + 35), zA, L, R);
+    const cs = typedSection(pf, tin, Math.max(P.halfW, edge + 35), zA, L, R, opts.neighbors ? (S, pf2, tl) => clipOverlaps(S, pf2, tl, ax.key, opts.neighbors) : null);
     cs.s = q.s; cs.name = q.name; cs.dev = pf.dev;
     out.push(cs);
   }
