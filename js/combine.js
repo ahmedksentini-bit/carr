@@ -30,7 +30,7 @@ const LAYERS = Object.keys(STY);
  *   ax: axe (profils.js listAxes : key, name, len, at(s) → { p, t }, half),
  *   PL: profil en long (axpl : zAt, gradeAt, nodes, segs, curves) ou null, pk0 : PK origine,
  *   tnAt(s) → Z TN ou null, stations : [{ num, s }] (profils implantés, sinon pas régulier), devAt(s) → { l, r } (%),
- *   prims : [primitives du projet], dxf : géométrie DXF (polys, points, texts) ou null,
+ *   prims : [primitives du projet], dxf : géométrie DXF (polys, points, texts) ou null, tnPts : semis du MNT [[x, y, z]],
  *   ohs : [{ name, s, label }], format, scale, zScale, title, project }
  * @returns {{ svgs: string[], info: { sheets, coverage, overlap, step, paper } }}
  */
@@ -46,6 +46,14 @@ export function combinedSheets(o) {
   const overlap = Math.min(C * 0.5, gaps.length ? gaps[gaps.length >> 1] : 20), step = Math.max(C * 0.2, C - overlap);
   const n = len > C ? Math.min(300, Math.ceil((len - C) / step) + 1) : 1;
   const dxf = prepDxf(o.dxf), svgs = [];
+  // courbes de niveau : boîtes englobantes précalculées
+  const tnC = (o.tnPrims || []).map((pr) => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const add = (q) => { if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.y < y0) y0 = q.y; if (q.y > y1) y1 = q.y; };
+    if (pr.k === 'path') for (const sg of pr.segs) { add(sg.a); add(sg.b); } else add(pr.p);
+    return { pr, x0, y0, x1, y1 };
+  });
+  o = { ...o, tnC };
   for (let i = 0; i < n; i++) {
     const s0 = Math.min(i * step, Math.max(0, len - C)), s1 = Math.min(len, s0 + C);
     svgs.push(sheet({ ...o, PW, PH, k, kz, zScale, inner, titleH, labelW, planR, profR, plotX0, plotW, C, overlap, st, dxf, i, n, s0, s1 }));
@@ -135,6 +143,36 @@ function planBand(o) {
       out += txt(q.x, q.y, t.s, Math.min(3, t.h * k), { c: '#9ca3af', rot: upright(-((t.rot || 0) - phi) * 180 / Math.PI), a: t.align === 'right' ? 'end' : t.align === 'center' ? 'middle' : 'start' });
     }
   }
+  // courbes de niveau (1 m, maîtresses 5 m cotées)
+  if (o.tnC?.length) {
+    let dMin = '', dMaj = '', lab = '';
+    for (const q of o.tnC) {
+      if (!inBB(q)) continue;
+      const pr = q.pr;
+      if (pr.k === 'path') { let d = ''; pr.segs.forEach((sg, j) => { const a = T(sg.a), b = T(sg.b); d += `${j ? '' : `M${P(a.x, a.y)}`}L${P(b.x, b.y)}`; }); if (pr.role === 'major') dMaj += d; else dMin += d; }
+      else { const t = T(pr.p); lab += txt(t.x, t.y + 0.5, pr.s, 1.5, { a: 'middle', c: '#a0703a', rot: upright(-((pr.rot || 0) - phi) * 180 / Math.PI), halo: true }); }
+    }
+    if (dMin) out += `<path d="${dMin}" fill="none" stroke="#d4b48c" stroke-width="0.08"/>`;
+    if (dMaj) out += `<path d="${dMaj}" fill="none" stroke="#b8865a" stroke-width="0.16"/>`;
+    out += lab;
+  }
+  // points du terrain naturel (semis du MNT) et leur altitude ; étiquettes sans chevauchement (grille de 7 × 2,5 mm)
+  if (o.tnPts?.length) {
+    let cr = '', lab = '';
+    const used = new Set(), hz = 1.3;
+    for (const q of o.tnPts) {
+      const x = +q[0], y = +q[1], z = +q[2];
+      if (!(x >= bb.x0 && x <= bb.x1 && y >= bb.y0 && y <= bb.y1) || !Number.isFinite(z)) continue;
+      const t = T({ x, y });
+      if (t.x < plotX0 || t.x > plotX0 + plotW || t.y < planR.y || t.y > planR.y + planR.h) continue;
+      cr += `M${P(t.x - 0.35, t.y)}h0.7M${P(t.x, t.y - 0.35)}v0.7`;
+      const key = `${Math.floor(t.x / 7)}:${Math.floor(t.y / 2.5)}`;
+      if (used.has(key)) continue;
+      used.add(key);
+      lab += txt(t.x + 0.5, t.y - 0.3, z.toFixed(2).replace('.', ','), hz, { c: '#7c5e2a' });
+    }
+    if (cr) out += `<path d="${cr}" stroke="#7c5e2a" stroke-width="0.12"/>` + lab;
+  }
   // projet dessiné
   for (const L of LAYERS) for (const pr of o.prims || []) if (pr.L === L) out += primSvg(pr, STY[L], T, k);
   // axe de la feuille, PK, profils implantés
@@ -222,7 +260,7 @@ function segsD(segs, T, k) {
 const CART = [
   { key: 'num', label: 'N° PROFIL', h: 5 }, { key: 'dp', label: 'DISTANCES PARTIELLES', h: 9 }, { key: 'pk', label: 'PK (ABSCISSES)', h: 9 },
   { key: 'tn', label: 'COTES TN', h: 9 }, { key: 'zp', label: 'COTES PROJET', h: 9 }, { key: 'el', label: 'DÉCLIVITÉS / RAYONS', h: 6 },
-  { key: 'len', label: 'LONGUEURS', h: 5 }, { key: 'dl', label: 'DÉVERS GAUCHE (%)', h: 8 }, { key: 'dr', label: 'DÉVERS DROIT (%)', h: 8 },
+  { key: 'len', label: 'LONGUEURS / DÉNIVELÉES', h: 5 }, { key: 'dl', label: 'DÉVERS GAUCHE (%)', h: 8 }, { key: 'dr', label: 'DÉVERS DROIT (%)', h: 8 },
 ];
 
 function profileBand(o) {
@@ -257,7 +295,14 @@ function profileBand(o) {
   }
   if (zn) zones.push(zn);
   const stepZ = kz >= 6 ? 1 : kz >= 1.5 ? 5 : 10;
-  for (const z of zones) { const room = cap - (z.hi - z.lo); z.pc = Math.floor((z.lo - Math.min(room * 0.35, 3 * stepZ)) / stepZ) * stepZ; }
+  for (const z of zones) {
+    const room = cap - (z.hi - z.lo);
+    z.pc = Math.floor((z.lo - Math.min(room * 0.35, 3 * stepZ)) / stepZ) * stepZ;
+    // l'arrondi du plan de comparaison ne doit pas faire sortir le haut de la zone (ligne rouge) du cadre
+    const q = stepZ >= 1 ? 0.5 : stepZ / 2;
+    while (z.pc + cap < z.hi + 0.06 * cap && z.pc + q <= z.lo + 1e-9) z.pc += q;
+    if (z.pc + cap < z.hi + 0.06 * cap) z.pc = Math.ceil((z.hi + 0.06 * cap - cap) / q) * q;
+  }
   const zoneAt = (s) => { let j = 0; while (j + 1 < zones.length && zones[j + 1].s <= s + 1e-9) j++; return zones[j]; };
   const Y = (s, z) => plot.y + plot.h - (z - (zoneAt(s)?.pc ?? z)) * kz;
   out += `<rect x="${plot.x}" y="${plot.y}" width="${plot.w}" height="${plot.h}" fill="none" stroke="#000" stroke-width="0.25"/>`;
@@ -275,10 +320,31 @@ function profileBand(o) {
   out += `<path d="${line(tn)}" fill="none" stroke="#5c4f44" stroke-width="0.3"/>`;
   if (PL) {
     out += `<path d="${line(zp)}" fill="none" stroke="#cd1c24" stroke-width="0.5"/>`;
-    for (const c of PL.curves || []) { // raccordements : rappels aux tangences, rayon
-      for (const s of [c.sA, c.sB]) if (s >= s0 && s <= s1) out += `<line x1="${X(s).toFixed(2)}" y1="${plot.y + 2}" x2="${X(s).toFixed(2)}" y2="${Y(s, zp(s)).toFixed(2)}" stroke="#cd1c24" stroke-width="0.12" stroke-dasharray="0.8 0.6"/>`;
+    // points caractéristiques : sommets (PI) avec les tangentes prolongées, points de tangence des raccordements,
+    // point haut / bas ; repère, PK et cote écrits à la verticale au-dessus de la ligne rouge
+    const inS = (v) => v >= s0 - 1e-6 && v <= s1 + 1e-6;
+    const mark = (sv, z, lab, sym) => {
+      const x = X(sv), y = Y(sv, z), yt = Math.max(plot.y + 1.5, y - 14);
+      let m = `<line x1="${x.toFixed(2)}" y1="${(y - 1).toFixed(2)}" x2="${x.toFixed(2)}" y2="${yt.toFixed(2)}" stroke="#cd1c24" stroke-width="0.1"/>`;
+      m += sym === 'pi' ? `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="0.6" fill="#fff" stroke="#cd1c24" stroke-width="0.2"/>`
+        : sym === 'top' ? `<path d="M${P(x - 0.7, y + 0.6)}L${P(x + 0.7, y + 0.6)}L${P(x, y - 0.6)}Z" fill="#cd1c24"/>`
+        : `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="0.4" fill="#cd1c24"/>`;
+      const t = `${lab} · PK ${fmtPk(o.pk0 + sv).replace(/,00$/, '')} · z ${f2(z)}`;
+      m += `<text x="${(x - 0.4).toFixed(2)}" y="${(yt + 0.3).toFixed(2)}" font-size="1.5" fill="#b91c1c" text-anchor="end" transform="rotate(-90 ${(x - 0.4).toFixed(2)} ${(yt + 0.3).toFixed(2)})" stroke="#fff" stroke-width="0.35" paint-order="stroke">${esc(t)}</text>`;
+      return m;
+    };
+    (PL.nodes || []).forEach((nd, i) => {
+      if (!inS(nd.s)) return;
+      const c = (PL.curves || []).find((q) => Math.abs(q.s - nd.s) < 1e-6);
+      if (c) out += `<path d="M${P(X(c.sA), Y(c.sA, zp(c.sA)))}L${P(X(nd.s), Y(nd.s, nd.z))}L${P(X(c.sB), Y(c.sB, zp(c.sB)))}" fill="none" stroke="#cd1c24" stroke-width="0.12" stroke-dasharray="0.8 0.5"/>`;
+      out += mark(nd.s, nd.z, i ? (i === PL.nodes.length - 1 ? 'fin' : `PI ${i}`) : 'origine', 'pi');
+    });
+    for (const c of PL.curves || []) { // raccordements : tangences, point haut / bas, rayon
+      for (const [sv, lab] of [[c.sA, 'TE'], [c.sB, 'TS']]) if (inS(sv)) out += mark(sv, zp(sv), lab, 'tg');
+      const g1 = c.g1, g2 = c.g2, s0c = c.sA - (g1 * 2 * c.T) / (g2 - g1);
+      if (g1 * g2 < 0 && s0c > c.sA && s0c < c.sB && inS(s0c)) out += mark(s0c, zp(s0c), c.type === 'convexe' ? 'point haut' : 'point bas', 'top');
       const sm = (c.sA + c.sB) / 2;
-      if (sm >= s0 && sm <= s1) out += txt(X(sm), plot.y + 4, `R ${f2(c.R, 0)} ${c.type === 'convexe' ? 'saillant' : 'rentrant'}`, 1.9, { a: 'middle', c: '#b91c1c' });
+      if (sm >= s0 && sm <= s1) out += txt(X(sm), plot.y + plot.h - 4, `R ${f2(c.R, 0)} ${c.type === 'convexe' ? 'saillant' : 'rentrant'}`, 1.9, { a: 'middle', c: '#b91c1c', halo: true });
     }
   }
   for (const q of o.ohs || []) { // ouvrages : repère sous la ligne rouge, désignation au-dessus
@@ -340,8 +406,10 @@ function cartouche(o, rows, y0, X, vis, zp, tn) {
       if (w >= lab2.length * 0.95) s += txt((xa + xb) / 2, yl + rows[jl].h * 0.68, lab2, 1.8, { a: 'middle' });
       return s;
     };
-    for (const l of lines) out += cell(l.s0, l.s1, `${l.g >= 0 ? 'rampe' : 'pente'} ${f2(Math.abs(l.g) * 100, 2)} %`, `L = ${f2(l.s1 - l.s0)}`, 'seg');
-    for (const c of paras) out += cell(c.s0, c.s1, `R = ${f2(c.R, 0)} ${c.type === 'convexe' ? 'saillant' : 'rentrant'}`, `L = ${f2(c.s1 - c.s0)}`, 'para');
+    // dénivelée de chaque élément (cote de fin − cote de début)
+    const dh = (a, b) => { const v = PL.zAt(b) - PL.zAt(a); return `Δh ${v >= 0 ? '+' : '−'}${f2(Math.abs(v))}`; };
+    for (const l of lines) out += cell(l.s0, l.s1, `${l.g >= 0 ? 'rampe' : 'pente'} ${f2(Math.abs(l.g) * 100, 2)} %`, `L = ${f2(l.s1 - l.s0)} · ${dh(l.s0, l.s1)}`, 'seg');
+    for (const c of paras) out += cell(c.s0, c.s1, `R = ${f2(c.R, 0)} ${c.type === 'convexe' ? 'saillant' : 'rentrant'}`, `L = ${f2(c.s1 - c.s0)} · ${dh(c.s0, c.s1)}`, 'para');
   }
   return out;
 }
