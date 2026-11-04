@@ -194,7 +194,7 @@ export function islandDims(prj, br) {
   const i = br.island || {};
   if (isPlan(prj)) {
     const d = PLAN[prj.context].island, a = secondaryAuto(prj, br);
-    return { type: i.type || 'physique', b: num(i.base, d.base), h: num(i.length, a.h), gap: num(i.gap, d.gap), rHead: d.rHead, rTip: d.rTip, shift: 0, autoShift: 0, Rr: a.Rr, bdg: sectionParams(prj).bdgBr };
+    return { type: i.type || 'physique', b: num(i.base, d.base), h: num(i.length, a.h), gap: num(i.gap, d.gap), rHead: d.rHead, rTip: d.rTip, shift: 0, autoShift: 0, Rr: a.Rr, bdg: num(br.bdg, sectionParams(prj).bdgBr) };
   }
   const Rg = +prj.ring.Rg;
   const autoShift = prj.context === 'interurbain' && Rg > 15 ? (0.5 + Rg / 50) / 2 : 0;
@@ -208,7 +208,7 @@ export function islandDims(prj, br) {
     shift: br.tpc?.on ? 0 : num(i.shift, autoShift),
     autoShift,
     Rr: 4 * Rg,
-    bdg: sectionParams(prj).bdgBr, // retrait de l'îlot en saillie par rapport à l'enveloppe peinte
+    bdg: num(br.bdg, sectionParams(prj).bdgBr), // retrait de l'îlot en saillie / enveloppe peinte (BDG de la branche, à défaut du carrefour)
   };
 }
 

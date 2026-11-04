@@ -141,8 +141,16 @@ function buildRoundabout(prj, ext = {}) {
     const { en, ex } = ap;
     const off = (d) => (cont ? G.offsetPath(cont, d) : []);
     // Rives (peinture) et bords de chaussée, de l'extrémité de la branche jusqu'à la tangence sur l'anneau.
-    en.edge = G.offsetPath(en.curb, -sec.bdd);
-    ex.edge = G.offsetPath(ex.curb, sec.bdd);
+    // BDD et berme propres à la branche (profil de la route raccordée) : celles du carrefour au droit de l'anneau, puis
+    // transition linéaire sur l'alignement droit jusqu'à celles de la branche à son extrémité (xEnd).
+    const bddB = num(b.bdd, sec.bdd), bermeB = num(b.berme, sec.berme);
+    const dTr = Math.max(Math.abs(bddB - sec.bdd), Math.abs(bermeB - sec.berme));
+    const xB = xEnd, xA = Math.max(xT, xEnd - Math.max(10, 15 * dTr));
+    const ramp = (v0, v1) => (x) => (x <= xA ? v0 : x >= xB ? v1 : v0 + ((v1 - v0) * (x - xA)) / (xB - xA || 1));
+    const bddAt = ramp(sec.bdd, bddB), bermeAt = ramp(sec.berme, bermeB);
+    const xOf = (p) => dot(sub(p, O), u);
+    en.edge = Math.abs(bddB - sec.bdd) < 1e-6 ? G.offsetPath(en.curb, -sec.bdd) : G.offsetPathVar(en.curb, (q) => -bddAt(q.x));
+    ex.edge = Math.abs(bddB - sec.bdd) < 1e-6 ? G.offsetPath(ex.curb, sec.bdd) : G.offsetPathVar(ex.curb, (q) => bddAt(q.x));
     // Passage piéton à ppRecul de la ligne de cédez-le-passage, îlot séparateur coupé en refuge.
     let cross = null;
     if (sec.pp) {
@@ -153,9 +161,9 @@ function buildRoundabout(prj, ext = {}) {
     }
     const full = (contPath, local) => [...G.revPath(contPath), ...Wp(local)];
     const side = (sd, s, wa) => {
-      const paintW = full(off(s * (th + wa)), sd.curb), edgeW = full(off(s * (th + wa + sec.bdd)), sd.edge);
+      const paintW = full(off(s * (th + wa)), sd.curb), edgeW = full(off(s * (th + wa + bddB)), sd.edge);
       return {
-        ...sd, paintW, edgeW, edgeCont: off(s * (th + wa + sec.bdd)), curbW: paintW,
+        ...sd, paintW, edgeW, edgeCont: off(s * (th + wa + bddB)), curbW: paintW,
         F: G.segStart(edgeW[0]), Fpaint: G.segStart(paintW[0]),
         Tc: W(sd.fil.Tc), Tl: W(sd.fil.Tl), C: W(sd.fil.C),
       };
@@ -184,6 +192,9 @@ function buildRoundabout(prj, ext = {}) {
       island, cross, yieldStart: yl?.a, yieldEnd: yl?.b, exitStart: xl?.a, exitEnd: xl?.b, gis: fmtGis(theta, unit),
       farAxis: cont ? G.segEnd(cont[cont.length - 1]) : W({ x: xEnd, y: a }),
       farDir: cont ? norm(sub(G.segEnd(cont[cont.length - 1]), G.segAt(cont[cont.length - 1], 0.98))) : u,
+      bdd: bddB, berme: bermeB, bddAtW: (p) => bddAt(xOf(p)), bermeAtW: (p) => bermeAt(xOf(p)),
+      // point du monde relevant de cette branche (au-delà du début de la transition, près de son axe) : pour les abords
+      near: (p) => xOf(p) > xA - 1 && Math.abs(dot(sub(p, O), n) - a) < th + Math.max(wIn, wOut) + Math.max(bddB, sec.bdd) + 6,
     };
     bd.entry.phiTc = ang(sub(bd.entry.Tc, O));
     bd.exit.phiTc = ang(sub(bd.exit.Tc, O));
@@ -294,7 +305,7 @@ function buildRoundabout(prj, ext = {}) {
     if (!prj.traffic?.tad?.[bd.id] || bds.length < 2) return;
     const nx = bds[(i + 1) % bds.length], br = prj.branches[bd.idx], T0 = TAD[prj.context];
     const r = buildBypass(D, bd, nx, ringEdge[i], {
-      R: num(br.tadR, T0.R), w: num(br.tadW, T0.w), bdg: sec.bdgBr, bdd: sec.bdd, bddBr: sec.bdd, urbain: prj.context === 'urbain',
+      R: num(br.tadR, T0.R), w: num(br.tadW, T0.w), bdg: sec.bdgBr, bdd: sec.bdd, bddBr: bd.bdd, bddBrJ: nx.bdd, urbain: prj.context === 'urbain',
     });
     if (r.error) { issues.push({ lvl: 'err', bi: bd.idx, msg: `${bd.name} → ${nx.name} : voie directe de tourne-à-droite non dessinée (${r.error}).` }); return; }
     if (r.needK > bd.xEnd || r.needJ > nx.xEnd) {
@@ -333,10 +344,14 @@ function buildRoundabout(prj, ext = {}) {
 
   // Bords de chaussée et abords (caniveau, bordure, trottoir, contre-bordure / berme).
   const bands = sideBands(prj, sec), bandLayer = prj.context === 'urbain' ? 'TROTTOIR' : 'ACCOTEMENT';
-  sectors.forEach((S) => {
+  // Berme (abords) d'une branche au profil différent : largeur variable le long de sa transition.
+  const varB = bds.some((bd) => Math.abs(bd.berme - sec.berme) > 1e-6);
+  sectors.forEach((S, i) => {
     if (!S.length) return;
     P({ k: 'path', L: 'BORDURE', segs: S });
-    sideBandPrims(S, bands, bandLayer).forEach(P);
+    const nx = bds[(i + 1) % bds.length], own = [bds[i], nx];
+    const wAt = varB ? (p, nm, w) => { if (nm !== 'berme') return w; const q = own.find((bd) => bd.near(p)); return q ? q.bermeAtW(p) : w; } : null;
+    sideBandPrims(S, bands, bandLayer, wAt).forEach(P);
   });
 
   // Voies directes : îlot de séparation, bords côté îlot, rives, axe.

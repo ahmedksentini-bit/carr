@@ -109,7 +109,7 @@ export function addSigns(prj, D) {
   const roadside = (bd, code, x, s, extra = {}) => {
     const w = widthOf(code, extra.gamme || SP.gamme);
     const { p, t, beyond } = along(bd, x);
-    const nL = rot90(t), y = edgeAt(bd, s, x, bdd) + offRoad(w);
+    const nL = rot90(t), y = edgeAt(bd, s, x, bd.bddAtW ? bd.bddAtW(p) : bdd) + offRoad(w);
     const sg = sign({ code, branch: bd.name, bi: bd.idx, p: add(p, mul(nL, s * y)), face: s > 0 ? t : neg(t), out: mul(nL, s), x: x - bd.x0, where: s > 0 ? 'à droite, en approche' : 'à droite, en sortie', ...extra });
     if (beyond) { sg.note = (sg.note ? sg.note + ' ; ' : '') + 'au-delà de l\'axe dessiné (prolongement droit)'; say('info', `${bd.name} : ${code} à ${fmt(x, 0)} m, au-delà de l'axe dessiné — prolongez l'axe pour l'implanter.`); }
     return sg;

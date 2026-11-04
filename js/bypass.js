@@ -26,14 +26,14 @@ function cutBelowX(segs, xc) {
 }
 
 // bk, bj : branches construites (roundabout.js) ; ringArc : bord de chaussée de l'anneau entre l'entrée de k et la
-// sortie de j ; o : { R (rayon en axe), w (largeur de chaussée), bdg, bdd, bddBr (BDD des branches), urbain }.
+// sortie de j ; o : { R (rayon en axe), w (largeur de chaussée), bdg, bdd, bddBr (BDD de la branche k), bddBrJ (BDD de j), urbain }.
 // Retourne la géométrie en coordonnées monde, { needK, needJ } si les branches sont trop courtes, ou { error }.
 export function buildBypass(D, bk, bj, ringArc, o) {
   const B = o.urbain ? BYPASS_URBAIN : BYPASS, w2 = o.w / 2;
   // Repère de chaque branche : centre de son lobe pour un carrefour cacahuète (bk.Oc), centre de l'anneau sinon.
   const fk = frame(bk.Oc || D.O, bk.u), fj = frame(bj.Oc || D.O, bj.u);
   const yk0 = bk.a + bk.th + bk.entry.wa, yj0 = bj.a - (bj.th + bj.exit.wa); // rives des chaussées d'approche
-  const ek = yk0 + o.bddBr, ej = yj0 - o.bddBr;                              // bords de chaussée
+  const ek = yk0 + o.bddBr, ej = yj0 - (o.bddBrJ ?? o.bddBr);                          // bords de chaussée
   const yAc = ek + B.sep + o.bdg + w2, yBc = ej - (B.sep + o.bdg + w2);       // axes de la voie directe
   const Rc = o.R;
   const V = G.lineLine(fk.W({ x: 0, y: yAc }), bk.u, fj.W({ x: 0, y: yBc }), bj.u);

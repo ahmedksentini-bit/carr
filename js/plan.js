@@ -264,6 +264,8 @@ export function buildPlan(prj, opt = {}) {
     const bd = {
       idx, id: b.id, name, role: 'secondaire', sY: s.sY, l: s.auto.l, theta: fr.theta, u: s.u, n: fr.n, a: 0, ai: 0, x0, xT, xEnd, h, b: isl.b, hb: 0, th: 0, isl,
       W, Ws: fr.Ws, Wp, target, cont, axisFillets,
+      // BDD et berme propres (profil de la route raccordée), à défaut celles du carrefour : profils en travers
+      bdd: pick(b.bdd, sec.bdd), berme: pick(b.berme, sec.berme), bddAtW: () => pick(b.bdd, sec.bdd), bermeAtW: () => pick(b.berme, sec.berme),
       // curbW : bordure complète (axe suivi compris) ; curbL : partie locale, de l'alignement droit à la principale.
       entry: { ...en, curbW: full(en, wIn), curbL: Wp(en.curb), Tc: W(en.fil.Tc), Tl: W(en.fil.Tl), C: W(en.fil.C) },
       exit: { ...ex, curbW: full(ex, -wOut), curbL: Wp(ex.curb), Tc: W(ex.fil.Tc), Tl: W(ex.fil.Tl), C: W(ex.fil.C) },

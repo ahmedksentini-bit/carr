@@ -188,6 +188,21 @@ export function offsetPath(segs, delta) {
   return out;
 }
 
+// Décalage variable : d(p) donne, au point p du chemin, le décalage (positif à gauche du sens de parcours). Les éléments
+// où d est constant restent exacts (droite ou arc décalé) ; ailleurs, polyligne échantillonnée au pas step.
+export function offsetPathVar(segs, dFn, step = 1) {
+  const out = [];
+  for (const s of segs) {
+    const n = Math.max(2, Math.ceil(segLen(s) / step)), ps = [], ds = [];
+    for (let i = 0; i <= n; i++) { const p = segAt(s, i / n); ps.push(p); ds.push(dFn(p)); }
+    if (ds.every((d) => Math.abs(d - ds[0]) < 1e-6)) { out.push(...offsetPath([s], ds[0])); continue; }
+    const tan = (p) => (s.t === 'L' ? norm(sub(s.b, s.a)) : (s.ccw ? rot90(norm(sub(p, s.c))) : neg(rot90(norm(sub(p, s.c))))));
+    const q = ps.map((p, i) => add(p, mul(rot90(tan(p)), ds[i])));
+    for (let i = 1; i < q.length; i++) if (dist(q[i - 1], q[i]) > 1e-9) out.push(L(q[i - 1], q[i]));
+  }
+  return out;
+}
+
 // Cercle passant par trois points.
 export function circumcircle(p, q, r) {
   const a = sub(q, p), b = sub(r, p); // calcul relatif à p (coordonnées projetées de grande valeur)

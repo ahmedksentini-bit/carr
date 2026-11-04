@@ -11,22 +11,25 @@ export const upright = (r) => { r = G.normAng(r); return r > Math.PI / 2 && r <=
 
 // Abords d'un bord de chaussée S parcouru terre à droite : surface du trottoir, limites des bandes
 // (caniveau, bordure, trottoir, contre-bordure / berme) et fermetures aux extrémités.
-export function sideBandPrims(S, bands, layer) {
+export function sideBandPrims(S, bands, layer, wAt = null) {
+  // wAt(p, nom, largeur) : largeur de la bande au point p du bord (branche d'un profil différent de celui du carrefour) ;
+  // les bandes sont alors décalées d'une distance variable (cumul des largeurs au point du bord).
+  const off = (k) => (wAt ? G.offsetPathVar(S, (p) => -bands.slice(0, k).reduce((a, [nm, w]) => a + wAt(p, nm, w), 0)) : G.offsetPath(S, -bands.slice(0, k).reduce((a, [, w]) => a + w, 0)));
   const out = [];
   let d = 0;
-  for (const [nm, w] of bands) {
+  bands.forEach(([nm, w], k) => {
     if (nm === 'trottoir') {
-      const a = G.offsetPath(S, -d), b = G.offsetPath(S, -(d + w));
+      const a = off(k), b = off(k + 1);
       if (a.length && b.length) {
         out.push({ k: 'fill', L: 'TROTTOIR', role: 'trottoir', rings: [[...a, G.L(G.segEnd(a[a.length - 1]), G.segEnd(b[b.length - 1])), ...G.revPath(b), G.L(G.segStart(b[0]), G.segStart(a[0]))]] });
       }
     }
     d += w;
-    const o = G.offsetPath(S, -d);
+    const o = off(k + 1);
     if (o.length) out.push({ k: 'path', L: layer, segs: o });
-  }
+  });
   if (d > 0) {
-    const o = G.offsetPath(S, -d);
+    const o = off(bands.length);
     if (o.length) out.push({ k: 'path', L: 'LIMITE', segs: [G.L(G.segStart(S[0]), G.segStart(o[0])), G.L(G.segEnd(S[S.length - 1]), G.segEnd(o[o.length - 1]))] });
   }
   return out;

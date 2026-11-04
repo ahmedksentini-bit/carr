@@ -27,6 +27,8 @@ export function platform(prj, bd, s, sec) {
   // Largeur de l'îlot séparateur (triangle de construction) ou du TPC à cette abscisse.
   const isl = s < (bd.h || 0) && (bd.b || 0) > 0 ? Math.max(bd.th || 0, ((bd.b || 0) * (1 - s / bd.h)) / 2) : bd.th || 0;
   const raised = isl > 0.05 && (bd.island?.outline ? true : (bd.th || 0) > 0);
+  // BDD et berme de la branche à cette station (profil de la route raccordée, transition près de l'anneau)
+  if (bd.bddAtW) sec = { ...sec, bdd: bd.bddAtW(p), berme: bd.bermeAtW(p) };
   const bands = sideBands(prj, sec);
   for (const sd of [1, -1]) {
     const w = sd > 0 ? (s < (bd.h || 0) ? bd.entry?.w : bd.entry?.wa ?? bd.entry?.w) : (s < (bd.h || 0) ? bd.exit?.w : bd.exit?.wa ?? bd.exit?.w);
