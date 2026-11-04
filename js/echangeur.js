@@ -349,7 +349,7 @@ export function buildEchangeur(prj, D) {
     const sA = rg ? Math.max(0, rg[0]) : 0, sB = rg ? Math.min(sEnd, rg[1]) : sEnd;
     const pathD = sA > 1e-6 || sB < sEnd - 1e-6 ? (sB - sA > 1 ? G.revPath(G.pathHead(G.revPath(G.pathHead(path, sB)), sB - sA)) : []) : path;
     const off = (delta) => G.offsetPath(pathD, delta);
-    const road = { key, k: H.k, H, path, al, cat, sEnd, E0, E1, E2, ok: sEnd > 1, isRoute, drawn: [sA, sB] };
+    const road = { key, k: H.k, H, path, al, cat, fit, sEnd, E0, E1, E2, ok: sEnd > 1, isRoute, drawn: [sA, sB] };
     if (!road.ok) return road;
     if (isRoute) vsaSectionChecks(H, (lvl, msg) => issues.push({ lvl, msg: `${H.name} : ${msg}` }), fmt);
     const visible = pathD.length > 0;
