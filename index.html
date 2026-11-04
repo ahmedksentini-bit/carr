@@ -341,7 +341,6 @@
         <div id="plChart"></div>
         <details class="pl-pts"><summary>Points d'inflexion (tableau s, z, R)</summary><div class="tablewrap"><table id="plTable" class="pts"></table></div></details>
         <div id="plChecks"></div>
-        </div>
         <h3>Stations</h3>
         <div class="row">
           <label class="fld"><span class="lb">Pas</span><input id="plStep" type="text" inputmode="decimal" value="10"><span class="un">m</span></label>
@@ -356,8 +355,9 @@
           <label class="fld"><span class="lb">Hauteurs</span><select id="plCbZ"><option value="0" selected>auto (× 10)</option><option value="50">1/50</option><option value="100">1/100</option><option value="200">1/200</option><option value="250">1/250</option><option value="500">1/500</option><option value="1000">1/1000</option></select></label>
           <button id="btnPlCombo" class="primary">Tracé combiné…</button>
         </div>
-        <div class="tablewrap"><table id="plStations" class="pts"></table></div>
+        <details class="pl-pts"><summary>Stations (tableau s, X, Y, z TN, z projet)</summary><div class="tablewrap"><table id="plStations" class="pts"></table></div></details>
         <p class="note" id="plNote"></p>
+        </div>
       </div>
 
       <div class="tab" id="tab-pt" hidden>
