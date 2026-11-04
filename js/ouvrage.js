@@ -86,28 +86,33 @@ function extendAxis(pts) {
 }
 
 // ---------------------------------------------------------------- recensement des ouvrages
-function collectDecks(prj, D, extra) {
-  const hw = D?.hwy, decks = [];
+// low : voie principale franchie { key, road (axe dessiné), Hm (paramètres), idx (−1 : voie principale 1, sinon indice
+// de la voie dans prj.crosses) }. Passent au-dessus : les voies secondaires, et les autres voies principales listées
+// après elle (la voie principale 1 est la plus basse) ; tiges de trompettes et giratoires dénivelés : sur la voie 1.
+function collectDecks(prj, D, extra, low) {
+  const hw = low?.road, decks = [];
   if (!hw?.ok) return decks;
-  const offOf = (p) => pathProject(hw.path, p);
-  // Voies secondaires : chaque franchissement de l'autoroute.
+  const offOf = (p) => pathProject(hw.path, p), main1 = low.key === 'hwy', tag = main1 ? '' : `@${low.key}`;
+  // Voies secondaires (et voies principales supérieures) : chaque franchissement de la voie principale.
   (D.crosses || []).forEach((c, k) => {
-    if (!c?.ok) return;
-    const X = crossParams(prj, k), cid = crossList(prj)[k]?.id || `k${k}`;
+    if (!c?.ok || k === low.idx) return;
+    const XC = crossList(prj)[k];
+    if (!main1 && XC?.main && k < low.idx) return; // voie principale listée avant : en dessous
+    const X = crossParams(prj, k), cid = XC?.id || `k${k}`;
     let nX = 0;
     const pts = G.samplePath(c.path, 1);
     const offs = pts.map((p) => offOf(p).off);
     for (let i = 1; i < pts.length; i++) {
       if (Math.sign(offs[i - 1]) === Math.sign(offs[i]) || offs[i - 1] === 0) continue;
       const j0 = Math.max(0, i - 400), j1 = Math.min(pts.length, i + 400); // l'axe réel sur ± 400 m, puis prolongement droit
-      decks.push({ key: `x:${cid}:${nX++}`, src: X.name, axis: extendAxis(pts.slice(j0, j1)), halfW: c.E2 + 0, road: true, kind: X.kind, geo: { path: c.path, al: c.al }, X0: G.lerp(pts[i - 1], pts[i], offs[i - 1] / (offs[i - 1] - offs[i])) });
+      decks.push({ key: `x:${cid}:${nX++}${tag}`, src: X.name, axis: extendAxis(pts.slice(j0, j1)), halfW: c.E2 + 0, road: true, kind: X.kind, geo: { path: c.path, al: c.al }, X0: G.lerp(pts[i - 1], pts[i], offs[i - 1] / (offs[i - 1] - offs[i])) });
     }
   });
   // Tiges de trompettes paramétriques : l'ouvrage porte les deux voies de la tige (S-semi et boucle) ; son axe est le
   // milieu de leurs axes et sa largeur suit leur écartement, de sorte qu'un tablier allongé suit les bretelles là où
   // elles s'écartent (bifurcation boucle / S-semi) au lieu de partir tout droit.
   (prj.ramps || []).forEach((r, iS) => {
-    if (r.role !== 'semi' || !r.tp?.P0 || !r.tp?.u) return;
+    if (!main1 || r.role !== 'semi' || !r.tp?.P0 || !r.tp?.u) return;
     const P0 = r.tp.P0, u = norm(r.tp.u), n = rot90(u), half0 = Math.max(1, +r.tp.tpc || 1) / 2 + 3.5 + 1.0;
     const iB = (prj.ramps || []).findIndex((q) => q.role === 'boucle' && q.grp === r.id);
     const polyOf = (i) => (i >= 0 && D.ramps?.[i]?.al?.path ? G.samplePath(D.ramps[i].al.path, 1) : null);
@@ -137,7 +142,7 @@ function collectDecks(prj, D, extra) {
     decks.push({ key: `t:${r.id}`, src: `tige de la trompette (${r.name})`, axis, halfW: half0, halfWArr, tige: true, X0: P0 });
   });
   // Giratoires dénivelés : anneau franchissant l'autoroute.
-  for (const g of extra?.girden || []) {
+  for (const g of main1 ? extra?.girden || [] : []) {
     const Rm = g.Rg - g.la / 2, ring = [];
     for (let k = 0; k < 720; k++) ring.push(G.polar(g.O, Rm, (k / 720) * G.TAU));
     const offs = ring.map((p) => offOf(p).off);
@@ -156,8 +161,8 @@ function collectDecks(prj, D, extra) {
 }
 
 // ---------------------------------------------------------------- conception d'un ouvrage
-function designDeck(prj, D, deck, O) {
-  const hw = D.hwy, Hm = hwyParams(prj), issues = [];
+function designDeck(prj, D, deck, O, low) {
+  const hw = low.road, Hm = low.Hm, issues = [];
   const axis = deck.axis, aOff = axis.map((p) => pathProject(hw.path, p).off), aL = arcLens(axis);
   const hwArr = deck.halfWArr ? deck.halfWArr.map((v) => v + O.corn) : null;
   const eL = hwArr ? offsetPolyVar(axis, hwArr, 1) : offsetPoly(axis, deck.halfW + O.corn), eR = hwArr ? offsetPolyVar(axis, hwArr, -1) : offsetPoly(axis, -(deck.halfW + O.corn));
@@ -364,21 +369,28 @@ export function buildOuvrages(prj, D, extra = {}) {
     out.cadreAuto = new Map(cad.map((g) => [g.c.id, auto.get(g)]));
     return auto;
   };
-  if (!O.on || !prj.hwy?.on || !D?.hwy?.ok) { nameAll([]); return out; }
-  const Hm = hwyParams(prj), TH = (prj.opts?.textH || 0.8) * 1.2;
-  const decks = collectDecks(prj, D, extra).map((d) => ({ ...d, ep: O.ep, Wr: O.Wr, Wt: O.Wt }));
+  // voies principales franchies : la voie principale 1 (prj.hwy) puis les voies de prj.crosses marquées « main »
+  const lows = [];
+  if (prj.hwy?.on && D?.hwy?.ok) lows.push({ key: 'hwy', road: D.hwy, Hm: hwyParams(prj), idx: -1 });
+  crossList(prj).forEach((c, k) => { if (c?.main && c.on !== false && D?.crosses?.[k]?.ok) lows.push({ key: `x:${c.id}`, road: D.crosses[k], Hm: crossParams(prj, k), idx: k }); });
+  if (!O.on || !lows.length) { nameAll([]); return out; }
+  const TH = (prj.opts?.textH || 0.8) * 1.2;
   const designs = [];
-  for (const dk of decks) {
-    let B = null;
-    try { B = designDeck(prj, D, dk, O); } catch (e) { console.error(e); }
-    if (!B) { out.issues.push({ lvl: 'warn', msg: `${dk.src} : ouvrage non implanté (axe trop court au droit du franchissement).` }); continue; }
-    designs.push(B);
-  }
+  lows.forEach((low, li) => {
+    const decks = collectDecks(prj, D, extra, low).map((d) => ({ ...d, ep: O.ep, Wr: O.Wr, Wt: O.Wt }));
+    for (const dk of decks) {
+      let B = null;
+      try { B = designDeck(prj, D, dk, O, low); } catch (e) { console.error(e); }
+      if (!B) { out.issues.push({ lvl: 'warn', msg: `${dk.src} : ouvrage non implanté (axe trop court au droit du franchissement).` }); continue; }
+      B.low = low; B.lowRank = li; B.sX += li * 1e7; // numérotation : voie principale 1, puis les suivantes
+      designs.push(B);
+    }
+  });
   designs.sort((a, b) => a.sX - b.sX);
   const auto = nameAll(designs);
   designs.forEach((B) => {
     const nameAuto = auto.get(B), name = String(prj.ouvr?.decks?.[B.deck.key]?.name || '').trim() || nameAuto;
-    B.name = name; B.hwPath = D.hwy.path; B.median = Hm.median;
+    B.name = name; B.hwPath = B.low.road.path; B.median = B.low.Hm.median; B.sX -= B.lowRank * 1e7;
     drawDeck(B, (o) => D.prims.push(o), name, TH);
     out.issues.push(...B.issues.map((q) => ({ ...q, msg: `${name} – ${q.msg}` })));
     // axe courbe : tracé en plan exporté vers PSIDA (calculé à la demande, la reconstitution d'une tige coûte ~0,5 s)

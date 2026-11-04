@@ -990,9 +990,9 @@ export function buildEchangeur(prj, D) {
       P({ k: 'path', L: 'BORDURE', segs: polySegs(along(h, Ft.s, sFin, lane)), role: 'principale' });
       P({ k: 'path', L: 'BORDURE', segs: polySegs(outer) }); P({ k: 'path', L: 'ACCOTEMENT', segs: polySegs(berm) });
       // Triangle de zébrage prolongé en aval de E.1,00 m jusqu'à la rencontre des deux rives (E.0, à 1/p) ; la ligne de
-      // l'insertion commence à ce point.
+      // l'insertion commence à ce point et se poursuit le long du biseau jusqu'à sa fin (rive de la chaussée rétablie).
       const L0 = wv ? 0 : Math.min(1 / Math.max(0.01, e.p || 0.03), Math.max(0, insL - 1)), sE0 = Ft.s + sd * L0;
-      P({ k: 'path', L: 'MARQUAGE', segs: polySegs(along(h, sE0, sIns, () => 0)), dash: [3, 3.5], wm: 0.15 });
+      P({ k: 'path', L: 'MARQUAGE', segs: polySegs(along(h, sE0, sFin, () => 0)), dash: [3, 3.5], wm: 0.15 });
       const apexE = L0 > 0.5 ? [h.off(sE0, 0)] : [];
       const mus = [...edgeN, ...apexE, ...along(h, Ft.s, sNoseE, () => 0)];
       P({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(mus, ang(Ft.d) + Math.PI / 4, 1.0), wm: 0.12 });
