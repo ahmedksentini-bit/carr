@@ -58,12 +58,35 @@ export class View3D {
     this.X0 = O.x; this.Y0 = O.y;
     this.Z0 = (tin ? tinZ(tin, O.x, O.y) : null) ?? (+prj.ring.zC || 0);
     if (tin) this.addTerrain(tin, opts.wire);
+    // carrefour actif, autres carrefours du projet (opts.others : [{ prj, D }]), axes de l'échangeur (opts.axes)
+    for (const J of [{ prj, D }, ...(opts.others || [])]) {
+      try { this.addJunction(J.prj, J.D, tin, opts); } catch (e) { console.error(e); }
+    }
+    for (const A of opts.axes || []) { try { this.addAxis(A.name, A.list); } catch (e) { console.error(e); } }
+    this.overview(D);
+  }
+  addJunction(prj, D, tin, opts = {}) {
+    if (!D?.O) return;
     const sec = sectionParams(prj), P = { ...ptParams(prj), halfW: opts.halfW || ptParams(prj).halfW };
     if (D.kind === 'giratoire') this.addRing(prj, D);
     else if (D.main && D.zMain) this.addMain(prj, D, tin, sec, P);
     for (const bd of D.branches) if (bd.zAt && bd.role !== 'principale') this.addBranch(prj, D, bd, tin, sec, P);
     this.addSigns(D, tin);
-    this.overview(D);
+  }
+  // Axe de l'échangeur (autoroute, voie secondaire, bretelle) : coupes au profil type (ptaxes.axisSections) le long
+  // de l'axe, échantillonnées en travers (0,5 m, 1 m au-delà de 30 m).
+  addAxis(name, list) {
+    const secs = (list || []).filter((cs) => cs?.proj?.length >= 2 && cs.p && cs.n);
+    if (secs.length < 2) return;
+    const W = Math.max(...secs.map((cs) => Math.max(...cs.proj.map((q) => Math.abs(q.y))))), ys = [];
+    for (let y = -W; y <= W + 1e-9; y += Math.abs(y) < 30 ? 0.5 : 1) ys.push(Math.round(y * 100) / 100);
+    if (ys[ys.length - 1] < W - 1e-6) ys.push(W);
+    const rows = [], pts = [];
+    for (const cs of secs) {
+      rows.push(sampleSection(cs, ys));
+      pts.push(ys.map((y) => { const q = G.add(cs.p, G.mul(cs.n, y)); return [q.x, q.y]; }));
+    }
+    this.addGrid(rows, ys, pts, name);
   }
 
   addMesh(geo, color, opts = {}) {

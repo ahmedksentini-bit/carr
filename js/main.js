@@ -5114,9 +5114,24 @@ async function open3D() {
 }
 function build3D() {
   if (!v3d || !S.D?.ok) return;
-  try { v3d.build(S.prj, S.D, S.tn?.tin, { ve: +$('#v3dVe').value || 1, wire: $('#v3dWire').checked }); }
+  // Tous les éléments du projet : axes de l'échangeur ayant un profil en long (autoroute, voies secondaires, bretelles)
+  // en coupes au profil type (talus coupés aux chevauchements) et autres carrefours du projet.
+  const tin = S.tn?.tin || null, axesOut = [], missing = [];
+  try {
+    const axes = S.prof?.axes || listAxes(S.prj, S.D), nb = tin ? earthworkIdx() : null;
+    for (const A of S.axpl?.values() || []) {
+      const ax = axes.find((a) => a.key === A.key); if (!ax) continue;
+      if (!A.defined) { missing.push(A.name); continue; }
+      const step = Math.max(2, Math.min(10, ax.len / 500)), profs = [];
+      for (let sv = 0; sv < ax.len - 0.2; sv += step) profs.push({ s: sv, name: '' });
+      profs.push({ s: ax.len, name: '' });
+      try { axesOut.push({ name: A.name, list: axisSections(S.prj, S.D, ax, A, profs, tin, nb ? { neighbors: nb } : {}).list }); } catch (e) { console.error(e); }
+    }
+  } catch (e) { console.error(e); }
+  const others = (S.Do || []).map((o) => { const sn = (S.prj.others || []).find((q) => q.id === o.id); return sn && o.D?.ok ? { prj: { ...S.prj, ...pickJ(sn) }, D: o.D } : null; }).filter(Boolean);
+  try { v3d.build(S.prj, S.D, tin, { ve: +$('#v3dVe').value || 1, wire: $('#v3dWire').checked, axes: axesOut, others }); }
   catch (e) { console.error(e); toast('Vue 3D : ' + e.message, 'err'); }
-  $('#v3dNote').textContent = (S.tn ? '' : 'Aucun MNT (onglet Terrain) : terrain et talus absents. ') + 'Orbite : bouton gauche · panoramique : bouton droit · zoom : molette.';
+  $('#v3dNote').textContent = (S.tn ? '' : 'Aucun MNT (onglet Terrain) : terrain et talus absents. ') + (missing.length ? `Sans profil en long (non représentés) : ${missing.join(', ')}. ` : '') + 'Orbite : bouton gauche · panoramique : bouton droit · zoom : molette.';
 }
 function bind3D() {
   $('#btn3d').addEventListener('click', open3D);

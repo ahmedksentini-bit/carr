@@ -144,7 +144,9 @@ export function crossSectionFrom(pf, tin, P) {
 // Nature d'un point de la plateforme / du talus d'après son libellé (pour les couleurs de la vue 3D).
 export function kindOf(label) {
   if (!label) return 'bordure';
-  if (/^îlot/.test(label)) return 'ilot';
+  if (/^îlot|TPC|terre-plein/i.test(label)) return 'ilot';
+  if (/^BDG/.test(label)) return 'bdg';
+  if (/^BAU/.test(label)) return 'bdd';
   if (/^(voie|rive|axe|caniveau)/.test(label)) return 'chaussee';
   if (/^BDD/.test(label)) return 'bdd';
   if (/^trottoir/.test(label)) return 'trottoir';
