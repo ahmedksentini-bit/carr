@@ -153,11 +153,21 @@ export function roundPolylineFit(pts, radii = []) {
     if (defl < 1e-4 || defl > Math.PI - 1e-4) return null;
     return { i, r, d1, d2, ccw: cr > 0, tanh: Math.tan(defl / 2), need: r * Math.tan(defl / 2), T: 0 };
   });
-  const usedIn = new Array(n).fill(0), usedOut = new Array(n).fill(0); // tangentes déjà prises sur les côtés i-1→i et i→i+1
-  for (const g of geo.filter(Boolean).sort((a, b) => a.r - b.r)) {
-    const i = g.i, avail = Math.min(Ls[i - 1] - usedOut[i - 1], Ls[i] - usedIn[i + 1]) - 0.01;
-    g.T = Math.max(0, Math.min(g.need, avail));
-    usedIn[i] = g.T; usedOut[i] = g.T;
+  // Tangentes : chaque sommet demande T = R·tan(δ/2) ; sur un côté trop court pour les deux sommets qui le partagent,
+  // la longueur est répartie au prorata de leurs demandes (jamais tout à l'un et rien à l'autre, ce qui laissait une
+  // cassure sans raccordement au second sommet). Itéré : réduire un sommet sur un côté libère de la place sur l'autre.
+  for (const g of geo) if (g) g.T = g.need;
+  for (let it = 0; it < 60; it++) {
+    let changed = false;
+    for (let j = 0; j + 1 < n; j++) {
+      const a = geo[j], b = geo[j + 1], ta = a ? a.T : 0, tb = b ? b.T : 0, Lj = Math.max(0, Ls[j] - 0.01);
+      if (ta + tb <= Lj + 1e-9) continue;
+      const f = Lj / (ta + tb);
+      if (a) a.T = ta * f;
+      if (b) b.T = tb * f;
+      changed = true;
+    }
+    if (!changed) break;
   }
   const segs = [];
   let cur = pts[0];

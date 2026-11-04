@@ -747,12 +747,12 @@ function refreshEch() {
     S.echSig = sig;
     $('#rampList').innerHTML = ramps.map((q, i) => `<li data-ri="${i}" class="rli${i === S.rsel ? ' on' : ''}"><b>${esc(q.name)}</b> ${esc(rampParams(S.prj, q).label)} · ${esc(RAMP_CAT[q.cat]?.label || '')}</li>`).join('') || '<li class="empty-li">Aucune bretelle.</li>';
     const nV = H.axis?.length || 0;
-    $('#hwyVertices').innerHTML = nV > 2 ? '<h3>Sommets de l\'axe</h3><div class="tablewrap"><table class="pts"><tr><th>#</th><th>X</th><th>Y</th><th>R (m)</th><th title="Paramètre A des clothoïdes du sommet ; vide : longueur minimale de la catégorie, 0 : sans clothoïde">A (m)</th></tr>' +
-      H.axis.map((q, k) => `<tr><td>${k}</td><td><input data-k="hwy.axis.${k}.x" inputmode="decimal"></td><td><input data-k="hwy.axis.${k}.y" inputmode="decimal"></td><td>${k && k < nV - 1 ? `<input data-k="hwy.axis.${k}.r" inputmode="decimal">` : ''}</td><td>${k && k < nV - 1 ? `<input data-k="hwy.axis.${k}.a" inputmode="decimal" placeholder="${aAuto('hwy', k)}">` : ''}</td></tr>`).join('') + '</table></div>' : '';
+    $('#hwyVertices').innerHTML = nV > 2 ? '<h3>Sommets de l\'axe</h3><div class="tablewrap"><table class="pts"><tr><th>#</th><th>X</th><th>Y</th><th>R (m)</th><th title="Paramètre A des clothoïdes du sommet ; vide : longueur minimale de la catégorie, 0 : sans clothoïde">A (m)<th title="Rayon réellement appliqué sur le plan (réduit quand les tangentes ne tiennent pas entre les sommets voisins)">R appliqué</th></tr>' +
+      H.axis.map((q, k) => `<tr><td>${k}</td><td><input data-k="hwy.axis.${k}.x" inputmode="decimal"></td><td><input data-k="hwy.axis.${k}.y" inputmode="decimal"></td><td>${k && k < nV - 1 ? `<input data-k="hwy.axis.${k}.r" inputmode="decimal">` : ''}</td><td>${k && k < nV - 1 ? `<input data-k="hwy.axis.${k}.a" inputmode="decimal" placeholder="${aAuto('hwy', k)}">` : ''}</td><td class="mono" data-rfit="hwy:${k}"></td></tr>`).join('') + '</table></div>' : '';
     renderCrossFields();
     const xk = S.xsel, XC = S.prj.crosses?.[xk]?.axis || [], nX = XC.length;
-    $('#crossVertices').innerHTML = nX >= 2 ? '<h3>Sommets de l\'axe de la voie secondaire</h3><div class="tablewrap"><table class="pts"><tr><th>#</th><th>X</th><th>Y</th><th>R (m)</th><th title="Paramètre A des clothoïdes du sommet ; vide : longueur minimale de la catégorie, 0 : sans clothoïde">A (m)</th></tr>' +
-      XC.map((q, k) => `<tr><td>${k}</td><td><input data-k="crosses.${xk}.axis.${k}.x" inputmode="decimal"></td><td><input data-k="crosses.${xk}.axis.${k}.y" inputmode="decimal"></td><td>${k && k < nX - 1 ? `<input data-k="crosses.${xk}.axis.${k}.r" inputmode="decimal">` : ''}</td><td>${k && k < nX - 1 ? `<input data-k="crosses.${xk}.axis.${k}.a" inputmode="decimal" placeholder="${aAuto(`x${xk}`, k)}">` : ''}</td></tr>`).join('') + '</table></div>' : '';
+    $('#crossVertices').innerHTML = nX >= 2 ? '<h3>Sommets de l\'axe de la voie secondaire</h3><div class="tablewrap"><table class="pts"><tr><th>#</th><th>X</th><th>Y</th><th>R (m)</th><th title="Paramètre A des clothoïdes du sommet ; vide : longueur minimale de la catégorie, 0 : sans clothoïde">A (m)<th title="Rayon réellement appliqué sur le plan">R appliqué</th></tr>' +
+      XC.map((q, k) => `<tr><td>${k}</td><td><input data-k="crosses.${xk}.axis.${k}.x" inputmode="decimal"></td><td><input data-k="crosses.${xk}.axis.${k}.y" inputmode="decimal"></td><td>${k && k < nX - 1 ? `<input data-k="crosses.${xk}.axis.${k}.r" inputmode="decimal">` : ''}</td><td>${k && k < nX - 1 ? `<input data-k="crosses.${xk}.axis.${k}.a" inputmode="decimal" placeholder="${aAuto(`x${xk}`, k)}">` : ''}</td><td class="mono" data-rfit="x${xk}:${k}"></td></tr>`).join('') + '</table></div>' : '';
     if (!r) $('#rampForm').innerHTML = '';
     else {
       const i = S.rsel, k = (f) => `ramps.${i}.${f}`;
@@ -786,6 +786,19 @@ function refreshEch() {
         }).join('') + '</table></div>' +
         '<div class="row"><button id="btnRpiAdd">+ Sommet</button></div>';
     }
+  }
+  // Tableaux des sommets : valeurs du projet (le tracé a pu changer sur le plan : glisser, poignées, insertion,
+  // prolongement, raccordement à un carrefour) et rayon réellement appliqué, à chaque mise à jour.
+  for (const el of $$('#hwyVertices [data-k], #crossVertices [data-k], #rampForm [data-k^="ramps."][data-k*=".pis."]')) {
+    if (el === document.activeElement) continue;
+    const v = getPath(S.prj, el.dataset.k);
+    if (el.type === 'checkbox') el.checked = !!v; else el.value = showNum(typeof v === 'number' ? +v.toFixed(4) : v);
+  }
+  for (const td of $$('[data-rfit]')) {
+    const [w, k] = td.dataset.rfit.split(':'), road = w === 'hwy' ? D?.hwy : D?.crosses?.[+w.slice(1)], f = road?.fit?.find((q) => q.i === +k);
+    td.textContent = f ? (f.r < 0.01 ? 'cassure' : fmt(f.r, 0)) : '';
+    td.className = 'mono' + (f && f.r < f.req - 0.5 ? ' warn' : '');
+    td.title = f && f.r < f.req - 0.5 ? `Rayon saisi ${fmt(f.req, 0)} m non applicable : tangente nécessaire ${fmt(f.Tneed, 1)} m, disponible ${fmt(f.T, 1)} m entre les sommets voisins.` : '';
   }
   // Résultats (recalculés à chaque mise à jour).
   const hw = D?.hwy;
