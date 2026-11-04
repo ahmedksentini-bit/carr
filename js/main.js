@@ -612,7 +612,7 @@ function renderOuvr() {
     ['Axe des piles de rive', `à ${fmt(o.yP, 2)} m de l'axe de l'autoroute`],
     ['Talus 3/2 sous culée', `hauteur ${fmt(o.Ht, 2)} m, emprise ${fmt(1.5 * o.Ht, 2)} m`],
     ...(() => { const q = worstClearance(S.clear, o.name); return q ? [['Tirant d\'air (profils en long, dévers compris)', `${fmt(q.ta, 2)} m ${q.lvl === 'err' ? `< gabarit ${fmt(o.gab, 2)} m ✖` : `≥ ${fmt(o.gab, 2)} m ✔`} — point le plus haut de ${S.axpl?.get(q.lower)?.name || q.lower} sous le tablier (${Math.abs(q.crit.yLow) < 0.3 ? 'sur l\'axe' : `${fmt(Math.abs(q.crit.yLow), 2)} m ${q.crit.yLow > 0 ? 'à gauche' : 'à droite'} de l\'axe`}, s = ${fmt(q.crit.sLow, 1)} m)${(S.clear || []).filter((c) => c.ouvr === o.name).length > 1 ? ` ; voies franchies : ${(S.clear || []).filter((c) => c.ouvr === o.name).map((c) => `${S.axpl?.get(c.lower)?.name || c.lower} ${fmt(c.ta, 2)} m`).join(', ')}` : ''}`]] : [['Tirant d\'air', 'profils en long de la voie portée et de la voie franchie à saisir (onglet Profil en long)']]; })(),
-  ]) + (() => { const q = worstClearance(S.clear, o.name); return q && q.lvl === 'err' ? `<div class="row"><button data-raise="${esc(o.name)}" title="Place un point d'inflexion sur la voie portée, au droit de l'ouvrage, à la cote assurant le gabarit + 0,10 m (les points à moins de 40 m sont remplacés)">Relever ${esc(S.axpl?.get(q.key)?.name || 'la voie portée')} au gabarit (z = ${fmt(q.zNeed, 2)} m)</button></div>` : ''; })() + `<div class="row"><a class="btn primary" data-psidalink="${esc(o.key)}" href="${esc(o.curved ? PSIDA_URL : psidaLink(o, S.prj))}" target="_blank" rel="noopener" title="Ouvre psida.ksr-infra.org (onglet Conception) avec la travure, la largeur, l'épaisseur, le biais, le tirant d'air et les appuis de cet ouvrage">Ouvrir dans PSIDA ↗</a><button class="mini" data-psidajson="${esc(o.name)}" title="Projet PSIDA (.json) à ouvrir avec le bouton Ouvrir de PSIDA">Exporter (.json)</button></div>` + `<p class="note">${esc(o.hText)}</p><ul class="ouvr-items">${o.items.map((it) => `<li class="${lvlCls[it.level] || ''}">${esc(it.text)}</li>`).join('')}</ul></div>`).join('');
+  ]) + (() => { const q = worstClearance(S.clear, o.name); return q && q.lvl === 'err' ? `<div class="row"><button data-raise="${esc(o.name)}" title="Place un point d'inflexion sur la voie portée, au droit de l'ouvrage, à la cote assurant le gabarit + 0,10 m (les points à moins de 40 m sont remplacés)">Relever ${esc(S.axpl?.get(q.key)?.name || 'la voie portée')} au gabarit (z = ${fmt(q.zNeed, 2)} m)</button></div>` : ''; })() + `<div class="row"><a class="btn primary" data-psidalink="${esc(o.key)}" href="${esc(o.curved ? PSIDA_URL : psidaLink(o, S.prj, ouvrNiv(o)))}" target="_blank" rel="noopener" title="Ouvre psida.ksr-infra.org (onglet Conception) avec la travure, la largeur, l'épaisseur, le biais, le tirant d'air et les appuis de cet ouvrage">Ouvrir dans PSIDA ↗</a><button class="mini" data-psidajson="${esc(o.name)}" title="Projet PSIDA (.json) à ouvrir avec le bouton Ouvrir de PSIDA">Exporter (.json)</button></div>` + `<p class="note">${esc(o.hText)}</p><ul class="ouvr-items">${o.items.map((it) => `<li class="${lvlCls[it.level] || ''}">${esc(it.text)}</li>`).join('')}</ul></div>`).join('');
 }
 // Fiche d'un cadre PICF / PIPO : paramètres modifiables (vides = valeurs automatiques), grandeurs, lien PSIDA.
 function renderCadreEdit(o) {
@@ -1527,7 +1527,7 @@ function bindEch() {
   // « copier le lien » compris) ; alertes du tracé exporté affichées une fois
   const prepPsidaLink = (lk, warn) => {
     const o = (S.ouvr?.list || []).find((q) => q.key === lk.dataset.psidalink); if (!o) return;
-    lk.href = psidaLink(o, S.prj);
+    lk.href = psidaLink(o, S.prj, ouvrNiv(o));
     const w = psidaWarnings(o);
     if (warn && w.length && lk.dataset.warned !== '1') { lk.dataset.warned = '1'; toast(`${o.name} — export PSIDA : ${w.join(' ; ')}.`, 'warn'); }
   };
@@ -1566,7 +1566,7 @@ function bindEch() {
     const b = e.target.closest('[data-psidajson]'); if (!b) return;
     const o = (S.ouvr?.list || []).find((q) => q.name === b.dataset.psidajson); if (!o) return;
     { const w = psidaWarnings(o); if (w.length) toast(`${o.name} — export PSIDA : ${w.join(' ; ')}.`, 'warn'); }
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([psidaProject(o, S.prj)], { type: 'application/json' }));
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([psidaProject(o, S.prj, ouvrNiv(o))], { type: 'application/json' }));
     a.download = `psida-${o.name}-${o.spans.map((v) => fmt(v, 1)).join('-')}.json`.replace(/[\s,]+/g, '_'); a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   });
@@ -5167,6 +5167,24 @@ async function open3D() {
   const sel = $('#v3dBranch'), cands = S.D.branches.filter((bd) => bd.role !== 'principale' && bd.zAt);
   sel.innerHTML = cands.map((bd) => `<option value="${bd.idx}">${esc(bd.name)}</option>`).join('');
   build3D();
+}
+// Plan de nivellement d'un ouvrage pour PSIDA, ligne d'appui par ligne (ordre du tablier) : cote du dessus de chaussée
+// à l'axe zCh (ligne rouge de la voie portée), terrain zTN (chaussée franchie au droit des piles, dévers 2,5 % ; sinon
+// MNT), dessus de semelle des piles 1,00 m sous zTN (culées : donnée générale de PSIDA) ; hauteurs de fût déduites
+// (zCh − revêtement 0,08 − tablier − appareil 0,06 − bossage 0,10 − zDS). null si la voie portée n'a pas de profil.
+function ouvrNiv(o) {
+  try {
+    if (!o?.supPts?.length) return null;
+    const axes = S.prof?.axes || listAxes(S.prj, S.D), byKey = Object.fromEntries(axes.map((a) => [a.key, a])), tin = S.tn?.tin || null;
+    const sp = (S.ospans || []).filter((q) => q.okey === o.key), ups = sp.filter((q) => q.upper).map((q) => q.key), lows = [o.lowKey, ...sp.filter((q) => !q.upper).map((q) => q.key)];
+    const zOn = (keys, p, dev) => { for (const k of keys) { const A = S.axpl?.get(k), ax = byKey[k]; if (!A?.defined || !ax) continue; const pr = ax.project(p); if (pr && Math.abs(pr.off) < 60) return A.PL.zAt(Math.max(0, Math.min(ax.len, pr.s))) - (dev ? 0.025 * Math.min(Math.abs(pr.off), (ax.half || 8)) : 0); } return null; };
+    const zCh = o.supPts.map((q) => zOn(ups, q.p, false));
+    if (zCh.every((z) => z == null)) return null;
+    const zTN = o.supPts.map((q) => (q.kind === 'pile' ? zOn(lows, q.p, true) ?? (tin ? tinZ(tin, q.p.x, q.p.y) : null) : tin ? tinZ(tin, q.p.x, q.p.y) : zOn(lows, q.p, true)));
+    const zDS = o.supPts.map((q, i) => (q.kind === 'pile' && zTN[i] != null ? zTN[i] - 1.0 : null));
+    const pileH = o.supPts.map((q, i) => (q.kind === 'pile' && zCh[i] != null && zDS[i] != null ? zCh[i] - 0.08 - (o.h || 0) - 0.06 - 0.10 - zDS[i] : null)).filter((v, i) => o.supPts[i].kind === 'pile');
+    return { zCh, zTN, zDS, pileH: pileH.every((v) => v != null) ? pileH : null };
+  } catch (e) { console.error(e); return null; }
 }
 const inPolyXY = (q, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a.y > q.y) !== (b.y > q.y) && q.x < ((b.x - a.x) * (q.y - a.y)) / (b.y - a.y) + a.x) c = !c; } return c; };
 function build3D() {
