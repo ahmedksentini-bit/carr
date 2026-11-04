@@ -2866,7 +2866,7 @@ function syncCtxUI() {
   buildSignFields();
   buildEchFields();
   $$('#ctxSeg [data-ctx]').forEach((b) => b.classList.toggle('on', b.dataset.ctx === S.prj.context));
-  $$('#kindSeg [data-kind]').forEach((b) => b.classList.toggle('on', b.dataset.kind === (S.prj.kind || 'giratoire')));
+  $$('#kindSeg [data-kind], #kindSegPop [data-kind]').forEach((b) => b.classList.toggle('on', b.dataset.kind === (S.prj.kind || 'giratoire')));
   $('#ctxNote').textContent = S.prj.context === 'interurbain'
     ? 'Valeurs par défaut et contrôles : SETRA, Aménagement des carrefours interurbains (ACI, 1998).'
     : 'Valeurs par défaut et contrôles : CERTU, Guide des carrefours urbains (1999) / fiche Giratoires urbains ; mini-giratoires (1997).';
@@ -5233,7 +5233,7 @@ function bindUI() {
   $$('.tog').forEach((b) => { b.classList.toggle('on', !!S.tog[b.dataset.tog]); b.addEventListener('click', () => toggle(b.dataset.tog)); });
 
   $$('#ctxSeg [data-ctx]').forEach((b) => b.addEventListener('click', () => setContext(b.dataset.ctx)));
-  $$('#kindSeg [data-kind]').forEach((b) => b.addEventListener('click', () => setKind(b.dataset.kind)));
+  $$('#kindSeg [data-kind], #kindSegPop [data-kind]').forEach((b) => b.addEventListener('click', () => setKind(b.dataset.kind)));
   $('#crsSel').addEventListener('change', (e) => {
     const id = e.target.value, c = { ...S.prj.crs, id };
     if (id === 'utm' && S.crs.geo) { const ll = S.crs.toLL(viewer.cx, viewer.cy); c.zone = utmZoneOf(ll.lon); c.south = ll.lat < 0; }
@@ -5361,7 +5361,10 @@ function setKind(k) {
   if (changesFamily && S.prj.branches.length && confirm(t('Appliquer aux branches les valeurs par défaut de ce type de carrefour ?'))) resetBranchDefaults();
   S.formRole = undefined;
   syncCtxUI(); update();
-  zoomGira();
+  if (S.pop?.type === 'ring') $('#elPop .ttl').textContent = popTitle(S.pop); // fenêtre du carrefour ouverte : vue inchangée
+  else zoomGira();
+  const n = S.prj.jorder.length;
+  if (n > 1) toast(t(`${S.prj.jname || 'Carrefour'} : ${k === 'giratoire' ? 'giratoire' : `carrefour en ${k}`} — les ${n - 1} autre(s) carrefour(s) du projet gardent leur type.`));
 }
 
 // Valeurs du guide pour le Rg courant (anneau + branches).
