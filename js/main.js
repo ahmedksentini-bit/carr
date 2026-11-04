@@ -13,6 +13,7 @@ import { hwyParams, rampParams, endFrame, normRamp, buildEchangeur, trumpet, der
 import { pathProject, pathTangentAt, polySegs } from './clotho.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
+import { planElements, profileElements, tabulation, tablesCsv } from './tabexport.js';
 import { upright } from './common.js';
 import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF, crossSectionFrom, mainPlatform } from './pt.js';
 import { plParams, plBuild, plStations, plTerrainLine, plDXF, plChecks, axisLength, axisPointAt, PL_LIMITS } from './pl.js';
@@ -2715,6 +2716,7 @@ function refreshPanels() {
   refreshDevers();
   refreshChecks();
   refreshPoints();
+  if (!$('#tab-implantation')?.hidden) try { refreshTabAxes(); } catch (e) { console.error(e); }
   try { renderProfils(); } catch (e) { console.error(e); }
   refreshCapacity();
   refreshVisibility();
@@ -4863,6 +4865,7 @@ function refreshCapPlan(T) {
 function showTab(name) {
   $$('.tabs [data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
   $$('.tab').forEach((t) => (t.hidden = t.id !== 'tab-' + name));
+  if (name === 'implantation') try { refreshTabAxes(); } catch (e) { console.error(e); }
 }
 
 // --------------------------------------------------------- Liaisons
@@ -4996,6 +4999,8 @@ function bindUI() {
   $('#btnDxf').addEventListener('click', exportDXF);
   $('#btnPng').addEventListener('click', exportPNG);
   $('#btnCsv').addEventListener('click', exportCSV);
+  $('#tabAxis')?.addEventListener('change', refreshTabAxes);
+  document.querySelectorAll('[data-tabx]').forEach((b) => b.addEventListener('click', () => exportAxisTables(b.dataset.tabx)));
   $('#btnProfSer').addEventListener('click', () => setTool('profser'));
   $('#btnProfOne').addEventListener('click', () => setTool('profone'));
   $('#btnProfCsv').addEventListener('click', () => {
@@ -5237,6 +5242,44 @@ function exportPNG() {
     renderScene(ctx, v, { export: true, noTiles: true });
     save('Image exportée sans le fond satellite (restriction du fournisseur).');
   }
+}
+
+// ─── Tableaux des axes (onglet Implantation) : éléments en plan, éléments du profil en long, tabulation ───
+function tabAxes() { return S.prof?.axes || (S.D ? listAxes(S.prj, S.D) : []); }
+function refreshTabAxes() {
+  const sel = $('#tabAxis'); if (!sel) return;
+  const axes = tabAxes(), cur = sel.value, sig = axes.map((a) => a.key + a.name).join('|');
+  if (sel.dataset.sig !== sig) {
+    sel.dataset.sig = sig;
+    sel.innerHTML = (axes.length > 1 ? '<option value="*">tous les axes</option>' : '') + axes.map((a) => `<option value="${esc(a.key)}">${esc(a.name)} (${fmt(a.len, 0)} m)</option>`).join('');
+    if ([...sel.options].some((o) => o.value === cur)) sel.value = cur;
+  }
+  const ax = axes.find((a) => a.key === sel.value) || (sel.value === '*' ? null : axes[0]);
+  const pv = $('#tabPreview'); if (!pv) return;
+  if (!ax) { pv.innerHTML = axes.length ? '' : '<p class="note">Aucun axe : dessinez l\'autoroute, une voie secondaire, une bretelle ou une branche.</p>'; return; }
+  try {
+    const P = planElements(S.prj, ax);
+    pv.innerHTML = `<table class="pts"><thead><tr>${P.head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${P.rows.map((r) => `<tr>${r.map((c) => `<td class="mono">${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  } catch (e) { pv.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+function exportAxisTables(what) {
+  const axes = tabAxes(), key = $('#tabAxis').value, step = Math.max(1, parseNum($('#tabStep').value) || 25);
+  const list = key === '*' ? axes : axes.filter((a) => a.key === key);
+  if (!list.length) { toast('Aucun axe à exporter.', 'warn'); return; }
+  const tables = [];
+  for (const ax of list) {
+    const A = S.axpl?.get(ax.key) || null, profs = (S.prof?.list || []).filter((q) => q.axis === ax.key);
+    if (what === 'plan' || what === 'all') { const P = planElements(S.prj, ax); tables.push({ title: `${ax.name} — éléments du tracé en plan`, ...P }); }
+    if (what === 'pl' || what === 'all') {
+      const E = profileElements(S.prj, ax, A);
+      tables.push({ title: `${ax.name} — éléments du profil en long`, head: E.head, rows: E.rows });
+      if (E.piv) tables.push({ title: `${ax.name} — sommets du profil en long (PIV)`, ...E.piv });
+    }
+    if (what === 'tab' || what === 'all') { const T = tabulation(S.prj, S.D, ax, A, { step, tin: S.tn?.tin || null, profs }); tables.push({ title: `${ax.name} — tabulation (pas ${fmt(step, 2)} m)${A?.defined ? '' : ' — profil en long non défini : cotes projet absentes'}`, ...T }); }
+  }
+  const tag = { plan: 'trace_en_plan', pl: 'profil_en_long', tab: 'tabulation', all: 'tableaux_axes' }[what];
+  const nm = key === '*' ? 'tous_axes' : (list[0].name || 'axe').replace(/[^\p{L}\p{N}]+/gu, '_');
+  download(fname('csv').replace(/\.csv$/, `_${nm}_${tag}.csv`), tablesCsv(tables), 'text/csv;charset=utf-8');
 }
 
 function exportCSV() {
