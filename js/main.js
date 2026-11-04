@@ -5154,7 +5154,7 @@ function bindHydro() {
 // --------------------------------------------------------- Vue 3D
 let v3d = null;
 async function open3D() {
-  if (!S.D?.ok) { toast('Dessinez d\'abord le carrefour.', 'warn'); return; }
+  if (!S.D || !(S.D.ok || S.D.hwy?.ok || (S.D.crosses || []).some((c) => c?.ok) || (S.D.ramps || []).some((r) => r?.al))) { toast('Rien à dessiner : tracez une voie ou un carrefour.', 'warn'); return; }
   const box = $('#view3d'); box.hidden = false;
   if (!v3d) {
     try {
@@ -5168,26 +5168,58 @@ async function open3D() {
   sel.innerHTML = cands.map((bd) => `<option value="${bd.idx}">${esc(bd.name)}</option>`).join('');
   build3D();
 }
+const inPolyXY = (q, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a.y > q.y) !== (b.y > q.y) && q.x < ((b.x - a.x) * (q.y - a.y)) / (b.y - a.y) + a.x) c = !c; } return c; };
 function build3D() {
-  if (!v3d || !S.D?.ok) return;
+  if (!v3d || !S.D) return;
   // Tous les éléments du projet : axes de l'échangeur ayant un profil en long (autoroute, voies secondaires, bretelles)
   // en coupes au profil type (talus coupés aux chevauchements) et autres carrefours du projet.
   const tin = S.tn?.tin || null, axesOut = [], missing = [];
   try {
     const axes = S.prof?.axes || listAxes(S.prj, S.D), nb = tin ? earthworkIdx() : null;
-    for (const A of S.axpl?.values() || []) {
-      const ax = axes.find((a) => a.key === A.key); if (!ax) continue;
-      if (!A.defined) { missing.push(A.name); continue; }
+    for (const A0 of S.axpl?.values() || []) {
+      const ax = axes.find((a) => a.key === A0.key); if (!ax) continue;
+      let A = A0;
+      if (!A.defined) { // sans ligne rouge : profil provisoire sur le TN (sinon à la cote des extrémités calées, ou 100 m)
+        missing.push(A.name);
+        const pis = tin ? axisFromTerrain(ax, tin, { tied: A.tied || [] }) : [];
+        let nodes = [...(A.tied || []), ...pis].sort((a, b) => a.s - b.s);
+        if (nodes.length < 2) { const z = nodes[0]?.z ?? (+S.prj.ring?.zC || 100); nodes = [{ s: 0, z, R: 0 }, { s: ax.len, z, R: 0 }]; }
+        A = { ...A, PL: buildNodes(nodes), defined: true };
+      }
       const step = Math.max(2, Math.min(10, ax.len / 500)), profs = [];
       for (let sv = 0; sv < ax.len - 0.2; sv += step) profs.push({ s: sv, name: '' });
       profs.push({ s: ax.len, name: '' });
-      try { axesOut.push({ name: A.name, list: axisSections(S.prj, S.D, ax, A, profs, tin, nb ? { neighbors: nb } : {}).list }); } catch (e) { console.error(e); }
+      try {
+        const list = axisSections(S.prj, S.D, ax, A, profs, tin, nb ? { neighbors: nb } : {}).list;
+        // voie portée par un ouvrage : pas de remblai sous le tablier (coupes masquées dans son emprise)
+        const decks = (S.ouvr?.list || []).filter((o) => o.poly?.length > 2 && (S.ospans || []).some((q) => q.okey === o.key && q.upper && q.key === A.key)).map((o) => o.poly);
+        if (decks.length) for (const cs of list) if (decks.some((F) => inPolyXY(cs.p, F))) cs.skip3d = true;
+        axesOut.push({ name: A.name, list });
+      } catch (e) { console.error(e); }
+    }
+  } catch (e) { console.error(e); }
+  // Ouvrages : tablier (dessus à la ligne rouge des voies portées, épaisseur h), piles et culées (du pied — voie franchie
+  // ou TN — à la sous-face du tablier) ; les polygones sont ceux du plan (calque OUVRAGE).
+  const ouvr3 = [];
+  try {
+    const axes = S.prof?.axes || listAxes(S.prj, S.D), byKey = Object.fromEntries(axes.map((a) => [a.key, a]));
+    const zOn = (keys, p) => { for (const k of keys) { const A = S.axpl?.get(k), ax = byKey[k]; if (!A?.defined || !ax) continue; const pr = ax.project(p); if (pr && Math.abs(pr.off) < 40) return A.PL.zAt(Math.max(0, Math.min(ax.len, pr.s))) - 0.025 * Math.min(Math.abs(pr.off), 8); } return null; };
+    const fills = (S.D.prims || []).filter((o) => o.k === 'fill' && o.L === 'OUVRAGE');
+    const inside = (q, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a.y > q.y) !== (b.y > q.y) && q.x < ((b.x - a.x) * (q.y - a.y)) / (b.y - a.y) + a.x) c = !c; } return c; };
+    for (const o of S.ouvr?.list || []) {
+      if (!(o.poly?.length > 2)) continue;
+      const sp = (S.ospans || []).filter((q) => q.okey === o.key), ups = sp.filter((q) => q.upper).map((q) => q.key), lows = sp.filter((q) => !q.upper).map((q) => q.key);
+      const zT = (p) => tin ? tinZ(tin, p.x, p.y) : null;
+      const zLow = (p) => zOn(lows, p) ?? zT(p) ?? (+S.prj.ring?.zC || 100);
+      const zTop = (p) => zOn(ups, p) ?? zLow(p) + (o.gab || 4.75) + (o.h || 0.8);
+      const parts = fills.filter((f) => f.role === 'pile' || f.role === 'culee').map((f) => ({ role: f.role, pts: G.samplePath(f.rings[0], 1) })).filter((q) => q.pts.length > 2 && inside(q.pts.reduce((a, b) => ({ x: a.x + b.x / q.pts.length, y: a.y + b.y / q.pts.length }), { x: 0, y: 0 }), o.poly));
+      ouvr3.push({ name: o.name, deck: o.poly, h: o.h || 0.8, parts, zTop, zLow });
     }
   } catch (e) { console.error(e); }
   const others = (S.Do || []).map((o) => { const sn = (S.prj.others || []).find((q) => q.id === o.id); return sn && o.D?.ok ? { prj: { ...S.prj, ...pickJ(sn) }, D: o.D } : null; }).filter(Boolean);
-  try { v3d.build(S.prj, S.D, tin, { ve: +$('#v3dVe').value || 1, wire: $('#v3dWire').checked, axes: axesOut, others }); }
+  try { v3d.build(S.prj, S.D, tin, { ve: +$('#v3dVe').value || 1, wire: $('#v3dWire').checked, axes: axesOut, others, ouvr: ouvr3 }); }
   catch (e) { console.error(e); toast('Vue 3D : ' + e.message, 'err'); }
-  $('#v3dNote').textContent = (S.tn ? '' : 'Aucun MNT (onglet Terrain) : terrain et talus absents. ') + (missing.length ? `Sans profil en long (non représentés) : ${missing.join(', ')}. ` : '') + 'Orbite : bouton gauche · panoramique : bouton droit · zoom : molette.';
+  $('#v3dNote').textContent = (S.tn ? '' : 'Aucun MNT (onglet Terrain) : terrain et talus absents. ') + (missing.length ? `Sans ligne rouge, posés provisoirement ${tin ? 'sur le TN' : 'à plat'} : ${missing.join(', ')}. ` : '') + 'Orbite : bouton gauche · panoramique : bouton droit · zoom : molette.';
 }
 function bind3D() {
   $('#btn3d').addEventListener('click', open3D);
@@ -5475,7 +5507,7 @@ function bindUI() {
   bindPL();
   bindPT();
   bindHydro(); bindBvSheet();
-  if (/[?&]debug\b/.test(location.search)) window.__gira = { S, get viewer() { return viewer; }, lineGrips: () => gripAxes().flatMap(axisLineGrips), ew: () => earthworkCorridors() }; // tests de navigateur (?debug)
+  if (/[?&]debug\b/.test(location.search)) window.__gira = { S, get viewer() { return viewer; }, get v3d() { return v3d; }, lineGrips: () => gripAxes().flatMap(axisLineGrips), ew: () => earthworkCorridors() }; // tests de navigateur (?debug)
   bind3D();
   bindEch();
   $('#btnImportDxf').addEventListener('click', () => $('#fileDxf').click());
