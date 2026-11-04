@@ -398,7 +398,10 @@ export function buildOuvrages(prj, D, extra = {}) {
     let tr;
     const trace = () => { if (tr === undefined) { try { tr = deckTrace(B); } catch (e) { console.error(e); tr = null; } } return tr; };
     if (turn > 1e-3) B.items.push({ level: 'info', text: `Axe courbe (déviation ${fmt((turn * 200) / Math.PI, 1)} gr entre les culées) : le lien PSIDA transmet le tracé en plan (${B.deck.geo ? 'droites et arcs exacts' : 'droites, arcs et clothoïdes reconstitués'}) et le biais propre à chaque ligne d'appui ; tablier calculé en plaque (alertes éventuelles du tracé affichées à l'export).` });
-    out.list.push({ supRel: B.supRel, trace, curved: turn > 1e-3, poly: B.deckPoly || [], P: B.P0, sX: B.sX, nameAuto, key: B.deck.key, spansAuto: B.spansAuto, user: B.user, shift: B.shift, hGuide: B.hGuide, name, src: B.deck.src, psi: B.psi, spans: B.spans, central: B.central, type: B.type, h: B.h, hText: B.ep.text, width: 2 * B.halfW, about: B.about, items: B.items, yP: B.yP, yC: B.side, Ht: B.Ht, roadHalf: B.deck.halfW, gab: O.gab, fck: O.fck, ep: O.ep, nPiles: B.sup.filter((q) => q.kind === 'pile').length });
+    // lignes d'appui dans l'ordre du tablier (culée, piles, culée) : point sur l'axe de l'ouvrage (nivellement PSIDA)
+    const aLx = arcLens(B.axis), ptAt = (a) => { let k = 1; while (k < aLx.length - 1 && aLx[k] < a) k++; return G.lerp(B.axis[k - 1], B.axis[k], (a - aLx[k - 1]) / (aLx[k] - aLx[k - 1] || 1)); };
+    const supPts = B.sup.slice().sort((q1, q2) => q1.a - q2.a).map((q) => ({ kind: q.kind, p: ptAt(q.a) }));
+    out.list.push({ supPts, lowKey: B.low.key, supRel: B.supRel, trace, curved: turn > 1e-3, poly: B.deckPoly || [], P: B.P0, sX: B.sX, nameAuto, key: B.deck.key, spansAuto: B.spansAuto, user: B.user, shift: B.shift, hGuide: B.hGuide, name, src: B.deck.src, psi: B.psi, spans: B.spans, central: B.central, type: B.type, h: B.h, hText: B.ep.text, width: 2 * B.halfW, about: B.about, items: B.items, yP: B.yP, yC: B.side, Ht: B.Ht, roadHalf: B.deck.halfW, gab: O.gab, fck: O.fck, ep: O.ep, nPiles: B.sup.filter((q) => q.kind === 'pile').length });
   });
   return out;
 }
@@ -410,8 +413,12 @@ export function buildOuvrages(prj, D, extra = {}) {
 // dispositif de retenue) reportées aux mêmes distances des bords du tablier.
 export const PSIDA_URL = 'https://psida.ksr-infra.org/';
 const f2 = (v) => String(Math.round(v * 100) / 100);
-export function psidaData(o, prj) {
+// niv (facultatif) : plan de nivellement des lignes d'appui { zCh, zTN, zDS } (listes, null = donnée générale de PSIDA).
+export function psidaData(o, prj, niv = null) {
   const b = o.width / 2, rh = o.roadHalf, about = Math.ceil(Math.max(0.5, o.about) * 20) / 20;
+  const lst = (arr) => arr.map((v) => (v == null || !Number.isFinite(v) ? '' : f2(v))).join('; ');
+  const nivF = niv ? { niv_actif: 'on', niv_zCh: lst(niv.zCh), niv_zTN: lst(niv.zTN), niv_zDS: lst(niv.zDS), niv_hBos: '0.10' } : {};
+  const pileH = niv?.pileH?.length ? niv.pileH.map(f2).join(', ') : Array(Math.max(1, o.nPiles)).fill(f2(o.gab)).join(', ');
   const lines = [[5, b - 0.1], [6.5, b - 0.7], [5, b - 0.5]].flatMap(([g, e]) => [`${g} @ ${f2(-e)}`, `${g} @ ${f2(e)}`]).join(' ; ');
   return {
     ouvrage: 'dalle',
@@ -428,8 +435,9 @@ export function psidaData(o, prj) {
     lines,
     ap_pileType: 'voile',
     ap_pileB: f2(o.ep),
-    ap_pileH: Array(Math.max(1, o.nPiles)).fill(f2(o.gab)).join(', '),
+    ap_pileH: pileH,
     ap_culType: 'enterree',
+    ...nivF,
     plan_ouvrage: `${o.name} – ${o.src}`,
     plan_projet: prj?.name || '',
     ...psidaTraceFields(o),
@@ -450,5 +458,5 @@ function psidaTraceFields(o) {
 const b64 = (txt) => (typeof btoa === 'function' ? btoa(unescape(encodeURIComponent(txt))) : Buffer.from(txt, 'utf8').toString('base64'));
 // Alertes du tracé exporté (biais < 50 gr à une ligne d'appui, angle vif, reconstitution imprécise) à montrer avant l'export.
 export function psidaWarnings(o) { const t = o.curved && typeof o.trace === 'function' ? o.trace() : null; return t?.warnings || []; }
-export function psidaLink(o, prj) { return `${PSIDA_URL}#conception/d=${encodeURIComponent(b64(JSON.stringify(psidaData(o, prj))))}`; }
-export function psidaProject(o, prj) { return JSON.stringify({ format: 'psida-projet', version: '0.99', date: new Date().toISOString(), source: 'GIRA (carr.ksr-infra.org)', data: psidaData(o, prj) }, null, 1); }
+export function psidaLink(o, prj, niv = null) { return `${PSIDA_URL}#conception/d=${encodeURIComponent(b64(JSON.stringify(psidaData(o, prj, niv))))}`; }
+export function psidaProject(o, prj, niv = null) { return JSON.stringify({ format: 'psida-projet', version: '0.99', date: new Date().toISOString(), source: 'GIRA (carr.ksr-infra.org)', data: psidaData(o, prj, niv) }, null, 1); }
