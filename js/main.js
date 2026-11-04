@@ -1536,6 +1536,13 @@ function drawAxes(ctx, v, T, exp) {
   // « + » au bout extérieur de chaque axe : prolonge la saisie.
   if (exp || S.tool !== 'select') return;
   ctx.lineWidth = 1.6;
+  for (const e of echEnds()) {
+    const [x, y] = plusPos(e);
+    ctx.fillStyle = T.L.AXE_SAISI.stroke;
+    ctx.beginPath(); ctx.arc(x, y, 8, 0, 2 * Math.PI); ctx.fill();
+    ctx.strokeStyle = '#111';
+    ctx.beginPath(); ctx.moveTo(x - 4.5, y); ctx.lineTo(x + 4.5, y); ctx.moveTo(x, y - 4.5); ctx.lineTo(x, y + 4.5); ctx.stroke();
+  }
   S.prj.branches.forEach((b, i) => {
     const e = outerEnd(i);
     if (!e) return;
@@ -1810,12 +1817,35 @@ function dedupe(pts) {
   return out;
 }
 
+// ─── « + » aux deux extrémités des axes d'échangeur (autoroute, voies secondaires) : prolongement de la saisie ───
+/** Extrémités prolongeables : { ref: { t: 'hwy' } | { t: 'cross', i }, atStart, p, prev }. */
+function echEnds() {
+  const out = [];
+  const add = (ref, ax) => { if (!ax || ax.length < 2) return; const n = ax.length - 1; out.push({ ref, atStart: true, p: ax[0], prev: ax[1] }, { ref, atStart: false, p: ax[n], prev: ax[n - 1] }); };
+  if (S.prj.hwy?.on) add({ t: 'hwy' }, S.prj.hwy.axis);
+  (S.prj.crosses || []).forEach((X, i) => { if (X.on !== false) add({ t: 'cross', i }, X.axis); });
+  return out;
+}
+/** Abscisses des éléments rattachés à un axe d'échangeur décalées de d (prolongement à l'origine) ; PK origine corrigé. */
+function shiftAxisStations(ref, d) {
+  if (!(Math.abs(d) > 1e-6)) return;
+  const X = ref.t === 'cross' ? S.prj.crosses[ref.i] : null, key = ref.t === 'hwy' ? 'hwy' : `x:${X?.id}`, H = ref.t === 'hwy' ? S.prj.hwy : X;
+  const refs = ref.t === 'hwy' ? ['hwy1', 'hwy2'] : [xref(ref.i, 1), xref(ref.i, 2)];
+  const sh = (v) => (v === '' || v == null || !Number.isFinite(+v) ? v : +(+v + d).toFixed(3));
+  for (const r of S.prj.ramps || []) for (const e of [r.from, r.to]) if (e && refs.includes(e.ref)) e.s = sh(e.s);
+  for (const c of S.prj.cadres || []) if (c.axis === key) c.s = sh(c.s);
+  for (const p of S.prj.axpl?.[key]?.pis || []) p.s = sh(p.s);
+  for (const q of S.prj.prof?.series || []) if (q.axis === key) { q.s0 = sh(q.s0); q.s1 = sh(q.s1); }
+  for (const q of S.prj.prof?.manual || []) if (q.axis === key) q.s = sh(q.s);
+  for (const c of S.prj.hydro?.res?.crossings || []) if (c.key === key) c.pk = sh(c.pk);
+  if (H) H.pk0 = String(+((parseNum(String(H.pk0 ?? '')) || 0) - d).toFixed(3));
+}
 // Prolongement d'un axe depuis son « + » : outil axe amorcé sur l'extrémité extérieure.
 function startExtend(e) {
   setTool('axis');
-  S.extend = { bi: e.bi, atStart: e.atStart };
+  S.extend = e.ref ? { ref: e.ref, atStart: e.atStart } : { bi: e.bi, atStart: e.atStart };
   S.draft = [e.p];
-  S.sel = e.bi;
+  if (!e.ref) S.sel = e.bi;
   renderBranchForm(); setPrompt(); viewer.invalidate();
 }
 
@@ -2011,6 +2041,22 @@ function finishAxis() {
     }
     setTool('select'); return;
   }
+  if (S.extend?.ref) { // axe d'autoroute ou de voie secondaire prolongé
+    const { ref, atStart } = S.extend, X = ref.t === 'hwy' ? S.prj.hwy : S.prj.crosses[ref.i], add = pts.slice(1);
+    S.extend = null;
+    if (X && add.length) {
+      const R0 = ref.t === 'hwy' ? 1500 : 400, len = () => { try { const P = ref.t === 'hwy' ? hwyParams(S.prj) : crossParams(S.prj, ref.i); return roadAlignment(P, 2.5).path.reduce((a, q) => a + G.segLen(q), 0); } catch { return 0; } };
+      const L0 = atStart ? len() : 0, ax = X.axis.map((p) => ({ ...p }));
+      // l'ancienne extrémité devient un sommet intérieur : rayon par défaut s'il n'en avait pas
+      const iOld = atStart ? 0 : ax.length - 1; if (!(+ax[iOld].r > 0)) ax[iOld].r = R0;
+      const nw = add.map((p, k) => ({ x: p.x, y: p.y, r: k < add.length - 1 ? R0 : '' }));
+      X.axis = atStart ? [...nw.reverse().map((p, k) => ({ ...p, r: k === 0 ? '' : R0 })), ...ax] : [...ax, ...nw];
+      if (atStart) shiftAxisStations(ref, len() - L0); // PK et raccordements existants conservés
+      S.echSig = ''; update();
+    }
+    setTool('select');
+    return;
+  }
   if (S.extend) {
     const { bi, atStart } = S.extend, b = S.prj.branches[bi], add = pts.slice(1);
     S.extend = null;
@@ -2184,6 +2230,7 @@ function hitHandle(px, py) {
     const [x, y] = plusPos(e);
     if (Math.hypot(px - x, py - y) < 9) return { kind: 'plus', e };
   }
+  if (S.tool === 'select') for (const e of echEnds()) { const [x, y] = plusPos(e); if (Math.hypot(px - x, py - y) < 9) return { kind: 'plus', e }; }
   if (S.D?.O) { const [x, y] = viewer.w2s(S.D.O.x, S.D.O.y); if (Math.hypot(px - x, py - y) < 9) return { kind: 'center' }; }
   if (S.hover >= 0) { const h = vtx(S.hover); if (h) return h; }
   return null;
