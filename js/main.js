@@ -3538,6 +3538,17 @@ function refreshSigns() {
 
 // --------------------------------------------------------- Terrain naturel (MNT)
 // Reconstruit le TIN et ses primitives quand les points ou les options de dessin changent.
+// Courbes de niveau du MNT tous les 1 m (maîtresses tous les 5 m, cotées) pour le tracé combiné : celles du terrain si
+// son équidistance est de 1 m, sinon recalculées.
+function combinedContours() {
+  try {
+    const t = S.prj.tn || {}, pts = Array.isArray(t.pts) ? t.pts : [];
+    if (pts.length < 3) return [];
+    const keep = (q) => q.L === 'MNT' && ((q.k === 'path' && (q.role === 'major' || q.role === 'minor')) || q.k === 'text');
+    if (S.tn && (t.step === '' || t.step == null || +t.step === 1)) return S.tn.prims.filter(keep);
+    return buildTerrain(pts.map((p) => ({ x: p[0], y: p[1], z: p[2] })), { step: 1, textH: +S.prj.opts.textH || 0.8 }).prims.filter(keep);
+  } catch (e) { console.error(e); return []; }
+}
 function rebuildTerrain() {
   const t = S.prj.tn || {};
   const pts = Array.isArray(t.pts) ? t.pts : [];
@@ -4024,7 +4035,7 @@ function bindPL() {
       R = combinedSheets({
         ax, PL, pk0: pkOrigin(S.prj, key), tnAt: (s) => (tin ? tinZ(tin, ax.at(s).p.x, ax.at(s).p.y) : null),
         stations: plCartStations(key, ax, A.PL), devAt, ohs, prims: [...(S.D?.prims || []), ...(S.Do || []).flatMap((d) => d.D?.prims || [])],
-        dxf: S.dxf, format, scale, zScale: zs > 0 ? zs : Math.max(1, Math.round(scale / 10)), title: ax.name, project: S.prj.name,
+        dxf: S.dxf, tnPts: Array.isArray(S.prj.tn?.pts) ? S.prj.tn.pts : [], tnPrims: combinedContours(), format, scale, zScale: zs > 0 ? zs : Math.max(1, Math.round(scale / 10)), title: ax.name, project: S.prj.name,
       });
     } catch (e) { console.error(e); toast('Tracé combiné : ' + e.message, 'err'); return; }
     const html = combinedHtml(R.svgs, R.info, `Tracé combiné ${ax.name} — ${S.prj.name}`), url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
