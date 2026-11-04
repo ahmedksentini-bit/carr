@@ -84,8 +84,17 @@ export function nearestAxis(axes, w, tol) {
 
 export function profParams(prj) {
   const p = prj.prof || {};
-  return { step: Math.max(1, num(p.step, 25)), tan: p.tan !== false, tick: Math.max(1, num(p.tick, 4)), series: p.series || [], manual: p.manual || [], on: p.on !== false };
+  return { step: Math.max(1, num(p.step, 25)), tan: p.tan !== false, tick: Math.max(0.5, num(p.tick, 2)), series: p.series || [], manual: p.manual || [], on: p.on !== false };
 }
+
+// PK origine d'un axe (voie principale, voies secondaires ; 0 ailleurs) et écriture 12+345,67.
+function pk0Of(prj, key) {
+  const v = (x) => (x === '' || x == null || !Number.isFinite(+x) ? 0 : +x);
+  if (key === 'hwy') return v(prj.hwy?.pk0);
+  if (key.startsWith('x:')) return v(crossList(prj).find((c) => `x:${c.id}` === key)?.pk0);
+  return 0;
+}
+export function pkText(v) { const a = Math.abs(v), km = Math.floor(a / 1000 + 1e-9), m = a - km * 1000; return `${v < 0 ? '−' : ''}${km}+${m.toFixed(2).padStart(6, '0').replace('.', ',')}`; }
 
 // Liste numérotée des profils et symboles en plan (D.prims, calque PROFILS).
 export function buildProfils(prj, D, TH = 1) {
@@ -118,25 +127,27 @@ export function buildProfils(prj, D, TH = 1) {
     L.forEach((q, i) => {
       const { p, t } = ax.at(q.s), n = G.rot90(t);
       const gis = (((Math.atan2(n.x, n.y) * 200) / Math.PI) % 400 + 400) % 400; // gisement de la normale (gr, depuis le nord)
-      list.push({ axis: ax.key, axisName: ax.name, n: i + 1, name: `P${i + 1}`, s: q.s, p, t, nrm: n, gis, src: q.src, type: q.type, ref: q.ref });
+      list.push({ axis: ax.key, axisName: ax.name, n: i + 1, name: `P${i + 1}`, s: q.s, pk: pk0Of(prj, ax.key) + q.s, p, t, nrm: n, gis, src: q.src, type: q.type, ref: q.ref });
     });
   }
-  // Symbole : cercle sur l'axe, segment perpendiculaire (des deux côtés), numéro au bout du segment côté gauche.
+  // Symbole : cercle sur l'axe, court segment perpendiculaire (des deux côtés), numéro au bout du segment côté gauche
+  // et, juste après lui, le PK du profil (même orientation).
   if (P.on && D?.prims) {
-    const r = Math.max(0.35, TH * 0.45), tk = Math.max(P.tick, TH * 3);
+    const r = Math.max(0.35, TH * 0.45), tk = Math.max(P.tick, TH * 1.6);
     for (const q of list) {
       D.prims.push({ k: 'circle', L: 'PROFILS', c: q.p, r });
       D.prims.push({ k: 'path', L: 'PROFILS', segs: [G.L(G.add(q.p, G.mul(q.nrm, -tk)), G.add(q.p, G.mul(q.nrm, -r))), G.L(G.add(q.p, G.mul(q.nrm, r)), G.add(q.p, G.mul(q.nrm, tk)))] });
-      const rot = Math.atan2(q.nrm.y, q.nrm.x);
-      D.prims.push({ k: 'text', L: 'PROFILS', p: G.add(q.p, G.mul(q.nrm, tk + TH * 0.4)), s: q.name, rot, align: 'left', h: TH * 0.9 });
+      const rot = Math.atan2(q.nrm.y, q.nrm.x), at = G.add(q.p, G.mul(q.nrm, tk + TH * 0.4)), along = G.mul(q.t, TH * 0.55);
+      D.prims.push({ k: 'text', L: 'PROFILS', p: G.add(at, along), s: q.name, rot, align: 'left', h: TH * 0.9 });
+      D.prims.push({ k: 'text', L: 'PROFILS', p: G.sub(at, along), s: `PK ${pkText(q.pk)}`, rot, align: 'left', h: TH * 0.75 });
     }
   }
   return { list, axes, issues };
 }
 
 export function profilsCsv(list) {
-  const rows = ['Profil;Axe;Abscisse (m);X;Y;Gisement normale (gr);Origine;Point de tangence'];
-  for (const q of list) rows.push([q.name, q.axisName, q.s.toFixed(3), q.p.x.toFixed(3), q.p.y.toFixed(3), q.gis.toFixed(4), q.src, q.type || ''].join(';'));
+  const rows = ['Profil;Axe;Abscisse (m);PK;X;Y;Gisement normale (gr);Origine;Point de tangence'];
+  for (const q of list) rows.push([q.name, q.axisName, q.s.toFixed(3), pkText(q.pk ?? q.s), q.p.x.toFixed(3), q.p.y.toFixed(3), q.gis.toFixed(4), q.src, q.type || ''].join(';'));
   return rows.join('\r\n');
 }
 

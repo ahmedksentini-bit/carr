@@ -138,15 +138,20 @@ function planBand(o) {
   // projet dessiné
   for (const L of LAYERS) for (const pr of o.prims || []) if (pr.L === L) out += primSvg(pr, STY[L], T, k);
   // axe de la feuille, PK, profils implantés
-  const half = (ax.half || 5) + 6, pts = [];
+  const half = (ax.half || 5) + 6, bar = Math.max(2, Math.min(ax.half || 5, 8)), pts = [];
   for (let s = Math.max(0, s0 - 30); s <= Math.min(ax.len, s1 + 30) + 1e-9; s += 1) pts.push(T(ax.at(s).p));
   out += `<path d="${pts.map((q, j) => `${j ? 'L' : 'M'}${P(q.x, q.y)}`).join('')}" fill="none" stroke="#fff" stroke-width="0.9"/>`;
   out += `<path d="${pts.map((q, j) => `${j ? 'L' : 'M'}${P(q.x, q.y)}`).join('')}" fill="none" stroke="#c00" stroke-width="0.35" stroke-dasharray="6 1 1 1"/>`;
   for (const q of o.st) {
     if (q.s < s0 - 1e-6 || q.s > s1 + 1e-6) continue;
-    const { p, t } = ax.at(q.s), m = G.rot90(t), a = T(G.add(p, G.mul(m, half))), b = T(G.sub(p, G.mul(m, half)));
-    out += `<line x1="${a.x.toFixed(2)}" y1="${a.y.toFixed(2)}" x2="${b.x.toFixed(2)}" y2="${b.y.toFixed(2)}" stroke="#2563eb" stroke-width="0.15" stroke-dasharray="1.2 0.6"/>`;
-    out += txt(a.x, a.y - 0.8, String(q.num), 1.8, { a: 'middle', c: '#1d4ed8' });
+    const { p, t } = ax.at(q.s), m = G.rot90(t), a = T(G.add(p, G.mul(m, bar))), b = T(G.sub(p, G.mul(m, bar)));
+    out += `<line x1="${a.x.toFixed(2)}" y1="${a.y.toFixed(2)}" x2="${b.x.toFixed(2)}" y2="${b.y.toFixed(2)}" stroke="#2563eb" stroke-width="0.15"/>`;
+    // numéro et PK au bout du trait, dans son prolongement, sur deux lignes (texte remis à l'endroit)
+    const raw = -(Math.atan2(m.y, m.x) - phi) * 180 / Math.PI, rot = upright(raw), flip = Math.abs(((raw - rot) % 360 + 360) % 360 - 180) < 1;
+    const e = T(G.add(p, G.mul(m, (flip ? -1 : 1) * (bar + 0.8 / k)))), rr = (rot * Math.PI) / 180, nx = -Math.sin(rr), ny = Math.cos(rr);
+    const n0 = { x: e.x - nx * 0.3, y: e.y - ny * 0.3 }, n1 = { x: e.x + nx * 2, y: e.y + ny * 2 };
+    out += txt(n0.x, n0.y, String(q.num), 1.8, { a: 'start', c: '#1d4ed8', w: 'bold', rot, halo: true });
+    out += txt(n1.x, n1.y, fmtPk(o.pk0 + q.s).replace(/,00$/, ''), 1.5, { a: 'start', c: '#1d4ed8', rot, halo: true });
   }
   const tick = [10, 20, 25, 50, 100, 200, 500, 1000, 2000].find((v) => v * k >= 18) || 5000;
   for (let s = Math.ceil((o.pk0 + s0) / tick) * tick - o.pk0; s <= s1 + 1e-6; s += tick) {
