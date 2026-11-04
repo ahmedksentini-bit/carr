@@ -13,7 +13,8 @@ import { hwyParams, rampParams, endFrame, normRamp, buildEchangeur, trumpet, der
 import { pathProject, pathTangentAt, polySegs } from './clotho.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
-import { planElements, profileElements, tabulation, tablesCsv } from './tabexport.js';
+import { planElements, profileElements, tabulation, tablesCsv, pkOrigin } from './tabexport.js';
+import { combinedSheets, combinedHtml } from './combine.js';
 import { upright } from './common.js';
 import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF, crossSectionFrom, mainPlatform } from './pt.js';
 import { plParams, plBuild, plStations, plTerrainLine, plDXF, plChecks, axisLength, axisPointAt, PL_LIMITS } from './pl.js';
@@ -3785,6 +3786,29 @@ function bindPL() {
   $('#plTable').addEventListener('input', (e) => { const t = e.target; if (t.dataset.pi == null) return; plSetPi(+t.dataset.pi, t.dataset.f, parseNum(t.value)); update({ commit: false }); });
   $('#plTable').addEventListener('change', (e) => { const ac = plAxisCtx(); if (ac && e.target.dataset.pi != null) { ac.store.pis.sort((a, b) => +a.s - +b.s); commitHistory(); refreshPL(); return; } if (e.target.dataset.pi != null) { const br = S.prj.branches[plBranch()?.idx]; if (br?.pl) br.pl.pis.sort((a, b) => +a.s - +b.s); commitHistory(); refreshPL(); } });
   $('#plTable').addEventListener('click', (e) => { const b = e.target.closest('[data-pidel]'); if (!b) return; const ac = plAxisCtx(); if (ac) { ac.store.pis.splice(+b.dataset.pidel, 1); S.plPi = -1; update(); return; } const br = S.prj.branches[plBranch()?.idx]; if (!br?.pl) return; br.pl.pis.splice(+b.dataset.pidel, 1); S.plPi = -1; update(); });
+  // Tracé combiné (comme BVTrace) : feuilles plan + profil en long + cartouche, à l'échelle, page imprimable en PDF.
+  $('#btnPlCombo').addEventListener('click', () => {
+    const ac = plAxisCtx();
+    if (!ac) { toast('Tracé combiné : choisissez un axe de l\'échangeur (autoroute, voie secondaire, bretelle) dans la liste « Axe ».', 'warn'); return; }
+    const { ax, A, key } = ac, PL = A.defined ? A.PL : null, tin = S.tn?.tin || null;
+    let T = null, TP = null; try { T = axisType(S.prj, S.D, key); TP = typeParams(S.prj); } catch { /* sans profil type */ }
+    const devAt = (s) => { if (!T) return null; try { const pf = axisPlatform(S.prj, S.D, ax, T, s, PL ? PL.zAt(s) : 0, TP); return { l: pf.dev.left * 100, r: pf.dev.right * 100 }; } catch { return null; } };
+    const ohs = (S.cadres || []).filter((g) => g.ax?.key === key && !g.err && g.c).map((g) => ({ name: g.name, s: +g.c.s || 0, label: g.K ? (g.K.type === 'poutres' ? `${g.K.spans.map((v) => fmt(v, 1)).join(' + ')} m` : `${g.K.n > 1 ? `${g.K.n} × ` : ''}${fmt(g.K.B, 2)} × ${fmt(g.K.H, 2)}`) : '' }));
+    const scale = +$('#plCbScale').value || 1000, zs = +$('#plCbZ').value || 0, format = $('#plCbFmt').value || 'A3';
+    let R;
+    try {
+      R = combinedSheets({
+        ax, PL, pk0: pkOrigin(S.prj, key), tnAt: (s) => (tin ? tinZ(tin, ax.at(s).p.x, ax.at(s).p.y) : null),
+        stations: plCartStations(key, ax, A.PL), devAt, ohs, prims: [...(S.D?.prims || []), ...(S.Do || []).flatMap((d) => d.D?.prims || [])],
+        dxf: S.dxf, format, scale, zScale: zs > 0 ? zs : Math.max(1, Math.round(scale / 10)), title: ax.name, project: S.prj.name,
+      });
+    } catch (e) { console.error(e); toast('Tracé combiné : ' + e.message, 'err'); return; }
+    const html = combinedHtml(R.svgs, R.info, `Tracé combiné ${ax.name} — ${S.prj.name}`), url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+    const w = window.open(url, '_blank');
+    if (!w) download(fname('csv').replace(/\.csv$/, `_trace_combine_${ax.name}.html`), html, 'text/html;charset=utf-8');
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+    toast(`Tracé combiné de ${ax.name} : ${R.info.sheets} feuille${R.info.sheets > 1 ? 's' : ''} ${format} au 1/${scale} (${fmt(R.info.coverage, 0)} m par feuille, recouvrement ${fmt(R.info.overlap, 1)} m)${PL ? '' : ' — sans ligne rouge (profil non saisi)'}${tin ? '' : ' — sans TN (aucun MNT)'}.`);
+  });
   $('#btnPlDxf').addEventListener('click', () => {
     const ac = plAxisCtx();
     if (ac) {
