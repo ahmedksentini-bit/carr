@@ -279,6 +279,7 @@ function update({ commit = true, panels = true } = {}) {
   rebuildTerrain();
   if (!S.D && S.prj.hwy?.on) try { S.D = buildDesign(S.prj); } catch (e) { console.error(e); } // premier calcul (ouverture) : les trompettes se recalculent sur l'autoroute construite
   try { syncTrumpets(); } catch (e) { console.error(e); }
+  try { const nL = linkBranchesToRoads(); if (nL) toast(`${nL} branche${nL > 1 ? 's' : ''} de carrefour déduite${nL > 1 ? 's' : ''} de la route raccordée (prolongement tangent, même profil en travers).`); } catch (e) { console.error(e); }
   try { syncRoadProfiles(); } catch (e) { console.error(e); }
   try { syncRampBranches(); syncTrumpets(); } catch (e) { console.error(e); } // la tige peut avoir été raccourcie par une branche
   try { S.D = buildDesign(S.prj); } catch (e) { console.error(e); S.D = null; toast('Erreur de calcul : ' + e.message, 'err'); }
@@ -1961,12 +1962,55 @@ const r3p = (q) => ({ x: Math.round(q.x * 1000) / 1000, y: Math.round(q.y * 1000
 // raccordée y arrive par un alignement droit dans le même axe (tangence). opt.src : axe d'origine (« x:id », « hwy ») dont la branche reprend le profil en travers (voies, TPC, BDD, berme).
 function addArm(j, u, Lb, opt = {}) {
   const E = G.add(j.C, G.mul(u, j.R + Lb)), inner = G.add(j.C, G.mul(u, j.plan ? 0.5 : j.R + 6));
-  const exists = (j.J.branches || []).some((b) => { const a = b.axis || []; if (a.length < 2) return false; const far = G.dist(a[0], j.C) >= G.dist(a[a.length - 1], j.C) ? a[0] : a[a.length - 1]; return G.dot(G.norm(G.sub(far, j.C)), u) > Math.cos(Math.PI / 18); });
-  if (exists) return null;
+  let found = null;
+  for (const b of j.J.branches || []) {
+    const a = b.axis || []; if (a.length < 2) continue;
+    const far = G.dist(a[0], j.C) >= G.dist(a[a.length - 1], j.C) ? a[0] : a[a.length - 1], c = G.dot(G.norm(G.sub(far, j.C)), u);
+    if (c > Math.cos(Math.PI / 9) && (!found || c > found.c)) found = { b, c };
+  }
+  if (found) {
+    const b = found.b;
+    if (!opt.src || b.src) return null; // déjà issue d'un axe : inchangée
+    // branche dessinée à la main dans le prolongement de la route : elle en est désormais déduite (axe tangent, profil)
+    Object.assign(b, { axis: [r3p(E), r3p(inner)], length: Lb, radial: true, src: opt.src });
+    const P = roadProfile(opt.src); if (P) applyProfile(b, P);
+    return b;
+  }
   const b = { ...newBranch(j.J, [r3p(E), r3p(inner)]), length: Lb };
   if (opt.src) { b.src = opt.src; const P = roadProfile(opt.src); if (P) applyProfile(b, P); }
   j.J.branches.push(b);
   return b;
+}
+// Routes déjà raccordées à un carrefour (extrémité près de lui, dans son axe) dont la branche n'est pas déduite de la
+// route (projet antérieur, branche dessinée à la main, branche manquante) : la branche en devient le prolongement tangent,
+// avec son profil en travers. Une fois liée (src), la branche n'est plus retouchée ici.
+function linkBranchesToRoads() {
+  if (S.drag) return 0;
+  let n = 0;
+  const jl = knownJunctions();
+  for (const X of S.prj.crosses || []) {
+    if (X.on === false || (X.axis || []).length < 2) continue;
+    for (const end of [0, 1]) {
+      const ax = X.axis, iE = end ? ax.length - 1 : 0, Q = ax[end ? ax.length - 2 : 1], E = ax[iE];
+      let best = null;
+      for (const j of jl) { // portée : celle d'un raccordement, ou l'extrémité des branches dessinées (+ 30 m)
+        const reach = Math.max(j.R + PS_LB + 40, ...(j.J.branches || []).map((q) => Math.max(...(q.axis || []).map((v) => G.dist(v, j.C))) + 30));
+        const d = G.dist(E, j.C); if (d > j.R && d < reach && (!best || d < best.d)) best = { j, d };
+      }
+      if (!best) continue;
+      const j = best.j, u = G.norm(G.sub(Q, j.C));
+      if (G.dot(G.norm(G.sub(E, Q)), G.norm(G.sub(j.C, E))) < 0.7) continue; // la route ne se dirige pas vers le carrefour
+      const linked = (j.J.branches || []).some((b) => { if (b.src !== 'x:' + X.id) return false; const a = b.axis || []; if (a.length < 2) return false; const far = G.dist(a[0], j.C) >= G.dist(a[a.length - 1], j.C) ? a[0] : a[a.length - 1]; return G.dot(G.norm(G.sub(far, j.C)), u) > Math.cos(Math.PI / 9); });
+      if (linked) continue;
+      const Lb = Math.min(PS_LB, G.dist(Q, j.C) - j.R - 15);
+      if (Lb < 15) continue;
+      const b = addArm(j, u, Lb, { src: 'x:' + X.id });
+      if (!b) continue;
+      ax[iE] = { ...r3p(G.add(j.C, G.mul(u, j.R + Lb))), r: '' }; // dernier alignement de la route dans l'axe de la branche
+      n++;
+    }
+  }
+  return n;
 }
 // Profil en travers d'un axe de l'échangeur, repris par les branches de carrefour qui s'y raccordent : voies par sens,
 // largeur de voie, TPC (terre-plein central + BDG des deux côtés ; 0 = chaussée unique), BDD (ou BAU) et berme.
