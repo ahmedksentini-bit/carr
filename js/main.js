@@ -37,6 +37,7 @@ import { isVsa } from './vsa.js';
 import { ringFrames } from './ringshape.js';
 import { clearanceChecks, worstClearance, structureSpans } from './gabarit.js';
 import { buildAxisProfiles, axisPlChecks, axisTerrainLine, axisFromTerrain, buildNodes, axisLimits } from './axpl.js';
+import { ringPlBuild } from './devers.js';
 import { chausseeOverlaps } from './overlap.js';
 import { autoProfile, newProfile, cloneProfile, findProfile } from './ptype.js';
 import { openTypeEditor } from './pttedit.js';
@@ -522,8 +523,10 @@ function junctionsZ() {
   const out = [];
   // cote zC d'un carrefour : ignorée si elle s'écarte de plus de 30 m du terrain naturel (valeur par défaut jamais réglée)
   const zOk = (z, O) => { if (z == null || !Number.isFinite(z)) return null; const t = S.tn?.tin ? tinZ(S.tn.tin, O.x, O.y) : null; return t != null && Math.abs(z - t) > 30 ? null : z; };
-  if (S.D?.O) out.push({ O: S.D.O, Rg: (+S.prj.ring?.Rg || 20) + (S.D.shape ? S.D.shape.e / 2 : 0), zC: zOk(S.prj.ring?.zC === '' || S.prj.ring?.zC == null ? null : +S.prj.ring.zC, S.D.O), name: S.prj.jname || 'giratoire' });
-  for (const d of S.Do || []) { const o = S.prj.others.find((q) => q.id === d.id); if (d.D?.O && o) out.push({ O: d.D.O, Rg: +o.ring?.Rg || 20, zC: zOk(o.ring?.zC === '' || o.ring?.zC == null ? null : +o.ring.zC, d.D.O), name: o.name }); }
+  // anneau à profil en long saisi : cote du bord extérieur de l'anneau dans la direction du point (zAt)
+  const ringZ = (D) => (D?.ringPL && D.zRing ? (p) => { const u = G.norm(G.sub(p, D.O)); return D.zRing(G.add(D.O, G.mul(u, (D.Rg || 20) + 0.2))); } : null);
+  if (S.D?.O) out.push({ O: S.D.O, Rg: (+S.prj.ring?.Rg || 20) + (S.D.shape ? S.D.shape.e / 2 : 0), zC: zOk(S.prj.ring?.zC === '' || S.prj.ring?.zC == null ? null : +S.prj.ring.zC, S.D.O), zAt: ringZ(S.D), name: S.prj.jname || 'giratoire' });
+  for (const d of S.Do || []) { const o = S.prj.others.find((q) => q.id === d.id); if (d.D?.O && o) out.push({ O: d.D.O, Rg: +o.ring?.Rg || 20, zC: zOk(o.ring?.zC === '' || o.ring?.zC == null ? null : +o.ring.zC, d.D.O), zAt: ringZ(d.D), name: o.name }); }
   return out;
 }
 // Onglet Ouvrages : liste, travure modifiable de l'ouvrage choisi (réglages par ouvrage dans prj.ouvr.decks), fiche.
@@ -2919,7 +2922,8 @@ function buildStaticPanels() {
     fld('ring.pente', 'Déclivité générale du site p', '%') +
     fld('ring.gisPente', 'Gisement de la ligne de plus grande pente (descente)', 'gr') +
     '<div data-for="giratoire">' +
-    sel('ring.mode', 'Calage de l\'anneau', [['aci', 'Dévers constant, rive ext. dans la pente (ACI)'], ['cone', 'Cône posé sur le plan incliné']], { branch: false }) + '</div>';
+    sel('ring.mode', 'Calage de l\'anneau', [['aci', 'Dévers constant, rive ext. dans la pente (ACI)'], ['cone', 'Cône posé sur le plan incliné']], { branch: false }) +
+    '<p class="note">Profil en long de l\'anneau : onglet Profil long, axe « Anneau » (sur la rive intérieure peinte). Une fois saisi, la rive intérieure suit la ligne rouge et zC, la déclivité et le calage ci-dessus ne s\'appliquent plus à l\'anneau.</p></div>';
   $('[data-k="ring.devers"]').disabled = true; // 1,5 % imposé
   $('#capFields').innerHTML = '<div data-for="giratoire">' +
     sel('traffic.site', 'Milieu', Object.entries(SITES).map(([k, s]) => [k, s.label]), { branch: false }) + '</div>' +
@@ -3591,7 +3595,7 @@ function plBranch() {
 }
 // Axe de l'échangeur affiché dans l'onglet Profil en long (autoroute, voie secondaire, bretelle) : { key, A, ax, store }.
 function plAxisCtx() {
-  const key = typeof S.plSel === 'string' && !S.plSel.startsWith('b:') ? S.plSel : (!(S.D?.branches || []).some((bd) => bd.role !== 'principale') && S.axpl?.size ? [...S.axpl.keys()][0] : null);
+  const key = typeof S.plSel === 'string' && !S.plSel.startsWith('b:') && S.plSel !== 'g:ring' ? S.plSel : (!(S.D?.branches || []).some((bd) => bd.role !== 'principale') && S.axpl?.size ? [...S.axpl.keys()][0] : null);
   if (!key || !S.axpl?.has(key)) return null;
   const A = S.axpl.get(key), ax = (S.prof?.axes || listAxes(S.prj, S.D)).find((a) => a.key === key);
   if (!ax) return null;
@@ -3783,8 +3787,9 @@ function plEditor() {
   if (S.plEd) return S.plEd;
   S.plEd = createPlEditor($('#plChart'), {
     setPis(pis, { commit = true } = {}) {
-      const ac = plAxisCtx();
-      if (ac) ac.store.pis = pis;
+      const rc = plRingCtx(), ac = rc ? null : plAxisCtx();
+      if (rc) rc.store.pis = pis;
+      else if (ac) ac.store.pis = pis;
       else { const d = plData(); if (!d) return; d.br.pl = { ...(d.br.pl || {}), pis }; }
       update({ commit });
     },
@@ -3803,15 +3808,65 @@ function plData() {
   const PL = db.pl || plBuild({ pis: [{ s: sEnd, z: db.z0 + db.grade * sEnd, R: 0 }] }, db.z0);
   return { bd, db, br, sEnd, PL, defined: !!db.pl };
 }
+// Anneau d'un giratoire dans l'onglet Profil long : axe sur la rive intérieure peinte, ligne rouge fermée (bouclage
+// s = 0 ≡ L) stockée dans prj.ring.pl. { RA, store } ou null.
+const RING_PL_LIMITS = { gMax: 0.03, Rconv: 500, Rconc: 500, label: 'anneau de giratoire (valeurs usuelles) : déclivité ≤ 3 %, raccordements R ≥ 500 m' };
+function plRingCtx() {
+  if (S.plSel !== 'g:ring' || isPlan(S.prj) || !S.D?.ringAxis) return null;
+  S.prj.ring.pl = S.prj.ring.pl || { pis: [] };
+  if (!Array.isArray(S.prj.ring.pl.pis)) S.prj.ring.pl.pis = [];
+  return { RA: S.D.ringAxis, store: S.prj.ring.pl };
+}
+function refreshPLRing(c) {
+  const { RA, store } = c, L = RA.L, tin = S.tn?.tin || null;
+  const RPL = ringPlBuild(store.pis, L), defined = !!RPL;
+  const zAt = RPL ? RPL.zAt : (sv) => S.D.zRing(RA.at(sv)); // sans ligne rouge : cote du modèle zC / déclivité (indicatif)
+  const pts = RPL ? RPL.pts : [];
+  const nodes = [...(pts.length && pts[0].s < 1e-6 ? [] : [{ s: 0, z: zAt(0), R: 0 }]), ...pts.map((q) => ({ ...q })), { s: L, z: zAt(0), R: 0 }];
+  const segs = []; for (let i = 0; i + 1 < nodes.length; i++) segs.push({ s0: nodes[i].s, s1: nodes[i + 1].s, g: (nodes[i + 1].z - nodes[i].z) / Math.max(1e-9, nodes[i + 1].s - nodes[i].s) });
+  const PL = { nodes, segs, curves: RPL ? RPL.curves.filter((q) => q.sB > 0 && q.sA < L) : [], issues: RPL?.issues || [], zAt, gradeAt: RPL ? RPL.gradeAt : (sv) => (zAt(Math.min(L, sv + 0.5)) - zAt(Math.max(0, sv - 0.5))), sEnd: L, defined };
+  const tn = []; if (tin) for (let sv = 0; sv <= L + 1e-9; sv += 1) { const q = RA.at(Math.min(sv, L)), z = tinZ(tin, q.x, q.y); if (z != null) tn.push([Math.min(sv, L), z]); }
+  const stations = []; let n = 1; for (let sv = 0; sv <= L + 1e-9; sv += 10) { const q = RA.at(sv); stations.push({ num: n++, s: sv, z: tin ? tinZ(tin, q.x, q.y) : null }); }
+  const piOf = (nd) => store.pis.findIndex((q) => Math.abs(((+q.s % L) + L) % L - nd.s) < 1e-6);
+  $('#plChart').hidden = false;
+  plEditor().render({
+    key: 'g:ring', name: 'Anneau (rive intérieure)', PL, defined, tn, pis: store.pis.map((q) => ({ s: +q.s, z: +q.z, R: +q.R || 0 })),
+    nodeInfo: (k, nd) => { const i = defined ? piOf(nd) : -1; return i >= 0 ? { fixed: false, pi: i, label: `PI ${i + 1}` } : { fixed: true, pi: -1, label: k ? 'bouclage (s = L)' : 'origine' }; },
+    sMin: 0, sEnd: L, stations, limits: RING_PL_LIMITS, defaultR: RING_PL_LIMITS.Rconv, endFixed: null, startFixed: null,
+    note: defined ? '' : 'Pas de ligne rouge sur l\'anneau : cote zC et déclivité du site (onglet Profil), en tiretés. Outil « Point » (clic) ou « Draft TN… » pour la saisir.',
+  });
+  S.plPi = S.plEd.sel;
+  $('#plTable').innerHTML = '<thead><tr><th>Point</th><th>s (m)</th><th>z (m)</th><th>R (m)</th><th>pente aval</th><th></th></tr></thead><tbody>' +
+    store.pis.map((q, i) => {
+      const sg = segs.find((x) => Math.abs(x.s0 - (((+q.s % L) + L) % L)) < 1e-6);
+      return `<tr class="${i === S.plPi ? 'on' : ''}"><td>PI ${i + 1}</td>` + ['s', 'z', 'R'].map((f) => `<td><input data-pi="${i}" data-f="${f}" type="text" inputmode="decimal" value="${showNum(q[f] ?? '')}"></td>`).join('') +
+        `<td class="mono">${sg ? fmt(sg.g * 100, 2) + ' %' : '—'}</td><td class="act"><button data-pidel="${i}" title="Supprimer ce point">×</button></td></tr>`;
+    }).join('') + `<tr><td>bouclage</td><td class="mono">${fmt(L, 2)}</td><td class="mono">${fmt(zAt(0), 3)}</td><td class="mono">—</td><td class="mono" colspan="2">= origine (s = 0)</td></tr></tbody>`;
+  const checks = [];
+  if (defined) {
+    for (const it of PL.issues) checks.push(it);
+    for (const sg of segs) if (Math.abs(sg.g) > RING_PL_LIMITS.gMax + 1e-9) checks.push({ lvl: 'warn', msg: `Anneau : déclivité de ${fmt(Math.abs(sg.g) * 100, 2)} % entre s = ${fmt(sg.s0, 1)} et ${fmt(sg.s1, 1)} m — ${RING_PL_LIMITS.label}.` });
+  }
+  $('#plChecks').innerHTML = (checks.length ? '<ul class="checks">' + checks.map((q) => `<li class="${q.lvl}"><span class="ic">${{ err: '✖', warn: '!', info: 'i', ok: '✔' }[q.lvl] || 'i'}</span><span>${esc(q.msg)}</span></li>`).join('') + '</ul>' : '')
+    + `<p class="note">Axe sur la rive intérieure peinte (longueur ${fmt(L, 2)} m), origine au nord du centre, abscisse dans le sens de circulation. ${defined ? 'La rive intérieure suit cette ligne rouge ; le dévers de l\'anneau (onglet Anneau) est appliqué vers l\'extérieur ; zC et la déclivité du site ne s\'appliquent plus à l\'anneau.' : ''} Limites : ${esc(RING_PL_LIMITS.label)}.</p>`;
+  const step = parseNum($('#plStep').value) || 10;
+  const rows = []; for (let sv = 0; sv <= L + 1e-9; sv += step) rows.push(sv); if (L - rows[rows.length - 1] > 0.01) rows.push(L);
+  $('#plStations').innerHTML = '<thead><tr><th>s (m)</th><th>X</th><th>Y</th><th>z TN</th><th>z projet</th><th>projet − TN</th><th>pente</th></tr></thead><tbody>' +
+    rows.map((sv) => { const q = RA.at(sv), zt = tin ? tinZ(tin, q.x, q.y) : null, zp = zAt(sv), dz = zt == null ? null : zp - zt; return `<tr><td>${fmt(sv, 2)}</td><td>${q.x.toFixed(2)}</td><td>${q.y.toFixed(2)}</td><td>${zt == null ? '—' : fmt(zt)}</td><td>${fmt(zp)}</td><td class="${dz == null ? '' : dz >= 0 ? 'fill' : 'cut'}">${dz == null ? '—' : (dz >= 0 ? '+' : '−') + fmt(Math.abs(dz))}</td><td>${fmt(PL.gradeAt(sv) * 100, 2)} %</td></tr>`; }).join('') + '</tbody>';
+  $('#plNote').textContent = S.tn ? '' : 'Aucun MNT : le terrain naturel n\'est pas tracé (onglet Terrain).';
+}
 function refreshPL() {
   const sel = $('#plBranch'), cands = (S.D?.branches || []).filter((bd) => bd.role !== 'principale');
+  const hasRing = !isPlan(S.prj) && !!S.D?.ringAxis;
   const axs = [...(S.axpl?.values() || [])];
-  const sig = JSON.stringify([cands.map((b) => [b.idx, b.name]), axs.map((a) => [a.key, a.name])]);
+  const sig = JSON.stringify([hasRing, cands.map((b) => [b.idx, b.name]), axs.map((a) => [a.key, a.name])]);
   if (sel.dataset.sig !== sig) {
     sel.dataset.sig = sig;
-    sel.innerHTML = (cands.length ? `<optgroup label="Branches du carrefour">${cands.map((b) => `<option value="b:${b.idx}">${esc(b.name)}</option>`).join('')}</optgroup>` : '')
+    sel.innerHTML = (hasRing || cands.length ? `<optgroup label="Carrefour">${hasRing ? '<option value="g:ring">Anneau (axe sur la rive intérieure)</option>' : ''}${cands.map((b) => `<option value="b:${b.idx}">${esc(b.name)}</option>`).join('')}</optgroup>` : '')
       + (axs.length ? `<optgroup label="Échangeur">${axs.map((a) => `<option value="${esc(a.key)}">${esc(a.name)}</option>`).join('')}</optgroup>` : '');
   }
+  const rc = plRingCtx();
+  if (rc) { sel.value = 'g:ring'; refreshPLRing(rc); return; }
   const ac = plAxisCtx();
   if (ac) { sel.value = ac.key; refreshPLAxis(ac); return; }
   const d = plData();
@@ -3852,6 +3907,8 @@ function refreshPL() {
   $('#plNote').textContent = (S.tn ? '' : 'Aucun MNT : le terrain naturel n\'est pas tracé (onglet Terrain). ') + (bd.cont ? 'Au-delà de l\'alignement droit, s suit l\'axe saisi (raccordement compris).' : '');
 }
 function plSetPi(i, f, v) {
+  const rc = plRingCtx();
+  if (rc) { if (rc.store.pis[i]) rc.store.pis[i] = { ...rc.store.pis[i], [f]: v }; return; }
   const ac = plAxisCtx();
   if (ac) { if (ac.store.pis[i]) ac.store.pis[i] = { ...ac.store.pis[i], [f]: v }; return; }
   const br = S.prj.branches[plBranch()?.idx];
@@ -3860,6 +3917,11 @@ function plSetPi(i, f, v) {
   br.pl.pis[i] = { ...br.pl.pis[i], [f]: v };
 }
 function plAddPi(s, z, R) {
+  const rc = plRingCtx();
+  if (rc) {
+    const q = { s: Math.round(Math.max(0, Math.min(rc.RA.L, s)) * 10) / 10, z: Math.round(z * 100) / 100, R: R ?? RING_PL_LIMITS.Rconv };
+    rc.store.pis.push(q); rc.store.pis.sort((a, b) => +a.s - +b.s); S.plPi = rc.store.pis.indexOf(q); update(); return;
+  }
   const ac = plAxisCtx();
   if (ac) {
     const q = { s: Math.round(Math.max(0, Math.min(ac.ax.len, s)) * 10) / 10, z: Math.round(z * 100) / 100, R: R ?? axisLimits(S.prj, ac.key).Rconv };
@@ -3890,8 +3952,8 @@ function bindPL() {
   $('#dlgPL').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); }); // clic sur le fond
   $('#plStep').addEventListener('change', refreshPL);
   $('#plTable').addEventListener('input', (e) => { const t = e.target; if (t.dataset.pi == null) return; plSetPi(+t.dataset.pi, t.dataset.f, parseNum(t.value)); update({ commit: false }); });
-  $('#plTable').addEventListener('change', (e) => { const ac = plAxisCtx(); if (ac && e.target.dataset.pi != null) { ac.store.pis.sort((a, b) => +a.s - +b.s); commitHistory(); refreshPL(); return; } if (e.target.dataset.pi != null) { const br = S.prj.branches[plBranch()?.idx]; if (br?.pl) br.pl.pis.sort((a, b) => +a.s - +b.s); commitHistory(); refreshPL(); } });
-  $('#plTable').addEventListener('click', (e) => { const b = e.target.closest('[data-pidel]'); if (!b) return; const ac = plAxisCtx(); if (ac) { ac.store.pis.splice(+b.dataset.pidel, 1); S.plPi = -1; update(); return; } const br = S.prj.branches[plBranch()?.idx]; if (!br?.pl) return; br.pl.pis.splice(+b.dataset.pidel, 1); S.plPi = -1; update(); });
+  $('#plTable').addEventListener('change', (e) => { const rc = plRingCtx(); if (rc && e.target.dataset.pi != null) { rc.store.pis.sort((a, b) => +a.s - +b.s); commitHistory(); refreshPL(); return; } const ac = plAxisCtx(); if (ac && e.target.dataset.pi != null) { ac.store.pis.sort((a, b) => +a.s - +b.s); commitHistory(); refreshPL(); return; } if (e.target.dataset.pi != null) { const br = S.prj.branches[plBranch()?.idx]; if (br?.pl) br.pl.pis.sort((a, b) => +a.s - +b.s); commitHistory(); refreshPL(); } });
+  $('#plTable').addEventListener('click', (e) => { const b = e.target.closest('[data-pidel]'); if (!b) return; const rc = plRingCtx(); if (rc) { rc.store.pis.splice(+b.dataset.pidel, 1); S.plPi = -1; update(); return; } const ac = plAxisCtx(); if (ac) { ac.store.pis.splice(+b.dataset.pidel, 1); S.plPi = -1; update(); return; } const br = S.prj.branches[plBranch()?.idx]; if (!br?.pl) return; br.pl.pis.splice(+b.dataset.pidel, 1); S.plPi = -1; update(); });
   // Tracé combiné (comme BVTrace) : feuilles plan + profil en long + cartouche, à l'échelle, page imprimable en PDF.
   $('#btnPlCombo').addEventListener('click', () => {
     const ac = plAxisCtx();
