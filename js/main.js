@@ -9,7 +9,7 @@ import { buildDesign, fmt, fmtGis } from './roundabout.js';
 import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan, SECTION, sectionParams, TAD, SIGNS, signParams } from './norms.js';
 import { GAMMES, CATALOG } from './signs.js';
 import { signSVG, signOutline } from './signicons.js';
-import { hwyParams, rampParams, endFrame, normRamp, buildEchangeur, trumpet, deriveTrumpet, crossingWith, xref, cloverleaf, halfCloverleaf, diamond, gradeRoundabout, HWY_CAT, RAMP_CAT, crossParams, roadAlignment, parseXref } from './echangeur.js';
+import { hwyParams, rampParams, endFrame, normRamp, buildEchangeur, trumpet, deriveTrumpet, crossingWith, xref, cloverleaf, halfCloverleaf, diamond, gradeRoundabout, HWY_CAT, RAMP_CAT, crossParams, roadAlignment, parseXref, tigeTpc } from './echangeur.js';
 import { pathProject, pathTangentAt, polySegs } from './clotho.js';
 import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerrain, SRTM_ATTR } from './terrain.js';
 import { tinZ } from './tin.js';
@@ -1019,9 +1019,11 @@ function syncRampBranches() {
           if (b.srcSig !== profSig(P)) applyProfile(b, P);
         }
       }
-      // Tige de trompette (deux bretelles d'un même groupe) : la branche reprend la séparation des voies de la tige.
-      const tpc = parseNum(String(S.prj.hwy.trTpc ?? '')) || 1;
-      if (g.length === 2 && g[0].r.grp && g[0].r.grp === g[1].r.grp && tpc > 1.001 && (!b.tpc?.on || Math.abs(+b.tpc.width - tpc) > 1e-3)) b.tpc = { ...b.tpc, on: true, width: tpc };
+      // Tige de trompette (deux bretelles d'un même groupe) : la branche reprend la séparation des voies de la tige (TPC,
+      // BDG comprises, quelle que soit sa largeur) et la BDG des bretelles — même profil que la tige, sans rétrécissement.
+      const tpc = tigeTpc(S.prj, g[0].r.tp || {}), tige = g.length === 2 && g[0].r.grp && g[0].r.grp === g[1].r.grp;
+      if (tige) { let bdg = 0.5; try { bdg = Math.min(...g.map((e) => rampParams(S.prj, e.r).bdg)); } catch { /* défaut */ } if (b.bdg !== bdg) b.bdg = bdg; }
+      if (tige && (!b.tpc?.on || Math.abs(+b.tpc.width - tpc) > 1e-3)) b.tpc = { ...b.tpc, on: true, width: tpc };
       else if (G.dist(b.axis[0], axis[0]) > 0.01 || G.dist(b.axis[b.axis.length - 1], axis[1]) > 0.01) b.axis = axis;
       keep.add(key);
       for (const e of g) {

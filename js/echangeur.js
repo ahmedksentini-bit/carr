@@ -795,8 +795,18 @@ export function buildEchangeur(prj, D) {
         R.La = La; R.Ladisp = R.ladE + (last?.L || 0); R.VRe = VR * 3.6;
         if (last && La > R.Ladisp + 1e-6) err(`zone d'accélération ${fmt(R.Ladisp)} m < La = ${fmt(La)} m (${fmt(VR * 3.6)} → 55 km/h, Ri = ${fmt(rIn(last.R))} m, rampe ${fmt(rp.pente, 1)} %, § 3.2.5).`);
       } else {
-        const Pr = hT.R, sFin = WV.byE.get(R.id)?.sS ?? Ft.s + rp.to.ins + rp.to.biseau;
-        if (sFin > Pr.al.length) warn(`la voie d'insertion dépasse l'extrémité de ${Pr.name} (${fmt(sFin - Pr.al.length)} m).`);
+        const Pr = hT.R;
+        // Voie d'insertion + biseau plus longs que la bretelle réceptrice (tige arrêtée au giratoire, par exemple) : ils
+        // sont raccourcis pour se refermer avant son extrémité, au lieu d'être coupés net (rétrécissement brutal).
+        const avail = Pr.al.length - Ft.s - 5, need = rp.to.ins + rp.to.biseau;
+        if (!WV.byE.get(R.id) && need > avail + 1e-6) {
+          if (avail > 15) {
+            const bis = Math.min(rp.to.biseau, Math.max(Math.min(30, avail * 0.5), (avail * rp.to.biseau) / need)), ins = Math.max(0, avail - bis);
+            warn(`voie d'insertion ramenée à ${fmt(ins)} m + biseau ${fmt(bis)} m (au lieu de ${fmt(rp.to.ins)} + ${fmt(rp.to.biseau)} m) pour se refermer avant l'extrémité de ${Pr.name} — allongez ${Pr.name} (éloignez le giratoire) pour retrouver les longueurs réglementaires.`);
+            rp.to.ins = ins; rp.to.biseau = bis;
+          } else warn(`la voie d'insertion dépasse l'extrémité de ${Pr.name} (${fmt(need - avail - 5)} m) : place insuffisante pour la refermer.`);
+        }
+        const sFin = WV.byE.get(R.id)?.sS ?? Ft.s + rp.to.ins + rp.to.biseau;
         if (Pr.Ft && Pr.al.length - Pr.sTplE - sFin < 25 - 1e-6) warn(`${fmt(Pr.al.length - Pr.sTplE - sFin)} m entre la fin de l'insertion et le tpl de ${Pr.name} : 25 m minimum (§ 5.3).`);
         Pr.children.push({ a: Ft.s - rp.to.Lm, b: sFin });
       }
