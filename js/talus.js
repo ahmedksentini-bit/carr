@@ -184,8 +184,8 @@ function meetLines(R) {
 // corridors : [{ id, rows: [{ L, R }], closed, plat (contour de plate-forme, facultatif) }] ; masks : polygones [{ x, y }] (tabliers) ; opts : { esp }.
 // Rend { prims, n: { barbules, meet } } : hachures TALUS (rôle R ou D), bords TALUS (rôle crete), rencontre de deux
 // talus (TALUS, rôle inter) et EET (calque EET).
-export function talusPrims(corridors, masks = [], opts = {}) {
-  const esp = Math.max(0.5, +opts.esp || 2), R = new Regions(10);
+// Plates-formes et talus des couloirs dans l'index des régions (triangles cotés).
+function fillRegions(R, corridors) {
   corridors.forEach((K, cid) => {
     const rows = K.rows, n = rows.length, m = K.closed ? n : n - 1;
     for (let i = 0; i < m; i++) {
@@ -196,6 +196,33 @@ export function talusPrims(corridors, masks = [], opts = {}) {
     // plate-forme donnée par son contour (anneau) : triangles en éventail depuis le premier sommet
     if (K.plat?.length > 2) for (let i = 1; i + 1 < K.plat.length; i++) R.add(K.plat[0], K.plat[i], K.plat[i + 1], 'P', cid);
   });
+}
+// Terrassements de tous les couloirs (talus non découpés), pour limiter les coupes en travers d'un axe là où son talus
+// chevauche celui d'un autre : owner(x, y, z, br, id) → identifiant de l'axe qui l'emporte au point (x, y) sur le talus de
+// l'axe id (cote z, remblai R / déblai D), ou null s'il reste à id — mêmes règles que le dessin en plan (plate-forme d'un
+// autre axe ; remblai le plus haut ; déblai le plus profond ; remblai posé sur un déblai).
+export function earthworkIndex(corridors) {
+  const R = new Regions(10);
+  fillRegions(R, corridors);
+  const cidOf = new Map(corridors.map((K, i) => [K.id, i]));
+  return {
+    owner(x, y, z, br, id) {
+      const list = R.grid.get(Math.floor(x / R.cell) + ',' + Math.floor(y / R.cell)), me = cidOf.has(id) ? cidOf.get(id) : -2;
+      if (!list) return null;
+      for (const i of list) {
+        const t = R.tris[i];
+        if (t.cid === me || t.cid < 0) continue;
+        const zt = inTri(t, x, y);
+        if (zt == null) continue;
+        if (t.kind === 'P' || (br === 'R' && t.kind === 'R' && zt > z + 0.02) || (br === 'D' && t.kind === 'D' && zt < z - 0.02) || (br === 'D' && t.kind === 'R')) return corridors[t.cid].id;
+      }
+      return null;
+    },
+  };
+}
+export function talusPrims(corridors, masks = [], opts = {}) {
+  const esp = Math.max(0.5, +opts.esp || 2), R = new Regions(10);
+  fillRegions(R, corridors);
   const flat = (p) => ({ x: p.x, y: p.y, z: 0 });
   for (const poly of masks) if (poly?.length > 2) for (let i = 1; i + 1 < poly.length; i++) R.add(flat(poly[0]), flat(poly[i]), flat(poly[i + 1]), 'P', -1);
 

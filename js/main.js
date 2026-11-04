@@ -40,7 +40,7 @@ import { buildAxisProfiles, axisPlChecks, axisTerrainLine, axisFromTerrain, buil
 import { chausseeOverlaps } from './overlap.js';
 import { autoProfile, newProfile, cloneProfile, findProfile } from './ptype.js';
 import { openTypeEditor } from './pttedit.js';
-import { talusPrims, rowFromSection, radialTalus } from './talus.js';
+import { talusPrims, rowFromSection, radialTalus, earthworkIndex } from './talus.js';
 import { analyse, SITES } from './capacity.js';
 import { initLang, getLang, t } from './i18n.js';
 import { analysePlan, gapParams, GAPS } from './capacity-plan.js';
@@ -394,6 +394,18 @@ function junctionCorridors(prj, D, tin, step, out, tag) {
 function computeTalus() {
   const tin = S.tn?.tin;
   if (!tin || !S.D || (S.prj.opts.vis.TALUS === false && S.prj.opts.vis.EET === false)) return null;
+  const T = talusParams(), out = earthworkCorridors();
+  if (!out) return null;
+  const masks = [...(S.ouvr?.list || []).map((o) => o.poly), ...(S.cadres || []).filter((g) => g.K?.type === 'poutres').map((g) => g.poly)].filter((p) => p?.length > 2);
+  return talusPrims(out, masks, { esp: T.esp });
+}
+// Couloirs de terrassement de tous les axes (coupes au profil type, talus non découpés), mis en cache : talus en plan
+// et limite des talus qui se chevauchent dans les profils en travers (talus vertical, pas de double comptage).
+function earthworkCorridors() {
+  const tin = S.tn?.tin;
+  if (!tin || !S.D) return null;
+  const sig = JSON.stringify({ ...S.prj, tn: S.tnSig, opts: null, view: null, prof: null, ptt: S.prj.ptt });
+  if (S.ewCache?.sig === sig) return S.ewCache.out;
   const T = talusParams(), out = [], axes = S.prof?.axes || listAxes(S.prj, S.D);
   for (const A of S.axpl?.values() || []) {
     if (!A.defined) continue;
@@ -403,8 +415,14 @@ function computeTalus() {
   }
   try { junctionCorridors(S.prj, S.D, tin, T.step, out, 'j0'); } catch (e) { console.error(e); }
   for (const o of S.Do || []) { const sn = (S.prj.others || []).find((q) => q.id === o.id); if (sn) try { junctionCorridors({ ...S.prj, ...pickJ(sn) }, o.D, tin, T.step, out, o.id); } catch (e) { console.error(e); } }
-  const masks = [...(S.ouvr?.list || []).map((o) => o.poly), ...(S.cadres || []).filter((g) => g.K?.type === 'poutres').map((g) => g.poly)].filter((p) => p?.length > 2);
-  return talusPrims(out, masks, { esp: T.esp });
+  S.ewCache = { sig, out, idx: null };
+  return out;
+}
+function earthworkIdx() {
+  const out = earthworkCorridors();
+  if (!out) return null;
+  if (!S.ewCache.idx) S.ewCache.idx = earthworkIndex(out);
+  return S.ewCache.idx;
 }
 let talusTimer = null;
 // Calcul différé (après une pause de 350 ms) : les coupes de tous les axes coûtent quelques dixièmes de seconde.
@@ -3858,7 +3876,7 @@ function ptAxisCtx() {
 }
 function ptAxisList(c) {
   const profs = (S.prof?.list || []).filter((q) => q.axis === c.key);
-  return axisSections(S.prj, S.D, c.ax, c.A, profs, S.tn?.tin || null);
+  return axisSections(S.prj, S.D, c.ax, c.A, profs, S.tn?.tin || null, { neighbors: earthworkIdx() });
 }
 // Récapitulatif des cubatures de tous les axes de l'échangeur ayant un profil en long et des profils implantés.
 function ptRecap() {
@@ -3867,7 +3885,7 @@ function ptRecap() {
     const ax = (S.prof?.axes || []).find((a) => a.key === A.key), profs = (S.prof?.list || []).filter((q) => q.axis === A.key);
     if (!ax || !profs.length) continue;
     if (!A.defined) { rows.push({ name: A.name, n: profs.length, note: 'profil en long à définir' }); continue; }
-    const R = axisSections(S.prj, S.D, ax, A, profs, S.tn?.tin || null);
+    const R = axisSections(S.prj, S.D, ax, A, profs, S.tn?.tin || null, { neighbors: earthworkIdx() });
     rows.push({ name: A.name, n: profs.length, L: profs.length > 1 ? profs[profs.length - 1].s - profs[0].s : 0, vCut: R.vCut, vFill: R.vFill, out: R.list.filter((c) => !c.ok).length });
   }
   return rows;
@@ -3939,7 +3957,12 @@ function refreshPTAxis(c) {
       `<td class="mono cut">${fmt(q.cut, 2)}</td><td class="mono fill">${fmt(q.fill, 2)}</td><td class="mono cut">${fmt(q.vCut, 0)}</td><td class="mono fill">${fmt(q.vFill, 0)}</td></tr>`).join('') + '</tbody>';
   const noTN = list.filter((q) => !q.ok).length, noEnd = list.filter((q) => q.ok && (!q.endL || !q.endR)).length;
   $('#ptNote').textContent = (S.tn ? '' : 'Aucun MNT : talus et cubatures non calculés (onglet Terrain). ') + (noTN ? `${noTN} profil(s) hors du MNT. ` : '') + (noEnd ? `${noEnd} profil(s) : talus sans entrée en terre dans la demi-largeur de coupe. ` : '')
-    + `Total ${c.ax.name} : déblai ${fmt(R.vCut, 0)} m³, remblai ${fmt(R.vFill, 0)} m³ entre ${list[0].name} et ${list[list.length - 1].name} (aires moyennes${typeParams(S.prj).ech > 0 ? ', au fond de forme' : ''}, sans décapage ni foisonnement).`;
+    + `Total ${c.ax.name} : déblai ${fmt(R.vCut, 0)} m³, remblai ${fmt(R.vFill, 0)} m³ entre ${list[0].name} et ${list[list.length - 1].name} (aires moyennes${typeParams(S.prj).ech > 0 ? ', au fond de forme' : ''}, sans décapage ni foisonnement).`
+    + (() => { // talus limités par un axe voisin (talus vertical, terrassement compté avec l'autre axe)
+      const nm = (id) => (S.prof?.axes || []).find((a) => a.key === id)?.name || (String(id).startsWith('j') ? 'carrefour' : id);
+      const by = new Map(); for (const q of list) for (const k of q.cutBy || []) by.set(nm(k.by), (by.get(nm(k.by)) || 0) + 1);
+      return by.size ? ` Talus vertical à la limite des talus qui se chevauchent (terrassement compté une seule fois, avec l'axe voisin) : ${[...by].map(([n, k]) => `${k} profil${k > 1 ? 's' : ''} contre ${n}`).join(', ')}.` : '';
+    })();
 }
 // ---------------------------------------------------------------- Profils types (ptype.js, pttedit.js)
 // Affectation des demi-profils à l'axe choisi (gauche, droite, plages d'abscisses) et bibliothèque du projet.
@@ -5231,7 +5254,7 @@ function bindUI() {
   bindPL();
   bindPT();
   bindHydro(); bindBvSheet();
-  if (/[?&]debug\b/.test(location.search)) window.__gira = { S, get viewer() { return viewer; }, lineGrips: () => gripAxes().flatMap(axisLineGrips) }; // tests de navigateur (?debug)
+  if (/[?&]debug\b/.test(location.search)) window.__gira = { S, get viewer() { return viewer; }, lineGrips: () => gripAxes().flatMap(axisLineGrips), ew: () => earthworkCorridors() }; // tests de navigateur (?debug)
   bind3D();
   bindEch();
   $('#btnImportDxf').addEventListener('click', () => $('#fileDxf').click());
