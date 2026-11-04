@@ -348,7 +348,26 @@ export function buildEchangeur(prj, D) {
     // complet reste la référence des abscisses et des raccordements.
     const sA = rg ? Math.max(0, rg[0]) : 0, sB = rg ? Math.min(sEnd, rg[1]) : sEnd;
     const pathD = sA > 1e-6 || sB < sEnd - 1e-6 ? (sB - sA > 1 ? G.revPath(G.pathHead(G.revPath(G.pathHead(path, sB)), sB - sA)) : []) : path;
-    const off = (delta) => G.offsetPath(pathD, delta);
+    // Raccord avec la tige d'une trompette (rg.taper) : sur Lt mètres depuis l'extrémité de la tige, les lignes de la
+    // voie passent progressivement de leur position sur la tige (deux voies de bretelle de part et d'autre du TPC, BDD et
+    // berme des bretelles) à celle du profil de la voie — pas de changement brutal de largeur ni de profil.
+    const tp = rg?.taper, E0r = H.median / 2 + H.bdg, E1r = E0r + H.lanes * H.wLane, E2r = E1r + H.bau;
+    const kR = [E0r, E1r, E2r, E2r + H.berme], kT = tp ? [tp.tpc / 2, tp.tpc / 2 + tp.w, tp.tpc / 2 + tp.w + tp.bdd, tp.tpc / 2 + tp.w + tp.bdd + tp.berme] : null;
+    const Lt = tp ? Math.min(Math.max(20, 25 * Math.max(...kR.map((v, i) => Math.abs(kT[i] - v)))), (sB - sA) / 2) : 0;
+    const mapT = (d) => { if (d <= kR[0]) return kR[0] > 1e-9 ? (kT[0] * d) / kR[0] : kT[0]; for (let i = 1; i < 4; i++) if (d <= kR[i] + 1e-9) return kT[i - 1] + ((kT[i] - kT[i - 1]) * (d - kR[i - 1])) / Math.max(1e-9, kR[i] - kR[i - 1]); return kT[3] + d - kR[3]; };
+    const tap = (delta, st) => {
+      if (!tp || delta === 0) return delta;
+      const u = tp.at === 'start' ? st - sA : sB - st; if (u >= Lt) return delta;
+      const a = Math.abs(delta), t = 1 - Math.max(0, u) / Lt;
+      return Math.sign(delta) * (a + (mapT(a) - a) * t);
+    };
+    const offS = (delta, a = sA, b = sB) => { // ligne décalée échantillonnée (pas fin dans la zone de raccord)
+      const pts = [];
+      for (let st = a; st < b - 1e-9; st += tp && ((tp.at === 'start' && st - sA < Lt) || (tp.at !== 'start' && sB - st < Lt)) ? 0.5 : 2) pts.push(add(G.pathPointAt(path, st), mul(rot90(pathTangentAt(path, st)), tap(delta, st))));
+      pts.push(add(G.pathPointAt(path, b), mul(rot90(pathTangentAt(path, b)), tap(delta, b))));
+      return polySegs(pts);
+    };
+    const off = (delta) => (tp && delta !== 0 ? offS(delta) : G.offsetPath(pathD, delta));
     const road = { key, k: H.k, H, path, al, cat, fit, sEnd, E0, E1, E2, ok: sEnd > 1, isRoute, drawn: [sA, sB] };
     if (!road.ok) return road;
     if (isRoute) vsaSectionChecks(H, (lvl, msg) => issues.push({ lvl, msg: `${H.name} : ${msg}` }), fmt);
@@ -380,7 +399,7 @@ export function buildEchangeur(prj, D) {
       }
       return cuts.map(([a, b]) => {
         const n = Math.max(1, Math.ceil((b - a) / 2)), pts = [];
-        for (let i = 0; i <= n; i++) { const st = a + ((b - a) * i) / n; pts.push(add(G.pathPointAt(path, st), mul(rot90(pathTangentAt(path, st)), delta))); }
+        for (let i = 0; i <= n; i++) { const st = a + ((b - a) * i) / n; pts.push(add(G.pathPointAt(path, st), mul(rot90(pathTangentAt(path, st)), tap(delta, st)))); }
         return polySegs(pts);
       });
     };
@@ -399,6 +418,13 @@ export function buildEchangeur(prj, D) {
       P({ k: 'fill', L: 'ILOT_SEP', rings: [ring(off(H.median / 2), off(-H.median / 2))], role: 'ilot' });
       P({ k: 'path', L: 'BORDURE', segs: off(H.median / 2) }); P({ k: 'path', L: 'BORDURE', segs: off(-H.median / 2) });
     } else P({ k: 'path', L: 'MARQUAGE', segs: off(0), dash: [3, 10], wm: 0.15 }); // ligne axiale T1 (chaussée bidirectionnelle)
+    if (tp && Lt > 1) { // fin du TPC de la tige : bords intérieurs des voies convergeant vers l'axe (nez), zébra
+      const [a, b] = tp.at === 'start' ? [sA, sA + Lt] : [sB - Lt, sB];
+      const L1 = offS(1e-6, a, b), L2 = offS(-1e-6, a, b);
+      P({ k: 'path', L: 'MARQUAGE', segs: L1, wm: 0.15 }); P({ k: 'path', L: 'MARQUAGE', segs: L2, wm: 0.15 });
+      const poly = [...G.samplePath(L1, 1), ...G.samplePath(G.revPath(L2), 1)];
+      if (poly.length > 3) P({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon([poly], ang(pathTangentAt(path, (a + b) / 2)) + Math.PI / 4, 1.0), wm: 0.12 });
+    }
     P({ k: 'path', L: 'AXE', segs: pathD, role: 'principale' });
     const sLab = Math.min(sB, sA + 30);
     text('COTATION', G.pathPointAt(path, sLab), `${H.name} — ${isRoute ? `route ${H.median > 0 ? '2×' : ''}${H.lanes * (H.median > 0 ? 1 : 2)} voie(s)` : `${H.cat}, 2×${H.lanes} voies`}`, ang(pathTangentAt(path, sLab)), 'center', TH * 1.2);
@@ -475,7 +501,7 @@ export function buildEchangeur(prj, D) {
     const segs = axisPaths[`cross${k}`];
     if (!segs) return null;
     const sE = G.pathLen(segs);
-    let lo = 0, hi = sE, hit = false;
+    let lo = 0, hi = sE, hit = false, taper = null;
     for (const r of prj.ramps || []) {
       if (r.role !== 'semi' || r.tp?.crossK !== k || !r.tp.u || !r.pis?.length) continue;
       const u = norm(r.tp.u);
@@ -487,9 +513,16 @@ export function buildEchangeur(prj, D) {
       const pr = pathProject(segs, E);
       if (!pr) continue;
       hit = true;
-      if (G.dot(pathTangentAt(segs, pr.s), u) >= 0) lo = Math.max(lo, pr.s); else hi = Math.min(hi, pr.s);
+      const fwd = G.dot(pathTangentAt(segs, pr.s), u) >= 0;
+      if (fwd) lo = Math.max(lo, pr.s); else hi = Math.min(hi, pr.s);
+      if (!r.cut?.j) { // tige libre (pas de giratoire) : raccord progressif du profil de la tige à celui de la voie
+        const rp = rampParams(prj, r);
+        taper = { at: fwd ? 'start' : 'end', tpc: tigeTpc(prj, r.tp || {}), w: rp.w, bdd: rp.bdd, berme: rp.berme };
+      }
     }
-    return hit ? [lo, hi] : null;
+    if (!hit) return null;
+    const rg = [lo, hi]; if (taper) rg.taper = taper;
+    return rg;
   };
   D.crosses = XPs.map((X, k) => { const r = X.on && X.axis.length >= 2 ? drawRoad(`cross${k}`, X, tigeRange(k, X)) : null; return r?.ok ? r : null; });
   D.cross = D.crosses[0] || null;
