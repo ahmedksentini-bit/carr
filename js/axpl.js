@@ -73,8 +73,8 @@ export function buildAxisProfiles(prj, D, axes, juncs = [], tin = null) {
       // voie secondaire raccordée à un carrefour : extrémité calée sur la cote zC de son centre
       const tied = [];
       for (const end of [0, 1]) {
-        const s = end ? ax.len : 0, p = ax.at(s).p, j = juncs.find((q) => q.zC != null && Number.isFinite(q.zC) && G.dist(q.O, p) < q.Rg + 85);
-        if (j) tied.push({ s, z: Math.round(j.zC * 1000) / 1000, R: 0, why: `${j.name || 'carrefour'} (zC)`, end });
+        const s = end ? ax.len : 0, p = ax.at(s).p, j = juncs.find((q) => (q.zAt || (q.zC != null && Number.isFinite(q.zC))) && G.dist(q.O, p) < q.Rg + 85);
+        if (j) { const z = j.zAt ? j.zAt(p) : j.zC; tied.push({ s, z: Math.round(z * 1000) / 1000, R: 0, why: `${j.name || 'carrefour'} (${j.zAt ? 'profil de l\'anneau' : 'zC'})`, end }); }
       }
       const u = sortPis(store[ax.key]?.pis).filter((q) => !tied.some((t) => Math.abs(t.s - q.s) < 1));
       mk(ax, tied.length ? [...tied, ...u].sort((a, b) => a.s - b.s) : u, u, tied);
@@ -104,7 +104,7 @@ export function buildAxisProfiles(prj, D, axes, juncs = [], tin = null) {
           const pr = a.project(p);
           if (pr && Math.abs(pr.off) < (a.half || 4) + 40) { const H = out.get(a.key); z = H.PL.zAt(Math.max(0, Math.min(a.len, pr.s))) - CROSSFALL * Math.min(Math.abs(pr.off), a.half || 4); why = `${a.name} (carrefour à ${fmt(Math.abs(pr.off), 0)} m de l'axe, s = ${fmt(pr.s, 1)} m)`; break; }
         }
-        if (z == null) { const j = juncs.find((q) => q.zC != null && Number.isFinite(q.zC) && G.dist(q.O, p) < q.Rg + 40); if (j) { z = j.zC; why = `${j.name || 'giratoire'} (zC)`; } }
+        if (z == null) { const j = juncs.find((q) => (q.zAt || (q.zC != null && Number.isFinite(q.zC))) && G.dist(q.O, p) < q.Rg + 40); if (j) { z = j.zAt ? j.zAt(p) : j.zC; why = `${j.name || 'giratoire'} (${j.zAt ? 'profil de l\'anneau' : 'zC'})`; } }
         if (z != null) tied.push({ s, z: Math.round(z * 1000) / 1000, R: 0, why, end });
       }
       const u = sortPis(store[`r:${r.id}`]?.pis).filter((q) => !tied.some((t) => Math.abs(t.s - q.s) < 1));

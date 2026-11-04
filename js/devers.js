@@ -9,13 +9,51 @@
 //           extérieur jusqu'au dévers courant de la section (toit).
 import * as G from './geom.js';
 import { plParams, plBuild, axisLength } from './pl.js';
-import { signedOffset, pointNormalAt } from './ringshape.js';
+import { signedOffset, pointNormalAt, projectOnPath } from './ringshape.js';
 
 const { sub, dot, mul, add, polar } = G;
 
 export const gisVec = (gon) => { const t = (gon * Math.PI) / 200; return { x: Math.sin(t), y: Math.cos(t) }; };
 const pct = (v) => (v * 100).toFixed(1).replace('.', ',') + ' %';
 const upright = (r) => { r = G.normAng(r); return r > Math.PI / 2 && r <= 1.5 * Math.PI ? r - Math.PI : r; };
+
+// Profil en long périodique (anneau fermé de longueur L) : points saisis { s, z, R } ramenés dans [0, L), raccordements
+// paraboliques y compris au bouclage (s = 0 ≡ L). Rend { zAt, gradeAt, pts, segs, curves, issues } ou null (aucun point).
+export function ringPlBuild(pisIn, L) {
+  const md = (v) => ((v % L) + L) % L;
+  const pts = [];
+  for (const q of Array.isArray(pisIn) ? pisIn : []) {
+    const sv = +q.s, z = +q.z;
+    if (q.s === '' || q.z === '' || q.s == null || q.z == null || !Number.isFinite(sv) || !Number.isFinite(z)) continue;
+    const s0 = md(sv);
+    if (pts.some((t) => Math.min(Math.abs(t.s - s0), L - Math.abs(t.s - s0)) < 0.05)) continue;
+    pts.push({ s: s0, z, R: Math.max(0, +q.R || 0) });
+  }
+  if (!pts.length || !(L > 1)) return null;
+  pts.sort((a, b) => a.s - b.s);
+  if (pts.length === 1) { const z = pts[0].z; return { pts, segs: [{ s0: 0, s1: L, g: 0 }], curves: [], issues: [], zAt: () => z, gradeAt: () => 0 }; }
+  const ext = [{ ...pts[pts.length - 1], s: pts[pts.length - 1].s - L }, ...pts, { ...pts[0], s: pts[0].s + L }], e0 = ext[0];
+  const P = plBuild({ pis: ext.slice(1).map((q) => ({ s: q.s - e0.s, z: q.z, R: q.R })) }, e0.z);
+  const sh = (v) => v + e0.s;
+  const segs = P.segs.map((q) => ({ ...q, s0: sh(q.s0), s1: sh(q.s1) }));
+  const curves = P.curves.map((c) => ({ ...c, s: sh(c.s), sA: sh(c.sA), sB: sh(c.sB) }));
+  return { pts, segs, curves, issues: P.issues, zAt: (sv) => P.zAt(md(sv) - e0.s), gradeAt: (sv) => P.gradeAt(md(sv) - e0.s) };
+}
+// Axe de l'anneau, sur la rive intérieure peinte (Ri, ou contour Rg − la d'une cacahuète) : origine au nord du centre
+// (gisement 0), abscisse croissante dans le sens de circulation (trigonométrique). { L, path, sOf(P), at(s) }.
+export function ringAxis(D) {
+  const O = D.O;
+  if (!O || !(D.Ri > 0.5)) return null;
+  if (D.shape) {
+    let path = D.shape.path(-D.la);
+    if (G.polyArea(G.samplePath(path, 1)) < 0) path = G.revPath(path);
+    const L = G.pathLen(path), s0 = projectOnPath(path, G.add(O, { x: 0, y: 1e4 })).s;
+    return { L, path, sOf: (P) => (((projectOnPath(path, P).s - s0) % L) + L) % L, at: (sv) => G.pathPointAt(path, ((((sv + s0) % L) + L) % L)) };
+  }
+  const Ri = D.Ri, L = 2 * Math.PI * Ri, a0 = Math.PI / 2;
+  const path = [G.A(O, Ri, a0, a0 + Math.PI, true), G.A(O, Ri, a0 + Math.PI, a0 + 2 * Math.PI, true)];
+  return { L, path, sOf: (P) => Ri * G.normAng(Math.atan2(P.y - O.y, P.x - O.x) - a0), at: (sv) => polar(O, Ri, a0 + sv / Ri) };
+}
 
 export function addDevers(prj, D) {
   const r = prj.ring, O = D.O;
@@ -32,16 +70,37 @@ export function addDevers(prj, D) {
     if (off >= 0) return zPlane(P);
     return zPlane(so.p) + d * Math.min(-off, D.la);
   };
-  const zRing = D.shape ? zShape : (P) => {
+  // Profil en long saisi pour l'anneau (axe sur la rive intérieure, onglet Profil long) : la rive intérieure suit la
+  // ligne rouge, le dévers d vers l'extérieur est constant ; l'îlot central se raccorde à la rive intérieure. La cote
+  // zC et la déclivité du site ne s'appliquent alors plus à l'anneau.
+  const RA = ringAxis(D), RPL = RA ? ringPlBuild(r.pl?.pis, RA.L) : null;
+  D.ringAxis = RA; D.ringPL = RPL;
+  let zMean = 0;
+  if (RPL) { for (let k = 0; k < 64; k++) zMean += RPL.zAt((k * RA.L) / 64) / 64; }
+  const zAxisRing = RPL ? (P) => {
+    const zA = RPL.zAt(RA.sOf(P));
+    if (D.shape) {
+      const off = signedOffset(D.shape, P).off;
+      if (off >= 0) return zA - d * D.la;
+      if (off >= -D.la) return zA - d * (D.la + off);
+      return zA;
+    }
+    const rr = G.dist(P, O);
+    if (rr >= D.Rg) return zA - d * (D.Rg - D.Ri);
+    if (rr >= D.Ri) return zA - d * (rr - D.Ri);
+    const t = rr / D.Ri;
+    return zA * t + zMean * (1 - t);
+  } : null;
+  const zRing = zAxisRing || (D.shape ? zShape : (P) => {
     const rr = G.dist(P, O);
     if (mode === 'cone') return zPlane(P) - d * Math.max(0, rr - D.Ri);
     if (rr >= D.Rg) return zPlane(P);
     // Îlot central : surface interpolée, raccordée à la rive intérieure (zC + d·la au centre).
     if (rr <= D.Ri) return zC - p * dot(sub(P, O), g) * (D.Rg / D.Ri) + d * (D.Rg - D.Ri);
     return zC - p * D.Rg * dot(mul(sub(P, O), 1 / rr), g) + d * (D.Rg - rr);
-  };
+  });
   // Dévers radial descendant vers l'extérieur, à l'azimut trigonométrique phi.
-  const radial = (phi) => (mode === 'cone' ? d + p * dot(G.unit(phi), g) : d);
+  const radial = (phi) => (mode === 'cone' && !RPL ? d + p * dot(G.unit(phi), g) : d);
   const TH = +prj.opts?.textH || 0.8;
 
   // Dévers radial le long de l'anneau
@@ -51,7 +110,7 @@ export function addDevers(prj, D) {
     if (v < mn) { mn = v; phiMin = (k * Math.PI) / 180; }
     if (v > mx) mx = v;
   }
-  D.devers = { p, d, g, zC, mode, minRadial: mn, maxRadial: mx, maxTransverse: Math.max(Math.abs(mn), Math.abs(mx)), phiMin, branches: [] };
+  D.devers = { p, d, g, zC, mode, minRadial: mn, maxRadial: mx, maxTransverse: Math.max(Math.abs(mn), Math.abs(mx)), phiMin, branches: [], ringPL: !!RPL };
   D.zRing = zRing;
 
   // Profil en long de l'anneau (bords extérieur et intérieur) par gisement.
@@ -89,16 +148,26 @@ export function addDevers(prj, D) {
     const dir = v >= 0 ? e : G.neg(e);
     arrow(G.add(polar(O, rm, phi), mul(dir, -1.2)), dir, 2.4, pct(Math.abs(v)));
   }
-  if (p > 0) {
+  // Axe de l'anneau (rive intérieure) : ligne d'axe, origine (s = 0) et sens de l'abscisse.
+  if (RA) {
+    P({ k: 'path', L: 'AXE', segs: RA.path, role: 'anneau' });
+    const q0 = RA.at(0), q1 = RA.at(0.5), tg = G.norm(sub(q1, q0)), nn = G.norm(sub(q0, O));
+    P({ k: 'path', L: 'AXE', segs: [G.L(G.add(q0, mul(nn, -1)), G.add(q0, mul(nn, 1)))] });
+    P({ k: 'arrow', L: 'AXE', p: G.add(q0, mul(nn, -1.6)), dir: tg, len: 3, text: RPL ? 'axe anneau s = 0' : 'axe anneau s = 0 (profil à saisir)', h: TH * 0.7, rot: upright(G.ang(tg)) });
+  }
+  if (p > 0 && !RPL) {
     const rA = D.shape ? Math.min(D.Rb, 6) : D.Rb;
     arrow(G.add(O, mul(g, -rA * 0.35)), g, rA * 0.7, `plan p = ${pct(p)}`, TH);
   }
 
   // Branches
   for (const bd of D.branches) {
+    // pente de l'anneau suivant la normale n de la branche au raccordement (plan du site, ou ligne rouge de l'anneau)
+    let dn = -p * dot(bd.n, g);
+    if (RPL) { const Q = bd.W({ x: bd.x0 + 0.5, y: bd.a }); dn = zRing(G.add(Q, mul(bd.n, 0.5))) - zRing(G.add(Q, mul(bd.n, -0.5))); }
     branchDevers(prj, D, bd, {
       z0: zRing(bd.W({ x: bd.x0, y: bd.a })),
-      d0In: -p * dot(bd.n, g), d0Out: p * dot(bd.n, g),
+      d0In: dn, d0Out: -dn,
       defGrade: -p * dot(bd.u, g),
       base: (Pw, x) => (x <= bd.x0 + 1e-6 && (D.shape ? signedOffset(D.shape, Pw).off <= 0.05 : G.dist(Pw, O) <= D.Rg + 0.05) ? zRing(Pw) : null),
       arrow, TH,
