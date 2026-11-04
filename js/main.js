@@ -3046,7 +3046,7 @@ function renderProfils() {
   ].join('') || '<li class="empty-li">Aucun profil : « Série entre deux points » puis deux clics sur un même axe, ou « Profil isolé ».</li>';
   $('#profTable').innerHTML = list.length
     ? '<thead><tr><th>Profil</th><th>Axe</th><th>Abscisse</th><th>X</th><th>Y</th><th>Gisement (gr)</th><th>Origine</th></tr></thead><tbody>' +
-      list.map((q, i) => `<tr data-prof="${i}"><td>${esc(q.name)}</td><td>${esc(q.axisName)}</td><td class="mono">${q.s.toFixed(3)}</td><td class="mono">${q.p.x.toFixed(3)}</td><td class="mono">${q.p.y.toFixed(3)}</td><td class="mono">${q.gis.toFixed(4)}</td><td>${esc(q.src)}${q.type ? ` (${esc(q.type)})` : ''}</td></tr>`).join('') + '</tbody>'
+      list.map((q, i) => `<tr data-prof="${i}"><td>${esc(q.name)}</td><td>${esc(q.axisName)}</td><td class="mono">${fmt(q.s, 3)}</td><td class="mono">${fmt(q.p.x, 3)}</td><td class="mono">${fmt(q.p.y, 3)}</td><td class="mono">${fmt(q.gis, 4)}</td><td>${esc(q.src)}${q.type ? ` (${esc(q.type)})` : ''}</td></tr>`).join('') + '</tbody>'
     : '';
 }
 function refreshPoints() {

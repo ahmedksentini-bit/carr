@@ -519,3 +519,8 @@ details.hy-tabdetail > summary { cursor: pointer; font-weight: 600; }
 #mtMap .mt-label { background: rgba(26,35,50,.82); border: 1px solid rgba(255,255,255,.35); border-radius: 3px; color: #f0f4f8; font: 600 10px/1.2 system-ui, sans-serif; padding: 2px 5px; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
 #mtMap .mt-label::before { display: none; }
 @media (max-width: 760px) { .mt-wrap { flex-direction: column; } .mt-side { width: auto; max-height: 40%; border-right: 0; border-bottom: 1px solid var(--line2); } }
+
+/* liste des séries et profils isolés (onglet Implantation) */
+#profSeries li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 8px; }
+#profSeries li > b { min-width: 46px; }
+#profSeries li > span { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
