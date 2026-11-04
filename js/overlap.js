@@ -30,7 +30,15 @@ export function chausseeOverlaps(prj, D, { decks = [], juncs = [] } = {}) {
     if (!c?.ok) return;
     const [a, b] = c.drawn || [0, c.sEnd];
     if (b - a < 5) return;
-    const pts = G.samplePath(c.path, 2).filter((p, i, arr) => { const s = (i / Math.max(1, arr.length - 1)) * c.sEnd; return s >= a - 1 && s <= b + 1; });
+    // abscisses réelles des points échantillonnés (un alignement droit n'y a que ses deux extrémités)
+    const all = G.samplePath(c.path, 2), Ls = [0];
+    for (let i = 1; i < all.length; i++) Ls.push(Ls[i - 1] + G.dist(all[i - 1], all[i]));
+    const pts = [];
+    for (let i = 0; i < all.length; i++) {
+      if (Ls[i] >= a - 1 && Ls[i] <= b + 1) pts.push(all[i]);
+      else if (i && (Ls[i - 1] - a) * (Ls[i] - a) < 0) pts.push(G.lerp(all[i - 1], all[i], (a - Ls[i - 1]) / (Ls[i] - Ls[i - 1])));
+      if (i && (Ls[i - 1] - b) * (Ls[i] - b) < 0) pts.push(G.lerp(all[i - 1], all[i], (b - Ls[i - 1]) / (Ls[i] - Ls[i - 1])));
+    }
     els.push({ id: `cross${k}`, refs: [`x${k ? k + ':' : ''}1`, `x${k ? k + ':' : ''}2`], name: c.H?.name || `Voie secondaire ${k + 1}`, pts, half: c.E2, road: true });
   });
   // bretelles
