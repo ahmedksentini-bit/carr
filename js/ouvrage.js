@@ -21,7 +21,7 @@
 import * as G from './geom.js';
 import { pathProject, pathTangentAt, polySegs } from './clotho.js';
 import { hwyParams, crossParams, crossList } from './echangeur.js';
-import { fmt, upright } from './common.js';
+import { fmt, upright, spanSupports } from './common.js';
 import { deckTrace, deckTurn } from './psidatrace.js';
 import { domaineEmploi, epaisseurGuide, verifierTravure, verifierBiais, verifierCoupe, verifierOuvertures, longueurAbout, GUIDE89 } from './psida.js';
 
@@ -196,14 +196,14 @@ function designDeck(prj, D, deck, O) {
   sup.push({ kind: 'pile', s: order[1], y: yP, a: aP[order[1]] }, { kind: 'culee', s: order[1], y: side[order[1]].yC, a: side[order[1]].aC });
   for (const q of sup) if (q.kind === 'culee') q.yCrest = q.y - 0.5;
   const spansAuto = sup.slice(1).map((q, i) => +Math.abs(q.a - sup[i].a).toFixed(2));
-  // Travure saisie dans l'onglet Ouvrages (travées le long de l'axe, centrées sur le croisement, décalage éventuel) :
-  // appuis replacés sur l'axe, lignes d'appui toujours parallèles à l'autoroute ; implantation contrôlée.
+  // Travure saisie dans l'onglet Ouvrages (travées le long de l'axe, décalage éventuel) : la pile centrale (nombre pair
+  // de travées) reste au croisement, ou la travée centrale (nombre impair) y reste centrée ; les autres appuis se
+  // décalent vers l'extérieur ; lignes d'appui toujours parallèles à l'autoroute ; implantation contrôlée.
   const ov = (O.decks || {})[deck.key] || {};
   const user = Array.isArray(ov.spans) && ov.spans.length >= 1 && ov.spans.every((v) => +v > 1) ? ov.spans.map(Number) : null;
   let sup2 = sup;
   if (user) {
-    const S = user.reduce((x, y) => x + y, 0), a1 = a0 + (+ov.shift || 0) - S / 2;
-    const pos = [a1]; for (const L of user) pos.push(pos[pos.length - 1] + L);
+    const pos = spanSupports(user).map((x) => a0 + (+ov.shift || 0) + x);
     if (pos[0] < 1 || pos[pos.length - 1] > aL[aL.length - 1] - 1) return null;
     sup2 = pos.map((a, i) => {
       let k = 1; while (k < aL.length - 1 && aL[k] < a) k++;

@@ -35,6 +35,21 @@ export function sideBandPrims(S, bands, layer, wAt = null) {
   return out;
 }
 
+// Abscisses des appuis d'une travure (culée, piles, culée) par rapport au point fixe de l'ouvrage : nombre pair de
+// travées → l'appui du milieu (pile centrale) reste sur le point fixe ; impair → la travée du milieu y est centrée.
+// Les autres appuis s'en déduisent de proche en proche : changer une travée ne déplace que les appuis situés au-delà
+// d'elle, vers l'extérieur, au lieu d'élargir l'ouvrage des deux côtés.
+export function spanSupports(spans) {
+  const n = spans.length, pos = new Array(n + 1).fill(0);
+  if (!n) return [0];
+  let c;
+  if (n % 2 === 0) { c = n / 2; pos[c] = 0; }
+  else { const m = (n - 1) / 2; pos[m] = -spans[m] / 2; pos[m + 1] = spans[m] / 2; c = m; }
+  for (let i = c - 1; i >= 0; i--) pos[i] = pos[i + 1] - spans[i];
+  for (let i = (n % 2 === 0 ? c : c + 1) + 1; i <= n; i++) pos[i] = pos[i - 1] + spans[i - 1];
+  return pos;
+}
+
 // Oriente une polyligne de l'extrémité la plus proche de O vers la plus éloignée.
 export function nearFar(axis, O) {
   return G.dist(axis[0], O) <= G.dist(axis[axis.length - 1], O) ? axis : axis.slice().reverse();

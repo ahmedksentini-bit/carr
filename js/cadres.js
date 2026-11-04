@@ -14,7 +14,7 @@
 // de la voie + corniches ; type de poutres et hauteur proposés selon la plus grande portée (ordres de grandeur des
 // guides Sétra, à confirmer dans PSIDA, onglet « Ponts à poutres », champs pt_*).
 import * as G from './geom.js';
-import { fmt, upright } from './common.js';
+import { fmt, upright, spanSupports } from './common.js';
 import { pathProject, polySegs } from './clotho.js';
 import { listAxes } from './profils.js';
 import { PSIDA_URL } from './ouvrage.js';
@@ -121,10 +121,9 @@ export function poutresSupports(g, yc = 0) {
   const { ax, s, d, K } = g, out = [];
   const at = (x) => { const ss = Math.max(0, Math.min(ax.len, s + x)), q = ax.at(ss), cr = G.cross(q.t, d); return { x, s: ss, p: q.p, t: q.t, cr: Math.abs(cr) < 0.05 ? Math.sign(cr || 1) * 0.05 : cr }; };
   const edge = (A, y) => G.add(A.p, G.mul(d, y / A.cr)); // point de la ligne d'appui à la distance y de l'axe (gauche > 0)
-  let x = -K.Ltot / 2;
-  const xs = [x]; for (const L of K.spans) { x += L; xs.push(x); }
+  const xs = spanSupports(K.spans); // pile centrale (ou travée centrale) fixe au point d'implantation de l'ouvrage
   xs.forEach((xi, i) => { const A = at(xi); out.push({ ...A, kind: i === 0 || i === xs.length - 1 ? 'culee' : 'pile', L: edge(A, yc + K.W / 2), R: edge(A, yc - K.W / 2) }); });
-  const ends = [at(-K.Ltot / 2 - K.about), at(K.Ltot / 2 + K.about)].map((A) => ({ ...A, L: edge(A, yc + K.W / 2), R: edge(A, yc - K.W / 2) }));
+  const ends = [at(xs[0] - K.about), at(xs[xs.length - 1] + K.about)].map((A) => ({ ...A, L: edge(A, yc + K.W / 2), R: edge(A, yc - K.W / 2) }));
   return { sup: out, ends, edge };
 }
 function drawPoutres(g, name, P, TH) {
