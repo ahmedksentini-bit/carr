@@ -1781,6 +1781,7 @@ const PROMPTS = {
   pickx: 'Échangeur : cliquez la voie secondaire au croisement (trompette : du côté de la voirie ordinaire), ou dessinez une nouvelle voie secondaire en commençant du côté de la voirie ordinaire — Entrée / clic droit pour terminer.',
   trumpet: 'Trompette : cliquez au croisement de la route transversale (ou sur l\'autoroute à l\'endroit de l\'ouvrage), du côté de la voirie ordinaire.',
   measure: 'Mesure : cliquez deux points.',
+  insv: 'Insérer un sommet : cliquez sur l\'axe de l\'autoroute, d\'une voie secondaire, d\'une bretelle ou d\'une branche à l\'endroit où couper le segment. Le sommet reçoit un rayon (cercle) ; faites ensuite pivoter l\'une des deux droites par sa poignée de tangence, ou déplacez le sommet. Échap pour terminer.',
   bvcut: 'Couper un bassin : cliquez les points d\'une ligne en travers du bassin, en débordant de son contour — double-clic ou Entrée pour couper, Échap pour annuler.',
 };
 
@@ -1818,6 +1819,35 @@ function dedupe(pts) {
   return out;
 }
 
+// ─── Insertion d'un sommet (cercle) dans un segment d'axe ───
+// Axes éditables par sommets : autoroute, voies secondaires, bretelles libres (PI), axes de branches. Le clic est
+// projeté sur le segment le plus proche (polygone des sommets) ; le nouveau sommet, posé sur le segment, ne change
+// pas encore le tracé (déflexion nulle) ; il reçoit un rayon par défaut, utilisé dès qu'une des droites pivote.
+function insertVertexAt(px, py) {
+  const cands = [];
+  if (S.prj.hwy?.on) cands.push({ arr: () => S.prj.hwy.axis, R: 1500, name: S.prj.hwy.name || 'autoroute', rKey: 'r' });
+  (S.prj.crosses || []).forEach((X, i) => { if (X.on !== false) cands.push({ arr: () => S.prj.crosses[i].axis, R: 400, name: X.name || `voie secondaire ${i + 1}`, rKey: 'r' }); });
+  (S.prj.ramps || []).forEach((r, i) => { if (Array.isArray(r.pis) && !isDerivedLoop(r) && !isParamTrumpet(r)) cands.push({ arr: () => S.prj.ramps[i].pis, R: 80, name: r.name || 'bretelle', rKey: 'R', ramp: true }); });
+  S.prj.branches.forEach((b, i) => cands.push({ arr: () => S.prj.branches[i].axis, R: 30, name: b.name || `branche ${i + 1}`, rKey: 'r', bi: i }));
+  let best = null;
+  for (const c of cands) {
+    const ax = c.arr() || [];
+    for (let k = 0; k + 1 < ax.length; k++) {
+      const [ax0, ay0] = viewer.w2s(ax[k].x, ax[k].y), [ax1, ay1] = viewer.w2s(ax[k + 1].x, ax[k + 1].y);
+      const d = G.distToSeg({ x: px, y: py }, { x: ax0, y: ay0 }, { x: ax1, y: ay1 });
+      if (d < 12 && (!best || d < best.d)) best = { c, k, d };
+    }
+  }
+  if (!best) { toast('Cliquez plus près d\'un axe (ligne des sommets).', 'warn'); return; }
+  const ax = best.c.arr(), a = ax[best.k], b = ax[best.k + 1];
+  const [wx, wy] = viewer.s2w(px, py), ab = G.sub(b, a), L2 = G.dot(ab, ab) || 1;
+  const t = Math.max(0.02, Math.min(0.98, G.dot(G.sub({ x: wx, y: wy }, a), ab) / L2));
+  const P = G.add(a, G.mul(ab, t)), v = { x: +P.x.toFixed(3), y: +P.y.toFixed(3), [best.c.rKey]: best.c.R };
+  ax.splice(best.k + 1, 0, v);
+  if (best.c.bi != null) selectBranch(best.c.bi);
+  S.echSig = ''; update();
+  toast(`Sommet inséré sur ${best.c.name} entre les sommets ${best.k} et ${best.k + 1} (R = ${fmt(best.c.R, 0)} m, modifiable dans la liste des sommets de l'axe).`);
+}
 // ─── « + » aux deux extrémités des axes d'échangeur (autoroute, voies secondaires) : prolongement de la saisie ───
 /** Extrémités prolongeables : { ref: { t: 'hwy' } | { t: 'cross', i }, atStart, p, prev }. */
 function echEnds() {
@@ -2291,6 +2321,7 @@ function bindCanvas() {
     else if (S.tool === 'pickx') pickSecondary(w, px, py);
     else if (['profser', 'profone', 'cadre', 'poutres'].includes(S.tool)) pickOnAxis(w);
     else if (S.tool === 'measure') { S.meas.push(w); if (S.meas.length > 2) S.meas = [w]; showMeasure(); }
+    else if (S.tool === 'insv') insertVertexAt(px, py);
     else if (S.tool === 'bvcut' && S.bvCut) { const q = S.bvCut.pts[S.bvCut.pts.length - 1]; if (!q || G.dist(q, w) > 0.01) S.bvCut.pts.push(w); }
     else if (S.tool === 'select') {
       const h = hitHandle(px, py);
@@ -2423,7 +2454,7 @@ function bindKeys() {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (/^[0-9@.\-]$/.test(e.key) && ['axis', 'measure', 'center'].includes(S.tool)) { $('#cmd').focus(); return; }
     const k = e.key.toLowerCase();
-    const map = { s: () => setTool('select'), a: () => setTool('axis'), c: () => setTool('center'), m: () => setTool('measure'), h: () => setTool('pan'), g: zoomGira, e: zoomAll };
+    const map = { s: () => setTool('select'), a: () => setTool('axis'), c: () => setTool('center'), m: () => setTool('measure'), i: () => setTool('insv'), h: () => setTool('pan'), g: zoomGira, e: zoomAll };
     if (map[k]) { e.preventDefault(); map[k](); }
   });
   window.addEventListener('keyup', (e) => { if (e.key === ' ') { S.space = false; updateCursor(); } });
