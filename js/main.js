@@ -3656,7 +3656,7 @@ function plAxisOverlay(key, ax, PL) {
     if (g.err || g.ax?.key !== key || !g.K) continue;
     if (g.K.type === 'poutres') { // pont à poutres porté par cet axe : tablier sous le profil, appuis
       const K = g.K, { sup } = poutresSupports(g);
-      items.push({ t: 'span', s0: g.s - K.Ltot / 2 - K.about, s1: g.s + K.Ltot / 2 + K.about, h: K.h + 0.08, sup: sup.map((A) => ({ kind: A.kind, s: A.s })), label: `${g.name} · pont à poutres ${K.spans.map((v) => fmt(v, 1)).join(' + ')} m` });
+      items.push({ t: 'span', s0: sup[0].s - K.about, s1: sup[sup.length - 1].s + K.about, h: K.h + 0.08, sup: sup.map((A) => ({ kind: A.kind, s: A.s })), label: `${g.name} · pont à poutres ${K.spans.map((v) => fmt(v, 1)).join(' + ')} m` });
       continue;
     }
     // radier au droit de l'axe : cotes fil d'eau de l'ouvrage (saisies ou automatiques), sinon tiré de la chaussée
