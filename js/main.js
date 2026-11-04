@@ -398,7 +398,14 @@ function computeTalus() {
   const T = talusParams(), out = earthworkCorridors();
   if (!out) return null;
   const masks = [...(S.ouvr?.list || []).map((o) => o.poly), ...(S.cadres || []).filter((g) => g.K?.type === 'poutres').map((g) => g.poly)].filter((p) => p?.length > 2);
-  return talusPrims(out, masks, { esp: T.esp });
+  // surfaces revêtues dessinées (chaussées, îlots) de l'échangeur et des carrefours : pas de talus dessus
+  const areas = [];
+  for (const D of [S.D, ...(S.Do || []).map((d) => d.D)]) for (const o of D?.prims || []) {
+    if (o.k !== 'fill' || !(o.L === 'CHAUSSEE' || o.L.startsWith('ILOT'))) continue;
+    const rings = (o.rings || []).map((r) => G.samplePath(r, 1)).filter((r) => r.length > 2);
+    if (rings.length) areas.push({ rings, rule: o.rule });
+  }
+  return talusPrims(out, masks, { esp: T.esp, areas });
 }
 // Couloirs de terrassement de tous les axes (coupes au profil type, talus non découpés), mis en cache : talus en plan
 // et limite des talus qui se chevauchent dans les profils en travers (talus vertical, pas de double comptage).
@@ -2059,19 +2066,41 @@ function syncRoadEnds() {
       const ax = X.axis, iE = G.dist(ax[0], D.O) <= G.dist(ax[ax.length - 1], D.O) ? 0 : ax.length - 1, Q = ax[iE ? iE - 1 : 1];
       if (G.dot(G.norm(G.sub(T, D.O)), G.norm(G.sub(ax[iE], D.O))) < 0.98) continue; // branche de l'autre côté du carrefour
       const v = G.norm(G.sub(ax[iE], Q));
-      if (Math.abs(G.cross(v, G.sub(T, Q))) > 0.5 || G.dist(ax[iE], T) > 400) continue; // hors du prolongement : rien n'est imposé
+      if (G.dist(ax[iE], T) > 400) continue;
+      let ins = null;
+      if (Math.abs(G.cross(v, G.sub(T, Q))) > 0.5) {
+        // Route principale d'un carrefour plan (T, X) : elle est droite au carrefour (bissectrice des deux routes
+        // raccordées), la route brisée au centre arrive donc de biais. Son extrémité est ramenée au bout de la branche et
+        // un sommet est ajouté dans l'axe de la principale, au-delà : la route s'y raccorde par un grand rayon (tangence).
+        const w = G.norm(G.sub(T, D.O)), dev = Math.acos(G.clamp(-G.dot(v, w), -1, 1)), dV = 40; // v : vers le carrefour, w : vers l'extérieur
+        if (bd.role !== 'principale' || dev > (15 * Math.PI) / 180 || G.dist(Q, D.O) < G.dist(T, D.O) + dV + 30) continue; // hors du prolongement : rien n'est imposé
+        const V = G.add(T, G.mul(w, dV)), dl = Math.acos(G.clamp(-G.dot(G.norm(G.sub(V, Q)), w), -1, 1));
+        const R = dl > 1e-4 ? Math.round(Math.min(3000, (0.9 * Math.min(dV, G.dist(Q, V) / 2)) / Math.tan(dl / 2)) / 10) * 10 : '';
+        ins = { V: { ...r3p(V), r: R || '' }, b: J.branches[bd.idx], w, O: D.O };
+      }
       if (!moves.has(X)) moves.set(X, {});
       moves.get(X)[iE] = T;
+      if (ins) (moves.get(X).ins ||= {})[iE] = ins;
     }
   }
   let n = 0;
-  for (const [X, m] of moves) {
+  for (const [X, mv] of moves) {
+    const { ins = {}, ...m } = mv;
     const old = X.axis, ax = old.map((q) => ({ ...q }));
     for (const [i, T] of Object.entries(m)) ax[i] = { ...ax[i], ...r3p(T) };
     if (Object.keys(m).every((i) => G.dist(ax[i], old[i]) < 0.05)) continue;
     const bad = [0, ax.length - 1].map((i) => { const j = i ? i - 1 : 1; return G.dot(G.sub(old[i], old[j]), G.sub(ax[i], ax[j])) > 0 ? 15 - G.dist(ax[i], ax[j]) : 15 + G.dist(ax[i], ax[j]); }).filter((x) => x > 0);
     if (bad.length) { warns.push(`${X.name || 'Voie principale'} : les branches de carrefour qui la prolongent la recouvrent (${fmt(Math.max(...bad), 0)} m de trop sur son dernier alignement) — éloignez les carrefours ou raccourcissez leurs branches (îlot, évasement).`); continue; }
-    const d0 = m[0] ? G.dot(G.sub(old[0], ax[0]), G.norm(G.sub(old[1], old[0]))) : 0; // allongement à l'origine
+    const lenTo = (pts, k) => { let L = 0; for (let i = 1; i <= k; i++) L += G.dist(pts[i - 1], pts[i]); return L; };
+    let d0 = m[0] ? G.dot(G.sub(old[0], ax[0]), G.norm(G.sub(old[1], old[0]))) : 0; // allongement à l'origine
+    // sommets de raccordement (fin d'abord, pour garder les indices) ; la branche principale est alignée sur la route
+    for (const i of Object.keys(ins).map(Number).sort((a, b) => b - a)) {
+      const { V, b, w, O } = ins[i];
+      ax.splice(i ? i : 1, 0, V);
+      if (!i) d0 = lenTo(ax, 2) - lenTo(old, 1); // T → V → Q au lieu de l'ancienne extrémité → Q
+      const a = b?.axis || [];
+      if (a.length >= 2) b.axis = a.map((q) => r3p(G.add(O, G.mul(w, G.dist(q, O)))));
+    }
     X.axis = ax; n++;
     if (Math.abs(d0) > 1e-3) shiftAxisStations(X === S.prj.hwy ? { t: 'hwy' } : { t: 'cross', i: S.prj.crosses.indexOf(X) }, d0); // PK et accroches conservés
   }

@@ -67,8 +67,40 @@ function inTri(t, x, y) {
   const eps = -1e-9;
   return l1 >= eps && l2 >= eps && l3 >= eps ? l1 * a.z + l2 * b.z + l3 * c.z : null;
 }
+// Surfaces revêtues dessinées (chaussées, îlots : anneaux de points, règle de remplissage) : aucun talus n'y est
+// apparent. Elles complètent les plates-formes des coupes en travers là où celles-ci ne couvrent pas le revêtement
+// (évasements et raccordements des branches de carrefour, tourne-à-droite, anneau entre deux branches…). Test du point
+// par demi-droite horizontale, les côtés étant rangés par bandes de 2 m.
+class Areas {
+  constructor(areas = [], band = 2) {
+    this.band = band;
+    this.list = areas.filter((A) => A?.rings?.length).map((A) => {
+      const bands = new Map(); let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const r of A.rings) for (let i = 0; i < r.length; i++) {
+        const a = r[i], b = r[(i + 1) % r.length];
+        if (a.y === b.y) continue;
+        x0 = Math.min(x0, a.x); x1 = Math.max(x1, a.x); y0 = Math.min(y0, a.y); y1 = Math.max(y1, a.y);
+        for (let k = Math.floor(Math.min(a.y, b.y) / band); k <= Math.floor(Math.max(a.y, b.y) / band); k++) { if (!bands.has(k)) bands.set(k, []); bands.get(k).push([a, b]); }
+      }
+      return { bands, x0, y0, x1, y1, evenodd: A.rule !== 'nonzero' };
+    });
+  }
+  inside(x, y) {
+    for (const A of this.list) {
+      if (x < A.x0 || x > A.x1 || y < A.y0 || y > A.y1) continue;
+      let wn = 0, nc = 0;
+      for (const [a, b] of A.bands.get(Math.floor(y / this.band)) || []) {
+        if ((a.y > y) === (b.y > y)) continue;
+        if (a.x + ((y - a.y) * (b.x - a.x)) / (b.y - a.y) <= x) continue;
+        nc++; wn += b.y > a.y ? 1 : -1;
+      }
+      if (A.evenodd ? nc % 2 === 1 : wn !== 0) return true;
+    }
+    return false;
+  }
+}
 class Regions {
-  constructor(cell = 10) { this.cell = cell; this.grid = new Map(); this.tris = []; }
+  constructor(cell = 10, areas = null) { this.cell = cell; this.grid = new Map(); this.tris = []; this.areas = areas; }
   add(a, b, c, kind, cid) {
     const t = { a, b, c, kind, cid }, i = this.tris.push(t) - 1, k = this.cell;
     const x0 = Math.floor(Math.min(a.x, b.x, c.x) / k), x1 = Math.floor(Math.max(a.x, b.x, c.x) / k);
@@ -80,6 +112,7 @@ class Regions {
   // Le point (x, y) du talus de l'axe cid, de cote z et de nature br, est-il apparent ? (cid2 : second axe ignoré,
   // pour la ligne de rencontre de deux talus)
   visible(x, y, z, br, cid, cid2 = cid) {
+    if (this.areas?.inside(x, y)) return false;
     const list = this.grid.get(Math.floor(x / this.cell) + ',' + Math.floor(y / this.cell));
     if (!list) return true;
     for (const i of list) {
@@ -181,7 +214,7 @@ function meetLines(R) {
 }
 
 // ------------------------------------------------------------------------------------------------ dessin
-// corridors : [{ id, rows: [{ L, R }], closed, plat (contour de plate-forme, facultatif) }] ; masks : polygones [{ x, y }] (tabliers) ; opts : { esp }.
+// corridors : [{ id, rows: [{ L, R }], closed, plat (contour de plate-forme, facultatif) }] ; masks : polygones [{ x, y }] (tabliers) ; opts : { esp, areas }.
 // Rend { prims, n: { barbules, meet } } : hachures TALUS (rôle R ou D), bords TALUS (rôle crete), rencontre de deux
 // talus (TALUS, rôle inter) et EET (calque EET).
 // Plates-formes et talus des couloirs dans l'index des régions (triangles cotés).
@@ -220,8 +253,9 @@ export function earthworkIndex(corridors) {
     },
   };
 }
+// opts.areas : surfaces revêtues [{ rings: [[{ x, y }]], rule }] où le talus est masqué.
 export function talusPrims(corridors, masks = [], opts = {}) {
-  const esp = Math.max(0.5, +opts.esp || 2), R = new Regions(10);
+  const esp = Math.max(0.5, +opts.esp || 2), R = new Regions(10, opts.areas?.length ? new Areas(opts.areas) : null);
   fillRegions(R, corridors);
   const flat = (p) => ({ x: p.x, y: p.y, z: 0 });
   for (const poly of masks) if (poly?.length > 2) for (let i = 1; i + 1 < poly.length; i++) R.add(flat(poly[0]), flat(poly[i]), flat(poly[i + 1]), 'P', -1);
