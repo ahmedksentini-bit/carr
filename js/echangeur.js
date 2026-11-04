@@ -595,7 +595,7 @@ export function buildEchangeur(prj, D) {
     }
     // Sommets : le premier est projeté sur la ligne d'obliquité du divergent, le dernier sur celle du convergent ;
     // les distances sont augmentées jusqu'à obtenir un alignement droit ≥ Lm (prolongement de l'obliquité, § 6.1).
-    const up = rp.pis.map((p) => ({ x: +p.x, y: +p.y, R: num(p.R, 0), A: num(p.A, 0), loop: !!p.loop, link: !!p.link, semi: !!p.semi }));
+    const up = rp.pis.map((p) => ({ x: +p.x, y: +p.y, R: num(p.R, 0), A: num(p.A, 0), loop: !!p.loop, link: !!p.link, semi: !!p.semi, tg: !!p.tg }));
     // Extrémité libre raccordée à un giratoire (branche dessinée automatiquement) : l'axe s'arrête au bout de la branche.
     const cut = rp.r?.cut;
     if (cut && up.length) { const k = cut.end === 'from' && !Fs ? 0 : cut.end === 'to' && !Ft ? up.length - 1 : -1; if (k >= 0) up[k] = { ...up[k], x: cut.x, y: cut.y, R: 0, A: 0 }; }
@@ -698,7 +698,7 @@ export function buildEchangeur(prj, D) {
       if (t.term) continue; // arc d'extrémité (chaussée en courbe) : prolongement de l'obliquité, pas une courbe de la bretelle
       const g = curves[curves.length - 1];
       if (g && t.link && t.sg === g.sg) { g.defl += t.defl; g.L2 = t.L2; g.last = t.i; g.loop = g.loop || t.loop; g.R = Math.min(g.R, t.R); g.Rs.push(t.R); g.Rlast = t.R; }
-      else curves.push({ i: t.i, last: t.i, R: t.R, Rs: [t.R], Rfirst: t.R, Rlast: t.R, sg: t.sg, defl: t.defl, L1: t.L1, L2: t.L2, A: t.A, loop: t.loop, semi: t.semi, linkIn: !!t.link });
+      else curves.push({ i: t.i, last: t.i, R: t.R, Rs: [t.R], Rfirst: t.R, Rlast: t.R, sg: t.sg, defl: t.defl, L1: t.L1, L2: t.L2, A: t.A, loop: t.loop, semi: t.semi, tg: !!t.tg, linkIn: !!t.link });
     }
     curves.forEach((g, j) => { g.linkOut = !!curves[j + 1]?.linkIn; });
     for (const g of curves) { g.loop = g.loop || (g.defl >= (150 * Math.PI) / 180 && !g.semi); g.L = Math.min(g.L1, g.L2); }
@@ -733,7 +733,7 @@ export function buildEchangeur(prj, D) {
         const ra = rIn(c.Rs[q - 1]), rb = rIn(c.Rs[q]);
         if (Math.abs(ra - rb) > 1e-6 && !(C.branche ? ra <= 1.5 * rb && rb <= 1.5 * ra : ra < 2 * rb && rb < 2 * ra)) warn(`${tag} : courbe composée Ri ${fmt(ra)} → ${fmt(rb)} m : rapport ${C.branche ? '≤ 1,5' : '< 2'} requis (§ 3.2.2).`);
       }
-      if (j > 0) {
+      if (j > 0 && !curves[j - 1].tg && !c.tg) { // virages de la tige d'une trompette : ceux de la voie secondaire
         const R1 = rIn(curves[j - 1].R), R2 = Rr;
         const okSeq = R2 >= 1.5 * C.Rdn || (C.branche ? R1 <= 1.5 * R2 : R1 < 2 * R2);
         if (!okSeq) warn(`enchaînement PI ${curves[j - 1].last} → PI ${c.i} : Ri1 = ${fmt(R1)} m, Ri2 = ${fmt(R2)} m ne respecte pas ${C.branche ? 'R1 ≤ 1,5 R2' : 'R1 < 2 R2'} (§ 3.2.2).`);
@@ -1070,17 +1070,66 @@ function onRealDiv(hw, s, sgn, yA, p3, Pw) {
   const S1 = add(G.pathPointAt(hw.path, sx), mul(nLs, -yA)), d = norm(sub(tLs, mul(nLs, p3)));
   return add(S1, mul(d, G.dot(sub(Pw, S1), d)));
 }
+// Polyligne de sommets { x, y, R } décalée de d (> 0 : à droite du sens de parcours) : sommets sur les bissectrices,
+// rayons concentriques (R + d à l'extérieur d'un virage, R − d à l'intérieur).
+function offsetPIs(pts, d) {
+  const rn = (t) => ({ x: t.y, y: -t.x }), n = pts.length, out = [];
+  for (let i = 0; i < n; i++) {
+    const p = pts[i], tIn = i ? norm(sub(p, pts[i - 1])) : null, tOut = i < n - 1 ? norm(sub(pts[i + 1], p)) : null;
+    if (!tIn || !tOut) { const q = add(p, mul(rn(tIn || tOut), d)); out.push({ ...p, x: +q.x.toFixed(3), y: +q.y.toFixed(3) }); continue; }
+    const n1 = rn(tIn), m = norm(add(n1, rn(tOut))), q = add(p, mul(m, d / Math.max(0.2, G.dot(m, n1))));
+    const R = +p.R > 0 ? Math.max(1, Math.round((+p.R + (G.cross(tIn, tOut) > 0 ? d : -d)) * 1000) / 1000) : p.R;
+    out.push({ ...p, x: +q.x.toFixed(3), y: +q.y.toFixed(3), R });
+  }
+  return out;
+}
+// Axe de la tige d'une trompette sur une voie secondaire saisie : depuis le croisement P0 (direction uW, vers la voirie
+// ordinaire), les sommets de la voie (rayons appliqués) jusqu'à la longueur L le long de l'axe, l'extrémité étant
+// reportée hors des raccordements. null : voie en ligne droite sur L (tige droite) ; { err } : voie non rectiligne au
+// droit de l'ouvrage.
+function tigeAxis(road, P0, uW, L, Lstraight) {
+  const ax = road?.H?.axis || [];
+  if (ax.length < 2) return null;
+  let i0 = -1;
+  for (let i = 0; i + 1 < ax.length && i0 < 0; i++) {
+    const a = ax[i], b = ax[i + 1], l = dist(a, b); if (l < 1e-6) continue;
+    const dd = norm(sub(b, a)), t = G.dot(sub(P0, a), dd);
+    if (t >= -1 && t <= l + 1 && Math.abs(G.cross(dd, sub(P0, a))) < 2.5) i0 = i;
+  }
+  if (i0 < 0) return null;
+  const fwd = G.dot(norm(sub(ax[i0 + 1], ax[i0])), uW) > 0;
+  const idx = fwd ? ax.map((_, i) => i).slice(i0 + 1) : ax.map((_, i) => i).slice(0, i0 + 1).reverse();
+  const fit = new Map((road.fit || []).map((f) => [f.i, f.r]));
+  const radius = (i) => (fit.has(i) ? +fit.get(i) : +ax[i].r || 0);
+  const pts = [{ x: P0.x, y: P0.y }];
+  let acc = 0, prev = P0;
+  for (let j = 0; j < idx.length; j++) {
+    const i = idx[j], V = ax[i], nxt = idx[j + 1] != null ? ax[idx[j + 1]] : null, dV = acc + dist(prev, V);
+    if (!nxt) { // fin de l'axe saisi : la tige va jusqu'à L (dans le prolongement du dernier alignement s'il le faut)
+      pts.push(add(prev, mul(norm(sub(V, prev)), Math.max(L - acc, 1))));
+      return pts.length > 2 ? { pts } : null;
+    }
+    const d1 = norm(sub(V, prev)), d2 = norm(sub(nxt, V)), defl = Math.acos(G.clamp(G.dot(d1, d2), -1, 1)), R = radius(i);
+    const T = R > 0 && defl > 1e-4 ? R * Math.tan(defl / 2) : 0;
+    if (defl < 1e-4 || !(R > 0)) { acc = dV; prev = V; continue; } // sommet sans déviation
+    if (dV - T >= L) { pts.push(add(prev, mul(d1, L - acc))); return pts.length > 2 ? { pts } : null; } // tige achevée avant ce virage
+    if (j === 0 && dV - T < Lstraight) return { err: `la voie secondaire doit rester en alignement droit sur au moins ${fmt(Lstraight, 0)} m après l'ouvrage (premier sommet à ${fmt(dV, 0)} m, raccordement R ${fmt(R, 0)} m dès ${fmt(dV - T, 0)} m)` };
+    pts.push({ x: V.x, y: V.y, R });
+    acc = dV; prev = V; L = Math.max(L, dV + T + 10); // extrémité hors du raccordement
+  }
+  return pts.length > 2 ? { pts } : null;
+}
 export function trumpet(prj, D, click, mkId, opt = {}) {
   const hw = D?.hwy;
   if (!hw?.ok) return { err: 'Dessinez d\'abord l\'axe de l\'autoroute.' };
   const pr = pathProject(hw.path, click);
   if (!pr) return { err: 'Point non reconnu.' };
   // Ouvrage : croisement avec la route transversale dessinée la plus proche du clic, sinon point cliqué (tige ⟂).
-  let s0 = pr.s, P0 = pr.p, tigeW = null;
+  let s0 = pr.s, P0 = pr.p, tigeW = null, kX = null;
   const sgn = pr.off >= 0 ? 1 : -1;
   {
     const X0 = crossingWith(D, click, opt.crossK);
-    if (X0 && (opt.crossK != null || X0.d < 300)) { s0 = X0.s; P0 = X0.P0; tigeW = X0.dir; }
+    if (X0 && (opt.crossK != null || X0.d < 300)) { s0 = X0.s; P0 = X0.P0; tigeW = X0.dir; kX = X0.k; }
   }
   const t = pathTangentAt(hw.path, s0), tL = sgn > 0 ? t : neg(t), nL = rot90(tL);
   const W = (q) => { const r = add(P0, add(mul(tL, q.x), mul(nL, q.y))); return { x: +r.x.toFixed(3), y: +r.y.toFixed(3) }; };
@@ -1174,8 +1223,17 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
   }
   if (!best) best = cands[0]; // aucun candidat recalé sans chevauchement : le message d'erreur de la S-semi suivra
   const sEnd = add(Rp, mul(u, Ys));
+  // Tige sur la voie secondaire saisie (courbe) : elle en suit l'axe, sommets et rayons compris (voie droite de la tige
+  // = S-semi, à off2 à droite de l'axe ; sommets marqués tg) ; la boucle en est déduite (voie gauche).
+  let tigeTail = [W(sEnd)];
+  if (tigeW && kX != null) {
+    const uW = add(mul(tL, u.x), mul(nL, u.y)), sinP = Math.max(0.3, u.y);
+    const TA = tigeAxis(D.crosses?.[kX], P0, uW, Ys, Math.max(60, (hw.E2 + (hw.H?.berme ?? 1)) / sinP + 40));
+    if (TA?.err) return { err: `Trompette : ${TA.err}.` };
+    if (TA?.pts) tigeTail = offsetPIs(TA.pts, off2).slice(1).map((q) => ({ x: q.x, y: q.y, ...(+q.R > 0 ? { R: q.R, A: Amin(q.R) } : {}), tg: 1 }));
+  }
   const B2 = { ...base, id: ids[1], name: 'S-semi', from: { ref: far, s: st(best.xS), biseau: '', obl: '', tpl: '' }, to: { ref: 'free' },
-    pis: [{ ...W(best.P1), R: R1, A: A1 }, { ...W(best.P2), R: R2, A: A2, semi: true }, W(sEnd)] };
+    pis: [{ ...W(best.P1), R: R1, A: A1 }, { ...W(best.P2), R: R2, A: A2, semi: true }, ...tigeTail] };
   const alS = buildAlignment([{ x: best.xS, y: -yA }, { ...best.P1, R: R1, A: A1 }, { ...best.P2, R: R2, A: A2 }, sEnd]);
   // 4. Bretelles directes : raccordées à la tige à yM le long de la tige (insertion de 100 + 75 m sur S-semi).
   const xSd = PId.x + Math.max(Ld, 140 + TdS + 25) - 10.5, xEd = PIe.x - Math.max(Ld, 140 + TdE + 25) + 10.5;
@@ -1204,7 +1262,9 @@ export function trumpet(prj, D, click, mkId, opt = {}) {
 export function deriveTrumpet(prj, D, semi, prev, opt = {}) {
   const hw = D?.hwy;
   if (!hw?.ok) return { err: 'Axe de l\'autoroute absent.' };
-  const pis = semi.pis || [];
+  // Tige courbe (sommets tg, sur l'axe de la voie secondaire) : le premier sommet tg termine la partie droite qui franchit
+  // l'autoroute (« cœur » de la S-semi) ; les suivants prolongent la tige le long de la voie.
+  const all = semi.pis || [], iT = all.findIndex((q) => q.tg), pis = iT >= 2 ? all.slice(0, iT + 1) : all, tail = iT >= 2 ? all.slice(iT + 1) : [];
   if (pis.length < 3 || !(+pis[pis.length - 2].R > 0)) return { err: 'S-semi incomplète (il faut R1, R2 et l\'extrémité de la tige).' };
   const far = semi.from?.ref, sgn = far === 'hwy2' ? -1 : 1, near = far === 'hwy2' ? 'hwy1' : 'hwy2';
   const w = 3.5, half = w / 2, yA = hw.E1 + 1 + half, off2 = half + tigeTpc(prj, opt) / 2, p3 = 0.03, g = Math.max(0, opt.gap ?? 0);
@@ -1345,7 +1405,13 @@ export function deriveTrumpet(prj, D, semi, prev, opt = {}) {
   }
   if (!PIl || -yA - Cl.y < rhoL * nn + 0.5 || xE - PIl.x < 100) return { err: 'La boucle déduite ne tient pas sous la chaussée : la grande courbe de la S-semi est trop proche de l\'autoroute.' };
   if (xE - PIl.x > 300) return { err: `Grande courbe de la S-semi trop éloignée de l'autoroute : la boucle, concentrique, ne rejoindrait la chaussée qu'à ${fmt(xE - PIl.x, 0)} m de l'ouvrage.` };
-  const loopPis = [W(tStart), { ...W(PIl), R: Rl, A: Al, loop: true }];
+  // Tige courbe : voie gauche = voie droite (S-semi) décalée de 2·off2 vers la gauche, parcourue en sens inverse.
+  let leftTail = null;
+  if (tail.length) {
+    const rightLane = [W(Rp), { ...Ew }, ...tail].map((q) => ({ x: +q.x, y: +q.y, ...(+q.R > 0 ? { R: +q.R } : {}) }));
+    leftTail = offsetPIs(rightLane, -2 * off2).slice(1).reverse().map((q) => ({ x: q.x, y: q.y, ...(+q.R > 0 ? { R: q.R, A: Amin(q.R) } : {}), tg: 1 }));
+  }
+  const loopPis = leftTail ? [...leftTail, { ...W(PIl), R: Rl, A: Al, loop: true }] : [W(tStart), { ...W(PIl), R: Rl, A: Al, loop: true }];
   const boucle = { ...base, ...prev.boucle, from: { ref: 'free' }, to: { ...(prev.boucle?.to || {}), ref: far, s: st(xE), Rt: Rt ? +Rt.toFixed(3) : '', Lt: Lt ? +Lt.toFixed(3) : '' }, pis: loopPis };
   // Bretelles directes (mêmes règles qu'à la création).
   const Ld = opt.Ldir || 300, Rd = opt.Rd || 120, Ad = opt.Ad || 80;
@@ -1355,8 +1421,14 @@ export function deriveTrumpet(prj, D, semi, prev, opt = {}) {
   const xSd = PId.x + Math.max(Ld, 140 + TdS + 25) - 10.5, xEd = PIe.x - Math.max(Ld, 140 + TdE + 25) + 10.5;
   const sdir = { ...base, ...prev.sdir, from: { ...(prev.sdir?.from || {}), ref: near, s: st(xSd) }, to: { ...(prev.sdir?.to || {}), ref: semi.id, s: +(alS.length - (Ys - yM)).toFixed(2) }, pis: [{ ...W(PId), R: Rd, A: Ad }] };
   // Tige raccourcie par une branche de giratoire (extrémité dans l'anneau) : la boucle commence plus bas sur la tige.
-  const cutB = prev.boucle?.cut, YsB = cutB && cutB.end === 'from' ? G.dot(Lc(cutB), u) : Ys;
-  const edir = { ...base, ...prev.edir, from: { ...(prev.edir?.from || {}), ref: boucle.id, s: +(YsB - (yME + 5)).toFixed(2) }, to: { ...(prev.edir?.to || {}), ref: near, s: st(xEd) }, pis: [{ ...W(PIe), R: Rd, A: Ad }] };
+  const cutB = prev.boucle?.cut;
+  let YsB = cutB && cutB.end === 'from' ? G.dot(Lc(cutB), u) : Ys;
+  if (leftTail) { // tige courbe : abscisse du croisement le long de la boucle (depuis son origine, ou la coupure)
+    const alB = buildAlignment([...loopPis.map((q) => ({ ...Lc(q), R: +q.R || 0, A: +q.A || 0, loop: !!q.loop })), { x: xE, y: -yA }]);
+    const sX = alB.path?.length ? pathProject(alB.path, Lp)?.s : null, sC = cutB && cutB.end === 'from' && alB.path?.length ? pathProject(alB.path, Lc(cutB))?.s ?? 0 : 0;
+    if (Number.isFinite(sX)) YsB = sX - sC;
+  }
+  const edir = { ...base, ...prev.edir, from: { ...(prev.edir?.from || {}), ref: boucle.id, s: +(YsB - (yME + 5 + (leftTail ? 12 : 0))).toFixed(2) }, to: { ...(prev.edir?.to || {}), ref: near, s: st(xEd) }, pis: [{ ...W(PIe), R: Rd, A: Ad }] };
   const R1 = +pis[0].R || 0;
   return { boucle, sdir, edir, P0, info: `S-semi R1 ${fmt(R1)} / R2 ${fmt(R2)} m → boucle déduite R ${fmt(Rl)} m (Ri ${fmt(Rl - half)} m)` };
 }
