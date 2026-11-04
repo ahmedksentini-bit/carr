@@ -1997,11 +1997,11 @@ function linkBranchesToRoads() {
       let best = null;
       for (const j of jl) { // portée : celle d'un raccordement, ou l'extrémité des branches dessinées (+ 30 m)
         const reach = Math.max(j.R + PS_LB + 40, ...(j.J.branches || []).map((q) => Math.max(...(q.axis || []).map((v) => G.dist(v, j.C))) + 30));
-        const d = G.dist(E, j.C); if (d > j.R && d < reach && (!best || d < best.d)) best = { j, d };
+        const d = G.dist(E, j.C); if (d < reach && (!best || d < best.d)) best = { j, d }; // extrémité dans l'anneau (voire au centre) comprise
       }
       if (!best) continue;
       const j = best.j, u = G.norm(G.sub(Q, j.C));
-      if (G.dot(G.norm(G.sub(E, Q)), G.norm(G.sub(j.C, E))) < 0.7) continue; // la route ne se dirige pas vers le carrefour
+      if (best.d > j.R && G.dot(G.norm(G.sub(E, Q)), G.norm(G.sub(j.C, E))) < 0.7) continue; // la route ne se dirige pas vers le carrefour
       const linked = (j.J.branches || []).some((b) => { if (b.src !== 'x:' + X.id) return false; const a = b.axis || []; if (a.length < 2) return false; const far = G.dist(a[0], j.C) >= G.dist(a[a.length - 1], j.C) ? a[0] : a[a.length - 1]; return G.dot(G.norm(G.sub(far, j.C)), u) > Math.cos(Math.PI / 9); });
       if (linked) continue;
       const Lb = Math.min(PS_LB, G.dist(Q, j.C) - j.R - 15);
