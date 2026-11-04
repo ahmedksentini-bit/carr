@@ -170,7 +170,7 @@ export function planParams(prj) {
   const tVis = num(p.tVis, (regime === 'stop' ? 8 : 10) + (tag.on ? 1 : 0));
   const dObs = num(p.dObs, regime === 'stop' ? 4 : 15);
   return {
-    main: p.main || ['', ''], wLane, nLanes, camber: num(p.camber, d.camber), pente: p.pente ?? '', regime,
+    main: p.main || ['', ''], mainTpc: num(p.mainTpc, 0), wLane, nLanes, camber: num(p.camber, d.camber), pente: p.pente ?? '', regime,
     v85: num(p.v85, d.v85), tVis, dObs, tag, c, epure: p.epure ?? d.epure,
   };
 }

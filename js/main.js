@@ -305,6 +305,7 @@ function update({ commit = true, panels = true } = {}) {
     try { S.checks = checkDesign(S.prj, S.D); } catch (e) { console.error(e); S.checks = []; }
     S.Do = otherDesigns();
   }
+  for (const msg of S.roadWarns || []) S.checks.push({ lvl: 'warn', msg });
   S.ouvr = null; S.cadres = [];
   let CG = [];
   if (S.D) try { CG = cadreGeoms(S.prj, S.D); } catch (e) { console.error(e); }
@@ -1959,29 +1960,44 @@ function applyProfile(b, P) {
 function setPlanMain(J, arms) {
   const P = roadProfile(arms[0].src);
   J.plan = { ...J.plan, main: [arms[0].id, arms[1].id] };
-  if (P) { J.plan.nLanes = P.lanes; J.plan.wLane = P.wLane; J.section = { ...J.section, bdd: P.bdd, berme: P.berme }; J.plan.srcSig = profSig(P); }
+  if (P) { J.plan.nLanes = P.lanes; J.plan.wLane = P.wLane; J.plan.mainTpc = P.tpc || 0; J.section = { ...J.section, bdd: P.bdd, berme: P.berme }; J.plan.srcSig = profSig(P); }
 }
-// Une voie secondaire prolongée par une branche de carrefour (branche issue de la voie, src) commence là où la branche
-// finit : la longueur de la branche dépend du carrefour (îlot, débouché, zone de tourne-à-gauche…), l'extrémité de la
-// voie glisse sur son dernier alignement — celui que la branche prolonge — pour qu'il n'y ait ni lacune ni recouvrement.
+// Axe d'origine d'une branche : voie secondaire « x:id », ou voie principale « hwy » quand c'est une route (coupable).
+const roadOf = (src) => (src === 'hwy' ? (S.prj.hwy?.on && S.prj.hwy.kind === 'route' ? S.prj.hwy : null) : src?.startsWith('x:') ? S.prj.crosses.find((c) => c.id === src.slice(2)) || null : null);
+// Une route prolongée par une branche de carrefour (branche issue de la route, src) commence là où la branche finit : la
+// longueur de la branche dépend du carrefour (îlot, évasement, zone de tourne-à-gauche…), l'extrémité de la route glisse
+// sur son dernier alignement — celui que la branche prolonge — pour qu'il n'y ait ni lacune ni recouvrement. Si la place
+// manque (deux carrefours trop proches, losange à giratoires…), rien n'est déplacé et un avertissement l'indique.
 function syncRoadEnds() {
-  let n = 0;
+  const moves = new Map(), warns = [];
   const list = [{ J: S.prj, D: S.D }, ...(S.prj.others || []).map((o) => ({ J: o, D: (S.Do || []).find((d) => d.id === o.id)?.D }))];
   for (const { J, D } of list) {
     if (!D?.O || !D.branches) continue;
     for (const bd of D.branches) {
-      const b = J.branches?.[bd.idx], X = b?.src?.startsWith('x:') && !b.gen ? S.prj.crosses.find((c) => c.id === b.src.slice(2)) : null;
+      const b = J.branches?.[bd.idx], X = roadOf(b?.src);
       if (!X || X.on === false || (X.axis || []).length < 2) continue;
       const T = bd.role === 'principale' ? (bd.entry?.F && bd.exit?.F ? G.lerp(bd.entry.F, bd.exit.F, 0.5) : null) : bd.farAxis;
       if (!T) continue;
       const ax = X.axis, iE = G.dist(ax[0], D.O) <= G.dist(ax[ax.length - 1], D.O) ? 0 : ax.length - 1, Q = ax[iE ? iE - 1 : 1];
-      if (G.dist(ax[iE], T) < 0.05) continue;
-      if (G.dot(G.norm(G.sub(T, D.O)), G.norm(G.sub(ax[iE], D.O))) < 0.98) continue; // branche de l'autre côté (losange : deux branches de la même voie)
-      const v = G.norm(G.sub(ax[iE], Q)), off = Math.abs(G.cross(v, G.sub(T, Q))), along = G.dot(G.sub(T, Q), v);
-      if (off > 0.5 || along < 15 || G.dist(ax[iE], T) > 300) continue; // hors du prolongement : rien n'est imposé
-      ax[iE] = { ...ax[iE], ...r3p(T) }; n++;
+      if (G.dot(G.norm(G.sub(T, D.O)), G.norm(G.sub(ax[iE], D.O))) < 0.98) continue; // branche de l'autre côté du carrefour
+      const v = G.norm(G.sub(ax[iE], Q));
+      if (Math.abs(G.cross(v, G.sub(T, Q))) > 0.5 || G.dist(ax[iE], T) > 400) continue; // hors du prolongement : rien n'est imposé
+      if (!moves.has(X)) moves.set(X, {});
+      moves.get(X)[iE] = T;
     }
   }
+  let n = 0;
+  for (const [X, m] of moves) {
+    const old = X.axis, ax = old.map((q) => ({ ...q }));
+    for (const [i, T] of Object.entries(m)) ax[i] = { ...ax[i], ...r3p(T) };
+    if (Object.keys(m).every((i) => G.dist(ax[i], old[i]) < 0.05)) continue;
+    const bad = [0, ax.length - 1].map((i) => { const j = i ? i - 1 : 1; return G.dot(G.sub(old[i], old[j]), G.sub(ax[i], ax[j])) > 0 ? 15 - G.dist(ax[i], ax[j]) : 15 + G.dist(ax[i], ax[j]); }).filter((x) => x > 0);
+    if (bad.length) { warns.push(`${X.name || 'Voie principale'} : les branches de carrefour qui la prolongent la recouvrent (${fmt(Math.max(...bad), 0)} m de trop sur son dernier alignement) — éloignez les carrefours ou raccourcissez leurs branches (îlot, évasement).`); continue; }
+    const d0 = m[0] ? G.dot(G.sub(old[0], ax[0]), G.norm(G.sub(old[1], old[0]))) : 0; // allongement à l'origine
+    X.axis = ax; n++;
+    if (Math.abs(d0) > 1e-3) shiftAxisStations(X === S.prj.hwy ? { t: 'hwy' } : { t: 'cross', i: S.prj.crosses.indexOf(X) }, d0); // PK et accroches conservés
+  }
+  S.roadWarns = warns;
   return n;
 }
 // Carrefour devenu plan (T, X) : la route qui le traverse (deux branches issues d'axes, opposées) est la principale.
@@ -2002,7 +2018,7 @@ function syncRoadProfiles() {
       if (!b.src) continue;
       const P = roadProfile(b.src);
       if (!P) continue;
-      if (main.includes(b.id)) { if (J.plan.srcSig !== profSig(P)) { J.plan.nLanes = P.lanes; J.plan.wLane = P.wLane; J.section = { ...J.section, bdd: P.bdd, berme: P.berme }; J.plan.srcSig = profSig(P); } }
+      if (main.includes(b.id)) { if (J.plan.srcSig !== profSig(P)) { J.plan.nLanes = P.lanes; J.plan.wLane = P.wLane; J.plan.mainTpc = P.tpc || 0; J.section = { ...J.section, bdd: P.bdd, berme: P.berme }; J.plan.srcSig = profSig(P); } }
       else if (b.srcSig !== profSig(P)) applyProfile(b, P);
     }
   }
@@ -2014,7 +2030,7 @@ function armsOnRoad(j, r) {
   const arms = [];
   r.E.forEach((E, i) => {
     if (!E) return;
-    const b = addArm(j, G.norm(G.sub(E, j.C)), PS_LB, { src: r.ids[i] ? 'x:' + r.ids[i] : null });
+    const b = addArm(j, G.norm(G.sub(E, j.C)), PS_LB, { src: r.ids[i] === 'hwy' ? 'hwy' : r.ids[i] ? 'x:' + r.ids[i] : null });
     if (b) arms.push(b);
   });
   if (j.plan && arms.length === 2) setPlanMain(j.J, arms);
@@ -2066,6 +2082,9 @@ function splitCross(m, sP, d, C = null) {
     const Y = { ...clone(X), id: uid(), name: `${X.name} ${tag}`, axis: other };
     S.prj.crosses.push(Y);
     ids = keep2 ? [Y.id, X.id] : [X.id, Y.id];
+    // PK continus : le tronçon qui suit la coupure commence au PK de son origine sur l'ancien axe
+    const pk0 = parseNum(String(X.pk0 ?? '')) || 0, sA = oldPath ? pathProject(oldPath, p2[0])?.s ?? s2 : s2, Z = keep2 ? X : Y;
+    Z.pk0 = String(+(pk0 + sA).toFixed(3));
     if (pis.length) { S.prj.axpl[`x:${X.id}`].pis = piMine; S.prj.axpl[`x:${Y.id}`] = { pis: piOther }; }
   } else if (p1) X.axis = p1;
   else if (p2) { X.axis = p2; if (pis.length) S.prj.axpl[`x:${X.id}`].pis = piS2; }
@@ -2078,11 +2097,72 @@ function splitCross(m, sP, d, C = null) {
   }
   return { E: [p1 ? p1[p1.length - 1] : null, p2 ? p2[0] : null], nk, ids };
 }
+// Voie principale de type route coupée de part et d'autre de l'abscisse sP (polyligne des sommets) à ± d : le tronçon
+// d'origine reste la voie principale (PK conservés), la suite devient une voie secondaire de même profil (PK continus) ;
+// bretelles accrochées, profil en long et ouvrages de la suite la suivent. Extrémités dans l'axe du centre C.
+function splitHwy(sP, d, C) {
+  const H = S.prj.hwy, pts = H.axis.map((q) => ({ ...q })), L = polyS(pts), Ltot = L[L.length - 1];
+  const s1 = sP - d, s2 = sP + d;
+  const p1 = s1 > 20 ? [...pts.filter((q, i) => L[i] < s1 - 5), { ...r3p(polyAt(pts, L, s1)), r: '' }] : null;
+  const p2 = Ltot - s2 > 20 ? [{ ...r3p(polyAt(pts, L, s2)), r: '' }, ...pts.filter((q, i) => L[i] > s2 + 5)] : null;
+  if (!p1 && !p2) return null;
+  if (p1) p1[0] = { ...p1[0], r: '' }; if (p2) p2[p2.length - 1] = { ...p2[p2.length - 1], r: '' };
+  for (const [q, iE, iQ] of [[p1, p1 ? p1.length - 1 : 0, p1 ? p1.length - 2 : 0], [p2, 0, 1]]) {
+    if (!q || q.length < 2 || G.dist(q[iQ], C) < d + 15) continue;
+    q[iE] = { ...r3p(G.add(C, G.mul(G.norm(G.sub(q[iQ], C)), d))), r: '' };
+  }
+  const dn = Math.max(0, +(S.prj.pt?.dev ?? 2.5) || 2.5), oldPath = S.D?.hwy?.path;
+  const sOld = (P) => (oldPath ? pathProject(oldPath, P)?.s ?? 0 : 0);
+  // accroches à reporter : bretelles (hwy1 / hwy2), ouvrages sur l'axe, points du profil en long
+  const hooks = [], cads = [];
+  if (oldPath) {
+    for (const r of S.prj.ramps || []) for (const e of [r.from, r.to]) { const m = /^hwy([12])$/.exec(e?.ref || ''); if (m && e.s !== '' && e.s != null) hooks.push({ e, sens: +m[1], P: G.pathPointAt(oldPath, +e.s) }); }
+    for (const c of S.prj.cadres || []) if (c.axis === 'hwy' && c.s !== '' && c.s != null) cads.push({ c, P: G.pathPointAt(oldPath, +c.s) });
+  }
+  const pis = S.prj.axpl?.hwy?.pis || [], sA = p2 ? sOld(p2[0]) : 0, pk0 = +H.pk0 || 0;
+  let ids = [null, null], nk = -1;
+  if (p1) {
+    H.axis = p1; ids[0] = 'hwy';
+    if (p2) {
+      nk = S.prj.crosses.length;
+      const Y = { ...newCross(nk), kind: 'route', name: `${H.name || 'Voie principale'} (suite)`, dcat: H.dcat || '', V: H.V ?? '', lanes: H.lanes ?? '', wLane: H.wLane ?? '', bau: H.bau ?? '', bdg: H.bdg ?? '', median: H.median ?? '', berme: H.berme ?? '', pk0: Math.round((pk0 + sA) * 100) / 100, axis: p2 };
+      S.prj.crosses.push(Y); ids[1] = Y.id;
+      if (pis.length) { S.prj.axpl.hwy.pis = pis.filter((q) => +q.s < s1); S.prj.axpl[`x:${Y.id}`] = { pis: pis.filter((q) => +q.s > s2).map((q) => ({ ...q, s: Math.round((+q.s - sA) * 10) / 10 })) }; }
+    } else if (pis.length) S.prj.axpl.hwy.pis = pis.filter((q) => +q.s < s1);
+  } else { // carrefour près de l'origine : la voie principale commence après lui
+    H.axis = p2; ids[1] = 'hwy'; H.pk0 = Math.round((pk0 + sA) * 100) / 100;
+    if (pis.length) S.prj.axpl.hwy.pis = pis.filter((q) => +q.s > s2).map((q) => ({ ...q, s: Math.round((+q.s - sA) * 10) / 10 }));
+  }
+  const paths = [['hwy', roadAlignment(hwyParams(S.prj), dn).path], ...(nk >= 0 ? [[nk, roadAlignment(crossParams(S.prj, nk), dn).path]] : [])];
+  const nearest = (P) => { let best = null; for (const [k2, path] of paths) { const pr = pathProject(path, P); if (pr && (!best || pr.d < best.d)) best = { k2, pr }; } return best; };
+  for (const h of hooks) { const b = nearest(h.P); if (b) { h.e.ref = b.k2 === 'hwy' ? 'hwy' + h.sens : xref(b.k2, h.sens); h.e.s = Math.round(b.pr.s * 100) / 100; } }
+  for (const q of cads) { const b = nearest(q.P); if (b) { q.c.axis = b.k2 === 'hwy' ? 'hwy' : `x:${S.prj.crosses[b.k2].id}`; q.c.s = Math.round(b.pr.s * 100) / 100; } }
+  return { E: [p1 ? p1[p1.length - 1] : null, p2 ? p2[0] : null], nk, ids };
+}
 // Carrefour posé (ou déplacé) sur une voie secondaire : la voie est coupée à R + Lb de part et d'autre du centre et y
 // arrive par ses branches ; les extrémités libres des bretelles voisines (losange, demi-échangeur à extrémités libres)
 // sont reportées dans l'anneau, où elles dessinent leur branche, ou au centre d'un carrefour plan.
 function connectJunctionToRoads(j) {
   const msgs = [];
+  // Voie principale : coupée si c'est une route ; une autoroute ne reçoit pas de carrefour à niveau.
+  const H = S.prj.hwy;
+  if (H?.on && (H.axis || []).length >= 2) {
+    const pts = H.axis, L = polyS(pts);
+    let best = null;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i], ab = G.sub(b, a), ll = G.dot(ab, ab) || 1, t = Math.max(0, Math.min(1, G.dot(G.sub(j.C, a), ab) / ll)), q = G.add(a, G.mul(ab, t)), d = G.dist(q, j.C);
+      if (!best || d < best.d) best = { d, s: L[i - 1] + t * Math.sqrt(ll), q };
+    }
+    const atEnd = G.dist(pts[0], j.C) < j.R + PS_LB + 5 || G.dist(pts[pts.length - 1], j.C) < j.R + PS_LB + 5;
+    if (best && best.d <= j.R + 15 && !atEnd) {
+      if (H.kind !== 'route') msgs.push(`${H.name || 'Autoroute'} : pas de carrefour à niveau sur une autoroute — échangeur (onglet Échangeur) ou voie principale de type route`);
+      else {
+        if (j.plan && !(j.J.plan?.main || []).filter((id) => (j.J.branches || []).some((b) => b.id === id)).length && best.d > 0.01) { j.C = r3p(best.q); j.J.center = { ...j.J.center, auto: false, x: j.C.x, y: j.C.y }; }
+        const name = H.name || 'Voie principale', r = splitHwy(best.s, j.R + PS_LB, j.C);
+        if (r) { const nArm = armsOnRoad(j, r); msgs.push(`${name} coupée au droit de ${j.name} (${nArm} branche${nArm > 1 ? 's' : ''} ajoutée${nArm > 1 ? 's' : ''}, tangente${nArm > 1 ? 's' : ''} à la route et de même profil en travers${r.ids[1] && r.ids[1] !== 'hwy' && r.ids[0] ? ` ; au-delà, « ${name} (suite) » est une voie secondaire de même profil` : ''})`); }
+      }
+    }
+  }
   for (let m = 0; m < S.prj.crosses.length; m++) {
     const X = S.prj.crosses[m];
     if (X.on === false || (X.axis || []).length < 2) continue;

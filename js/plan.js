@@ -247,6 +247,17 @@ export function buildPlan(prj, opt = {}) {
       const ext = cont && sd.F.x < xEnd - 1e-6 ? [L(W({ x: xEnd, y: sd.F.y }), W(sd.F))] : [];
       return [...G.revPath(off(d)), ...ext, ...Wp(sd.curb)];
     };
+    // Bords de chaussée : rive (curb) décalée de la BDD — celle du carrefour au droit de la principale, puis transition
+    // linéaire jusqu'à celle de la branche (profil de la route raccordée) à son extrémité.
+    const bddS = pick(b.bdd, sec.bdd), xA = Math.max(xT, xEnd - Math.max(10, 15 * Math.abs(bddS - sec.bdd)));
+    const bddAt = (x) => (x <= xA ? sec.bdd : x >= xEnd ? bddS : sec.bdd + ((bddS - sec.bdd) * (x - xA)) / (xEnd - xA || 1));
+    const same = Math.abs(bddS - sec.bdd) < 1e-6;
+    en.edge = same ? G.offsetPath(en.curb, -sec.bdd) : G.offsetPathVar(en.curb, (q) => -bddAt(q.x));
+    ex.edge = same ? G.offsetPath(ex.curb, sec.bdd) : G.offsetPathVar(ex.curb, (q) => bddAt(q.x));
+    const fullE = (sd, d) => {
+      const e0 = G.segStart(sd.edge[0]), ext = cont && e0.x < xEnd - 1e-6 ? [L(W({ x: xEnd, y: e0.y }), W(e0))] : [];
+      return [...G.revPath(off(d)), ...ext, ...Wp(sd.edge)];
+    };
     // Passage piéton à ppRecul du bord de la principale, îlot coupé en refuge.
     let cross = null;
     if (sec.pp) {
@@ -265,16 +276,17 @@ export function buildPlan(prj, opt = {}) {
       idx, id: b.id, name, role: 'secondaire', sY: s.sY, l: s.auto.l, theta: fr.theta, u: s.u, n: fr.n, a: 0, ai: 0, x0, xT, xEnd, h, b: isl.b, hb: 0, th: 0, isl,
       W, Ws: fr.Ws, Wp, target, cont, axisFillets,
       // BDD et berme propres (profil de la route raccordée), à défaut celles du carrefour : profils en travers
-      bdd: pick(b.bdd, sec.bdd), berme: pick(b.berme, sec.berme), bddAtW: () => pick(b.bdd, sec.bdd), bermeAtW: () => pick(b.berme, sec.berme),
+      bdd: bddS, berme: pick(b.berme, sec.berme), bddAtW: (p) => bddAt(dot(sub(p, O), s.u)), bermeAtW: () => pick(b.berme, sec.berme),
       // curbW : bordure complète (axe suivi compris) ; curbL : partie locale, de l'alignement droit à la principale.
-      entry: { ...en, curbW: full(en, wIn), curbL: Wp(en.curb), Tc: W(en.fil.Tc), Tl: W(en.fil.Tl), C: W(en.fil.C) },
-      exit: { ...ex, curbW: full(ex, -wOut), curbL: Wp(ex.curb), Tc: W(ex.fil.Tc), Tl: W(ex.fil.Tl), C: W(ex.fil.C) },
+      // edgeW : bord de chaussée (BDD comprise), même parcours
+      entry: { ...en, curbW: full(en, wIn), edgeW: fullE(en, wIn + bddS), curbL: Wp(en.curb), Tc: W(en.fil.Tc), Tl: W(en.fil.Tl), C: W(en.fil.C) },
+      exit: { ...ex, curbW: full(ex, -wOut), edgeW: fullE(ex, -(wOut + bddS)), curbL: Wp(ex.curb), Tc: W(ex.fil.Tc), Tl: W(ex.fil.Tl), C: W(ex.fil.C) },
       island, cross, K, stop: stop && { a: W(stop.a), b: W(stop.b) }, stopX: stopX && { a: W(stopX.a), b: W(stopX.b) },
       gis: fmtGis(fr.theta, unit), angle: Math.acos(G.clamp(Math.abs(dot(s.u, uM)), 0, 1)),
       farAxis: cont ? G.segEnd(cont[cont.length - 1]) : W({ x: xEnd, y: 0 }),
       farDir: cont ? norm(sub(G.segEnd(cont[cont.length - 1]), G.segAt(cont[cont.length - 1], 0.98))) : s.u,
     };
-    for (const sd of [bd.entry, bd.exit]) sd.F = G.segStart(sd.curbW[0]);
+    for (const sd of [bd.entry, bd.exit]) { sd.F = G.segStart(sd.curbW[0]); sd.Fe = G.segStart(sd.edgeW[0]); sd.Te = G.segEnd(sd.edgeW[sd.edgeW.length - 1]); }
     const xs = [toM(bd.entry.Tc).x, toM(bd.exit.Tc).x];
     const g0 = Math.min(...xs), g1 = Math.max(...xs);
     gaps[s.sY].push([g0, g1]);
@@ -303,13 +315,18 @@ export function buildPlan(prj, opt = {}) {
   const rnd = (pts) => G.roundPolyline(pts.map(toWp), pts.map((p, i) => (i > 0 && i < pts.length - 1 ? p.r || 0 : 0)));
 
   // Bords de la chaussée principale (interrompus au débouché des branches secondaires)
-  const edges = {};
+  // edges : bords des voies (rives) ; bords de chaussée décalés de la BDD vers l'extérieur.
+  const edges = {}, bddM = sec.bdd || 0, outE = (sg, segs) => (bddM > 0 ? G.offsetPath(segs, sg * bddM) : segs);
   for (const sg of [1, -1]) {
     edges[sg] = edgePts(sg);
-    for (const piece of cutPolyline(edges[sg], gaps[sg])) Pp({ k: 'path', L: 'BORDURE', segs: rnd(piece) });
+    for (const piece of cutPolyline(edges[sg], gaps[sg])) {
+      Pp({ k: 'path', L: 'BORDURE', segs: outE(sg, rnd(piece)) });
+      if (bddM > 0.05 && sec.rive) Pp({ k: 'path', L: 'MARQUAGE', segs: rnd(piece), wm: 0.15 });
+    }
   }
-  Pp({ k: 'path', L: 'LIMITE', segs: [L(toW(-LA, -half), toW(-LA, half))] });
-  Pp({ k: 'path', L: 'LIMITE', segs: [L(toW(LB, -half), toW(LB, half))] });
+  Pp({ k: 'path', L: 'LIMITE', segs: [L(toW(-LA, -half - bddM), toW(-LA, half + bddM))] });
+  Pp({ k: 'path', L: 'LIMITE', segs: [L(toW(LB, -half - bddM), toW(LB, half + bddM))] });
+  if (+P.mainTpc > 0) issues.push({ lvl: 'warn', msg: `Route principale à chaussées séparées (TPC de ${fmt(+P.mainTpc, 2)} m) : un carrefour plan (T, X) n'y est pas adapté ; il est dessiné sans TPC — préférez un giratoire ou un échangeur.` });
 
   // Îlots centraux de la route principale (côté A puis côté B par symétrie centrale), d'après la voie principale de
   // Mensura : présignalisation (l'enveloppe s'ouvre jusqu'au nez nz), déport (jusqu'à la largeur totale c), alignement
@@ -404,12 +421,12 @@ export function buildPlan(prj, opt = {}) {
   for (const cr of mainCross) crossingPrims(cr, toWp, sec, sec.pmr).forEach(Pp);
 
   // Remplissage chaussée (union à règle non nulle ; îlots en trous)
-  const low = rnd(edges[-1]), up = G.revPath(rnd(edges[1]));
+  const low = outE(-1, rnd(edges[-1])), up = G.revPath(outE(1, rnd(edges[1])));
   const mainRing = [...low, L(G.segEnd(low[low.length - 1]), G.segStart(up[0])), ...up, L(G.segEnd(up[up.length - 1]), G.segStart(low[0]))];
   const rings = [orient(mainRing, false), ...holes.map((h) => orient(h, true))];
   for (const bd of bds) {
     if (bd.role !== 'secondaire') continue;
-    rings.push(orient([...G.revPath(bd.exit.curbW), L(bd.exit.F, bd.entry.F), ...bd.entry.curbW, L(bd.entry.Tc, bd.exit.Tc)], false));
+    rings.push(orient([...G.revPath(bd.exit.edgeW), L(bd.exit.Fe, bd.entry.Fe), ...bd.entry.edgeW, L(bd.entry.Te, bd.exit.Te)], false));
     if (bd.island?.outline) for (const part of bd.island.pieces || [bd.island.outline]) rings.push(orient(part, true));
   }
   Pp({ k: 'fill', L: 'CHAUSSEE', rings, role: 'chaussee', rule: 'nonzero' });
@@ -419,8 +436,8 @@ export function buildPlan(prj, opt = {}) {
   const bands = sideBands(prj);
   if (bands.length) {
     const rest = [];
-    for (const sg of [1, -1]) for (const piece of cutPolyline(edges[sg], gaps[sg])) rest.push(sg > 0 ? G.revPath(rnd(piece)) : rnd(piece));
-    for (const bd of bds) if (bd.role === 'secondaire') rest.push(bd.entry.curbW, G.revPath(bd.exit.curbW));
+    for (const sg of [1, -1]) for (const piece of cutPolyline(edges[sg], gaps[sg])) rest.push(sg > 0 ? G.revPath(outE(sg, rnd(piece))) : outE(sg, rnd(piece)));
+    for (const bd of bds) if (bd.role === 'secondaire') rest.push(bd.entry.edgeW, G.revPath(bd.exit.edgeW));
     const head = (p) => G.segStart(p[0]), tail = (p) => G.segEnd(p[p.length - 1]);
     while (rest.length) {
       let ch = rest.shift();
@@ -524,9 +541,10 @@ export function buildPlan(prj, opt = {}) {
   for (const bd of bds) {
     if (bd.role !== 'secondaire') continue;
     const { W, isl, x0, xT, xEnd } = bd;
-    Pp({ k: 'path', L: 'BORDURE', segs: bd.entry.curbW });
-    Pp({ k: 'path', L: 'BORDURE', segs: bd.exit.curbW });
-    Pp({ k: 'path', L: 'LIMITE', segs: [L(bd.exit.F, bd.entry.F)] });
+    Pp({ k: 'path', L: 'BORDURE', segs: bd.entry.edgeW });
+    Pp({ k: 'path', L: 'BORDURE', segs: bd.exit.edgeW });
+    if (sec.rive && Math.max(bd.bdd, sec.bdd) > 0.05) for (const sd of [bd.entry, bd.exit]) Pp({ k: 'path', L: 'MARQUAGE', segs: sd.curbW, wm: 0.15 });
+    Pp({ k: 'path', L: 'LIMITE', segs: [L(bd.exit.Fe, bd.entry.Fe)] });
     if (bd.island) {
       // Enveloppe peinte (triangle de construction), zébra, îlot en saillie en retrait de la BDG.
       if (bd.island.outline) {
