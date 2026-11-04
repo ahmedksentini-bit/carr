@@ -411,8 +411,8 @@ export function buildEchangeur(prj, D) {
       for (const segs of offPieces(sg * E2, gaps[sg].bord)) P({ k: 'path', L: 'BORDURE', segs });
       for (const segs of offPieces(sg * (E2 + H.berme), gaps[sg].bord)) P({ k: 'path', L: 'ACCOTEMENT', segs });
       for (let i = 1; i < H.lanes; i++) P({ k: 'path', L: 'MARQUAGE', segs: off(sg * (E0 + i * H.wLane)), dash: [3, 10], wm: 0.15 }); // T1 3u
-      for (const segs of offPieces(sg * (E1 - 0.1), gaps[sg].rive)) P({ k: 'path', L: 'MARQUAGE', segs, wm: 0.15 }); // rive continue 3u
-      if (H.median > 0) P({ k: 'path', L: 'MARQUAGE', segs: off(sg * (E0 + 0.1)), wm: 0.15 }); // rive gauche 3u
+      for (const segs of offPieces(sg * E1, gaps[sg].rive)) P({ k: 'path', L: 'MARQUAGE', segs, wm: 0.15 }); // rive continue 3u, axée sur le bord de voie (comme les branches et bretelles)
+      if (H.median > 0) P({ k: 'path', L: 'MARQUAGE', segs: off(sg * E0), wm: 0.15 }); // rive gauche 3u (bord de voie)
     }
     if (H.median > 0) {
       P({ k: 'fill', L: 'ILOT_SEP', rings: [ring(off(H.median / 2), off(-H.median / 2))], role: 'ilot' });

@@ -141,11 +141,12 @@ function buildRoundabout(prj, ext = {}) {
     const { en, ex } = ap;
     const off = (d) => (cont ? G.offsetPath(cont, d) : []);
     // Rives (peinture) et bords de chaussée, de l'extrémité de la branche jusqu'à la tangence sur l'anneau.
-    // BDD et berme propres à la branche (profil de la route raccordée) : celles du carrefour au droit de l'anneau, puis
-    // transition linéaire sur l'alignement droit jusqu'à celles de la branche à son extrémité (xEnd).
+    // BDD et berme propres à la branche (profil de la route raccordée) : celles du carrefour au droit de l'anneau
+    // (évasement), puis transition linéaire dès la fin de l'évasement (xT) ; la largeur saisie pour la branche est tenue
+    // sur tout le reste de l'alignement jusqu'à son extrémité (xEnd), au droit de la route raccordée.
     const bddB = num(b.bdd, sec.bdd), bermeB = num(b.berme, sec.berme);
     const dTr = Math.max(Math.abs(bddB - sec.bdd), Math.abs(bermeB - sec.berme));
-    const xB = xEnd, xA = Math.max(xT, xEnd - Math.max(10, 15 * dTr));
+    const xA = Math.min(xT, xEnd), xB = Math.min(xEnd, xA + Math.max(10, 15 * dTr));
     const ramp = (v0, v1) => (x) => (x <= xA ? v0 : x >= xB ? v1 : v0 + ((v1 - v0) * (x - xA)) / (xB - xA || 1));
     const bddAt = ramp(sec.bdd, bddB), bermeAt = ramp(sec.berme, bermeB);
     const xOf = (p) => dot(sub(p, O), u);
