@@ -16,6 +16,7 @@ import { signSVG } from './signicons.js';
 const COLORS = {
   chaussee: 0x4b4f57, bdd: 0x5c6069, ilot: 0x4f8a4e, trottoir: 0xc9b59a, bordure: 0xd9d4cc, berme: 0x8b7d57, talus: 0x7a6b4a,
   franchissable: 0xb9ad93, bdg: 0x6b6f78, anneau: 0x4b4f57, terrain: [0x5c6b3f, 0x9a8c5a, 0xb9a36b],
+  ouvrage: 0xc8c4bc, pile: 0xb3aea4, culee: 0xa9a399,
 };
 const kindColor = (k) => COLORS[k] ?? COLORS.talus;
 
@@ -54,16 +55,45 @@ export class View3D {
   build(prj, D, tin, opts = {}) {
     this.clear();
     this.ve = +opts.ve || 1;
-    const O = D.O || { x: 0, y: 0 };
+    // emprise de tout ce qui est dessiné (axes, ouvrages, carrefours) : origine du repère et vue d'ensemble
+    const ext = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity, z: [] };
+    const grow = (p, z) => { ext.x0 = Math.min(ext.x0, p.x); ext.y0 = Math.min(ext.y0, p.y); ext.x1 = Math.max(ext.x1, p.x); ext.y1 = Math.max(ext.y1, p.y); if (z != null && Number.isFinite(z)) ext.z.push(z); };
+    for (const A of opts.axes || []) for (const cs of A.list || []) if (cs?.p) grow(cs.p, cs.zAxe);
+    for (const J of [{ D }, ...(opts.others || [])]) if (J.D?.O) grow(J.D.O);
+    for (const o of opts.ouvr || []) for (const q of o.deck) grow(q);
+    this.ext = Number.isFinite(ext.x0) ? ext : null;
+    const O = D.O || (this.ext ? { x: (ext.x0 + ext.x1) / 2, y: (ext.y0 + ext.y1) / 2 } : { x: 0, y: 0 });
     this.X0 = O.x; this.Y0 = O.y;
-    this.Z0 = (tin ? tinZ(tin, O.x, O.y) : null) ?? (+prj.ring.zC || 0);
+    const zs = ext.z.slice().sort((a, b) => a - b);
+    this.Z0 = (tin ? tinZ(tin, O.x, O.y) : null) ?? (D.O ? null : zs[Math.floor(zs.length / 2)]) ?? (+prj.ring.zC || 0);
     if (tin) this.addTerrain(tin, opts.wire);
     // carrefour actif, autres carrefours du projet (opts.others : [{ prj, D }]), axes de l'échangeur (opts.axes)
     for (const J of [{ prj, D }, ...(opts.others || [])]) {
       try { this.addJunction(J.prj, J.D, tin, opts); } catch (e) { console.error(e); }
     }
     for (const A of opts.axes || []) { try { this.addAxis(A.name, A.list); } catch (e) { console.error(e); } }
+    for (const o of opts.ouvr || []) { try { this.addOuvrage(o); } catch (e) { console.error(e); } }
     this.overview(D);
+  }
+  // Prisme vertical sur le polygone poly (monde), de zBot(p) à zTop(p) en chaque sommet : faces dessus, dessous, côtés.
+  addPrism(poly, zBot, zTop, color, name) {
+    let pts = poly.filter((q, i) => i === 0 || G.dist(q, poly[i - 1]) > 0.05);
+    if (pts.length > 2 && G.dist(pts[0], pts[pts.length - 1]) < 0.05) pts = pts.slice(0, -1);
+    if (pts.length < 3) return;
+    const zb = pts.map(zBot), zt = pts.map(zTop), pos = [];
+    const V = (i, top) => this.v(pts[i].x, pts[i].y, top ? zt[i] : zb[i]);
+    const tris = THREE.ShapeUtils.triangulateShape(pts.map((q) => new THREE.Vector2(q.x, q.y)), []);
+    for (const [a, b, c] of tris) { pos.push(...V(a, 1), ...V(b, 1), ...V(c, 1), ...V(a, 0), ...V(c, 0), ...V(b, 0)); }
+    for (let i = 0; i < pts.length; i++) { const j = (i + 1) % pts.length; pos.push(...V(i, 0), ...V(j, 0), ...V(j, 1), ...V(i, 0), ...V(j, 1), ...V(i, 1)); }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    this.addMesh(geo, color, { name });
+  }
+  // Ouvrage : tablier (épaisseur h sous la ligne rouge des voies portées), piles et culées jusqu'à la sous-face.
+  addOuvrage(o) {
+    const top = (p) => o.zTop(p), under = (p) => o.zTop(p) - o.h;
+    this.addPrism(o.deck, under, top, COLORS.ouvrage, `${o.name}:tablier`);
+    for (const q of o.parts) this.addPrism(q.pts, (p) => Math.min(o.zLow(p), under(p) - 0.2) - (q.role === 'culee' ? 1.0 : 0.3), under, q.role === 'pile' ? COLORS.pile : COLORS.culee, `${o.name}:${q.role}`);
   }
   addJunction(prj, D, tin, opts = {}) {
     if (!D?.O) return;
@@ -83,7 +113,7 @@ export class View3D {
     if (ys[ys.length - 1] < W - 1e-6) ys.push(W);
     const rows = [], pts = [];
     for (const cs of secs) {
-      rows.push(sampleSection(cs, ys));
+      rows.push(cs.skip3d ? { z: ys.map(() => null), kind: ys.map(() => null) } : sampleSection(cs, ys));
       pts.push(ys.map((y) => { const q = G.add(cs.p, G.mul(cs.n, y)); return [q.x, q.y]; }));
     }
     this.addGrid(rows, ys, pts, name);
@@ -214,9 +244,13 @@ export class View3D {
   }
 
   overview(D) {
-    const R = Math.max(60, (D?.zoomR || 60) * 1.2);
-    this.camera.position.set(R * 0.9, R * 0.8, R * 0.9);
-    this.controls.target.set(0, 0, 0);
+    // carrefour : vue rapprochée ; sans carrefour : toute l'emprise dessinée (limitée à 1 500 m)
+    let R = Math.max(60, (D?.zoomR || 60) * 1.2), tx = 0, tz = 0;
+    if (!D?.O && this.ext) { const e = this.ext; R = Math.min(1500, Math.max(80, 0.6 * Math.hypot(e.x1 - e.x0, e.y1 - e.y0))); [tx, , tz] = this.v((e.x0 + e.x1) / 2, (e.y0 + e.y1) / 2, this.Z0); }
+    this.scene.fog.near = Math.max(400, R * 1.5); this.scene.fog.far = Math.max(1500, R * 4);
+    this.camera.far = Math.max(4000, R * 6); this.camera.updateProjectionMatrix();
+    this.camera.position.set(tx + R * 0.9, R * 0.8, tz + R * 0.9);
+    this.controls.target.set(tx, 0, tz);
     this.controls.update();
   }
   // Vue conducteur : sur la branche bd, à s mètres du carrefour, au milieu de la voie d'entrée, œil à 1,10 m.
