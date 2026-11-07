@@ -21,6 +21,7 @@ import { plParams, plBuild, plStations, plTerrainLine, plDXF, plChecks, axisLeng
 import { createPlEditor } from './pleditor.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
+import { PSGR_GAB, psgrParams, psgrSection, psgrProfile, psgrChecks, psgrPlan, psgrProfileSVG, psgrSectionSVG, psgrProfileDXF, psgrSectionDXF } from './psgr.js';
 import { kmlTextOf, parseKML, newKmlLayer, buildKmlCache, drawKml, kmlStats, kmlBBoxLL, folderShown } from './kml.js';
 import { buildOuvrages, W_CLASSES, psidaLink, psidaProject, psidaWarnings, PSIDA_URL } from './ouvrage.js';
 import { buildProfils, listAxes, nearestAxis, profParams, profilsCsv } from './profils.js';
@@ -362,6 +363,7 @@ function update({ commit = true, panels = true } = {}) {
     S.Do = otherDesigns();
   }
   for (const msg of S.roadWarns || []) S.checks.push({ lvl: 'warn', msg });
+  try { computePsgr(); } catch (e) { console.error(e); S.psgrPrims = []; }
   S.ouvr = null; S.cadres = [];
   let CG = [];
   if (S.D) try { CG = cadreGeoms(S.prj, S.D); } catch (e) { console.error(e); }
@@ -1631,6 +1633,7 @@ function renderScene(ctx, v, exp = null) {
   for (const o of S.Do || []) drawDesign(ctx, v, o.D, theme, S.prj.opts.vis, { onImagery: imagery && S.prj.bg.provider === 'esri', onImage: () => viewer.invalidate() });
   drawDesign(ctx, v, S.D, theme, S.prj.opts.vis, { onImagery: imagery && S.prj.bg.provider === 'esri', onImage: () => viewer.invalidate() });
   if (S.talus?.prims) drawDesign(ctx, v, { prims: S.talus.prims }, theme, S.prj.opts.vis, {});
+  if (S.psgrPrims?.length) drawDesign(ctx, v, { prims: S.psgrPrims }, theme, S.prj.opts.vis, { onImage: () => viewer.invalidate() });
   if (!exp) for (const o of [{ D: S.D, name: S.prj.jname, active: true }, ...(S.Do || [])]) { // nom des carrefours
     if (!o.D?.O || (S.Do || []).length === 0) continue;
     const [x, y] = v.w2s(o.D.O.x, o.D.O.y);
@@ -3094,6 +3097,7 @@ function syncInputs() {
 }
 
 function refreshPanels() {
+  try { renderPsgrPanel(); } catch (e) { console.error(e); }
   $('#jList').innerHTML = junctionList().map((j) => `<li data-jid="${j.id}" class="${j.active ? 'on' : ''}"><span class="dot"></span><b>${esc(j.name)}</b><span>${j.kind === 'giratoire' ? 'Giratoire' : `Carrefour en ${j.kind}`} · ${j.n} branche(s)</span><span>${j.active ? t('actif') : ''}</span></li>`).join('');
   if (S.pop) $('#elPop .ttl').textContent = popTitle(S.pop);
   refreshMainSelects();
@@ -5621,6 +5625,7 @@ function bindUI() {
   });
 
   bindKml();
+  bindPsgr();
   $('#btnNew').addEventListener('click', () => {
     if (S.prj.branches.length && !confirm(t('Créer un nouveau projet ? Le projet en cours non enregistré sera perdu.'))) return;
     const keep = { crs: S.prj.crs, bg: S.prj.bg, opts: S.prj.opts, kind: S.prj.kind };
@@ -5800,6 +5805,171 @@ function renderDxfLayers() {
     '<div class="lyrs">' + layers.map((l) => `<label class="chk"><input type="checkbox" data-layer="${esc(l.name)}" ${l.visible ? 'checked' : ''}><i style="background:${l.color}"></i>${esc(l.name)} <span class="dim">${l.count}</span></label>`).join('') + '</div>';
 }
 
+// ================================================================ PSGR (passage souterrain à gabarit réduit)
+// Un PSGR est rattaché à un carrefour (jid) : la route qui le traverse (deux branches opposées) passe en trémie sous
+// le carrefour. Calcul dans psgr.js ; ici : axe de la route, couverture et cote de surface par défaut, contrôles des
+// TPC des branches (contre-allées écartées de la trémie), panneau de l'onglet PSGR et exports.
+const PSGR_GAP = 0.5;
+const PSGR_SEL = { gab: 'B', Vr: 60, tubes: 1, n: 1, entretien: 'autre' }; // séparation entre le piédroit et le bord de la contre-allée (bordure, glissière)
+const farOf = (b, C) => { const a = b.axis || []; return G.dist(a[0], C) >= G.dist(a[a.length - 1], C) ? a[0] : a[a.length - 1]; };
+function throughArms(J, C) {
+  const arms = (J.branches || []).filter((b) => (b.axis || []).length >= 2);
+  const main = isPlan(J) ? (J.plan?.main || []).map((id) => arms.find((b) => b.id === id)).filter(Boolean) : [];
+  let pair = main.length === 2 ? main : null;
+  if (!pair) {
+    let best = null;
+    for (let i = 0; i < arms.length; i++) for (let k = i + 1; k < arms.length; k++) {
+      const c = G.dot(G.norm(G.sub(farOf(arms[i], C), C)), G.norm(G.sub(farOf(arms[k], C), C)));
+      const score = c - (arms[i].src && arms[k].src ? 1 : 0); // de préférence deux branches issues de la route
+      if (c < -0.9 && (!best || score < best.score)) best = { score, p: [arms[i], arms[k]] };
+    }
+    pair = best?.p;
+  }
+  if (!pair) return null;
+  const [a, b] = pair, u = G.norm(G.sub(farOf(b, C), farOf(a, C)));
+  return { a, b, u };
+}
+// Distance de l'axe au bord droit de chaussée de la route (ou de la branche) qui arrive par la branche b.
+function armEdge(b) {
+  const P = b.src ? roadProfile(b.src) : null;
+  if (P) return (P.tpc || 0) / 2 + P.lanes * P.wLane + (+P.bdd || 0);
+  return (b.tpc?.on ? (+b.tpc.width || 0) / 2 : 0) + Math.max(+b.nIn || 1, +b.nOut || 1) * (+b.wLane || 3.5) + (b.bdd === '' || b.bdd == null ? 2 : +b.bdd);
+}
+function psgrAutoLc(j, ax) {
+  const urb = j.J.context === 'urbain';
+  if (!j.plan) return Math.ceil(2 * ((+j.J.ring?.Rg || 20) + (urb ? 8 : 3)) * 2) / 2; // anneau + passages piétons (urbain)
+  const others = (j.J.branches || []).filter((b) => b !== ax.a && b !== ax.b);
+  const w = Math.max(12, ...others.map((b) => (b.tpc?.on ? +b.tpc.width || 0 : 0) + ((+b.nIn || 1) + (+b.nOut || 1)) * (+b.wLane || 3.5) + 2 * (b.bdd === '' || b.bdd == null ? 2 : +b.bdd)));
+  return Math.ceil((w + 2 * (urb ? 6 : 3)) * 2) / 2;
+}
+function computePsgr() {
+  S.psgrRes = []; S.psgrPrims = [];
+  const list = S.prj.psgr || [];
+  if (!list.length) return;
+  const jl = knownJunctions(), TH = +S.prj.opts?.textH || 0.8;
+  list.forEach((q, i) => {
+    for (const [k, v] of Object.entries(PSGR_SEL)) if (q[k] == null || q[k] === '') q[k] = v; // listes : valeur par défaut affichée
+    const name = String(q.name || '').trim() || `PSGR ${i + 1}`, j = jl.find((x) => x.id === q.jid), r = { q, i, name, j };
+    S.psgrRes.push(r);
+    const fail = (msg) => { r.err = msg; S.checks.push({ lvl: 'warn', group: 'PSGR', msg: `${name} : ${msg}.` }); };
+    if (!j) return fail('carrefour introuvable (supprimé ?)');
+    const ax = throughArms(j.J, j.C);
+    if (!ax) return fail(`aucune route ne traverse ${j.name} (deux branches opposées dans le même axe)`);
+    const P = psgrParams(q), sec = psgrSection(P);
+    const LcAuto = psgrAutoLc(j, ax), Lc = P.Lc > 0 ? P.Lc : LcAuto;
+    const zC = j.J.ring?.zC, zs = P.zs ?? (zC === '' || zC == null ? 100 : +zC);
+    const pr = psgrProfile(P, sec, Lc, zs);
+    const pl = psgrPlan(P, sec, pr, j.C, ax.u, { edge: (e) => armEdge(e > 0 ? ax.b : ax.a), textH: TH, name });
+    S.psgrPrims.push(...pl.prims);
+    const checks = psgrChecks(P, sec, pr, name), need = sec.Wo + 2 * PSGR_GAP;
+    for (const b of [ax.a, ax.b]) {
+      const w = b.tpc?.on ? +b.tpc.width || 0 : 0;
+      if (w < need - 0.01) checks.push({ lvl: 'warn', msg: `${name} : TPC de la branche ${b.name} ${fmt(w)} m < trémie hors tout ${fmt(sec.Wo)} + 2 × ${fmt(PSGR_GAP)} = ${fmt(need)} m : les contre-allées doivent s'écarter de la trémie (« Adapter les TPC des branches »).` });
+      const R = b.src ? roadProfile(b.src) : null;
+      if (R && (R.tpc || 0) < need - 0.01) checks.push({ lvl: 'info', msg: `${name} : le TPC de ${R.name || 'la route'} (${fmt(R.tpc || 0)} m) est plus étroit que la trémie et ses séparations (${fmt(need)} m) : élargissement à prévoir sur ${fmt(pr.s3 + P.Lnose, 0)} m de part et d'autre du centre (tête de trémie et musoir).` });
+      const Lb = G.dist(farOf(b, j.C), j.C);
+      if (pr.s3 + P.Lnose > Lb + 1) checks.push({ lvl: 'info', msg: `${name} : tête de trémie et musoir à ${fmt(pr.s3 + P.Lnose, 0)} m du centre, au-delà de la branche ${b.name} (${fmt(Lb, 0)} m) : ils sont sur la route qui la prolonge.` });
+    }
+    if (!j.plan) { const Rb = (j.id === S.prj.jid ? S.D : (S.Do || []).find((d) => d.id === j.id)?.D)?.Rb; if (Rb && sec.Wo / 2 > Rb + (+j.J.ring?.la || 7)) checks.push({ lvl: 'warn', msg: `${name} : trémie hors tout ${fmt(sec.Wo)} m plus large que l'anneau.` }); }
+    for (const c of checks) S.checks.push({ ...c, group: 'PSGR' });
+    Object.assign(r, { P, sec, pr, pl, Lc, LcAuto, zs, ax, checks });
+  });
+}
+function psgrField(i, f, label, unit = 'm', o = {}) { return fld(`psgr.${i}.${f}`, label, unit, o); }
+function renderPsgrPanel() {
+  const host = $('#psgrPanel');
+  if (!host) return;
+  const list = S.prj.psgr || [];
+  $('#btnPsgrAdd').disabled = list.some((q) => q.jid === S.prj.jid);
+  const sig = JSON.stringify(list.map((q) => [q.id, q.gab, q.tubes]));
+  if (host.dataset.sig !== sig) {
+    host.dataset.sig = sig;
+    host.innerHTML = !list.length ? '<p class="note">Aucun PSGR. Rendez actif le carrefour à équiper (liste des carrefours), puis « + PSGR sous le carrefour actif ».</p>'
+      : list.map((q, i) => {
+        const lib = q.gab === 'libre';
+        return `<div class="psgr" data-psgri="${i}">
+          <div class="bhead">${psgrField(i, 'name', 'Nom', '', { text: true })}<button data-psgrzoom="${i}">Zoom</button><button class="danger" data-psgrdel="${i}">Supprimer</button></div>
+          <p class="note" data-psgrj="${i}"></p>
+          <h4>Gabarit et circulation</h4>
+          <div class="row">${sel(`psgr.${i}.gab`, 'Gabarit autorisé', Object.entries(PSGR_GAB).map(([k, g]) => [k, g.label]), { branch: false })}</div>
+          ${lib ? `<div class="row">${psgrField(i, 'G', 'Hauteur des véhicules admis G')}${psgrField(i, 'rs', 'Revanche de signalisation')}</div><div class="row">${psgrField(i, 'wv', 'Largeur des véhicules')}${psgrField(i, 'wl', 'Voie de droite')}${psgrField(i, 'wlo', 'Autres voies')}</div>` : `<div class="row">${psgrField(i, 'wl', 'Voie de droite', 'm', { ph: 'auto' })}${psgrField(i, 'wlo', 'Autres voies', 'm', { ph: 'auto' })}</div>`}
+          <div class="row">${sel(`psgr.${i}.Vr`, 'Vitesse de référence', [['60', '60 km/h'], ['80', '80 km/h']], { branch: false })}${sel(`psgr.${i}.tubes`, 'Ouvrage', [['1', 'tube unique, double sens'], ['2', 'deux tubes (un par sens)']], { branch: false })}${sel(`psgr.${i}.n`, 'Voies par sens', [['1', '1'], ['2', '2']], { branch: false })}</div>
+          <div class="row">${sel(`psgr.${i}.entretien`, 'Chaussée', [['autre', 'non lavée régulièrement'], ['lave', 'lavée régulièrement (engagement)']], { branch: false })}</div>
+          <h4>Coupe type</h4>
+          <div class="row">${psgrField(i, 'bd', 'Bandes dérasées', 'm', { ph: '0,25' })}${psgrField(i, 'trot', 'Trottoirs', 'm', { ph: '0,75' })}${psgrField(i, 'mur', 'Piédroits', 'm', { ph: '0,60' })}${q.tubes == 2 ? psgrField(i, 'mc', 'Voile central', 'm', { ph: '0,40' }) : ''}</div>
+          <div class="row">${psgrField(i, 'eT', 'Traverse', 'm', { ph: '0,70' })}${psgrField(i, 'rec', 'Chaussée sur traverse', 'm', { ph: '0,40' })}${psgrField(i, 'rp', 'Revanche de protection', 'm', { ph: '0,10' })}${psgrField(i, 'rc', 'Revanche de construction', 'm', { ph: '0,05' })}</div>
+          <div class="psgr-svg" data-psgrct="${i}"></div>
+          <h4>Profil en long</h4>
+          <div class="row">${psgrField(i, 'p', 'Déclivité des trémies', '%', { ph: '6' })}${psgrField(i, 'Rs', 'Rayon saillant Rs', 'm', { ph: 'auto' })}${psgrField(i, 'Rr', 'Rayon rentrant Rr', 'm', { ph: 'auto' })}</div>
+          <div class="row">${psgrField(i, 'Lc', 'Longueur couverte', 'm', { ph: 'auto' })}${psgrField(i, 'zs', 'Cote de la surface', 'm', { ph: 'zC' })}</div>
+          <div class="psgr-svg" data-psgrpl="${i}"></div>
+          <h4>Signalisation et tri des véhicules hors gabarit</h4>
+          <div class="row">${psgrField(i, 'Lnose', 'Musoir après la tête', 'm', { ph: '25' })}${psgrField(i, 'dDet', 'Portique de détection avant le musoir', 'm', { ph: '60' })}${psgrField(i, 'dPre', 'Présignalisation B12 avant le musoir', 'm', { ph: '150' })}</div>
+          <div class="row"><button data-psgrtpc="${i}" title="TPC des deux branches de la route = trémie hors tout + 2 × 0,50 m : les contre-allées s'écartent de la trémie">Adapter les TPC des branches</button><button data-psgrdxf="pl:${i}">Profil en long (DXF)</button><button data-psgrdxf="ct:${i}">Coupe type (DXF)</button></div>
+          <div data-psgrout="${i}"></div>
+          <ul class="ouvr-items" data-psgrchk="${i}"></ul>
+        </div>`;
+      }).join('');
+  }
+  for (const r of S.psgrRes || []) {
+    const i = r.i, jn = host.querySelector(`[data-psgrj="${i}"]`);
+    if (jn) jn.textContent = r.j ? `Sous ${r.j.name}${r.ax ? ` · route ${r.ax.a.name} – ${r.ax.b.name}` : ''}${r.err ? ` — ${r.err}` : ''}` : r.err || '';
+    const out = host.querySelector(`[data-psgrout="${i}"]`), ul = host.querySelector(`[data-psgrchk="${i}"]`);
+    if (!r.P) { if (out) out.innerHTML = ''; if (ul) ul.innerHTML = ''; continue; }
+    const { P, sec, pr } = r;
+    for (const el of host.querySelectorAll(`[data-k="psgr.${i}.Lc"]`)) el.placeholder = `auto ${fmt(r.LcAuto, 1)}`;
+    for (const el of host.querySelectorAll(`[data-k="psgr.${i}.zs"]`)) el.placeholder = `zC ${fmt(r.zs)}`;
+    for (const el of host.querySelectorAll(`[data-k="psgr.${i}.Rs"]`)) el.placeholder = `auto ${fmt(P.Rs, 0)}`;
+    for (const el of host.querySelectorAll(`[data-k="psgr.${i}.Rr"]`)) el.placeholder = `auto ${fmt(P.Rr, 0)}`;
+    if (P.key !== 'libre') { for (const el of host.querySelectorAll(`[data-k="psgr.${i}.wl"]`)) el.placeholder = fmt(P.wl); for (const el of host.querySelectorAll(`[data-k="psgr.${i}.wlo"]`)) el.placeholder = fmt(P.wlo); }
+    if (out) out.innerHTML = kv([
+      ['Gabarit autorisé G (B12)', `${fmt(P.G)} m — ${P.src}`],
+      ['Hauteur libre minimale Hm', `${fmt(P.Hm)} m ; à construire ${fmt(P.Hint)} m`],
+      ['Fond sous la surface', `${fmt(sec.depth)} m (cote ${fmt(pr.zb)})`],
+      ['Plate-forme entre piédroits', `${fmt(sec.Wp)} m${P.tubes === 2 ? ' × 2' : ''} (mini à 1 m : ${fmt(sec.W1m)} m)`],
+      ['Trémie hors tout', `${fmt(sec.Wo)} m`],
+      ['Couverture', `${fmt(r.Lc, 1)} m${P.Lc > 0 ? '' : ' (auto)'}`],
+      ['Trémie ouverte (chaque côté)', `${fmt(pr.Lramp, 1)} m : Rr ${fmt(P.Rr * pr.p, 1)} m + rampe ${fmt(pr.Ls, 1)} m à ${fmt(pr.p * 100, 2)} % + Rs ${fmt(P.Rs * pr.p, 1)} m`],
+      ['Longueur totale tête à tête', `${fmt(pr.Ltot, 1)} m`],
+    ]);
+    if (ul) ul.innerHTML = r.checks.map((c) => `<li class="${c.lvl}">${esc(c.msg.replace(/^[^:]+ : /, ''))}</li>`).join('');
+    const ct = host.querySelector(`[data-psgrct="${i}"]`), plh = host.querySelector(`[data-psgrpl="${i}"]`);
+    const ks = JSON.stringify([P, sec.Wo]);
+    if (ct && ct.dataset.k !== ks) { ct.dataset.k = ks; ct.innerHTML = psgrSectionSVG(P, sec, { name: r.name }); }
+    const kp = JSON.stringify([P, pr.s3, pr.zs, r.Lc]);
+    if (plh && plh.dataset.k !== kp) { plh.dataset.k = kp; plh.innerHTML = psgrProfileSVG(P, sec, pr, { name: r.name }); }
+  }
+}
+function bindPsgr() {
+  $('#btnPsgrAdd').addEventListener('click', () => {
+    if (!S.D?.O) { toast('Placez d\'abord le carrefour (centre et branches).', 'warn'); return; }
+    S.prj.psgr = S.prj.psgr || [];
+    if (S.prj.psgr.some((q) => q.jid === S.prj.jid)) { toast('Ce carrefour a déjà un PSGR.', 'warn'); return; }
+    if (!throughArms(S.prj, S.D.O)) { toast('Aucune route ne traverse ce carrefour : il faut deux branches opposées dans le même axe (posez le carrefour sur une voie).', 'warn'); return; }
+    S.prj.psgr.push({ id: uid(), jid: S.prj.jid, name: `PSGR ${S.prj.psgr.length + 1}`, ...PSGR_SEL });
+    update();
+    const r = S.psgrRes?.[S.psgrRes.length - 1];
+    toast(`${r?.name || 'PSGR'} ajouté sous ${S.prj.jname || 'le carrefour'} : gabarit 2,60 m (PSGR type B), à régler dans l'onglet PSGR.`);
+  });
+  $('#psgrPanel').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    const ds = b.dataset, list = S.prj.psgr || [];
+    if (ds.psgrdel != null) { const q = list[+ds.psgrdel]; if (q && confirm(t(`Supprimer ${q.name || 'ce PSGR'} ?`))) { list.splice(+ds.psgrdel, 1); update(); } }
+    else if (ds.psgrzoom != null) { const r = S.psgrRes?.[+ds.psgrzoom]; if (r?.pl) { viewer.fit(r.pl.bbox); autosave(); } }
+    else if (ds.psgrtpc != null) {
+      const r = S.psgrRes?.[+ds.psgrtpc]; if (!r?.ax) return;
+      const w = Math.ceil((r.sec.Wo + 2 * PSGR_GAP) * 100) / 100;
+      for (const br of [r.ax.a, r.ax.b]) br.tpc = { ...br.tpc, on: true, width: w };
+      update(); toast(`TPC des branches ${r.ax.a.name} et ${r.ax.b.name} portés à ${fmt(w)} m.`);
+    } else if (ds.psgrdxf) {
+      const [kind, k] = ds.psgrdxf.split(':'), r = S.psgrRes?.[+k]; if (!r?.P) return;
+      const w = new DxfWriter();
+      if (kind === 'pl') psgrProfileDXF(w, r.P, r.sec, r.pr, 5, r.name); else psgrSectionDXF(w, r.P, r.sec, r.name);
+      download(fname('dxf').replace(/\.dxf$/, `_${r.name.replace(/[^\w-]+/g, '_')}_${kind === 'pl' ? 'profil' : 'coupe'}.dxf`), w.toString(), 'application/dxf');
+    }
+  });
+}
+
 // ================================================================ Calques KMZ / KML
 // Géométrie gardée en WGS84 dans S.kml (enregistrée avec le projet et, à part, dans le stockage local) ; projection
 // dans le système du projet mise en cache par calque et recalculée quand le système change.
@@ -5965,7 +6135,7 @@ function buildDxfText() {
   const lay = (k) => LAYERS[k]?.dxf;
   const TH = +S.prj.opts.textH || 0.8;
   let tal = null; try { tal = computeTalus(); } catch (e) { console.error(e); }
-  for (const pr of [...(S.tn && S.prj.opts.vis.MNT !== false ? S.tn.prims : []), ...(S.Do || []).flatMap((o) => o.D.prims || []), ...D.prims, ...(tal?.prims || [])]) {
+  for (const pr of [...(S.tn && S.prj.opts.vis.MNT !== false ? S.tn.prims : []), ...(S.Do || []).flatMap((o) => o.D.prims || []), ...D.prims, ...(tal?.prims || []), ...(S.psgrPrims || [])]) {
     const L = lay(pr.L);
     if (!L || S.prj.opts.vis[pr.L] === false) continue;
     const ex = pr.lt ? { ltype: pr.lt } : undefined;

@@ -458,6 +458,18 @@ ou sur un fond topographique DXF.
 - **Sélection sur le plan** : chaque élément (giratoire ou carrefour, branche, bretelle, autoroute, route transversale)
   se met en surbrillance au survol ; un clic ouvre sa fenêtre (tous ses paramètres, modifiables, et un bouton Supprimer
   en tête ; Échap ferme, Suppr supprime, fenêtre déplaçable par son en-tête).
+- **PSGR — passage souterrain à gabarit réduit** (onglet PSGR, calque `GIRA_PSGR`) : la route qui traverse un
+  giratoire ou un carrefour en T / X passe en trémie sous le carrefour ; les véhicules hors gabarit et les mouvements
+  tournants restent en surface sur les contre-allées. Gabarits PSGR type A (1,90 m, classe de la lettre-circulaire du
+  28 juin 1971) et B (2,60 m), RECTUR 2,00 / 2,70 / 3,50 m ou libre ; tube unique à double sens ou deux tubes, 1 ou 2
+  voies par sens. Coupe type d'après RECTUR (CETU, 1995) : largeur entre piédroits à 1 m (effet de paroi 1,20 m,
+  largeur des véhicules, interdistance), voies, bandes dérasées, trottoirs, Hm = G + revanche de signalisation,
+  revanches de protection et de construction. Profil en long symétrique : fond sous la couverture, rentrant Rr, rampe,
+  saillant Rs ; contrôles de déclivité (6 % ; 9 % en dérogation) et des rayons minimaux (visibilité, confort). Plan :
+  couverture, trémies ouvertes, piédroits, musoirs ; signalisation de tri (présignalisation B12 + panonceau, portique
+  de détection des hors-gabarit, B12 sur le musoir, gabarit physique à l'entrée). TPC des branches adaptables à la
+  trémie ; exports DXF du profil en long et de la coupe type. Le dossier-guide PSGR du SETRA (annexe II de la
+  circulaire de 1971) n'étant pas disponible, les valeurs non citées par RECTUR sont celles de la classe RECTUR voisine.
 - **Exports** : DXF R12 par calques `GIRA_*` (AutoCAD, Covadis, BricsCAD…), PNG, points d'implantation X, Y, Z en CSV,
   projet `.gira.json` (et sauvegarde automatique dans le navigateur).
 

@@ -25,6 +25,7 @@ export const THEMES = {
       COTATION: { stroke: '#38bdf8', w: 0.9, text: '#7dd3fc' },
       DEVERS: { stroke: '#fb923c', w: 1.2, text: '#fdba74' },
       OUVRAGE: { stroke: '#e2e8f0', w: 1.4, text: '#e2e8f0', fill: { tablier: 'rgba(203,213,225,0.16)', pile: 'rgba(148,163,184,0.45)', culee: 'rgba(148,163,184,0.55)' }, roles: { axe: { stroke: '#94a3b8', w: 0.8 }, cache: { stroke: '#cbd5e1', w: 1 }, err: { stroke: '#ef4444', w: 2.6 } } },
+      PSGR: { stroke: '#c4b5fd', w: 1.3, text: '#ddd6fe', fill: { couv: 'rgba(167,139,250,0.22)', tremie: 'rgba(30,27,46,0.55)' }, roles: { cache: { stroke: 'rgba(196,181,253,0.7)', w: 1 }, axe: { stroke: '#a78bfa', w: 0.9 }, tete: { stroke: '#ede9fe', w: 1.8 }, portique: { stroke: '#f472b6', w: 2 }, nez: { stroke: '#f5f5f5', w: 1.4 } } },
       RETENUE: { stroke: '#fbbf24', w: 1.2, text: '#fcd34d', roles: { W: { stroke: 'rgba(251,191,36,0.75)', w: 0.9 } } },
       TALUS: { stroke: '#a8a29e', w: 1, roles: { crete: { stroke: '#d6d3d1', w: 1.3 }, inter: { stroke: '#fde68a', w: 1.4 }, R: { stroke: 'rgba(134,239,172,0.85)' }, D: { stroke: 'rgba(253,186,116,0.85)' } } },
       EET: { stroke: '#bef264', w: 1.1, dash: [6, 3] },
@@ -56,6 +57,7 @@ export const THEMES = {
       COTATION: { stroke: '#0369a1', w: 0.9, text: '#0c4a6e' },
       DEVERS: { stroke: '#c2410c', w: 1.2, text: '#9a3412' },
       OUVRAGE: { stroke: '#334155', w: 1.4, text: '#1e293b', fill: { tablier: 'rgba(100,116,139,0.14)', pile: 'rgba(71,85,105,0.4)', culee: 'rgba(71,85,105,0.5)' }, roles: { axe: { stroke: '#64748b', w: 0.8 }, cache: { stroke: '#475569', w: 1 }, err: { stroke: '#dc2626', w: 2.6 } } },
+      PSGR: { stroke: '#6d28d9', w: 1.3, text: '#4c1d95', fill: { couv: 'rgba(124,58,237,0.14)', tremie: 'rgba(76,29,149,0.16)' }, roles: { cache: { stroke: 'rgba(109,40,217,0.7)', w: 1 }, axe: { stroke: '#7c3aed', w: 0.9 }, tete: { stroke: '#4c1d95', w: 1.8 }, portique: { stroke: '#db2777', w: 2 }, nez: { stroke: '#111827', w: 1.4 } } },
       RETENUE: { stroke: '#b45309', w: 1.2, text: '#92400e', roles: { W: { stroke: 'rgba(180,83,9,0.7)', w: 0.9 } } },
       TALUS: { stroke: '#78716c', w: 1, roles: { crete: { stroke: '#57534e', w: 1.3 }, inter: { stroke: '#a16207', w: 1.4 }, R: { stroke: 'rgba(21,128,61,0.85)' }, D: { stroke: 'rgba(154,52,18,0.85)' } } },
       EET: { stroke: '#4d7c0f', w: 1.1, dash: [6, 3] },
@@ -169,7 +171,7 @@ function arrowHead(ctx, x0, y0, x1, y1, size) {
 export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
   if (!D) return;
   const T = THEMES[theme];
-  const order = ['MNT', 'BASSINS', 'CHAUSSEE', 'TALUS', 'EET', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'RETENUE', 'OUVRAGE', 'PMR', 'VISIBILITE', 'EPURE', 'AXE', 'PROFILS', 'DEVERS', 'COTATION', 'SIGNALISATION'];
+  const order = ['MNT', 'BASSINS', 'CHAUSSEE', 'TALUS', 'EET', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'RETENUE', 'OUVRAGE', 'PSGR', 'PMR', 'VISIBILITE', 'EPURE', 'AXE', 'PROFILS', 'DEVERS', 'COTATION', 'SIGNALISATION'];
   ctx.lineCap = 'butt'; ctx.lineJoin = 'round';
   for (const layer of order) {
     if (vis[layer] === false) continue;

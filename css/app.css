@@ -537,3 +537,9 @@ details.hy-tabdetail > summary { cursor: pointer; font-weight: 600; }
 #profSeries li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 8px; }
 #profSeries li > b { min-width: 46px; }
 #profSeries li > span { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+/* PSGR */
+ul.ouvr-items li.err { color: var(--err); }
+ul.ouvr-items li.info { color: var(--muted); }
+.psgr { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; margin: 8px 0; }
+.psgr h4 { margin: 10px 0 4px; }
+.psgr-svg { margin: 6px 0; overflow-x: auto; color: var(--text, #d7dde5); background: var(--panel2); border-radius: 6px; padding: 4px; }

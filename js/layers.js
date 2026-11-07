@@ -18,6 +18,7 @@ export const LAYERS = {
   COTATION: { label: 'Cotations', dxf: 'GIRA_COTATION', aci: 4 },
   DEVERS: { label: 'Dévers', dxf: 'GIRA_DEVERS', aci: 30 },
   OUVRAGE: { label: 'Ouvrages (tabliers, piles, culées)', dxf: 'GIRA_OUVRAGE', aci: 5 },
+  PSGR: { label: 'PSGR (trémies, piédroits, couverture, portiques)', dxf: 'GIRA_PSGR', aci: 140 },
   RETENUE: { label: 'Dispositifs de retenue (largeur de fonctionnement)', dxf: 'GIRA_RETENUE', aci: 40 },
   TALUS: { label: 'Talus (bords, barbules) et quarts de cône', dxf: 'GIRA_TALUS', aci: 34 },
   EET: { label: 'Entrées en terre (limite des terrassements)', dxf: 'GIRA_ENTREE_EN_TERRE', aci: 30, ltype: 'TIRETS' },
