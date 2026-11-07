@@ -16,6 +16,12 @@ ou sur un fond topographique DXF.
   ou saisie « lat, lon ».
 - **Import DXF ASCII** : LINE, LWPOLYLINE / POLYLINE (arcs), ARC, CIRCLE, ELLIPSE, SPLINE, TEXT, MTEXT, POINT,
   INSERT (blocs, attributs), DIMENSION ; calques avec couleurs, unités m / cm / mm.
+- **Calques KMZ / KML** (onglet Projet) : import de fichiers Google Earth / My Maps / QGIS (plusieurs à la fois) ;
+  chaque fichier devient un calque de la liste, ses dossiers KML des sous-calques cochables. Lus : Point, LineString,
+  Polygon (avec trous), MultiGeometry, gx:Track ; styles KML (couleurs, épaisseurs, remplissage). Par calque :
+  affichage, couleur (ou « Couleur unique »), noms, opacité, zoom, ordre de superposition, renommer, retirer.
+  Géométrie conservée en WGS84 et reprojetée dans le système du projet (un projet local sans axe passe en UTM au
+  fuseau du KMZ) ; accrochage aux sommets ; calques enregistrés avec le projet ; export DXF optionnel (`KMZ_*`).
 - **Giratoire** : axes de branches saisis par l'utilisateur, centre calculé à l'intersection des axes (ou placé),
   Rg, la, bande franchissable ; par branche : voies, le / Re, ls / Rs, îlot séparateur (triangle de construction
   ACI Rg × Rg/4, décalage à gauche, bordures Rg/50), îlot peint ou absent, **TPC** avec sa largeur.

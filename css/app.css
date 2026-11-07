@@ -108,6 +108,18 @@ main.app { display: grid; grid-template-columns: 46px minmax(0, 1fr) 452px; min-
 .layers .lyrs { max-height: 240px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; margin-top: 6px; }
 .layers .chk i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid rgba(255,255,255,.25); }
 .layers .chk .dim { margin-left: auto; font-size: 11px; }
+.kml-l { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin-top: 8px; }
+.kml-l.off { opacity: .6; }
+.kml-h { display: flex; align-items: center; gap: 6px; }
+.kml-h .chk { margin: 0; flex: 1; min-width: 0; }
+.kml-h .chk b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.kml-h input[type=color] { width: 26px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; cursor: pointer; }
+.kml-tb { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; align-items: center; }
+.kml-tb button { padding: 3px 7px; font-size: 11px; }
+.kml-tb .chk { margin: 0 6px 0 0; font-size: 12px; }
+.kml-tb input[type=range] { width: 90px; }
+.kml-l .lyrs { max-height: 200px; }
+.kml-l .lyrs .chk { font-size: 12px; margin: 3px 0; }
 .kv dl { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; margin: 8px 0; padding: 8px 10px; background: var(--panel2); border-radius: 6px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; text-align: right; font-family: var(--mono); font-size: 12px; }
@@ -252,6 +264,7 @@ html[dir=rtl] .fld input[data-type=text], html[dir=rtl] .seg button, html[dir=rt
 html[dir=rtl] .kv dd { text-align: left; }
 html[dir=rtl] .hint { padding-left: 0; padding-right: 2px; }
 html[dir=rtl] .layers .chk .dim { margin-left: 0; margin-right: auto; }
+html[dir=rtl] .kml-tb .chk { margin: 0 0 0 6px; }
 html[dir=rtl] .guide ul { padding-left: 0; padding-right: 18px; }
 html[dir=rtl] dialog ol { padding-left: 0; padding-right: 20px; }
 html[dir=rtl] .keys td { padding: 2px 0 2px 10px; }
