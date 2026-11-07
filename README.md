@@ -61,6 +61,12 @@ ou sur un fond topographique DXF.
   à l'alignement radial) et par sommet de l'axe saisi, cotés sur le plan (rayon réduit signalé) ; poignées
   de sommet et de milieu de segment (le segment se déplace, les raccordements suivent) ; un « + » au bout extérieur
   de chaque axe en prolonge la saisie.
+- **Axes des voies d'échangeur (voie principale, voies secondaires)** : au survol (outil Sélection), la droite ou le
+  raccordement (clothoïde d'entrée, arc, clothoïde de sortie) sous le curseur est mis en surbrillance ; un clic ouvre sa
+  fenêtre : pour un raccordement, rayon R et paramètre A de la clothoïde du sommet, modifiables (A vide : clothoïde de la
+  catégorie de conception ; A = 0 : arc seul), avec L des clothoïdes, longueur d'arc, déviation et tangente ; pour une
+  droite, longueur, gisement et abscisse. Les droites se déplacent par leurs poignées aux points de tangence (rondes :
+  rotation autour de l'autre point de tangence ; losange : translation), les sommets restant déplaçables.
 - **Dévers** : anneau à dévers imposé de 1,5 % vers l'extérieur, constant sur site en pente (ou cône sur plan incliné),
   profil en long des rives, variation des dévers de chaque branche, flèches de dévers sur le plan.
 - **Épures de giration (T et X)** : semi-remorque de 16,50 m (largeur 2,55 m, empattement du tracteur 3,80 m, sellette

@@ -1760,6 +1760,7 @@ function elGeom(el) {
   const D = S.D;
   if (el.type === 'bv') { const c = S.prj.hydro?.res?.crossings?.find((q) => q.id === el.i); return c?.ring?.length ? { lines: c.ring.map((r) => [...r, r[0]]), half: 0.8 } : null; }
   if (el.type === 'ouvr') { const p = ouvrPoly(el.i); return p?.length > 2 ? { lines: [[...p, p[0]]], half: 0.6 } : null; }
+  if (el.type === 'axel') { const q = axElOf(el); return q ? { lines: [q.pts], half: 1.0 } : null; }
   if (el.type === 'ramp') { const R = D?.ramps?.[el.i]; return R?.al?.path ? { lines: [G.samplePath(R.al.path, 2)], half: R.rp.w / 2 + R.rp.bdd } : null; }
   if (el.type === 'hwy' || el.type === 'cross') { const r = el.type === 'hwy' ? D?.hwy : D?.crosses?.[el.i]; return r?.ok ? { lines: [G.samplePath(r.path, 4)], half: r.E2 + r.H.berme } : null; }
   if (el.type === 'branch') {
@@ -1782,6 +1783,81 @@ function elGeom(el) {
   }
   return null;
 }
+// ─── Éléments de l'axe en plan des voies d'échangeur (autoroute / voie principale, voies secondaires) ───
+// Survol : surbrillance de la droite ou du raccordement (clothoïde d'entrée, arc, clothoïde de sortie) sous le curseur ;
+// clic : fenêtre de l'élément — rayon R et paramètre A de la clothoïde du sommet, modifiables, ou longueur et gisement
+// de la droite. Les valeurs sont celles des sommets de l'axe (r, a ; a vide = clothoïde de la catégorie de conception).
+const axElCache = new Map();
+/** Alignement calculé d'un axe d'échangeur et ses éléments regroupés : courbes (par sommet) et droites (par côté). */
+function axisElements(ref) {
+  const ax = axRefArr(ref) || [];
+  if (ax.length < 2 || ref.t === 'br') return null;
+  const key = `${ref.t}${ref.i ?? ''}`, dn = Math.max(0, +(S.prj.pt?.dev ?? 2.5) || 2.5);
+  let P; try { P = ref.t === 'hwy' ? hwyParams(S.prj) : crossParams(S.prj, ref.i); } catch { return null; }
+  const sig = JSON.stringify([ax.map((p) => [p.x, p.y, p.r ?? null, p.a ?? null]), P.cat, P.dcat, P.V, P.kind, dn]);
+  const c = axElCache.get(key); if (c?.sig === sig) return c.v;
+  let v = null;
+  try {
+    const A = roadAlignment(P, dn), al = A.al, els = al?.elems || [], out = [];
+    els.forEach((e, k) => {
+      if (e.kind === 'A' && e.pi != null) {
+        const grp = [e], prev = els[k - 1], next = els[k + 1];
+        if (prev?.kind === 'C' && !prev.out) grp.unshift(prev);
+        if (next?.kind === 'C' && next.out) grp.push(next);
+        const tg = (al.tangents || []).find((q) => q.i === e.pi) || {};
+        out.push({ kind: 'curve', vi: e.pi, els: grp, R: e.R, A1: tg.A1 || 0, A2: tg.A2 || 0, L1: tg.L1 || 0, L2: tg.L2 || 0, defl: tg.defl || 0, La: e.len, T: tg.T || 0, s0: grp[0].s0 });
+      } else if (e.kind === 'L' && e.len > 0.05) {
+        const m = e.pointAt(e.len / 2); let kk = 0, bd = Infinity;
+        for (let j = 0; j + 1 < ax.length; j++) { const d = G.distToSeg(m, ax[j], ax[j + 1]); if (d < bd) { bd = d; kk = j; } }
+        out.push({ kind: 'line', k: kk, els: [e], len: e.len, th: e.th0, s0: e.s0 });
+      }
+    });
+    for (const q of out) { const pts = []; for (const e of q.els) { const n = Math.max(2, Math.ceil(e.len / 2)); for (let j = 0; j <= n; j++) pts.push(e.pointAt((e.len * j) / n)); } q.pts = pts; }
+    v = { list: out, P, fit: A.fit, name: P.name };
+  } catch { v = null; }
+  axElCache.set(key, { sig, v }); return v;
+}
+const axElRefs = () => [...(S.prj.hwy?.on && (S.prj.hwy.axis || []).length >= 2 ? [{ t: 'hwy' }] : []), ...(S.prj.crosses || []).map((X, i) => (X.on !== false && (X.axis || []).length >= 2 ? { t: 'cross', i } : null)).filter(Boolean)];
+/** Élément d'axe d'un objet 'axel' : { ref, kind, idx } → entrée de axisElements. */
+function axElOf(el) {
+  const A = axisElements(el.ref); if (!A) return null;
+  return A.list.find((q) => (el.kind === 'curve' ? q.kind === 'curve' && q.vi === el.idx : q.kind === 'line' && q.k === el.idx)) || null;
+}
+/** Panneau de la fenêtre d'un élément d'axe. */
+function renderAxEl(el) {
+  const box = $('#grpAxEl'), A = axisElements(el.ref), q = axElOf(el), ax = axRefArr(el.ref) || [];
+  if (!q || !A) { box.innerHTML = `<p class="note">${t('Élément introuvable : l\'axe a changé.')}</p>`; return; }
+  const unit = S.prj.opts.angleUnit, rows = (L) => `<table class="kv">${L.map(([a, b]) => `<tr><th>${esc(t(a))}</th><td>${b}</td></tr>`).join('')}</table>`;
+  if (q.kind === 'line') {
+    box.innerHTML = rows([['Alignement droit', `${t('entre les sommets')} ${q.k} ${t('et')} ${q.k + 1}`], ['Longueur', `${fmt(q.len, 2)} m`], ['Gisement', fmtGis(q.th, unit)], ['Abscisse de début', `${fmt(q.s0, 2)} m`]])
+      + `<p class="note">${t('Les poignées rondes (points de tangence) font pivoter la droite, le losange la translate.')}</p>`;
+    return;
+  }
+  const p = ax[q.vi] || {}, f = (A.fit || []).find((g) => g.i === q.vi), Rreq = +p.r || 0;
+  const aTxt = p.a == null || p.a === '' ? '' : String(p.a).replace('.', ',');
+  const Aeff = Math.max(q.A1, q.A2), auto = p.a == null || p.a === '';
+  box.innerHTML = `<div class="row"><label class="fld">${t('Rayon R')} [m]<input data-axel="r" inputmode="decimal" value="${String(Rreq || '').replace('.', ',')}"></label>`
+    + `<label class="fld">${t('Clothoïde A')} [m]<input data-axel="a" inputmode="decimal" value="${aTxt}" placeholder="${auto ? `auto ${fmt(Aeff, 0)}` : 'auto'}"></label></div>`
+    + `<p class="note">${t('A vide : clothoïde de la catégorie de conception ; A = 0 : arc seul.')}</p>`
+    + rows([
+      ['Sommet', `${q.vi}${f && f.r < f.req - 0.005 ? ` — ${t('rayon ramené à')} ${fmt(f.r, 1)} m ${t('faute de place')}` : ''}`],
+      ['Rayon de l\'arc', `${fmt(q.R, 2)} m`],
+      ['Clothoïdes A / L', q.L1 + q.L2 > 0 ? `${fmt(q.A1, 0)} / ${fmt(q.L1, 2)} m${Math.abs(q.A2 - q.A1) > 0.5 ? ` ; ${fmt(q.A2, 0)} / ${fmt(q.L2, 2)} m` : ''}` : t('aucune')],
+      ['Longueur de l\'arc', `${fmt(q.La, 2)} m`],
+      ['Déviation', fmtGis(q.defl, unit)],
+      ['Tangente', `${fmt(q.T, 2)} m`],
+      ['Abscisse de début', `${fmt(q.s0, 2)} m`],
+    ]);
+}
+function applyAxEl(inp) {
+  const el = S.pop; if (el?.type !== 'axel') return;
+  const ax = axRefArr(el.ref), p = ax?.[el.idx]; if (!p) return;
+  const v = parseNum(inp.value);
+  if (inp.dataset.axel === 'r') { if (!(v > 0)) { toast(t('Rayon : saisir une valeur positive.'), 'warn'); renderAxEl(el); return; } ax[el.idx] = { ...p, r: v }; }
+  else { const q = { ...p }; if (inp.value.trim() === '') delete q.a; else if (v >= 0) q.a = v; else { renderAxEl(el); return; } ax[el.idx] = q; }
+  S.echSig = ''; update(); renderAxEl(el);
+}
+
 // Élément sous le curseur : branches et bretelles avant les axes de section courante, puis l'anneau.
 function hitElement(px, py) {
   const D = S.D, P = { x: px, y: py }, cands = [];
@@ -1795,6 +1871,11 @@ function hitElement(px, py) {
     const [x, y] = viewer.w2s(o.D.O.x, o.D.O.y), R = Math.max(18, (o.D.kind === 'giratoire' ? o.D.Rpo : 20) * viewer.s), d = Math.hypot(px - x, py - y);
     if (d < R) cands.push({ type: 'junction', i: o.id, sc: -150 + d / R });
   }
+  // éléments de l'axe en plan (droites, raccordements) des voies d'échangeur : à quelques pixels de l'axe
+  if (S.tool === 'select') for (const ref of axElRefs()) {
+    const A = axisElements(ref); if (!A) continue;
+    for (const q of A.list) { const d = polyDist(q.pts); if (d < 6) cands.push({ type: 'axel', i: `${ref.t}${ref.i ?? ''}:${q.kind}:${q.kind === 'curve' ? q.vi : q.k}`, ref, kind: q.kind, idx: q.kind === 'curve' ? q.vi : q.k, sc: 500 + d + (q.kind === 'line' ? 0.5 : 0) }); }
+  }
   for (const [type, i, r] of [['hwy', 0, D?.hwy], ...(D?.crosses || []).map((c, k) => ['cross', k, c])]) {
     if (!r?.ok) continue;
     const tol = Math.max(7, (r.E2 + r.H.berme) * viewer.s), d = polyDist(G.samplePath(r.path, Math.max(2, 6 / viewer.s)));
@@ -1807,7 +1888,8 @@ function hitElement(px, py) {
   for (const g of S.cadres || []) if (g.poly?.length > 2 && (inPolyW(wq, g.poly) || polyDist([...g.poly, g.poly[0]]) < 6)) cands.push({ type: 'ouvr', i: `c:${g.c.id}`, sc: -310 });
   if (!cands.length) { const id = bvAt(wq); if (id) cands.push({ type: 'bv', i: id, sc: 5000 }); } // bassin versant : seulement hors des éléments du projet
   cands.sort((a, b) => a.sc - b.sc);
-  return cands[0] ? { type: cands[0].type, i: cands[0].i } : null;
+  const c0 = cands[0];
+  return c0 ? (c0.type === 'axel' ? { type: 'axel', i: c0.i, ref: c0.ref, kind: c0.kind, idx: c0.idx } : { type: c0.type, i: c0.i }) : null;
 }
 // Contour (monde) d'un ouvrage du plan : tablier ou cadre.
 function ouvrPoly(key) {
@@ -1819,13 +1901,14 @@ function ouvrName(key) {
   const o = (S.ouvr?.list || []).find((q) => q.key === key); return o ? `${o.name} — ${o.src}` : 'Ouvrage';
 }
 // Groupes de champs de la barre latérale affichés dans la fenêtre.
-const POP_GROUP = { ramp: '#grpRamp', hwy: '#grpHwy', cross: '#grpCross', branch: '#branchForm', ring: '#grpRing', ouvr: '#grpOuvr' };
+const POP_GROUP = { ramp: '#grpRamp', hwy: '#grpHwy', cross: '#grpCross', branch: '#branchForm', ring: '#grpRing', ouvr: '#grpOuvr', axel: '#grpAxEl' };
 function popTitle(el) {
   if (el.type === 'ramp') { const r = S.prj.ramps[el.i]; return `Bretelle ${r?.name || ''} — ${S.D?.ramps?.[el.i]?.label || ''}`; }
   if (el.type === 'hwy') return `Autoroute ${S.prj.hwy.name || ''}`;
   if (el.type === 'cross') return `Voie secondaire ${S.prj.crosses[el.i]?.name || ''}`;
   if (el.type === 'branch') return `Branche ${S.prj.branches[el.i]?.name || ''}`;
   if (el.type === 'ouvr') return `Ouvrage ${ouvrName(el.i)}`;
+  if (el.type === 'axel') { const A = axisElements(el.ref); return `${A?.name || ''} — ${el.kind === 'curve' ? `${t('raccordement du sommet')} ${el.idx}` : `${t('droite')} ${el.idx}-${el.idx + 1}`}`; }
   return `${S.D?.kind === 'giratoire' ? 'Giratoire' : 'Carrefour'} — ${S.prj.jname || ''}`;
 }
 function openPop(el, px, py) {
@@ -1836,7 +1919,9 @@ function openPop(el, px, py) {
   if (el.type === 'branch') selectBranch(el.i);
   if (el.type === 'cross') { if (S.prj.crosses[el.i]?.main) S.msel = el.i; else S.xsel = el.i; S.echSig = ''; refreshPanels(); }
   if (el.type === 'ouvr') { S.osel = el.i; $('#ouvrEdit').dataset.key = ''; renderOuvr(); }
+  if (el.type === 'axel') renderAxEl(el);
   const pop = $('#elPop'), node = $(POP_GROUP[el.type]);
+  $('#popDel').hidden = el.type === 'axel';
   if (!node) return;
   const ph = document.createElement('p'); ph.className = 'note moved-note'; ph.textContent = t('Affiché dans la fenêtre de l\'élément sur le plan.');
   node.parentNode.insertBefore(ph, node);
@@ -1887,6 +1972,7 @@ function bindJunctions() {
 function bindPop() {
   $('#popClose').addEventListener('click', () => closePop());
   $('#popDel').addEventListener('click', popDelete);
+  $('#elPop').addEventListener('change', (e) => { if (e.target?.dataset?.axel) applyAxEl(e.target); });
   // Déplacement de la fenêtre par son en-tête.
   const head = $('#elPop .elpop-head');
   head.addEventListener('pointerdown', (e) => {
