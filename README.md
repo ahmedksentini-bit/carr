@@ -475,7 +475,8 @@ ou sur un fond topographique DXF.
   largeur des véhicules, interdistance), voies, bandes dérasées, trottoirs, Hm = G + revanche de signalisation,
   revanches de protection et de construction. Profil en long symétrique : fond sous la couverture, rentrant Rr, rampe,
   saillant Rs ; contrôles de déclivité (6 % ; 9 % en dérogation) et des rayons minimaux (visibilité, confort). Plan :
-  couverture, trémies ouvertes, piédroits, musoirs ; signalisation de tri (présignalisation B12 + panonceau, portique
+  centré sur l'axe en plan de la route traversante (point le plus proche du centre du carrefour) et tracé le long de cet axe,
+  courbes comprises : couverture, trémies ouvertes, piédroits, musoirs ; signalisation de tri (présignalisation B12 + panonceau, portique
   de détection des hors-gabarit, B12 sur le musoir, gabarit physique à l'entrée). TPC des branches adaptables à la
   trémie ; exports DXF du profil en long et de la coupe type. Le dossier-guide PSGR du SETRA (annexe II de la
   circulaire de 1971) n'étant pas disponible, les valeurs non citées par RECTUR sont celles de la classe RECTUR voisine.
