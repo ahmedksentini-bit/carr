@@ -2,7 +2,7 @@
 import * as G from './geom.js';
 import { makeCRS, CRS_PRESETS, utmZoneOf } from './crs.js';
 import { TileLayer, PROVIDERS } from './tiles.js';
-import { parseDXF, buildDxfGeometry } from './dxf-parse.js';
+import { parseDXF, buildDxfGeometry, aciColor } from './dxf-parse.js';
 import { DxfWriter } from './dxf-write.js';
 import { Viewer, THEMES, drawDesign, drawDxf, buildDxfCache, snapDxf, drawGrid, drawHud, niceStep } from './viewer.js';
 import { buildDesign, fmt, fmtGis } from './roundabout.js';
@@ -21,6 +21,7 @@ import { plParams, plBuild, plStations, plTerrainLine, plDXF, plChecks, axisLeng
 import { createPlEditor } from './pleditor.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
+import { kmlTextOf, parseKML, newKmlLayer, buildKmlCache, drawKml, kmlStats, kmlBBoxLL, folderShown } from './kml.js';
 import { buildOuvrages, W_CLASSES, psidaLink, psidaProject, psidaWarnings, PSIDA_URL } from './ouvrage.js';
 import { buildProfils, listAxes, nearestAxis, profParams, profilsCsv } from './profils.js';
 import { cadreGeoms, drawCadre, cadreChecks, cadreLink, cadreProject, CADRE_DEF, PP_TYPES, parseSpansTxt, poutresSupports, cadreHeadPolys, HEAD_TYPES } from './cadres.js';
@@ -250,6 +251,7 @@ function otherDesigns() {
 const S = {
   prj: null, D: null, checks: [], crs: null,
   dxf: null, dxfCache: null, dxfName: '', dxfRaw: null,
+  kml: [], kmlCache: new Map(), kmlOpen: new Set(), // calques KMZ / KML importés (WGS84), cache projeté par calque, calques dépliés
   tool: 'select', sel: -1, hover: -1, hoverEl: null, pop: null, // élément survolé / fenêtre ouverte { type, i }
   rsel: -1, msel: -1, hwyDraw: false, rampKind: null, echSig: '', // échangeur : bretelle sélectionnée, saisie de l'axe autoroutier, type de bretelle à placer
   draft: [], meas: [], drag: null, mouse: null, cursorW: null, snap: null,
@@ -271,6 +273,7 @@ function init() {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem('gira.autosave') || 'null'); } catch { saved = null; }
   S.prj = saved && saved.app === 'GIRA' ? migrate(saved) : newProject();
+  try { const k = JSON.parse(localStorage.getItem('gira.kml') || '[]'); if (Array.isArray(k)) S.kml = k; } catch { S.kml = []; }
   applyCRS();
   rebuildTerrain();
   buildStaticPanels();
@@ -322,7 +325,7 @@ function changeCRS(cfg) {
     const c = tr({ x: viewer.cx, y: viewer.cy }); viewer.cx = c.x; viewer.cy = c.y;
   }
   S.prj.crs = cfg; S.crs = nxt;
-  syncCrsUI(); update();
+  syncCrsUI(); update(); renderKmlLayers();
 }
 
 // ================================================================ Mise à jour
@@ -1623,6 +1626,7 @@ function renderScene(ctx, v, exp = null) {
   }
   if (S.tog.grid) drawGrid(ctx, v, theme);
   if (S.dxf) { drawDxf(ctx, v, S.dxf, S.dxfCache, theme, +S.prj.opts.dxfOpacity || 1); ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0); }
+  for (let i = S.kml.length - 1; i >= 0; i--) { try { drawKml(ctx, v, S.kml[i], kmlCacheOf(S.kml[i])); } catch (e) { console.warn(e); } ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0); }
   if (S.tn) drawDesign(ctx, v, { prims: S.tn.prims }, theme, S.prj.opts.vis, {});
   for (const o of S.Do || []) drawDesign(ctx, v, o.D, theme, S.prj.opts.vis, { onImagery: imagery && S.prj.bg.provider === 'esri', onImage: () => viewer.invalidate() });
   drawDesign(ctx, v, S.D, theme, S.prj.opts.vis, { onImagery: imagery && S.prj.bg.provider === 'esri', onImage: () => viewer.invalidate() });
@@ -2498,6 +2502,7 @@ function pickPoint(px, py) {
     if (S.D && S.drag?.kind !== 'center') { S.D.points.forEach((q) => consider(q.p, 'point')); if (S.D.O) consider(S.D.O, 'centre'); }
     const d = snapDxf(S.dxfCache, x, y, bd);
     if (d) consider(d, 'DXF');
+    for (const L of S.kml) { if (!L.visible) continue; const k = snapDxf(kmlCacheOf(L), x, y, bd); if (k) consider(k, 'KMZ'); }
     if (best) { S.snap = best; return { x: best.x, y: best.y }; }
   }
   const last = S.tool === 'axis' ? S.draft[S.draft.length - 1] : S.tool === 'measure' && S.meas.length === 1 ? S.meas[0] : null;
@@ -2902,6 +2907,10 @@ function zoomAll() {
   let bb = designBBox();
   if (S.dxf?.bbox) {
     const d = S.dxf.bbox;
+    bb = bb ? { x0: Math.min(bb.x0, d.x0), y0: Math.min(bb.y0, d.y0), x1: Math.max(bb.x1, d.x1), y1: Math.max(bb.y1, d.y1) } : { ...d };
+  }
+  for (const L of S.kml) {
+    const d = L.visible && kmlCacheOf(L)?.bbox; if (!d) continue;
     bb = bb ? { x0: Math.min(bb.x0, d.x0), y0: Math.min(bb.y0, d.y0), x1: Math.max(bb.x1, d.x1), y1: Math.max(bb.y1, d.y1) } : { ...d };
   }
   if (bb) { viewer.fit(bb); autosave(); }
@@ -5553,6 +5562,7 @@ function bindUI() {
     if (e.target.id === 'dxfRemove') { S.dxf = null; S.dxfCache = null; S.dxfName = ''; renderDxfLayers(); viewer.invalidate(); }
   });
 
+  bindKml();
   $('#btnNew').addEventListener('click', () => {
     if (S.prj.branches.length && !confirm(t('Créer un nouveau projet ? Le projet en cours non enregistré sera perdu.'))) return;
     const keep = { crs: S.prj.crs, bg: S.prj.bg, opts: S.prj.opts, kind: S.prj.kind };
@@ -5596,6 +5606,7 @@ function bindUI() {
   $('#btnHelp').addEventListener('click', () => $('#dlgHelp').showModal());
   renderBranchForm();
   renderDxfLayers();
+  renderKmlLayers();
 }
 
 function setContext(c) {
@@ -5731,6 +5742,146 @@ function renderDxfLayers() {
     '<div class="lyrs">' + layers.map((l) => `<label class="chk"><input type="checkbox" data-layer="${esc(l.name)}" ${l.visible ? 'checked' : ''}><i style="background:${l.color}"></i>${esc(l.name)} <span class="dim">${l.count}</span></label>`).join('') + '</div>';
 }
 
+// ================================================================ Calques KMZ / KML
+// Géométrie gardée en WGS84 dans S.kml (enregistrée avec le projet et, à part, dans le stockage local) ; projection
+// dans le système du projet mise en cache par calque et recalculée quand le système change.
+function kmlCacheOf(L) {
+  const sig = JSON.stringify(S.prj.crs) + (window.proj4 ? 'p' : '');
+  let c = S.kmlCache.get(L.id);
+  if (!c || c.sig !== sig) { let cache = null; try { cache = buildKmlCache(L, S.crs); } catch (e) { console.warn(e); } c = { sig, cache }; S.kmlCache.set(L.id, c); }
+  return c.cache;
+}
+
+function saveKml() {
+  try { localStorage.setItem('gira.kml', JSON.stringify(S.kml)); }
+  catch { toast('Calques KMZ trop volumineux pour la sauvegarde automatique du navigateur : enregistrez le projet (ils y sont inclus).', 'warn'); }
+}
+
+async function importKml(files) {
+  let added = 0, far = false, firstBox = null;
+  for (const file of files) {
+    try {
+      const text = await kmlTextOf(await file.arrayBuffer(), file.name);
+      const parsed = parseKML(text);
+      if (!parsed.feats.length) throw new Error('aucun repère (point, ligne, polygone) lisible');
+      const L = newKmlLayer(parsed, file.name, S.kml.length);
+      S.kml.unshift(L); added++;
+      const ll = kmlBBoxLL(L);
+      if (ll && !firstBox) firstBox = ll;
+      const st = kmlStats(L);
+      toast(`${file.name} : ${st.l} lignes, ${st.a} surfaces, ${st.p} points, ${L.folders.length - 1} dossiers.`);
+    } catch (e) {
+      console.error(e);
+      toast(`Import de ${file.name} impossible : ${e.message}`, 'err');
+    }
+  }
+  if (!added) return;
+  // Projet non géoréférencé : sans axe saisi, on passe en UTM au fuseau du KMZ ; sinon, avertissement.
+  if (!S.crs.geo && firstBox) {
+    const lon = (firstBox.lon0 + firstBox.lon1) / 2, lat = (firstBox.lat0 + firstBox.lat1) / 2;
+    if (!S.prj.branches.length) { changeCRS({ id: 'utm', zone: utmZoneOf(lon), south: lat < 0, def: '' }); toast(`Système passé en UTM WGS84 fuseau ${utmZoneOf(lon)}${lat < 0 ? 'S' : 'N'} pour afficher le KMZ.`); }
+    else toast('Le projet est en coordonnées locales : choisissez un système géoréférencé (onglet Projet) pour afficher les calques KMZ.', 'warn');
+  }
+  const bb = kmlCacheOf(S.kml[0])?.bbox;
+  if (bb) {
+    far = viewer.cx < bb.x0 - 5000 || viewer.cx > bb.x1 + 5000 || viewer.cy < bb.y0 - 5000 || viewer.cy > bb.y1 + 5000;
+    if (!S.prj.branches.length || far) viewer.fit(bb);
+  }
+  saveKml(); renderKmlLayers(); viewer.invalidate(); autosave();
+}
+
+function renderKmlLayers() {
+  const host = $('#kmlLayers');
+  if (!host) return;
+  $('#kmlInfo').textContent = !S.kml.length ? 'Aucun calque. Formats : KMZ et KML (Google Earth, My Maps, QGIS…) en WGS84 ; chaque fichier devient un calque, ses dossiers des sous-calques.'
+    : !S.crs.geo ? 'Projet en coordonnées locales : choisissez un système géoréférencé pour afficher les calques KMZ.' : '';
+  if (!S.kml.length) { host.innerHTML = ''; return; }
+  const head = `<div class="row"><button data-kall="1">Tout afficher</button><button data-kall="0">Tout masquer</button>` +
+    `<label class="chk" title="Ajoute les calques KMZ visibles (dossiers cochés) à l'export DXF, sur des calques KMZ_…"><input type="checkbox" id="kmlDxf" ${S.prj.opts.kmlDxf ? 'checked' : ''}> Dans l'export DXF</label></div>`;
+  host.innerHTML = head + S.kml.map((L, i) => {
+    const st = kmlStats(L), open = S.kmlOpen.has(L.id), sub = L.folders.length > 1;
+    const folders = sub && open ? '<div class="lyrs">' + L.folders.slice(1).map((fo, j) =>
+      `<label class="chk" style="padding-inline-start:${(fo.depth - 1) * 14}px"><input type="checkbox" data-kfold="${j + 1}" ${fo.visible !== false ? 'checked' : ''} ${folderShown(L, fo.parent) ? '' : 'disabled'}>${esc(fo.name)} <span class="dim">${fo.n}</span></label>`).join('') + '</div>' : '';
+    return `<div class="kml-l${L.visible ? '' : ' off'}" data-kid="${esc(L.id)}">` +
+      `<div class="kml-h"><label class="chk" title="${esc(L.file || '')}"><input type="checkbox" data-kvis ${L.visible ? 'checked' : ''}><b>${esc(L.name)}</b></label>` +
+      `<span class="dim" title="lignes · surfaces · points">${st.l} · ${st.a} · ${st.p}</span>` +
+      `<input type="color" data-kcol value="${esc(L.color)}" title="Couleur du calque (repères sans style KML, ou tous si « Couleur unique »)"></div>` +
+      `<div class="kml-tb">` +
+      (sub ? `<button data-kact="fold">${open ? '▾' : '▸'} Dossiers (${L.folders.length - 1})</button>` : '') +
+      `<button data-kact="zoom">Zoom</button><button data-kact="up" ${i ? '' : 'disabled'} title="Monter (dessiné au-dessus)">↑</button><button data-kact="down" ${i < S.kml.length - 1 ? '' : 'disabled'} title="Descendre">↓</button>` +
+      `<button data-kact="ren" title="Renommer le calque">Renommer</button><button data-kact="del" class="danger">Retirer</button></div>` +
+      `<div class="kml-tb"><label class="chk"><input type="checkbox" data-kopt="labels" ${L.labels ? 'checked' : ''}> Noms</label>` +
+      `<label class="chk"><input type="checkbox" data-kopt="force" ${L.force ? 'checked' : ''}> Couleur unique</label>` +
+      `<label class="chk" title="Opacité du calque">Opacité <input type="range" data-kop min="0.1" max="1" step="0.05" value="${+L.opacity || 1}"></label></div>` +
+      folders + '</div>';
+  }).join('');
+}
+
+function bindKml() {
+  $('#btnImportKmz').addEventListener('click', () => $('#fileKmz').click());
+  $('#fileKmz').addEventListener('change', (e) => { const fs = [...e.target.files]; if (fs.length) importKml(fs); e.target.value = ''; });
+  const host = $('#kmlLayers');
+  const layerOf = (el) => { const id = el.closest('[data-kid]')?.dataset.kid; return S.kml.find((L) => L.id === id); };
+  const done = (render = true) => { saveKml(); if (render) renderKmlLayers(); viewer.invalidate(); };
+  host.addEventListener('input', (e) => {
+    const L = layerOf(e.target); if (!L) return;
+    if (e.target.dataset.kop != null) { L.opacity = +e.target.value; done(false); }
+    else if (e.target.dataset.kcol != null) { L.color = e.target.value; done(false); }
+  });
+  host.addEventListener('change', (e) => {
+    const el = e.target;
+    if (el.id === 'kmlDxf') { S.prj.opts.kmlDxf = el.checked; autosave(); return; }
+    const L = layerOf(el); if (!L) return;
+    if (el.dataset.kvis != null) { L.visible = el.checked; done(); }
+    else if (el.dataset.kopt) { L[el.dataset.kopt] = el.checked; done(false); }
+    else if (el.dataset.kfold) { L.folders[+el.dataset.kfold].visible = el.checked; done(); }
+  });
+  host.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.kall != null) { for (const L of S.kml) L.visible = b.dataset.kall === '1'; done(); return; }
+    const L = layerOf(b); if (!L) return;
+    const i = S.kml.indexOf(L), act = b.dataset.kact;
+    if (act === 'fold') { if (S.kmlOpen.has(L.id)) S.kmlOpen.delete(L.id); else S.kmlOpen.add(L.id); renderKmlLayers(); }
+    else if (act === 'zoom') { const bb = kmlCacheOf(L)?.bbox; if (bb) { if (!L.visible) { L.visible = true; done(); } viewer.fit(bb); autosave(); } else toast('Choisissez d\'abord un système de coordonnées géoréférencé.', 'warn'); }
+    else if (act === 'up' && i > 0) { S.kml.splice(i - 1, 0, S.kml.splice(i, 1)[0]); done(); }
+    else if (act === 'down' && i < S.kml.length - 1) { S.kml.splice(i + 1, 0, S.kml.splice(i, 1)[0]); done(); }
+    else if (act === 'ren') { const n = prompt(t('Nom du calque'), L.name); if (n != null && n.trim()) { L.name = n.trim(); done(); } }
+    else if (act === 'del') { if (!confirm(t('Retirer ce calque KMZ / KML ?'))) return; S.kml.splice(i, 1); S.kmlCache.delete(L.id); S.kmlOpen.delete(L.id); done(); }
+  });
+}
+
+// Calques KMZ visibles → DXF (un calque KMZ_<nom> par fichier, couleur ACI la plus proche).
+function kmlToDxf(w) {
+  if (!S.prj.opts.kmlDxf) return;
+  const used = new Set();
+  for (const L of S.kml) {
+    const c = L.visible && kmlCacheOf(L); if (!c?.bbox) continue;
+    let name = 'KMZ_' + L.name.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40).toUpperCase();
+    while (used.has(name)) name += '_'; used.add(name);
+    w.layer(name, nearestAci(L.color));
+    for (const f of c.feats) {
+      if (!folderShown(L, f.f)) continue;
+      for (const q of f.xy) {
+        if (q.t === 'P') { w.point(name, { x: q.c[0], y: q.c[1] }); if (f.name) w.text(name, { x: q.c[0] + 1, y: q.c[1] + 1 }, +S.prj.opts.textH || 0.8, 0, f.name); }
+        else for (const r of q.t === 'A' ? q.r : [q.c]) {
+          const v = []; for (let k = 0; k < r.length; k += 2) v.push({ x: r[k], y: r[k + 1] });
+          const closed = q.t === 'A'; if (closed && v.length > 2 && v[0].x === v[v.length - 1].x && v[0].y === v[v.length - 1].y) v.pop();
+          w.poly(name, v, closed);
+        }
+      }
+    }
+  }
+}
+function nearestAci(hex) {
+  const h = String(hex || '#ffffff').replace('#', ''), r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  let best = 7, bd = Infinity;
+  for (let i = 1; i < 256; i++) {
+    const a = aciColor(i).replace('#', ''), d = (parseInt(a.slice(0, 2), 16) - r) ** 2 + (parseInt(a.slice(2, 4), 16) - g) ** 2 + (parseInt(a.slice(4, 6), 16) - b) ** 2;
+    if (d < bd) { bd = d; best = i; }
+  }
+  return best;
+}
+
 // ================================================================ Exports
 const fname = (ext) => `${(S.prj.name || 'giratoire').replace(/[\\/:*?"<>|]+/g, '_')}.${ext}`;
 
@@ -5789,6 +5940,7 @@ function buildDxfText() {
     w.point(lay('IMPLANTATION'), q.p, q.z ?? 0);
     w.text(lay('IMPLANTATION'), { x: q.p.x + 0.25, y: q.p.y + 0.25 }, TH * 0.5, 0, String(q.n));
   }
+  kmlToDxf(w);
   // Cartouche sommaire
   const bb = designBBox(), x = bb.x0, y = bb.y0 - 4 * TH, l = lay('COTATION');
   const lines = [
@@ -5864,7 +6016,7 @@ function exportCSV() {
 }
 
 function saveProject() {
-  const data = JSON.stringify({ ...S.prj, view: { cx: viewer.cx, cy: viewer.cy, s: viewer.s }, savedAt: new Date().toISOString() }, null, 1);
+  const data = JSON.stringify({ ...S.prj, view: { cx: viewer.cx, cy: viewer.cy, s: viewer.s }, ...(S.kml.length ? { kml: S.kml } : {}), savedAt: new Date().toISOString() }, null, 1);
   download(fname('gira.json'), data, 'application/json');
 }
 
@@ -5872,11 +6024,13 @@ async function openProject(file) {
   try {
     const js = JSON.parse(await file.text());
     if (js.app !== 'GIRA') throw new Error('ce fichier n\'est pas un projet GIRA');
+    const kml = Array.isArray(js.kml) ? js.kml : null; delete js.kml;
     S.prj = migrate(js); S.D = null; S.trSig = new Map(); S.trGood = new Map();
     S.sel = -1; S.hist = []; S.fut = [];
     applyCRS(); syncCtxUI(); syncCrsUI(); renderBranchForm(); update();
     if (js.view && isFinite(js.view.s)) { viewer.cx = js.view.cx; viewer.cy = js.view.cy; viewer.s = js.view.s; viewer.invalidate(); } else zoomGira();
-    toast(`Projet « ${S.prj.name} » ouvert.`);
+    if (kml) { S.kml = kml; S.kmlCache.clear(); saveKml(); renderKmlLayers(); }
+    toast(`Projet « ${S.prj.name} » ouvert.` + (kml ? ` ${kml.length} calque(s) KMZ / KML.` : ''));
   } catch (e) { toast('Ouverture impossible : ' + e.message, 'err'); }
 }
 
@@ -5892,4 +6046,4 @@ function toast(msg, lvl = 'info') {
 
 init();
 // Poignée de débogage (console du navigateur).
-window.GIRA = { S, update, get viewer() { return viewer; }, zoomGira, newBranch, finishAxis, setTool, buildDxfText, parseDXF, buildDxfGeometry, setTerrainPoints, tinZ, hitElement, openPop, closePop };
+window.GIRA = { S, update, kmlToDxf, get viewer() { return viewer; }, zoomGira, newBranch, finishAxis, setTool, buildDxfText, parseDXF, buildDxfGeometry, setTerrainPoints, tinZ, hitElement, openPop, closePop };
