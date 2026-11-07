@@ -22,6 +22,12 @@ const ICONS = {
   AB6: () => `<path d="M32 3 L61 32 L32 61 L3 32 Z" fill="${W}"/><path d="M32 10 L54 32 L32 54 L10 32 Z" fill="${Y}"/>`,
   'B21-1': () => disc() + `<path d="M22 44 A12 12 0 1 1 42 44" fill="none" stroke="${W}" stroke-width="5"/><path d="M42 44 l-8 -2 l6 -6 Z" fill="${W}"/>`,
   B21a1: () => disc() + `<path d="M22 20 L42 44" stroke="${W}" stroke-width="6"/><path d="M46 48 l-12 -3 l6 -8 Z" fill="${W}"/>`,
+  // Hauteur limitée (B12) : disque blanc à bord rouge, hauteur entre deux flèches ; B12M : avec panonceau de distance.
+  B12: () => `<circle cx="32" cy="32" r="27" fill="${W}" stroke="${R}" stroke-width="7"/><path d="M32 12 l-5 6 h10 Z M32 52 l-5 -6 h10 Z" fill="${K}"/><text x="32" y="37" font-family="Arial, sans-serif" font-weight="bold" font-size="13" fill="${K}" text-anchor="middle">h</text>`,
+  B12M: () => `<circle cx="32" cy="27" r="22" fill="${W}" stroke="${R}" stroke-width="6"/><path d="M32 11 l-4 5 h8 Z M32 43 l-4 -5 h8 Z" fill="${K}"/><text x="32" y="31" font-family="Arial, sans-serif" font-weight="bold" font-size="11" fill="${K}" text-anchor="middle">h</text>` + panonceau(),
+  // Portique de détection des véhicules hors gabarit (PDH) et gabarit physique à l'entrée de la trémie (GAB).
+  PDH: () => `<path d="M8 58 V12 H56 V58" fill="none" stroke="${K}" stroke-width="5"/><path d="M14 18 H50" stroke="${Y}" stroke-width="5" stroke-dasharray="6 4"/><circle cx="32" cy="34" r="7" fill="${R}"/>`,
+  GAB: () => `<path d="M8 58 V12 H56 V58" fill="none" stroke="${K}" stroke-width="5"/><path d="M8 14 H56" stroke="${R}" stroke-width="7" stroke-dasharray="7 5"/><path d="M32 24 V50 M27 29 l5 -6 l5 6 M27 45 l5 6 l5 -6" fill="none" stroke="${K}" stroke-width="3"/>`,
   J5: () => `<rect x="4" y="4" width="56" height="56" fill="${B}" stroke="${W}" stroke-width="3"/><path d="M12 18 L32 46 L52 18" fill="none" stroke="${W}" stroke-width="8" stroke-linejoin="round"/>`,
   D42b: () => rect(B, W) + `<circle cx="32" cy="32" r="8" fill="none" stroke="${W}" stroke-width="3"/><path d="M32 24 V17 M32 40 V47 M24 32 H16 M40 32 H48" stroke="${W}" stroke-width="3"/><path d="M29 17 l3 -4 l3 4 Z M45 29 l4 3 l-4 3 Z" fill="${W}"/>`,
   D21: () => `<path d="M3 16 H50 L61 32 L50 48 H3 Z" fill="${W}" stroke="${K}" stroke-width="3"/><text x="27" y="37" font-family="Arial, sans-serif" font-size="13" fill="${K}" text-anchor="middle">SORTIE</text>`,
