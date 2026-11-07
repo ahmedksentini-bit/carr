@@ -1813,6 +1813,14 @@ function axisElements(ref) {
       }
     });
     for (const q of out) { const pts = []; for (const e of q.els) { const n = Math.max(2, Math.ceil(e.len / 2)); for (let j = 0; j <= n; j++) pts.push(e.pointAt((e.len * j) / n)); } q.pts = pts; }
+    // sommets sans raccordement (angle vif) : cercle supprimé, à reconstruire
+    for (let i = 1; i + 1 < ax.length; i++) {
+      if (out.some((q) => q.kind === 'curve' && q.vi === i)) continue;
+      const d1 = G.norm(G.sub(ax[i], ax[i - 1])), d2 = G.norm(G.sub(ax[i + 1], ax[i])), defl = Math.atan2(Math.abs(G.cross(d1, d2)), G.dot(d1, d2));
+      if (defl < 1e-4) continue;
+      const l = Math.min(12, G.dist(ax[i], ax[i - 1]) / 2, G.dist(ax[i], ax[i + 1]) / 2);
+      out.push({ kind: 'pi', vi: i, defl, pts: [G.sub(ax[i], G.mul(d1, l)), { x: +ax[i].x, y: +ax[i].y }, G.add(ax[i], G.mul(d2, l))] });
+    }
     v = { list: out, P, fit: A.fit, name: P.name };
   } catch { v = null; }
   axElCache.set(key, { sig, v }); return v;
@@ -1821,16 +1829,24 @@ const axElRefs = () => [...(S.prj.hwy?.on && (S.prj.hwy.axis || []).length >= 2 
 /** Élément d'axe d'un objet 'axel' : { ref, kind, idx } → entrée de axisElements. */
 function axElOf(el) {
   const A = axisElements(el.ref); if (!A) return null;
-  return A.list.find((q) => (el.kind === 'curve' ? q.kind === 'curve' && q.vi === el.idx : q.kind === 'line' && q.k === el.idx)) || null;
+  return A.list.find((q) => (el.kind === 'line' ? q.kind === 'line' && q.k === el.idx : q.kind === el.kind && q.vi === el.idx)) || null;
 }
 /** Panneau de la fenêtre d'un élément d'axe. */
 function renderAxEl(el) {
   const box = $('#grpAxEl'), A = axisElements(el.ref), q = axElOf(el), ax = axRefArr(el.ref) || [];
   if (!q || !A) { box.innerHTML = `<p class="note">${t('Élément introuvable : l\'axe a changé.')}</p>`; return; }
-  const unit = S.prj.opts.angleUnit, rows = (L) => `<table class="kv">${L.map(([a, b]) => `<tr><th>${esc(t(a))}</th><td>${b}</td></tr>`).join('')}</table>`;
+  const unit = S.prj.opts.angleUnit, fmtDev = (a) => (unit === 'deg' ? `${fmt((Math.abs(a) * 180) / Math.PI, 3)}°` : `${fmt((Math.abs(a) * 200) / Math.PI, 3)} gr`); // angle au centre, pas un gisement
+  const rows = (L) => `<table class="kv">${L.map(([a, b]) => `<tr><th>${esc(t(a))}</th><td>${b}</td></tr>`).join('')}</table>`;
   if (q.kind === 'line') {
     box.innerHTML = rows([['Alignement droit', `${t('entre les sommets')} ${q.k} ${t('et')} ${q.k + 1}`], ['Longueur', `${fmt(q.len, 2)} m`], ['Gisement', fmtGis(q.th, unit)], ['Abscisse de début', `${fmt(q.s0, 2)} m`]])
-      + `<p class="note">${t('Les poignées rondes (points de tangence) font pivoter la droite, le losange la translate.')}</p>`;
+      + `<p class="note">${t('Les poignées rondes (points de tangence) font pivoter la droite, le losange la translate.')}</p>`
+      + `<div class="row"><button data-axact="ttr">${t('Raccorder à une autre droite (tangente – tangente – rayon)…')}</button></div>`;
+    return;
+  }
+  if (q.kind === 'pi') {
+    box.innerHTML = `<p class="note">${t('Sommet sans raccordement (angle vif) : les deux droites se coupent ici. Saisissez un rayon pour reconstruire le cercle tangent aux deux droites.')}</p>`
+      + `<div class="row"><label class="fld">${t('Rayon R')} [m]<input data-axel="newr" inputmode="decimal" value="${String(+S.ttrR || 300).replace('.', ',')}"></label><button data-axact="rebuild" class="primary">${t('Reconstruire le cercle')}</button></div>`
+      + rows([['Sommet', `${q.vi}`], ['Déviation', fmtDev(q.defl)], ['Tangente pour ce rayon', `${fmt((+S.ttrR || 300) * Math.tan(q.defl / 2), 2)} m`]]);
     return;
   }
   const p = ax[q.vi] || {}, f = (A.fit || []).find((g) => g.i === q.vi), Rreq = +p.r || 0;
@@ -1843,13 +1859,53 @@ function renderAxEl(el) {
       ['Rayon de l\'arc', `${fmt(q.R, 2)} m`],
       ['Clothoïdes A / L', q.L1 + q.L2 > 0 ? `${fmt(q.A1, 0)} / ${fmt(q.L1, 2)} m${Math.abs(q.A2 - q.A1) > 0.5 ? ` ; ${fmt(q.A2, 0)} / ${fmt(q.L2, 2)} m` : ''}` : t('aucune')],
       ['Longueur de l\'arc', `${fmt(q.La, 2)} m`],
-      ['Déviation', fmtGis(q.defl, unit)],
+      ['Déviation', fmtDev(q.defl)],
       ['Tangente', `${fmt(q.T, 2)} m`],
       ['Abscisse de début', `${fmt(q.s0, 2)} m`],
-    ]);
+    ])
+    + `<div class="row"><button data-axact="delcircle" class="danger">${t('Supprimer le cercle')}</button></div>`;
+}
+/** Boutons de la fenêtre d'un élément d'axe : supprimer / reconstruire un cercle, raccorder deux droites. */
+function actAxEl(act) {
+  const el = S.pop; if (el?.type !== 'axel') return;
+  const ax = axRefArr(el.ref); if (!ax) return;
+  if (act === 'delcircle') {
+    const p = { ...ax[el.idx] }; S.ttrR = +p.r || 300; p.r = 0; delete p.lc; delete p.a; ax[el.idx] = p;
+    S.echSig = ''; update(); reopenAxEl({ ...el, kind: 'pi', i: `${el.i.split(':')[0]}:pi:${el.idx}` });
+    toast(t('Cercle supprimé : les deux droites se coupent au sommet. Saisissez un rayon et « Reconstruire le cercle ».'));
+  } else if (act === 'rebuild') {
+    const v = parseNum($('#grpAxEl input[data-axel="newr"]')?.value); if (!(v > 0)) { toast(t('Rayon : saisir une valeur positive.'), 'warn'); return; }
+    ax[el.idx] = { ...ax[el.idx], r: v }; S.ttrR = v;
+    S.echSig = ''; update(); reopenAxEl({ ...el, kind: 'curve', i: `${el.i.split(':')[0]}:curve:${el.idx}` });
+  } else if (act === 'ttr') {
+    S.ttr = { ref: el.ref, k: el.idx }; closePop();
+    toast(t('Tangente – tangente – rayon : cliquez la seconde droite du même axe (Échap pour annuler).'));
+  }
+}
+function reopenAxEl(el) {
+  const pop = $('#elPop'), x = pop.offsetLeft, y = pop.offsetTop;
+  if (axElOf(el)) { renderAxEl(el); S.pop = el; pop.querySelector('.ttl').textContent = popTitle(el); viewer.invalidate(); }
+  else closePop();
+  pop.style.left = x + 'px'; pop.style.top = y + 'px';
+}
+/** Tangente – tangente – rayon : les droites k1 et k2 d'un axe sont prolongées jusqu'à leur intersection, qui devient
+ *  un sommet de rayon R ; les sommets et raccordements situés entre elles sont supprimés. */
+function ttrJoin(ref, k1, k2, px, py) {
+  const ax = axRefArr(ref); if (!ax) return;
+  if (k1 === k2) { toast(t('Choisissez une autre droite que la première.'), 'warn'); return; }
+  if (k1 > k2) [k1, k2] = [k2, k1];
+  const d1 = G.sub(ax[k1 + 1], ax[k1]), d2 = G.sub(ax[k2 + 1], ax[k2]), X = G.lineLine(ax[k1], d1, ax[k2], d2);
+  if (!X) { toast(t('Les deux droites sont parallèles : pas de cercle tangent aux deux.'), 'warn'); return; }
+  if (G.dot(G.sub(X.p, ax[k1]), d1) <= 0 || G.dot(G.sub(ax[k2 + 1], X.p), d2) <= 0) { toast(t('Les deux droites ne se coupent pas entre leurs extrémités dans le sens de l\'axe : raccordement impossible.'), 'warn'); return; }
+  const removed = ax.slice(k1 + 1, k2 + 1), R = Math.max(0, ...removed.map((q) => +q.r || 0)) || +S.ttrR || 300;
+  ax.splice(k1 + 1, k2 - k1, { x: +X.p.x.toFixed(3), y: +X.p.y.toFixed(3), r: R });
+  S.ttrR = R; S.echSig = ''; update();
+  const el = { type: 'axel', ref, kind: 'curve', idx: k1 + 1, i: `${ref.t}${ref.i ?? ''}:curve:${k1 + 1}` };
+  openPop(el, px, py);
+  toast(`${t('Droites')} ${k1}-${k1 + 1} ${t('et')} ${k2}-${k2 + 1} ${t('raccordées au sommet')} ${k1 + 1} (R = ${fmt(R, 0)} m${removed.length > 1 ? `, ${removed.length} ${t('sommets remplacés')}` : ''}).`);
 }
 function applyAxEl(inp) {
-  const el = S.pop; if (el?.type !== 'axel') return;
+  const el = S.pop; if (el?.type !== 'axel' || inp.dataset.axel === 'newr') return;
   const ax = axRefArr(el.ref), p = ax?.[el.idx]; if (!p) return;
   const v = parseNum(inp.value);
   if (inp.dataset.axel === 'r') { if (!(v > 0)) { toast(t('Rayon : saisir une valeur positive.'), 'warn'); renderAxEl(el); return; } ax[el.idx] = { ...p, r: v }; }
@@ -1873,7 +1929,7 @@ function hitElement(px, py) {
   // éléments de l'axe en plan (droites, raccordements) des voies d'échangeur : à quelques pixels de l'axe
   if (S.tool === 'select') for (const ref of axElRefs()) {
     const A = axisElements(ref); if (!A) continue;
-    for (const q of A.list) { const d = polyDist(q.pts); if (d < 6) cands.push({ type: 'axel', i: `${ref.t}${ref.i ?? ''}:${q.kind}:${q.kind === 'curve' ? q.vi : q.k}`, ref, kind: q.kind, idx: q.kind === 'curve' ? q.vi : q.k, sc: 500 + d + (q.kind === 'line' ? 0.5 : 0) }); }
+    for (const q of A.list) { const d = polyDist(q.pts), idx = q.kind === 'line' ? q.k : q.vi; if (d < (q.kind === 'pi' ? 8 : 6)) cands.push({ type: 'axel', i: `${ref.t}${ref.i ?? ''}:${q.kind}:${idx}`, ref, kind: q.kind, idx, sc: 500 + d + (q.kind === 'line' ? 0.5 : q.kind === 'pi' ? -1 : 0) }); }
   }
   for (const [type, i, r] of [['hwy', 0, D?.hwy], ...(D?.crosses || []).map((c, k) => ['cross', k, c])]) {
     if (!r?.ok) continue;
@@ -1907,10 +1963,15 @@ function popTitle(el) {
   if (el.type === 'cross') return `Voie secondaire ${S.prj.crosses[el.i]?.name || ''}`;
   if (el.type === 'branch') return `Branche ${S.prj.branches[el.i]?.name || ''}`;
   if (el.type === 'ouvr') return `Ouvrage ${ouvrName(el.i)}`;
-  if (el.type === 'axel') { const A = axisElements(el.ref); return `${A?.name || ''} — ${el.kind === 'curve' ? `${t('raccordement du sommet')} ${el.idx}` : `${t('droite')} ${el.idx}-${el.idx + 1}`}`; }
+  if (el.type === 'axel') { const A = axisElements(el.ref); return `${A?.name || ''} — ${el.kind === 'curve' ? `${t('raccordement du sommet')} ${el.idx}` : el.kind === 'pi' ? `${t('sommet')} ${el.idx} ${t('(angle vif)')}` : `${t('droite')} ${el.idx}-${el.idx + 1}`}`; }
   return `${S.D?.kind === 'giratoire' ? 'Giratoire' : 'Carrefour'} — ${S.prj.jname || ''}`;
 }
 function openPop(el, px, py) {
+  if (S.ttr) { // tangente – tangente – rayon : second clic sur une droite du même axe
+    const T0 = S.ttr; S.ttr = null;
+    if (el.type === 'axel' && el.kind === 'line' && el.ref.t === T0.ref.t && (el.ref.i ?? null) === (T0.ref.i ?? null)) { ttrJoin(T0.ref, T0.k, el.idx, px, py); return; }
+    toast(t('Raccordement annulé : la seconde droite doit appartenir au même axe.'), 'warn');
+  }
   closePop(false);
   if (el.type === 'bv') { openBvSheet(el.i); return; }
   if (el.type === 'junction') { switchJunction(el.i, { zoom: false }); el = { type: 'ring', i: 0 }; }
@@ -1972,6 +2033,7 @@ function bindPop() {
   $('#popClose').addEventListener('click', () => closePop());
   $('#popDel').addEventListener('click', popDelete);
   $('#elPop').addEventListener('change', (e) => { if (e.target?.dataset?.axel) applyAxEl(e.target); });
+  $('#elPop').addEventListener('click', (e) => { const b = e.target.closest?.('[data-axact]'); if (b) actAxEl(b.dataset.axact); });
   // Déplacement de la fenêtre par son en-tête.
   const head = $('#elPop .elpop-head');
   head.addEventListener('pointerdown', (e) => {
@@ -2951,7 +3013,7 @@ function bindKeys() {
     if (typing) return;
     if ($('#dlgHelp').open) return;
     switch (e.key) {
-      case 'Escape': if (S.pop) { closePop(); return; } cancelTool(); return;
+      case 'Escape': if (S.ttr) { S.ttr = null; toast(t('Raccordement annulé.')); return; } if (S.pop) { closePop(); return; } cancelTool(); return;
       case 'Enter': if (S.tool === 'axis') finishAxis(); else if (S.tool === 'bvcut') { e.preventDefault(); bvFinishCut(); } return; // sans preventDefault, l'appui atteindrait le premier bouton de la fiche rouverte
       case 'Backspace': if (S.tool === 'axis' && S.draft.length) { e.preventDefault(); S.draft.pop(); setPrompt(); viewer.invalidate(); } return;
       case 'Delete': if (S.pop) { popDelete(); return; } if (S.sel >= 0) deleteBranch(S.sel); return;
@@ -5949,7 +6011,12 @@ function armEdge(b) {
 // à défaut, centre du carrefour et direction des extrémités des deux branches (une corde, qui s'écarte de l'axe en courbe).
 function psgrPose(C, ax) {
   const dn = Math.max(0, +(S.prj.pt?.dev ?? 2.5) || 2.5), hits = [];
-  for (const src of new Set([ax.a.src, ax.b.src].filter(Boolean))) {
+  // branches dessinées à la main (sans route d'origine) : on essaie toutes les routes du projet et l'on retient
+  // celles dont l'axe passe à moins de 40 m du centre dans la direction des deux branches
+  let srcs = [ax.a.src, ax.b.src].filter(Boolean), guess = false;
+  if (!srcs.length) { guess = true; srcs = [...(S.prj.hwy?.on ? ['hwy'] : []), ...(S.prj.crosses || []).filter((c) => c.on !== false).map((c) => `x:${c.id}`)]; }
+  const cand = [];
+  for (const src of new Set(srcs)) {
     let Q = null;
     try { Q = src === 'hwy' ? hwyParams(S.prj) : src.startsWith('x:') ? crossParams(S.prj, S.prj.crosses.findIndex((c) => c.id === src.slice(2))) : null; } catch { Q = null; }
     if (!Q || (Q.axis || []).length < 2) continue;
@@ -5961,8 +6028,10 @@ function psgrPose(C, ax) {
       const d = q.s + sg * s, dc = Math.max(0, Math.min(Lp, d)), t = G.mul(pathTangentAt(path, dc), sg);
       return { p: G.add(G.pathPointAt(path, dc), G.mul(t, sg * (d - dc))), t };
     };
-    hits.push({ p: q.p, t: G.mul(t0, sg), d: q.d, frame });
+    if (guess && Math.abs(G.dot(t0, ax.u)) < 0.9) continue; // route qui croise le carrefour, pas celle qu'il traverse
+    cand.push({ p: q.p, t: G.mul(t0, sg), d: q.d, frame });
   }
+  if (guess) { cand.sort((x, y) => x.d - y.d); if (cand.length) hits.push(cand[0]); } else hits.push(...cand);
   if (!hits.length) return { C, u: ax.u };
   if (hits.length === 1) return { C: hits[0].p, u: hits[0].t, frame: hits[0].frame };
   const p = G.lerp(hits[0].p, hits[1].p, 0.5), u = G.norm(G.add(hits[0].t, hits[1].t)); // route coupée au carrefour : deux tronçons
