@@ -54,8 +54,16 @@ const widthOf = (code, gamme) => {
 
 // Point et tangente (vers l'extérieur) de l'axe d'une branche à l'abscisse locale x (x0 : ligne de cédez-le-passage ou
 // bord de la principale) : alignement droit jusqu'à xEnd, puis axe suivi (cont), puis prolongement droit (beyond).
+// Branche prolongée par une route (bd.road : axe de la route depuis l'extrémité de la branche, vers l'extérieur) : au-delà
+// de l'axe dessiné, le panneau suit la route (son tracé, ses courbes) et non le prolongement droit de la branche.
 function along(bd, x) {
   const a = bd.a || 0;
+  if (x > bd.xEnd + 1e-9 && bd.road?.path?.length) {
+    const path = bd.road.path, len = G.pathLen(path), d = Math.min(x - bd.xEnd, len);
+    const p = G.pathPointAt(path, d), q = G.pathPointAt(path, Math.min(len, d + 0.5)), r = G.pathPointAt(path, Math.max(0, d - 0.5));
+    const t = norm(sub(q, r));
+    return x - bd.xEnd <= len ? { p, t, beyond: false, onRoad: true } : { p: add(p, mul(t, x - bd.xEnd - len)), t, beyond: true, onRoad: true };
+  }
   if (x <= bd.xEnd + 1e-9 || !bd.cont) return { p: bd.W({ x, y: a }), t: bd.u, beyond: x > bd.xEnd + 1e-9 };
   const d = x - bd.xEnd, len = G.pathLen(bd.cont);
   if (d <= len) {
@@ -72,7 +80,8 @@ function edgeAt(bd, s, x, bdd) {
     const c = cutAtX(path, x);
     if (c) return Math.abs(c.y) + (sd.edge ? 0 : bdd);
   }
-  return (bd.th || 0) + (sd?.w ?? 3.5) + bdd;
+  if (x > bd.xEnd + 1e-9 && bd.road?.edge > 0) return bd.road.edge + bdd; // bord de chaussée de la route
+  return (bd.th || 0) + Math.max(sd?.w ?? 3.5, (s > 0 ? bd.wIn : bd.wOut) || 0) + bdd; // voies courantes de la branche
 }
 
 // Largeur de l'îlot séparateur (triangle de construction) à l'abscisse x.
@@ -84,9 +93,10 @@ function pointInTri(p, a, b, c) {
 }
 
 // Calcule et ajoute la signalisation au projet dérivé D (prims, points, D.signs, D.signIssues).
-export function addSigns(prj, D) {
+export function addSigns(prj, D, opt = {}) {
   D.signs = []; D.signIssues = [];
   if (!D?.ok || !D.branches?.length) return;
+  for (const bd of D.branches) bd.road = opt.roads?.get(bd.id) || null;
   const SP = signParams(prj);
   if (!SP.on) return;
   const sec = sectionParams(prj), urb = prj.context === 'urbain', plan = isPlan(prj);

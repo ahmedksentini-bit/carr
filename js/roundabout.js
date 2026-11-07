@@ -27,7 +27,7 @@ export { fmt, fmtGis, autoCenter };
 export function buildDesign(prj, opt = {}) {
   const D = prj.kind === 'T' || prj.kind === 'X' ? buildPlan(prj, opt) : buildRoundabout(prj);
   // Signalisation verticale (panneaux, balises J5) : ajoutée au projet dérivé, sauf pour les calculs intermédiaires.
-  if (!opt.only) { try { addSigns(prj, D); } catch (e) { console.error(e); D.signs = []; D.signIssues = [{ lvl: 'err', msg: 'Signalisation : ' + e.message }]; } }
+  if (!opt.only) { try { addSigns(prj, D, opt); } catch (e) { console.error(e); D.signs = []; D.signIssues = [{ lvl: 'err', msg: 'Signalisation : ' + e.message }]; } }
   // Échangeur autoroutier (section courante et bretelles), s'il est activé.
   if (!opt.only) { try { buildEchangeur(prj, D); } catch (e) { console.error(e); D.ramps = []; D.echIssues = [{ lvl: 'err', msg: 'Calcul impossible : ' + e.message }]; } }
   return D;
@@ -189,7 +189,7 @@ function buildRoundabout(prj, ext = {}) {
     const yl = crossLine(en, target, 0.25), xl = crossLine(ex, target, 0.25);
     const bd = {
       idx, id: b.id, name, role: 'branche', Oc: O, Rgc: Rg, lobe: lob?.k || 0, theta, u, n, a, ai, x0, xT, xEnd, h, b: isl.b, hb, th, isl, W, Ws, Wp, cont, axisFillets,
-      entry: side(en, 1, wIn), exit: side(ex, -1, wOut),
+      entry: side(en, 1, wIn), exit: side(ex, -1, wOut), wIn, wOut,
       island, cross, yieldStart: yl?.a, yieldEnd: yl?.b, exitStart: xl?.a, exitEnd: xl?.b, gis: fmtGis(theta, unit),
       farAxis: cont ? G.segEnd(cont[cont.length - 1]) : W({ x: xEnd, y: a }),
       farDir: cont ? norm(sub(G.segEnd(cont[cont.length - 1]), G.segAt(cont[cont.length - 1], 0.98))) : u,
