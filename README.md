@@ -70,6 +70,11 @@ ou sur un fond topographique DXF.
   Le tableau des sommets (onglet Échangeur) donne X, Y au cm, R, la longueur de clothoïde et le rayon appliqué. Les
   clothoïdes sont réduites, puis supprimées (moins de 1 m), jusqu'à ce que les raccordements de deux sommets voisins
   tiennent sur leur côté : un chevauchement faisait revenir l'axe en arrière et croiser les bords et le TPC.
+  Un raccordement se supprime (« Supprimer le cercle » : le sommet devient un angle vif, cliquable) et se reconstruit
+  par tangente – tangente – rayon : au sommet, « Reconstruire le cercle » avec le rayon saisi ; entre deux droites
+  quelconques du même axe, « Raccorder à une autre droite… » puis clic sur la seconde droite : les deux droites sont
+  prolongées jusqu'à leur intersection, qui devient le sommet du cercle, et les sommets intermédiaires disparaissent
+  (Échap annule).
 - **Dévers** : anneau à dévers imposé de 1,5 % vers l'extérieur, constant sur site en pente (ou cône sur plan incliné),
   profil en long des rives, variation des dévers de chaque branche, flèches de dévers sur le plan.
 - **Épures de giration (T et X)** : semi-remorque de 16,50 m (largeur 2,55 m, empattement du tracteur 3,80 m, sellette
@@ -475,7 +480,8 @@ ou sur un fond topographique DXF.
   largeur des véhicules, interdistance), voies, bandes dérasées, trottoirs, Hm = G + revanche de signalisation,
   revanches de protection et de construction. Profil en long symétrique : fond sous la couverture, rentrant Rr, rampe,
   saillant Rs ; contrôles de déclivité (6 % ; 9 % en dérogation) et des rayons minimaux (visibilité, confort). Plan :
-  centré sur l'axe en plan de la route traversante (point le plus proche du centre du carrefour) et tracé le long de cet axe,
+  centré sur l'axe en plan de la route traversante (point le plus proche du centre du carrefour ; branches dessinées à la
+  main, sans route d'origine : route du projet passant à moins de 40 m du centre dans leur direction) et tracé le long de cet axe,
   courbes comprises : couverture, trémies ouvertes, piédroits, musoirs ; signalisation de tri (présignalisation B12 + panonceau, portique
   de détection des hors-gabarit, B12 sur le musoir, gabarit physique à l'entrée). TPC des branches adaptables à la
   trémie ; exports DXF du profil en long et de la coupe type. Le dossier-guide PSGR du SETRA (annexe II de la
