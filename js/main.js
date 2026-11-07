@@ -5944,6 +5944,30 @@ function armEdge(b) {
   if (P) return (P.tpc || 0) / 2 + P.lanes * P.wLane + (+P.bdd || 0);
   return (b.tpc?.on ? (+b.tpc.width || 0) / 2 : 0) + Math.max(+b.nIn || 1, +b.nOut || 1) * (+b.wLane || 3.5) + (b.bdd === '' || b.bdd == null ? 2 : +b.bdd);
 }
+// Position du PSGR : sur l'axe en plan de la route traversante (branches issues de l'autoroute ou d'une voie
+// secondaire), centré au point le plus proche du centre du carrefour et tracé le long de l'axe (courbes comprises) ;
+// à défaut, centre du carrefour et direction des extrémités des deux branches (une corde, qui s'écarte de l'axe en courbe).
+function psgrPose(C, ax) {
+  const dn = Math.max(0, +(S.prj.pt?.dev ?? 2.5) || 2.5), hits = [];
+  for (const src of new Set([ax.a.src, ax.b.src].filter(Boolean))) {
+    let Q = null;
+    try { Q = src === 'hwy' ? hwyParams(S.prj) : src.startsWith('x:') ? crossParams(S.prj, S.prj.crosses.findIndex((c) => c.id === src.slice(2))) : null; } catch { Q = null; }
+    if (!Q || (Q.axis || []).length < 2) continue;
+    let path; try { path = roadAlignment(Q, dn).path; } catch { continue; }
+    const q = pathProject(path, C); if (!q || q.d > 40) continue;
+    const t0 = pathTangentAt(path, q.s), sg = G.dot(t0, ax.u) < 0 ? -1 : 1, Lp = G.pathLen(path);
+    // repère courbe : point et tangente de l'axe à l'abscisse s du centre (prolongé en droite au-delà des extrémités)
+    const frame = (s) => {
+      const d = q.s + sg * s, dc = Math.max(0, Math.min(Lp, d)), t = G.mul(pathTangentAt(path, dc), sg);
+      return { p: G.add(G.pathPointAt(path, dc), G.mul(t, sg * (d - dc))), t };
+    };
+    hits.push({ p: q.p, t: G.mul(t0, sg), d: q.d, frame });
+  }
+  if (!hits.length) return { C, u: ax.u };
+  if (hits.length === 1) return { C: hits[0].p, u: hits[0].t, frame: hits[0].frame };
+  const p = G.lerp(hits[0].p, hits[1].p, 0.5), u = G.norm(G.add(hits[0].t, hits[1].t)); // route coupée au carrefour : deux tronçons
+  return { C: p, u };
+}
 function psgrAutoLc(j, ax) {
   const urb = j.J.context === 'urbain';
   if (!j.plan) return Math.ceil(2 * ((+j.J.ring?.Rg || 20) + (urb ? 8 : 3)) * 2) / 2; // anneau + passages piétons (urbain)
@@ -5968,7 +5992,8 @@ function computePsgr() {
     const LcAuto = psgrAutoLc(j, ax), Lc = P.Lc > 0 ? P.Lc : LcAuto;
     const zC = j.J.ring?.zC, zs = P.zs ?? (zC === '' || zC == null ? 100 : +zC);
     const pr = psgrProfile(P, sec, Lc, zs);
-    const pl = psgrPlan(P, sec, pr, j.C, ax.u, { edge: (e) => armEdge(e > 0 ? ax.b : ax.a), textH: TH, name });
+    const pose = psgrPose(j.C, ax);
+    const pl = psgrPlan(P, sec, pr, pose.C, pose.u, { edge: (e) => armEdge(e > 0 ? ax.b : ax.a), textH: TH, name, frame: pose.frame });
     S.psgrPrims.push(...pl.prims);
     const checks = psgrChecks(P, sec, pr, name), need = sec.Wo + 2 * PSGR_GAP;
     for (const b of [ax.a, ax.b]) {

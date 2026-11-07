@@ -131,55 +131,62 @@ export function psgrChecks(P, sec, pr, name) {
 
 // Plan : prims (repère local s le long de u depuis C, y à gauche) et points d'implantation de la signalisation.
 // edge(e) : distance de l'axe au bord droit de chaussée de la route pour le sens qui arrive du côté e (+1 / −1).
+// Repère du PSGR : opt.frame(s) → { p, t } (point de l'axe en plan de la route à l'abscisse s comptée depuis le centre,
+// tangente unitaire) ; à défaut, droite (C, u). Les lignes parallèles à l'axe sont échantillonnées (axe en courbe).
 export function psgrPlan(P, sec, pr, C, u, opt = {}) {
-  const n = rot90(u), W = (s, y) => add(add(C, mul(u, s)), mul(n, y));
+  const frame = opt.frame || ((s) => ({ p: add(C, mul(u, s)), t: u }));
+  const W = (s, y) => { const f = frame(s); return add(f.p, mul(rot90(f.t), y)); };
+  const tg = (s) => frame(s).t;
   const prims = [], signs = [];
   const Lyr = 'PSGR', h0 = sec.Wint / 2, h1 = h0 + P.mur, s0 = pr.s0, s3 = pr.s3, TH = opt.textH || 0.8;
+  const along = (sa, sb, y) => { const n = Math.max(1, Math.ceil(Math.abs(sb - sa) / 2)), pts = []; for (let k = 0; k <= n; k++) pts.push(W(sa + ((sb - sa) * k) / n, y)); return pts; };
+  const toSegs = (pts) => pts.slice(1).map((q, k) => L(pts[k], q));
   const seg = (a, b, extra = {}) => prims.push({ k: 'path', L: Lyr, segs: [L(a, b)], ...extra });
+  const par = (sa, sb, y, extra = {}) => prims.push({ k: 'path', L: Lyr, segs: toSegs(along(sa, sb, y)), ...extra }); // parallèle à l'axe
+  const ring = (sa, sb, ya, yb) => { const pts = [...along(sa, sb, ya), ...along(sb, sa, yb)]; return pts.map((p, i) => L(p, pts[(i + 1) % pts.length])); };
   const hidden = { role: 'cache', dash: [1.5, 1], lt: 'TIRETS' };
   // couverture (dalle sous le carrefour)
-  const cv = [W(-s0, -h1), W(s0, -h1), W(s0, h1), W(-s0, h1)];
-  prims.push({ k: 'fill', L: Lyr, role: 'couv', rings: [cv.map((p, i) => L(p, cv[(i + 1) % 4]))] });
-  prims.push({ k: 'path', L: Lyr, segs: cv.map((p, i) => L(p, cv[(i + 1) % 4])), closed: true, role: 'couv' });
+  const cv = ring(-s0, s0, -h1, h1);
+  prims.push({ k: 'fill', L: Lyr, role: 'couv', rings: [cv] });
+  prims.push({ k: 'path', L: Lyr, segs: cv, closed: true, role: 'couv' });
   // trémies ouvertes (remplissage) et piédroits : vus en trémie, cachés sous la couverture
   for (const e of [-1, 1]) {
-    const tr = [W(e * s0, -h0), W(e * s3, -h0), W(e * s3, h0), W(e * s0, h0)];
-    prims.push({ k: 'fill', L: Lyr, role: 'tremie', rings: [tr.map((p, i) => L(p, tr[(i + 1) % 4]))] });
-    for (const y of [-h1, -h0, h0, h1]) seg(W(e * s0, y), W(e * s3, y));
+    prims.push({ k: 'fill', L: Lyr, role: 'tremie', rings: [ring(e * s0, e * s3, -h0, h0)] });
+    for (const y of [-h1, -h0, h0, h1]) par(e * s0, e * s3, y);
     seg(W(e * s3, -h1), W(e * s3, h1), { role: 'tete' }); // tête de trémie (niveau de la surface)
-    if (P.tubes === 2) for (const y of [-P.mc / 2, P.mc / 2]) seg(W(e * s0, y), W(e * s3, y));
+    if (P.tubes === 2) for (const y of [-P.mc / 2, P.mc / 2]) par(e * s0, e * s3, y);
     // sens de circulation dans la trémie
-    // sens qui entre du côté e : il roule vers le centre (−e·u), sur sa droite (e·n)
-    const yl = e * (P.tubes === 2 ? sec.Wp / 2 + P.mc / 2 : sec.Wp / 4);
-    prims.push({ k: 'arrow', L: Lyr, p: W(e * (s0 + 4 + Math.min(8, (s3 - s0) / 3)), yl), dir: mul(u, -e), len: Math.min(8, (s3 - s0) / 3), h: TH * 0.7, rot: G.ang(u), text: '' });
+    // sens qui entre du côté e : il roule vers le centre (−e·t), sur sa droite (e·n)
+    const yl = e * (P.tubes === 2 ? sec.Wp / 2 + P.mc / 2 : sec.Wp / 4), sa = e * (s0 + 4 + Math.min(8, (s3 - s0) / 3));
+    prims.push({ k: 'arrow', L: Lyr, p: W(sa, yl), dir: mul(tg(sa), -e), len: Math.min(8, (s3 - s0) / 3), h: TH * 0.7, rot: G.ang(tg(sa)), text: '' });
   }
-  for (const y of [-h1, -h0, h0, h1]) seg(W(-s0, y), W(s0, y), hidden);
-  if (P.tubes === 2) for (const y of [-P.mc / 2, P.mc / 2]) seg(W(-s0, y), W(s0, y), hidden);
-  seg(W(-s3 - 10, 0), W(s3 + 10, 0), { role: 'axe', dash: [6, 1.5, 1, 1.5], lt: 'AXE' });
-  const rot = Math.abs(G.ang(u)) > Math.PI / 2 ? G.ang(u) + Math.PI : G.ang(u);
+  for (const y of [-h1, -h0, h0, h1]) par(-s0, s0, y, hidden);
+  if (P.tubes === 2) for (const y of [-P.mc / 2, P.mc / 2]) par(-s0, s0, y, hidden);
+  par(-s3 - 10, s3 + 10, 0, { role: 'axe', dash: [6, 1.5, 1, 1.5], lt: 'AXE' });
+  const u0 = tg(0), rot = Math.abs(G.ang(u0)) > Math.PI / 2 ? G.ang(u0) + Math.PI : G.ang(u0);
   prims.push({ k: 'text', L: Lyr, p: W(0, h1 + TH * 1.2), s: `${opt.name || 'PSGR'} — ${P.label.replace(/ —.*$/, '')} G ${fmt(P.G)} m — couverture ${fmt(2 * s0, 1)} m, trémies ${fmt(pr.Lramp, 1)} m à ${fmt(pr.p * 100, 1)} %`, h: TH, rot, align: 'center' });
   // Signalisation de chaque sens entrant (côté e) : présignalisation B12 + panonceau de distance, portique de détection
   // des véhicules hors gabarit, B12 sur le musoir de séparation (dernier choix possible), gabarit à l'entrée de la trémie.
   for (const e of [-1, 1]) {
-    const d = mul(u, -e), right = neg(rot90(d)), face = neg(d); // sens de marche vers le centre, droite, face vers l'usager
     const ed = opt.edge?.(e) ?? h1 + 7;
-    const at = (s, y) => add(add(C, mul(u, e * s)), mul(right, y));
+    // sens de marche vers le centre (−e·t), sa droite (e·n), face vers l'usager ; point à la distance s du centre
+    const at = (s, y) => W(e * s, e * y), dirAt = (s) => mul(tg(e * s), -e), rightAt = (s) => neg(rot90(dirAt(s))), faceAt = (s) => neg(dirAt(s));
     const sN = s3 + P.Lnose;
     // musoir entre la voie de la trémie (à gauche) et la contre-allée (à droite)
     seg(at(s3, h1), at(sN, h1 + 0.6), { role: 'nez' });
-    signs.push({ code: 'B12', p: at(sN, h1 + 0.6), face, out: right, note: `B12 « ${fmt(P.G)} m » sur le musoir : dernier choix avant la trémie`, s: e * sN });
-    signs.push({ code: 'GAB', p: at(s3, h1 + 0.2), face, out: right, note: `gabarit physique ${fmt(P.G)} m à l'entrée de la trémie`, s: e * s3 });
+    signs.push({ code: 'B12', p: at(sN, h1 + 0.6), face: faceAt(sN), out: rightAt(sN), note: `B12 « ${fmt(P.G)} m » sur le musoir : dernier choix avant la trémie`, s: e * sN });
+    signs.push({ code: 'GAB', p: at(s3, h1 + 0.2), face: faceAt(s3), out: rightAt(s3), note: `gabarit physique ${fmt(P.G)} m à l'entrée de la trémie`, s: e * s3 });
     seg(at(s3, h0), at(s3, 0), { role: 'portique' });
     const sD = sN + P.dDet, sP = sN + P.dPre;
-    signs.push({ code: 'PDH', p: at(sD, ed + 1.5), face, out: right, note: `portique de détection des véhicules hors gabarit, ${fmt(P.dDet, 0)} m avant le musoir (échappatoire par la contre-allée)`, s: e * sD });
+    signs.push({ code: 'PDH', p: at(sD, ed + 1.5), face: faceAt(sD), out: rightAt(sD), note: `portique de détection des véhicules hors gabarit, ${fmt(P.dDet, 0)} m avant le musoir (échappatoire par la contre-allée)`, s: e * sD });
     seg(at(sD, 0), at(sD, ed), { role: 'portique' });
-    signs.push({ code: 'B12M', p: at(sP, ed + 1.5), face, out: right, note: `présignalisation B12 « ${fmt(P.G)} m » + panonceau « à ${fmt(P.dPre, 0)} m »`, s: e * sP });
+    signs.push({ code: 'B12M', p: at(sP, ed + 1.5), face: faceAt(sP), out: rightAt(sP), note: `présignalisation B12 « ${fmt(P.G)} m » + panonceau « à ${fmt(P.dPre, 0)} m »`, s: e * sP });
   }
   for (const sg of signs) {
     prims.push({ k: 'circle', L: 'SIGNALISATION', c: sg.p, r: 0.12 });
     prims.push({ k: 'sign', L: 'SIGNALISATION', p: sg.p, out: sg.out, face: sg.face, code: sg.code, w: 1.0, h: TH * 0.7 });
   }
-  const bbox = (() => { const pts = [W(-s3 - 10, -h1), W(s3 + 10, h1), W(-s3 - 10, h1), W(s3 + 10, -h1)]; return { x0: Math.min(...pts.map((p) => p.x)), x1: Math.max(...pts.map((p) => p.x)), y0: Math.min(...pts.map((p) => p.y)), y1: Math.max(...pts.map((p) => p.y)) }; })();
+  const bbox = (() => { const pts = [...along(-s3 - 10, s3 + 10, -h1), ...along(-s3 - 10, s3 + 10, h1)]; return { x0: Math.min(...pts.map((p) => p.x)), x1: Math.max(...pts.map((p) => p.x)), y0: Math.min(...pts.map((p) => p.y)), y1: Math.max(...pts.map((p) => p.y)) }; })();
   return { prims, signs, bbox };
 }
 
