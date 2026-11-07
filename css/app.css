@@ -159,6 +159,11 @@ table.pts { border-collapse: collapse; width: 100%; font-size: 12px; }
 table.pts th { position: sticky; top: 0; background: var(--panel2); text-align: left; font-weight: 600; padding: 5px 6px; border-bottom: 1px solid var(--line); }
 table.pts td { padding: 4px 6px; border-bottom: 1px solid var(--line); }
 table.pts td.mono { text-align: right; white-space: nowrap; }
+/* sommets des axes d'échangeur : coordonnées complètes (au cm), rayon, longueur de clothoïde, rayon appliqué */
+table.pts.vtx { table-layout: fixed; font-size: 11.5px; }
+table.pts.vtx col.c-n { width: 24px; } table.pts.vtx col.c-xy { width: 27%; } table.pts.vtx col.c-r { width: 13%; } table.pts.vtx col.c-ra { width: auto; }
+table.pts.vtx td, table.pts.vtx th { padding: 3px 3px; }
+table.pts.vtx input { width: 100%; box-sizing: border-box; min-width: 0; padding: 3px 4px; font-family: var(--mono); font-size: 11.5px; }
 table.pts tbody tr:hover { background: var(--panel2); cursor: pointer; }
 #branchDevTable table.pts td { font-family: var(--mono); text-align: right; }
 #branchDevTable table.pts th { position: static; }

@@ -60,7 +60,7 @@ export function hwyParams(prj) {
     on: !!h.on, kind: auto ? 'autoroute' : 'route', name: h.name || (auto ? 'Autoroute' : 'Voie principale'), cat: HWY_CAT[h.cat] ? h.cat : 'L2', dcat, C: cat, V: num(h.V, auto ? cat.V : isVsa(dcat) ? DCAT[dcat].V : 90),
     lanes: Math.max(1, Math.round(num(h.lanes, sep ? 2 : 1))), wLane: num(h.wLane, 3.5), bau: num(h.bau, sep ? 2.5 : 2.0), bdg: num(h.bdg, sep ? 1.0 : 0),
     median: num(h.median, sep ? 3.0 : 0), berme: num(h.berme, auto ? 1.0 : 0.75), z0: num(h.z0, 100), pente: num(h.pente, 0), pk0: num(h.pk0, 0),
-    axis: (h.axis || []).map((p) => ({ x: +p.x, y: +p.y, r: +p.r || 0, a: p.a === '' || p.a == null || !isFinite(+p.a) ? null : +p.a })),
+    axis: (h.axis || []).map((p) => ({ x: +p.x, y: +p.y, r: +p.r || 0, a: p.a === '' || p.a == null || !isFinite(+p.a) ? null : +p.a, lc: p.lc === '' || p.lc == null || !isFinite(+p.lc) ? null : +p.lc })),
   };
 }
 
@@ -79,7 +79,7 @@ export function crossParams(prj, k = 0) {
     cat: auto ? (HWY_CAT[h.cat] ? h.cat : 'L2') : '', dcat, C: cat, V: num(h.V, auto ? cat.V : isVsa(dcat) ? DCAT[dcat].V : 90),
     lanes: Math.max(1, Math.round(num(h.lanes, sep ? 2 : 1))), wLane: num(h.wLane, 3.5), bau: num(h.bau, sep ? 2.5 : 2.0),
     bdg: num(h.bdg, sep ? 1.0 : 0), median: num(h.median, sep ? 3.0 : 0), berme: num(h.berme, auto ? 1.0 : 0.75), pk0: num(h.pk0, 0),
-    axis: (h.axis || []).map((p) => ({ x: +p.x, y: +p.y, r: +p.r || 0, a: p.a === '' || p.a == null || !isFinite(+p.a) ? null : +p.a })),
+    axis: (h.axis || []).map((p) => ({ x: +p.x, y: +p.y, r: +p.r || 0, a: p.a === '' || p.a == null || !isFinite(+p.a) ? null : +p.a, lc: p.lc === '' || p.lc == null || !isFinite(+p.lc) ? null : +p.lc })),
   };
 }
 
@@ -98,7 +98,8 @@ const isHwyRef = (ref) => /^(hwy[12]|x[12]|x\d+:[12])$/.test(ref || ''); // chau
 
 // Axe de l'autoroute ou d'une voie secondaire : droites et arcs aux sommets (rayons ramenés à la place disponible par
 // roundPolylineFit), puis clothoïdes symétriques à chaque sommet où la catégorie de conception les impose
-// (R < 1,5 Rdn, roadcat.js) : paramètre A saisi au sommet (champ a ; 0 = sans clothoïde) ou, à défaut, A = √(Lclo·R)
+// (R < 1,5 Rdn, roadcat.js) : longueur de clothoïde saisie au sommet (champ lc ; 0 = sans clothoïde ; A = √(lc·R)),
+// paramètre A (champ a, projets antérieurs) ou, à défaut, A = √(Lclo·R)
 // avec la longueur minimale de la catégorie. Les clothoïdes sont raccourcies (avec alerte) si les tangentes ne tiennent
 // pas entre les sommets voisins. Retourne { path (segments geom.js, clothoïdes échantillonnées au mètre et repérées
 // par .clo), fit, al (alignement clotho.js : éléments exacts L / C / A), cat }.
@@ -111,20 +112,24 @@ export function roadAlignment(H, dn = 2.5, issues = []) {
   const need = Pt.map((p, i) => (i && i < n - 1 && R[i] > 0 ? clothoidNeed(cat, R[i], H, dn) : 0));
   const A = Pt.map((p, i) => {
     if (!i || i === n - 1 || !(R[i] > 0)) return 0;
-    const a = p.a != null ? Math.max(0, p.a) : need[i] > 0 ? Math.ceil(Math.sqrt(need[i] * R[i])) : 0;
+    // longueur de clothoïde saisie (lc, m ; 0 = arc seul), sinon paramètre A (a, projets antérieurs), sinon catégorie
+    const lc = p.lc === '' || p.lc == null ? null : +p.lc, a0 = p.a === '' || p.a == null ? null : +p.a;
+    const a = lc != null && Number.isFinite(lc) ? (lc > 0 ? Math.sqrt(lc * R[i]) : 0) : a0 != null && Number.isFinite(a0) ? Math.max(0, a0) : need[i] > 0 ? Math.ceil(Math.sqrt(need[i] * R[i])) : 0;
     return Math.min(a, R[i] * Math.sqrt(defl(i))); // L ≤ R·δ : la clothoïde ne consomme pas plus que la déflexion
   });
   const want = A.slice();
   const T = (i) => (i > 0 && i < n - 1 && R[i] > 0 ? tangentLengths(R[i], A[i], A[i], defl(i)) : [0, 0]);
-  for (let it = 0; it < 60; it++) {
+  // Clothoïdes réduites jusqu'à ce que les tangentes de deux sommets voisins tiennent sur leur côté ; une clothoïde de
+  // moins de 1 m est supprimée (arc seul). Sans cette garantie, les raccordements se chevauchaient : l'axe revenait
+  // en arrière et les bords de chaussée et du TPC se croisaient (cassure en X).
+  const tient = (i) => T(i)[1] + T(i + 1)[0] <= dist(Pt[i], Pt[i + 1]) - 0.01;
+  const reduire = (j, f) => { if (!(A[j] > 0)) return; A[j] *= f; if ((A[j] * A[j]) / R[j] < 1) A[j] = 0; };
+  for (let it = 0; it < 200; it++) {
     let ok = true;
-    for (let i = 0; i + 1 < n; i++) {
-      if (T(i)[1] + T(i + 1)[0] <= dist(Pt[i], Pt[i + 1]) - 0.01) continue;
-      ok = false;
-      for (const j of [i, i + 1]) if (A[j] > 0) { A[j] *= 0.95; if (A[j] < 3) A[j] = 0; }
-    }
+    for (let i = 0; i + 1 < n; i++) { if (tient(i)) continue; ok = false; for (const j of [i, i + 1]) reduire(j, 0.92); }
     if (ok) break;
   }
+  for (let i = 0; i + 1 < n; i++) if (!tient(i)) { A[i] = 0; A[i + 1] = 0; } // dernier recours : arcs seuls (rayons ajustés à la place disponible)
   for (let i = 1; i < n - 1; i++) {
     if (!(want[i] > 0) || A[i] >= want[i] - 0.5) continue;
     const L = (A[i] * A[i]) / R[i];

@@ -837,12 +837,12 @@ function refreshEch() {
     S.echSig = sig;
     $('#rampList').innerHTML = ramps.map((q, i) => `<li data-ri="${i}" class="rli${i === S.rsel ? ' on' : ''}"><b>${esc(q.name)}</b> ${esc(rampParams(S.prj, q).label)} · ${esc(RAMP_CAT[q.cat]?.label || '')}</li>`).join('') || '<li class="empty-li">Aucune bretelle.</li>';
     const nV = H.axis?.length || 0;
-    $('#hwyVertices').innerHTML = nV > 2 ? '<h3>Sommets de l\'axe</h3><div class="tablewrap"><table class="pts"><tr><th>#</th><th>X</th><th>Y</th><th>R (m)</th><th title="Paramètre A des clothoïdes du sommet ; vide : longueur minimale de la catégorie, 0 : sans clothoïde">A (m)<th title="Rayon réellement appliqué sur le plan (réduit quand les tangentes ne tiennent pas entre les sommets voisins)">R appliqué</th></tr>' +
-      H.axis.map((q, k) => `<tr><td>${k}</td><td><input data-k="hwy.axis.${k}.x" inputmode="decimal"></td><td><input data-k="hwy.axis.${k}.y" inputmode="decimal"></td><td>${k && k < nV - 1 ? `<input data-k="hwy.axis.${k}.r" inputmode="decimal">` : ''}</td><td>${k && k < nV - 1 ? `<input data-k="hwy.axis.${k}.a" inputmode="decimal" placeholder="${aAuto('hwy', k)}">` : ''}</td><td class="mono" data-rfit="hwy:${k}"></td></tr>`).join('') + '</table></div>' : '';
+    $('#hwyVertices').innerHTML = nV > 2 ? '<h3>Sommets de l\'axe</h3><div class="tablewrap"><table class="pts vtx"><colgroup><col class="c-n"><col class="c-xy"><col class="c-xy"><col class="c-r"><col class="c-r"><col class="c-ra"></colgroup><tr><th>#</th><th>X</th><th>Y</th><th>R (m)</th><th title="Longueur des clothoïdes du sommet ; vide : longueur minimale de la catégorie, 0 : sans clothoïde">L clo. (m)</th><th title="Rayon réellement appliqué sur le plan (réduit quand les tangentes ne tiennent pas entre les sommets voisins)">R appl.</th></tr>' +
+      H.axis.map((q, k) => `<tr><td>${k}</td><td><input data-k="hwy.axis.${k}.x" data-dec="2" inputmode="decimal"></td><td><input data-k="hwy.axis.${k}.y" data-dec="2" inputmode="decimal"></td><td>${k && k < nV - 1 ? `<input data-k="hwy.axis.${k}.r" inputmode="decimal">` : ''}</td><td>${k && k < nV - 1 ? `<input data-k="hwy.axis.${k}.lc" inputmode="decimal" placeholder="${aAuto('hwy', k)}">` : ''}</td><td class="mono" data-rfit="hwy:${k}"></td></tr>`).join('') + '</table></div>' : '';
     renderCrossFields();
     const vtx = (xk) => { const XC = S.prj.crosses?.[xk]?.axis || [], nX = XC.length; return nX >= 2 ? `<h3>Sommets de l'axe de ${esc(S.prj.crosses[xk].name || 'la voie')}</h3>` + vtxTable(xk, XC, nX) : ''; };
-    const vtxTable = (xk, XC, nX) => '<div class="tablewrap"><table class="pts"><tr><th>#</th><th>X</th><th>Y</th><th>R (m)</th><th title="Paramètre A des clothoïdes du sommet ; vide : longueur minimale de la catégorie, 0 : sans clothoïde">A (m)<th title="Rayon réellement appliqué sur le plan">R appliqué</th></tr>' +
-      XC.map((q, k) => `<tr><td>${k}</td><td><input data-k="crosses.${xk}.axis.${k}.x" inputmode="decimal"></td><td><input data-k="crosses.${xk}.axis.${k}.y" inputmode="decimal"></td><td>${k && k < nX - 1 ? `<input data-k="crosses.${xk}.axis.${k}.r" inputmode="decimal">` : ''}</td><td>${k && k < nX - 1 ? `<input data-k="crosses.${xk}.axis.${k}.a" inputmode="decimal" placeholder="${aAuto(`x${xk}`, k)}">` : ''}</td><td class="mono" data-rfit="x${xk}:${k}"></td></tr>`).join('') + '</table></div>';
+    const vtxTable = (xk, XC, nX) => '<div class="tablewrap"><table class="pts vtx"><colgroup><col class="c-n"><col class="c-xy"><col class="c-xy"><col class="c-r"><col class="c-r"><col class="c-ra"></colgroup><tr><th>#</th><th>X</th><th>Y</th><th>R (m)</th><th title="Longueur des clothoïdes du sommet ; vide : longueur minimale de la catégorie, 0 : sans clothoïde">L clo. (m)</th><th title="Rayon réellement appliqué sur le plan">R appl.</th></tr>' +
+      XC.map((q, k) => `<tr><td>${k}</td><td><input data-k="crosses.${xk}.axis.${k}.x" data-dec="2" inputmode="decimal"></td><td><input data-k="crosses.${xk}.axis.${k}.y" data-dec="2" inputmode="decimal"></td><td>${k && k < nX - 1 ? `<input data-k="crosses.${xk}.axis.${k}.r" inputmode="decimal">` : ''}</td><td>${k && k < nX - 1 ? `<input data-k="crosses.${xk}.axis.${k}.lc" inputmode="decimal" placeholder="${aAuto(`x${xk}`, k)}">` : ''}</td><td class="mono" data-rfit="x${xk}:${k}"></td></tr>`).join('') + '</table></div>';
     $('#crossVertices').innerHTML = S.xsel >= 0 ? vtx(S.xsel) : '';
     $('#mainXVertices').innerHTML = S.msel >= 0 ? vtx(S.msel) : '';
     if (!r) $('#rampForm').innerHTML = '';
@@ -1785,8 +1785,8 @@ function elGeom(el) {
 }
 // ─── Éléments de l'axe en plan des voies d'échangeur (autoroute / voie principale, voies secondaires) ───
 // Survol : surbrillance de la droite ou du raccordement (clothoïde d'entrée, arc, clothoïde de sortie) sous le curseur ;
-// clic : fenêtre de l'élément — rayon R et paramètre A de la clothoïde du sommet, modifiables, ou longueur et gisement
-// de la droite. Les valeurs sont celles des sommets de l'axe (r, a ; a vide = clothoïde de la catégorie de conception).
+// clic : fenêtre de l'élément — rayon R et longueur L de la clothoïde du sommet, modifiables, ou longueur et gisement
+// de la droite. Les valeurs sont celles des sommets de l'axe (r, lc ; lc vide = clothoïde de la catégorie de conception).
 const axElCache = new Map();
 /** Alignement calculé d'un axe d'échangeur et ses éléments regroupés : courbes (par sommet) et droites (par côté). */
 function axisElements(ref) {
@@ -1794,7 +1794,7 @@ function axisElements(ref) {
   if (ax.length < 2 || ref.t === 'br') return null;
   const key = `${ref.t}${ref.i ?? ''}`, dn = Math.max(0, +(S.prj.pt?.dev ?? 2.5) || 2.5);
   let P; try { P = ref.t === 'hwy' ? hwyParams(S.prj) : crossParams(S.prj, ref.i); } catch { return null; }
-  const sig = JSON.stringify([ax.map((p) => [p.x, p.y, p.r ?? null, p.a ?? null]), P.cat, P.dcat, P.V, P.kind, dn]);
+  const sig = JSON.stringify([ax.map((p) => [p.x, p.y, p.r ?? null, p.a ?? null, p.lc ?? null]), P.cat, P.dcat, P.V, P.kind, dn]);
   const c = axElCache.get(key); if (c?.sig === sig) return c.v;
   let v = null;
   try {
@@ -1834,11 +1834,10 @@ function renderAxEl(el) {
     return;
   }
   const p = ax[q.vi] || {}, f = (A.fit || []).find((g) => g.i === q.vi), Rreq = +p.r || 0;
-  const aTxt = p.a == null || p.a === '' ? '' : String(p.a).replace('.', ',');
-  const Aeff = Math.max(q.A1, q.A2), auto = p.a == null || p.a === '';
+  const lTxt = p.lc == null || p.lc === '' ? '' : String(p.lc).replace('.', ','), Leff = Math.max(q.L1, q.L2), auto = lTxt === '';
   box.innerHTML = `<div class="row"><label class="fld">${t('Rayon R')} [m]<input data-axel="r" inputmode="decimal" value="${String(Rreq || '').replace('.', ',')}"></label>`
-    + `<label class="fld">${t('Clothoïde A')} [m]<input data-axel="a" inputmode="decimal" value="${aTxt}" placeholder="${auto ? `auto ${fmt(Aeff, 0)}` : 'auto'}"></label></div>`
-    + `<p class="note">${t('A vide : clothoïde de la catégorie de conception ; A = 0 : arc seul.')}</p>`
+    + `<label class="fld">${t('Longueur de clothoïde L')} [m]<input data-axel="lc" inputmode="decimal" value="${lTxt}" placeholder="${auto ? `auto ${fmt(Leff, 1)}` : 'auto'}"></label></div>`
+    + `<p class="note">${t('L vide : longueur de la catégorie de conception ; L = 0 : arc seul. A = √(L·R).')}</p>`
     + rows([
       ['Sommet', `${q.vi}${f && f.r < f.req - 0.005 ? ` — ${t('rayon ramené à')} ${fmt(f.r, 1)} m ${t('faute de place')}` : ''}`],
       ['Rayon de l\'arc', `${fmt(q.R, 2)} m`],
@@ -1854,7 +1853,7 @@ function applyAxEl(inp) {
   const ax = axRefArr(el.ref), p = ax?.[el.idx]; if (!p) return;
   const v = parseNum(inp.value);
   if (inp.dataset.axel === 'r') { if (!(v > 0)) { toast(t('Rayon : saisir une valeur positive.'), 'warn'); renderAxEl(el); return; } ax[el.idx] = { ...p, r: v }; }
-  else { const q = { ...p }; if (inp.value.trim() === '') delete q.a; else if (v >= 0) q.a = v; else { renderAxEl(el); return; } ax[el.idx] = q; }
+  else { const q = { ...p }; delete q.a; if (inp.value.trim() === '') delete q.lc; else if (v >= 0) q.lc = v; else { renderAxEl(el); return; } ax[el.idx] = q; } // la longueur remplace un A saisi auparavant
   S.echSig = ''; update(); renderAxEl(el);
 }
 
@@ -2655,7 +2654,7 @@ const axRefArr = (ref) => (ref.t === 'hwy' ? S.prj.hwy?.axis : ref.t === 'cross'
 const tgCache = new Map();
 /** Longueurs de tangente d'entrée / de sortie à chaque sommet, d'après l'alignement réel (rayons, clothoïdes). */
 function tangentLens(ref) {
-  const ax = axRefArr(ref) || [], n = ax.length, key = `${ref.t}${ref.i ?? ''}`, sig = JSON.stringify(ax.map((p) => [p.x, p.y, p.r || 0, p.a ?? null]));
+  const ax = axRefArr(ref) || [], n = ax.length, key = `${ref.t}${ref.i ?? ''}`, sig = JSON.stringify(ax.map((p) => [p.x, p.y, p.r || 0, p.a ?? null, p.lc ?? null]));
   const c = tgCache.get(key); if (c?.sig === sig) return c.v;
   const Ti = new Array(n).fill(0), To = new Array(n).fill(0);
   try {
@@ -3188,7 +3187,7 @@ function syncInputs() {
     // Cases du profil en travers non renseignées : valeur par défaut du contexte.
     if (el.type === 'checkbox') el.checked = !!(v ?? (el.dataset.k?.startsWith('section.') ? sectionParams(S.prj)[el.dataset.k.slice(8)] : v));
     else if (el.tagName === 'SELECT') el.value = v ?? '';
-    else el.value = el.dataset.type === 'text' ? v ?? '' : showNum(typeof v === 'number' ? +v.toFixed(4) : v);
+    else el.value = el.dataset.type === 'text' ? v ?? '' : showNum(typeof v === 'number' ? +v.toFixed(el.dataset.dec ? +el.dataset.dec : 4) : v);
   }
   for (const el of $$('[data-h]')) {
     const isBranch = !!el.closest('#branchForm');
@@ -4498,7 +4497,7 @@ function aAuto(which, i) {
   const P = road?.H?.axis?.[i]; if (!P || !els.length) return 'auto';
   const arc = els.find((e) => e.kind === 'A' && e.pi === i);
   const cl = arc ? els[els.indexOf(arc) - 1] : null;
-  return cl?.kind === 'C' ? `auto ${fmt(cl.A, 0)}` : 'auto';
+  return cl?.kind === 'C' ? `auto ${fmt(cl.len, 1)}` : 'auto';
 }
 function hyAxes() { return (S.prof?.axes || (S.D ? listAxes(S.prj, S.D) : [])); }
 function hyAxisChecked(h, ax) { return h.axes ? h.axes.includes(ax.key) : ax.key === 'hwy' || ax.key.startsWith('x:'); }
