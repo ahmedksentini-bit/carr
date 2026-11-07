@@ -200,27 +200,39 @@ function removeCross(i) {
 // des bretelles ou un profil en long saisi (il reste alors séparé).
 function rejoinRoadsAt(J, C) {
   if (!C) return 0;
-  const ends = [];
-  for (const b of J.branches || []) {
-    const X = roadOf(b.src); if (!X || (X.axis || []).length < 2) continue;
-    const ax = X.axis, d0 = G.dist(ax[0], C), d1 = G.dist(ax[ax.length - 1], C), atEnd = d1 < d0, E = atEnd ? ax[ax.length - 1] : ax[0];
-    if (Math.min(d0, d1) > (+J.ring?.Rg || 20) + PS_LB + 60) continue;
-    if (!ends.some((q) => q.X === X)) ends.push({ X, atEnd, u: G.norm(G.sub(E, C)) });
+  const reach = (+J.ring?.Rg || 20) + PS_LB + 60, ends = [];
+  // toutes les routes dont une extrémité est au carrefour (que ses branches existent encore ou non)
+  const roads = [...(S.prj.hwy?.on && S.prj.hwy.kind === 'route' ? [S.prj.hwy] : []), ...(S.prj.crosses || []).filter((X) => X.on !== false)];
+  for (const X of roads) {
+    const ax = X.axis || []; if (ax.length < 2) continue;
+    const d0 = G.dist(ax[0], C), d1 = G.dist(ax[ax.length - 1], C), atEnd = d1 < d0, E = atEnd ? ax[ax.length - 1] : ax[0];
+    if (Math.min(d0, d1) > reach) continue;
+    ends.push({ X, atEnd, u: G.norm(G.sub(E, C)) });
   }
   let n = 0;
   for (const A of ends) for (const B of ends) {
-    if (A === B || A.done || B.done || !A.atEnd || B.atEnd || G.dot(A.u, B.u) > -0.8) continue;
+    if (A === B || A.X === B.X || A.done || B.done || !A.atEnd || B.atEnd || G.dot(A.u, B.u) > -0.8) continue;
     if (B.X === S.prj.hwy) continue; // la voie principale 1 n'est jamais absorbée
     const kB = S.prj.crosses.indexOf(B.X); if (kB < 0) continue;
     const refd = (S.prj.ramps || []).some((r) => [r.from?.ref, r.to?.ref].some((ref) => { const x = parseXref(ref); return x && x.k === kB; }));
     if (refd || S.prj.axpl?.[`x:${B.X.id}`]?.pis?.length) continue;
     const auto = (A.X.kind || (A.X === S.prj.hwy ? 'autoroute' : 'route')) === 'autoroute';
-    A.X.axis = [...A.X.axis.slice(0, -1), { ...r3p(C), r: auto ? 1500 : 400 }, ...B.X.axis.slice(1)];
+    // sommets de raccordement ajoutés à la coupure (bend) : retirés, la route retrouve son tracé d'origine
+    const a = A.X.axis.slice(0, -1), b = B.X.axis.slice(1);
+    let bent = false;
+    while (a.length > 1 && a[a.length - 1].bend) { a.pop(); bent = true; }
+    while (b.length > 1 && b[0].bend) { b.shift(); bent = true; }
+    A.X.axis = bent ? [...a, ...b] : [...a, { ...r3p(C), r: auto ? 1500 : 400 }, ...b];
     if (/ \(suite\)$/.test(A.X.name || '')) A.X.name = A.X.name.replace(/ \(suite\)$/, '');
     A.done = B.done = true; removeCross(kB); n++;
   }
+  // extrémités restées seules : détachées, elles ne se raccordent plus d'elles-mêmes à un nouveau carrefour
+  for (const q of ends) if (!q.done && q.X !== S.prj.hwy && S.prj.crosses.includes(q.X)) freeEnd(q.X, q.atEnd ? 1 : 0);
   return n;
 }
+// Extrémité de voie détachée : linkBranchesToRoads ne la raccorde plus à un carrefour voisin ; glisser l'extrémité la
+// raccorde de nouveau (connectCross).
+function freeEnd(X, end) { X.free = { ...X.free, [end]: true }; }
 function deleteJunction() {
   const C = S.D?.O || (S.prj.center?.x != null ? { x: +S.prj.center.x, y: +S.prj.center.y } : null), nJoin = rejoinRoadsAt(S.prj, C);
   if (nJoin) toast(`${nJoin} route(s) recousue(s) au droit du carrefour supprimé.`);
@@ -2065,6 +2077,7 @@ function linkBranchesToRoads() {
   for (const X of S.prj.crosses || []) {
     if (X.on === false || (X.axis || []).length < 2) continue;
     for (const end of [0, 1]) {
+      if (X.free?.[end]) continue; // extrémité détachée (branche ou carrefour supprimé)
       const ax = X.axis, iE = end ? ax.length - 1 : 0, Q = ax[end ? ax.length - 2 : 1], E = ax[iE];
       let best = null;
       for (const j of jl) { // portée : celle d'un raccordement, ou l'extrémité des branches dessinées (+ 30 m)
@@ -2242,7 +2255,7 @@ function bendToCenter(q, end, C, d) {
       const T = 0.9 * Math.min(G.dist(V, E), G.dist(V, Q) / 2);
       const R = Math.max(10, Math.floor(Math.min(3000, T / Math.tan(delta / 2)) / 10) * 10);
       q[iE] = { ...r3p(E), r: '' };
-      q.splice(end ? iE : 1, 0, { ...r3p(V), r: R });
+      q.splice(end ? iE : 1, 0, { ...r3p(V), r: R, bend: 1 }); // bend : sommet de raccordement retiré si le carrefour est supprimé
       return { R, delta };
     }
   }
@@ -2504,9 +2517,20 @@ function deleteBranch(i) {
   const b = S.prj.branches[i];
   if (!b || !confirm(t(`Supprimer la branche ${b.name} ?`))) return;
   if (b.rampLink) for (const part of b.rampLink.split('|')) { const [rid, end] = part.split(':'), r = S.prj.ramps.find((x) => x.id === rid); if (r) { const E = end === 'from' ? r.pis[0] : r.pis[r.pis.length - 1]; r.noBranch = { x: E.x, y: E.y, end }; delete r.cut; } }
+  // Branche issue d'une voie secondaire : sinon recréée aussitôt à partir de la voie (linkBranchesToRoads). La voie
+  // est supprimée (OK) ou gardée et détachée du carrefour (Annuler).
+  const X = b.src?.startsWith('x:') ? S.prj.crosses.find((c) => c.id === b.src.slice(2)) : null;
+  let msg = '';
+  if (X && (X.axis || []).length >= 2) {
+    const C = S.D?.O || (S.prj.center?.x != null ? { x: +S.prj.center.x, y: +S.prj.center.y } : X.axis[0]);
+    const end = G.dist(X.axis[X.axis.length - 1], C) < G.dist(X.axis[0], C) ? 1 : 0;
+    if (confirm(t(`La branche ${b.name} prolonge la voie « ${X.name || 'secondaire'} ». Supprimer aussi cette voie ?\n\nOK : la voie est supprimée.\nAnnuler : la voie est gardée, détachée du carrefour.`))) { removeCross(S.prj.crosses.indexOf(X)); msg = `Branche ${b.name} et voie ${X.name || ''} supprimées.`; }
+    else { freeEnd(X, end); msg = `Branche ${b.name} supprimée ; la voie ${X.name || ''} est gardée, détachée du carrefour (glissez son extrémité pour la raccorder de nouveau).`; }
+  }
   S.prj.branches.splice(i, 1);
   S.sel = -1; S.hover = -1;
   renderBranchForm(); update();
+  if (msg) toast(msg);
 }
 
 function selectBranch(i) {
@@ -2740,7 +2764,7 @@ function bindCanvas() {
       syncInputs(); update();
       if (d.kind === 'center') centerPlaced();
       // extrémité d'une voie secondaire amenée sur un carrefour : raccordement (branche tangente, même profil)
-      if (d.kind === 'cvx' && (d.k === 0 || d.k === (S.prj.crosses[d.c]?.axis?.length || 0) - 1)) { const msg = connectCross(d.c, { ends: true }); if (msg) { update(); toast(msg); } }
+      if (d.kind === 'cvx' && (d.k === 0 || d.k === (S.prj.crosses[d.c]?.axis?.length || 0) - 1)) { const X = S.prj.crosses[d.c]; if (X?.free) delete X.free[d.k === 0 ? 0 : 1]; const msg = connectCross(d.c, { ends: true }); if (msg) { update(); toast(msg); } }
     }
     else if (['cadm', 'cadr', 'cadl'].includes(d.kind) && !d.moved) { const [px, py] = viewer.w2s(d.start.x, d.start.y); openPop({ type: 'ouvr', i: `c:${d.id}` }, px, py); } // simple clic sur une poignée : fiche de l'ouvrage
     else if (d.kind === 'pan') {
@@ -6274,4 +6298,4 @@ function toast(msg, lvl = 'info') {
 
 init();
 // Poignée de débogage (console du navigateur).
-window.GIRA = { S, update, kmlToDxf, get viewer() { return viewer; }, zoomGira, newBranch, finishAxis, setTool, buildDxfText, parseDXF, buildDxfGeometry, setTerrainPoints, tinZ, hitElement, openPop, closePop };
+window.GIRA = { S, update, kmlToDxf, deleteBranch, deleteJunction, get viewer() { return viewer; }, zoomGira, newBranch, finishAxis, setTool, buildDxfText, parseDXF, buildDxfGeometry, setTerrainPoints, tinZ, hitElement, openPop, closePop };
