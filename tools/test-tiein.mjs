@@ -1,5 +1,5 @@
 // Raccordement d'une branche aux limites de chaussée (js/tiein.js).
-import { nearestOnDxf, tieSection, tieLanes, tieAxis } from '../js/tiein.js';
+import { nearestOnDxf, tieSection, tieLanes, tieAxis, tieKeepAxis } from '../js/tiein.js';
 let fails = 0;
 const ok = (c, m) => { if (!c) { fails++; console.error('ÉCHEC', m); } };
 const near = (a, b, t = 1e-6) => Math.abs(a - b) < t;
@@ -32,5 +32,13 @@ const ax = [{ x: at(80, 0)[0], y: at(80, 0)[1] }, { x: at(65, 1)[0], y: at(65, 1
 const A = tieAxis(ax, T.M, T.t, O);
 ok(A.length === 4 && near(A[1].x, T.M.x, 1e-3) && A[2].r === 25, `axe [M+10, M, sommets intérieurs] (${A.length})`);
 ok(near(Math.hypot(A[0].x - A[1].x, A[0].y - A[1].y), 30, 1e-3), 'prolongement de 30 m');
+// orientation conservée : axe inchangé, raccordement au droit du milieu, écart latéral
+{
+  const axk = [{ x: at(70, 1)[0], y: at(70, 1)[1] }, { x: at(20, 1)[0], y: at(20, 1)[1] }];
+  const K = tieKeepAxis(axk, T.M);
+  ok(K && Math.abs(K.offset - 1) < 1e-6 && K.axis[0].x === axk[0].x, `axe conservé, écart 1,00 m (${K && K.offset})`);
+  const K2 = tieKeepAxis([{ x: at(40, 1)[0], y: at(40, 1)[1] }, axk[1]], T.M);
+  ok(K2 && Math.abs(Math.hypot(K2.axis[0].x - K2.M.x, K2.axis[0].y - K2.M.y) - 30) < 1e-3, 'axe trop court : prolongé de 30 m au-delà du raccordement');
+}
 if (fails) { console.error(`${fails} échec(s)`); process.exit(1); }
 console.log('test-tiein : OK');

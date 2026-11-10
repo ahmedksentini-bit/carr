@@ -120,6 +120,7 @@ export function fuseFillets(bd, nx, Oc, Rr, bdd, Rmin) {
     return true;
   };
   let R = Rt != null && Rt >= Rmin - 1e-6 ? Rt : Rmin, limited = false;
+  if (R === Rt && !fits(Rt)) return { error: `le rayon tangent à l'anneau (${fmt(Rt, 1)} m) déborde des alignements des branches` };
   if (R === Rmin && !fits(Rmin)) {
     // Rayon bus trop grand pour le coin : plus grand rayon qui tient (au moins le rayon tangent à l'anneau).
     let lo = Rt ?? lo0, hi = Rmin;
@@ -425,28 +426,33 @@ function buildRoundabout(prj, ext = {}) {
   const mod = (v) => (((v % Lpo) + Lpo) % Lpo);
   // Re / Rs qui se chevauchent : rayon unique (fuseFillets), au moins Rfus (giration d'un bus).
   const Rfus = Math.max(1, num(ring.Rfus, RFUS));
-  const overlap = (i, bd, nx) => {
-    const msg = `${bd.name} / ${nx.name} : branches trop proches, les raccordements Re/Rs se chevauchent sur l'anneau`;
-    if (bds.length < 2 || prj.traffic?.tad?.[bd.id] || (shape && bd.lobe !== nx.lobe)) { issues.push({ lvl: 'err', msg: msg + '.' }); return; }
+  // forced : rayon unique demandé (case « Rayon unique avec la branche suivante » de bd) sans chevauchement.
+  const overlap = (i, bd, nx, forced = false) => {
+    const msg = forced ? `${bd.name} / ${nx.name} : rayon unique demandé` : `${bd.name} / ${nx.name} : branches trop proches, les raccordements Re/Rs se chevauchent sur l'anneau`;
+    if (bds.length < 2 || prj.traffic?.tad?.[bd.id] || (shape && bd.lobe !== nx.lobe)) { if (!forced) issues.push({ lvl: 'err', msg: msg + '.' }); else issues.push({ lvl: 'warn', bi: bd.idx, msg: `${msg} : impossible (voie directe, lobes différents ou branche unique).` }); return !forced; }
     const f = fuseFillets(bd, nx, bd.Oc, bd.Rgc, sec.bdd, Rfus);
-    if (f.error) { issues.push({ lvl: 'err', msg: `${msg} ; rayon unique impossible (${f.error}).` }); return; }
+    if (f.error) { issues.push({ lvl: 'err', bi: bd.idx, msg: `${msg} ; rayon unique impossible (${f.error})${forced ? ' — Re et Rs conservés' : ''}.` }); return !forced; }
     Object.assign(bd.entry, { paintW: f.paint1, curbW: f.paint1, edgeW: f.edge1, fused: f, Tc: f.touch });
     Object.assign(nx.exit, { paintW: f.paint2, curbW: f.paint2, edgeW: f.edge2, fused: f, Tc: f.touch });
     bd.entry.phiTc = nx.exit.phiTc = ang(sub(f.touch, bd.Oc));
     ringEdge[i] = [];
+    const why = forced ? 'Re et Rs remplacés (demandé)' : 'Re et Rs se chevauchaient';
     issues.push(f.onRing
-      ? { lvl: 'info', bi: bd.idx, msg: `${bd.name} / ${nx.name} : Re et Rs se chevauchaient — fusionnés en un rayon unique R = ${fmt(f.R, 2)} m, tangent à la rive de l'anneau.` }
+      ? { lvl: 'info', bi: bd.idx, msg: `${bd.name} / ${nx.name} : ${why} — fusionnés en un rayon unique R = ${fmt(f.R, 2)} m, tangent à la rive de l'anneau.` }
       : f.limited
         ? { lvl: 'warn', bi: bd.idx, msg: `${bd.name} / ${nx.name} : Re et Rs fusionnés en un rayon unique R = ${fmt(f.R, 2)} m, limité par l'angle entre les branches (${fmt(f.Rmin, 2)} m pour la giration d'un bus ne tient pas) — le mouvement de tourne-à-droite des autobus passe par l'anneau ; vérifier l'épure de giration.` }
         : { lvl: 'warn', bi: bd.idx, msg: `${bd.name} / ${nx.name} : Re et Rs fusionnés en un rayon unique R = ${fmt(f.R, 2)} m (minimum retenu pour la giration d'un bus${f.Rt != null ? ` ; le rayon tangent à l'anneau ne serait que de ${fmt(f.Rt, 2)} m` : ''}), en retrait de l'anneau — vérifier l'épure de giration.` });
+    return true;
   };
+  const wantFuse = (bd) => !!prj.branches[bd.idx]?.fuseNext;
   bds.forEach((bd, i) => {
     const nx = bds[(i + 1) % bds.length];
     if (shape) {
       const sA = (q) => projectOnPath(pathPo, q).s;
       const span = bds.length === 1 ? Lpo : mod(sA(nx.W({ x: nx.x0, y: nx.a })) - sA(bd.W({ x: bd.x0, y: bd.a })));
-      const s0 = sA(bd.entry.Tc), s1 = sA(nx.exit.Tc), gap = mod(s1 - s0);
-      if (gap < span && gap > 1e-3) {
+      const s0 = sA(bd.entry.Tc), s1 = sA(nx.exit.Tc), gap = mod(s1 - s0), free = gap < span && gap > 1e-3;
+      if (free && wantFuse(bd) && overlap(i, bd, nx, true)) return;
+      if (free) {
         ringEdge[i] = subPath(pathPo, s0, s1);
         const r0 = projectOnPath(path0, bd.entry.Tc).s, r1 = projectOnPath(path0, nx.exit.Tc).s;
         rive(subPath(path0, r0, r1));
@@ -454,8 +460,9 @@ function buildRoundabout(prj, ext = {}) {
       return;
     }
     const span = bds.length === 1 ? G.TAU : G.ccwSweep(bd.theta, nx.theta);
-    const gap = G.ccwSweep(bd.entry.phiTc, nx.exit.phiTc);
-    if (gap < span && gap > 1e-4) {
+    const gap = G.ccwSweep(bd.entry.phiTc, nx.exit.phiTc), free = gap < span && gap > 1e-4;
+    if (free && wantFuse(bd) && overlap(i, bd, nx, true)) return;
+    if (free) {
       ringEdge[i] = [A(O, Rpo, bd.entry.phiTc, nx.exit.phiTc, true)];
       rive([A(O, Rg, bd.entry.phiTc, nx.exit.phiTc, true)]);
     } else overlap(i, bd, nx);

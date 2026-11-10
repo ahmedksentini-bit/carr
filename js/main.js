@@ -42,7 +42,7 @@ import { buildAxisProfiles, axisPlChecks, axisTerrainLine, axisFromTerrain, buil
 import { ringPlBuild } from './devers.js';
 import { chausseeOverlaps } from './overlap.js';
 import { empriseObstacles, empriseCheck, empriseMessages } from './emprise.js';
-import { nearestOnDxf, tieSection, tieLanes, tieAxis } from './tiein.js';
+import { nearestOnDxf, tieSection, tieLanes, tieAxis, tieKeepAxis } from './tiein.js';
 import { autoProfile, newProfile, cloneProfile, findProfile } from './ptype.js';
 import { openTypeEditor } from './pttedit.js';
 import { talusPrims, rowFromSection, radialTalus, earthworkIndex } from './talus.js';
@@ -450,7 +450,12 @@ function tieClick(w) {
   const sct = tieSection(T.e1, e, O);
   if (sct.error) { toast(`Raccordement impossible : ${sct.error}.`, 'err'); T.e1 = null; setPrompt(); viewer.invalidate(); return; }
   const L = tieLanes(sct.w, b.nIn, b.nOut);
-  b.axis = tieAxis(b.axis, sct.M, sct.t, O || sct.M);
+  let off = null;
+  if (S.prj.opts.tieKeep !== false) { // axe conservé : raccordement au point de l'axe au droit du milieu de la section
+    const k = tieKeepAxis(b.axis, sct.M);
+    if (k) { b.axis = k.axis; off = k.offset; sct.M = k.M; }
+  }
+  if (off == null) b.axis = tieAxis(b.axis, sct.M, sct.t, O || sct.M);
   b.wLane = L.wLane; b.bdd = L.bdd;
   for (const k of ['le', 'ls']) if (b[k] !== '' && b[k] != null && +b[k] < L.wLane) b[k] = L.wLane;
   b.length = '';
@@ -469,7 +474,7 @@ function tieClick(w) {
   }
   setTool('select'); selectBranch(T.bi);
   update();
-  toast(`${b.name} raccordée à la voirie existante : largeur ${fmt(sct.w, 2)} m → ${b.nIn || 1} + ${b.nOut || 1} voie(s) de ${fmt(L.wLane, 2)} m${L.bdd > 0 ? `, BDD ${fmt(L.bdd, 2)} m de part et d'autre` : ''}, longueur ${b.length !== '' ? fmt(+b.length, 1) + ' m' : 'auto'} depuis l'anneau.`);
+  toast(`${b.name} raccordée à la voirie existante : largeur ${fmt(sct.w, 2)} m → ${b.nIn || 1} + ${b.nOut || 1} voie(s) de ${fmt(L.wLane, 2)} m${L.bdd > 0 ? `, BDD ${fmt(L.bdd, 2)} m de part et d'autre` : ''}, longueur ${b.length !== '' ? fmt(+b.length, 1) + ' m' : 'auto'} depuis l'anneau${off != null ? ` ; orientation de l'axe conservée (axe à ${fmt(off, 2)} m du milieu de la rue existante)` : ''}.`);
 }
 
 // ================================================================ Contrôle d'emprise (emprise.js)
@@ -3540,11 +3545,13 @@ function renderBranchForm() {
   const head = `<div class="bhead">${fld('name', 'Nom', '', { branch: true, text: true })}<button id="btnDelBranch" class="danger" title="Supprimer (Suppr)">Supprimer</button></div>
     <div id="branchOut" class="kv"></div>`;
   const secP = sectionParams(S.prj), srcP = b.src ? roadProfile(b.src) : null;
+  // branche suivante dans le sens de l'anneau (sortie raccordée à l'entrée de celle-ci par la case « rayon unique »)
+  const bdsD = S.D?.branches || [], kD = bdsD.findIndex((q) => q.idx === S.sel), nextBr = kD >= 0 && bdsD.length > 1 ? bdsD[(kD + 1) % bdsD.length] : null;
   const lanes = `<h4>Voies de la branche</h4>
     ${srcP ? `<p class="note">Profil en travers repris de ${esc(srcP.name)} (voies, largeur, TPC, BDD, berme) à la création de la branche, puis à chaque modification de cet axe.</p>` : ''}
     <div class="row">${sel('nIn', 'Voies entrantes', [['1', '1'], ['2', '2'], ['3', '3']])}${sel('nOut', 'Voies sortantes', [['1', '1'], ['2', '2'], ['3', '3']])}</div>
     ${fld('wLane', 'Largeur de voie courante', 'm', { branch: true })}
-    <div class="row"><button id="btnTieIn" ${S.dxf ? '' : 'disabled title="Importez d\'abord un fond DXF (onglet Projet)"'}>Raccorder aux limites de chaussée (DXF)…</button></div>
+    <div class="row"><button id="btnTieIn" ${S.dxf ? '' : 'disabled title="Importez d\'abord un fond DXF (onglet Projet)"'}>Raccorder aux limites de chaussée (DXF)…</button><label class="chk" title="Décoché : l'axe est réorienté suivant la rue existante, extrémité au milieu de la section"><input type="checkbox" id="tieKeep" ${S.prj.opts.tieKeep === false ? '' : 'checked'}> garder l'orientation de l'axe</label></div>
     <p class="note">Deux clics sur les bords de la voirie existante : extrémité de l'axe au milieu, largeur partagée entre les voies (double sens), surlargeur en BDD au-delà de 3,75 m par voie, longueur jusqu'au raccordement.</p>
     <div class="row">${fld('bdd', 'BDD (ou BAU) de la branche', 'm', { branch: true, ph: showNum(secP.bdd), title: 'Vide : BDD du carrefour (onglet Profil). Différente : transition linéaire sur l\'alignement droit, depuis la BDD de l\'anneau.' })}${S.prj.context === 'urbain' ? '' : fld('berme', 'Berme de la branche', 'm', { branch: true, ph: showNum(secP.berme) })}</div>`;
   const profile = (from) => `<h4>Profil et dévers</h4>
@@ -3593,6 +3600,7 @@ function renderBranchForm() {
       <h4>Entrée</h4>
       ${fld('le', 'Largeur d\'entrée le', 'm', { branch: true, title: 'Mesurée du bord de l\'îlot au bord extérieur, au droit de l\'anneau' })}
       ${fld('Re', 'Rayon d\'entrée Re', 'm', { branch: true })}
+      ${nextBr ? `<label class="chk" title="Re de cette branche et Rs de la branche suivante (sens de l'anneau) remplacés par un seul arc tangent aux deux bords, de préférence tangent à la rive de l'anneau (au moins le rayon unique mini de l'onglet Anneau)"><input type="checkbox" data-bk="fuseNext"> Rayon unique avec la sortie de ${esc(nextBr.name)}</label>` : ''}
       <h4>Sortie</h4>
       ${fld('ls', 'Largeur de sortie ls', 'm', { branch: true })}
       ${fld('Rs', 'Rayon de sortie Rs', 'm', { branch: true })}
@@ -5878,6 +5886,7 @@ function bindUI() {
     }
     if (e.target.id === 'btnDelBranch') deleteBranch(S.sel);
     if (e.target.id === 'btnTieIn') startTie();
+    if (e.target.id === 'tieKeep') { S.prj.opts.tieKeep = e.target.checked; autosave(); }
     const tr = e.target.closest('#ptsTable tr[data-pt]');
     if (tr) {
       const q = S.D?.points[+tr.dataset.pt];

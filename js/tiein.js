@@ -78,3 +78,26 @@ export function tieAxis(axis, M, t, O) {
   if (pts.length < 3) pts.push(r3(G.add(O, G.mul(G.norm(G.sub(M, O)), Math.min(dM - 5, Math.max(5, dM / 2))))));
   return pts;
 }
+
+// Variante « orientation conservée » : l'axe saisi n'est pas modifié ; le raccordement se fait au point de l'axe le
+// plus proche du milieu M de la section (axe prolongé de 30 m s'il s'arrête avant). Écart latéral axe ↔ milieu
+// renvoyé (décalage de l'axe par rapport à la voirie existante).
+export function tieKeepAxis(axis, M) {
+  const a = axis || [];
+  if (a.length < 2) return null;
+  let best = null;
+  for (let i = 0; i + 1 < a.length; i++) {
+    const P = a[i], Q = a[i + 1], d = G.sub(Q, P), L2 = G.dot(d, d);
+    if (!(L2 > 0)) continue;
+    const t = G.dot(G.sub(M, P), d) / L2, tc = i === 0 ? Math.min(1, t) : G.clamp(t, 0, 1); // au-delà de l'extrémité extérieure : prolongement
+    const p = G.add(P, G.mul(d, tc)), dd = G.dist(p, M);
+    if (!best || dd < best.d) best = { p, d: dd, i, t: tc };
+  }
+  const out = a.map((q) => ({ ...q }));
+  if (best.i === 0 && best.t < 0.05) { // le raccordement est au-delà (ou tout près) de l'extrémité saisie : axe prolongé
+    const u = G.norm(G.sub(a[0], a[1]));
+    const far = G.add(best.p, G.mul(u, 30));
+    out[0] = { ...out[0], x: Math.round(far.x * 1000) / 1000, y: Math.round(far.y * 1000) / 1000 };
+  }
+  return { axis: out, M: best.p, offset: best.d };
+}
