@@ -1,6 +1,7 @@
 // Rayon unique quand Re (branche i) et Rs (branche suivante) se chevauchent (fuseFillets, js/roundabout.js).
 import * as G from '../js/geom.js';
 import { buildDesign, RFUS } from '../js/roundabout.js';
+import { empriseObstacles } from '../js/emprise.js';
 let fails = 0;
 const ok = (c, m) => { if (!c) { fails++; console.error('ÉCHEC', m); } };
 const br = (name, deg) => { const a = (deg * Math.PI) / 180; return { id: name, name, radial: true, nIn: 1, nOut: 1, island: { type: 'aucun' }, tpc: { on: false }, wLane: 3, le: 3.5, ls: 4, Re: 12, Rs: 15, axis: [{ x: 90 * Math.cos(a), y: 90 * Math.sin(a) }, { x: 25 * Math.cos(a), y: 25 * Math.sin(a) }] }; };
@@ -33,6 +34,17 @@ ok(D.branches.every((b) => !b.entry.fused && !b.exit.fused), 'pas de fusion sans
   const h = D.branches[0].entry.fused;
   ok(h && D.branches[1].exit.fused === h && h.onRing, `fusion demandée, tangente à l'anneau (${h && h.R})`);
   ok(D.branches.slice(1).every((b) => !b.entry.fused), 'autres secteurs inchangés');
+}
+// Bâti protégé : un bloc posé juste derrière l'arc de 12,50 m → rayon choisi pour que la bordure reste dehors.
+{
+  const D0 = buildDesign(prj([0, 35, 180, 270])), f0 = D0.branches[0].entry.fused;
+  const e = f0.edge1[f0.edge1.length - 1], m = G.segAt(e, 0.5), out = G.norm(G.sub(m, f0.C)); // côté terrain : vers le centre de l'arc
+  const c = G.add(m, G.mul(out, -1.0)); // bloc à 1 m derrière la bordure, côté terrain
+  const sq = (c, h) => new Float64Array([c.x - h, c.y - h, c.x + h, c.y - h, c.x + h, c.y + h, c.x - h, c.y + h]);
+  const ob = empriseObstacles({ polys: [], hatches: [{ layer: 'B', rings: [sq(c, 0.5)] }] }, 'B');
+  const D1 = buildDesign(prj([0, 35, 180, 270]), { keep: { ob, ded: 0.4, min: 0.8, layer: 'B' } }), f1 = D1.branches[0].entry.fused;
+  ok(f1 && !f1.intrude && f1.avail >= 0.8 - 1e-6 && Math.abs(f1.R - f0.R) > 0.2, `rayon modifié pour 0,80 m de trottoir (${f1 && f1.R} / ${f0.R}, ${f1 && f1.avail})`);
+  ok(D1.issues.some((q) => /hors du calque B/.test(q.msg)), 'message de rayon choisi hors du bâti');
 }
 if (fails) { console.error(`${fails} échec(s)`); process.exit(1); }
 console.log('test-fuse : OK');

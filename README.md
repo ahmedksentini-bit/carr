@@ -345,7 +345,11 @@ ou sur un fond topographique DXF.
   retrait de l'anneau ; s'il ne tient pas entre les branches, le plus grand rayon qui tient. Bord de chaussée
   concentrique, coté « R … (Re/Rs fusionnés) ». Cercle et lobe d'une cacahuète (même lobe). Sans chevauchement, la case « Rayon unique
   avec la sortie de … » (fenêtre de la branche, Entrée) impose le même arc entre l'entrée de la branche et la sortie
-  de la suivante dans le sens de l'anneau.
+  de la suivante dans le sens de l'anneau. Avec un calque protégé (contrôle d'emprise), la bordure ne doit jamais
+  entrer dans le bâti : le rayon unique est choisi, entre le rayon tangent à l'anneau et le plus grand qui tient, au
+  plus près du rayon voulu avec au moins le trottoir minimal (sinon au moins hors du bâti) ; un rayon unique demandé
+  qui entrerait forcément dans le bâti est abandonné (Re et Rs conservés), un chevauchement sans solution est signalé
+  en erreur.
 - **Accès sur VSA 90 / 110** (`js/vsa.js`, voie principale ou secondaire de catégorie VSA) : guide Cerema « VSA 90 et
   110 » (2014, § 4.2, 6.1 à 6.4) complété, pour les accès rapprochés, par le guide Certu « Conception des accès sur VRU
   de type A » (2003). Section courante par défaut 2×2 voies, BAU 2,50 m, BDG 1,00 m, avec contrôles (chaussées
