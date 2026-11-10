@@ -3254,7 +3254,11 @@ function syncInputs() {
   for (const el of $$('[data-h]')) {
     const isBranch = !!el.closest('#branchForm');
     if (isBranch && !br) continue;
-    const h = hintFor(el.dataset.h, S.prj, isBranch ? br : null);
+    let h = hintFor(el.dataset.h, S.prj, isBranch ? br : null);
+    if (el.dataset.h === 'axeL' && isBranch) {   // longueurs calculées par l'épure de la branche
+      const L = S.D?.branches?.find((q) => q.idx === S.sel)?.axeL;
+      if (L) h = { txt: `auto : ${fmt(L.auto, 1)} m (îlot, évasement + 20 m) ; minimum ${fmt(L.min, 1)} m ; retenu ${fmt(L.used, 1)} m — au-delà, la branche suit la courbe dessinée`, lvl: +br?.axeL > 0 && L.used > +br.axeL + 0.05 ? 'warn' : '' };
+    }
     el.textContent = h?.txt || '';
     el.className = 'hint' + (h?.lvl ? ' ' + h.lvl : '');
   }
@@ -3441,6 +3445,7 @@ function renderBranchForm() {
       ${roadBendHtml(b)}
       <h4>Axe</h4>
       <label class="chk"><input type="checkbox" data-bk="radial"> Axe radial (passe par le centre de l'anneau)</label>
+      ${fld('axeL', 'Alignement droit avant le raccordement (depuis l\'anneau)', 'm', { branch: true, ph: 'auto' })}
       ${fld('axeR', 'Rayon au raccordement avec l\'alignement radial', 'm', { branch: true, ph: 'auto' })}
       <p class="note">Rayons de raccordement aux sommets de l'axe saisi (vide : rayon ci-dessus) ; ils sont cotés sur le plan.</p>
       <div id="axisRadii"></div>

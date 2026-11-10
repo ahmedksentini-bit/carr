@@ -8,7 +8,7 @@ import * as G from './geom.js';
 import { islandDims, sectionParams, sideBands, TAD } from './norms.js';
 import { addDevers } from './devers.js';
 import { fmt, fmtGis, upright, autoCenter, branchDirection, frame, nearFar, polylineAfter, sideBandPrims } from './common.js';
-import { buildApproach, crossLine, widthAlong } from './approach.js';
+import { buildApproach, crossLine, widthAlong, flareEnd } from './approach.js';
 import { buildPlan } from './plan.js';
 import { buildBypass } from './bypass.js';
 import { makeDims } from './dims.js';
@@ -89,15 +89,23 @@ function buildRoundabout(prj, ext = {}) {
     const pl = nearFar(b.axis, O), far = pl[pl.length - 1];
     if (G.dist(far, O) < Rg + 5) { issues.push({ lvl: 'err', bi: idx, msg: `${name} : l'axe saisi doit sortir de l'anneau (> Rg + 5 m).` }); return; }
 
-    // --- Axe de la branche : alignement droit dirigé vers le centre sur la longueur utile (îlot, évasement,
-    // marge, voie directe éventuelle), puis raccordement de rayon sec.axeR à l'axe saisi, qu'il suit ensuite.
-    const shiftEst = hasIsland && !th && isl.type !== 'aucun' ? isl.shift : 0;
-    const flare = Math.max(0, hb + Math.max(le, ls) + shiftEst - th - Math.min(wIn, wOut));
-    const Lmin = Math.max(Rg + h + Math.max(10, 15 * flare) + 20, ext[idx] || 0);
+    // --- Axe de la branche : alignement droit dirigé vers le centre, puis raccordement de rayon sec.axeR à l'axe saisi,
+    // qu'il suit ensuite. Alignement compté depuis l'anneau : au moins l'îlot et l'évasement réel (plancher, voie
+    // directe éventuelle comprise), 20 m de marge en plus par défaut ; longueur saisie (b.axeL) bornée au plancher.
+    // Axe saisi trop court pour la longueur par défaut : marge abandonnée pour suivre la courbe dessinée ; encore trop
+    // court : courbe ignorée, signalée.
+    const aiR = hasIsland && !th && isl.type !== 'aucun' ? -isl.shift : 0;   // axe radial : a = 0, x0 = Rg, triangle décalé
+    const Lfloor = Math.max(flareEnd({ x0: Rg, xT: Rg + h, a: 0, ai: aiR, hb, th, le, ls, wIn, wOut }), ext[idx] || 0);
+    const Lauto = Math.max(Lfloor + 20, ext[idx] || 0);
+    const Lwant = +b.axeL > 0 ? Rg + +b.axeL : null;
+    let Lmin = Lwant != null ? Math.max(Lfloor, Lwant) : Lauto;
+    if (Lwant != null && Lwant < Lfloor - 0.05) issues.push({ lvl: 'warn', bi: idx, msg: `${name} : alignement droit porté à ${fmt(Lfloor - Rg, 1)} m depuis l'anneau (îlot et évasement) au lieu de ${fmt(+b.axeL, 1)} m.` });
     let u, a = 0, cont = null, axisFillets = [];
     const axeR = +b.axeR > 0 ? +b.axeR : sec.axeR;
     if (b.radial !== false) {
       let pa = polylineAfter(pl, O, Lmin + 15);
+      if (!pa && Lwant == null && Lmin > Lfloor) { const pf = polylineAfter(pl, O, Lfloor + 15); if (pf) { pa = pf; Lmin = Lfloor; } }
+      if (!pa && pl.length > 2) issues.push({ lvl: 'warn', bi: idx, msg: `${name} : la courbe de l'axe dessiné est dans l'alignement droit obligatoire (${fmt(Lfloor - Rg, 0)} m au moins depuis l'anneau : îlot et évasement) ; elle n'est pas suivie et la branche reste droite. Prolongez l'axe (« + » à son extrémité) ou dessinez la courbe au-delà.` });
       if (pa) {
         const defl = Math.acos(G.clamp(dot(norm(sub(pa.J, O)), pa.dir), -1, 1));
         pa = polylineAfter(pl, O, Lmin + axeR * Math.tan(defl / 2) + 2) || pa;
@@ -188,7 +196,7 @@ function buildRoundabout(prj, ext = {}) {
     }
     const yl = crossLine(en, target, 0.25), xl = crossLine(ex, target, 0.25);
     const bd = {
-      idx, id: b.id, name, role: 'branche', Oc: O, Rgc: Rg, lobe: lob?.k || 0, theta, u, n, a, ai, x0, xT, xEnd, h, b: isl.b, hb, th, isl, W, Ws, Wp, cont, axisFillets,
+      idx, id: b.id, name, role: 'branche', Oc: O, Rgc: Rg, lobe: lob?.k || 0, theta, u, n, a, ai, x0, xT, xEnd, h, b: isl.b, hb, th, isl, W, Ws, Wp, cont, axisFillets, axeL: { auto: Lauto - Rg, min: Lfloor - Rg, used: Lmin - Rg },
       entry: side(en, 1, wIn), exit: side(ex, -1, wOut), wIn, wOut,
       island, cross, yieldStart: yl?.a, yieldEnd: yl?.b, exitStart: xl?.a, exitEnd: xl?.b, gis: fmtGis(theta, unit),
       farAxis: cont ? G.segEnd(cont[cont.length - 1]) : W({ x: xEnd, y: a }),
