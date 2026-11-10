@@ -1519,6 +1519,23 @@ function drawCadreHandles(ctx, v, T) {
     for (const q of [h.lenM, h.lenP]) { if (!q) continue; const [lx, ly] = v.w2s(q.x, q.y); ctx.fillRect(lx - 3.5, ly - 3.5, 7, 7); }
   }
 }
+// Poignées des rayons uniques Re/Rs : point de contact sur la rive de l'anneau, à glisser le long de l'anneau.
+function fuseGrips() {
+  if (S.tool !== 'select' || !S.D?.branches) return [];
+  return S.D.branches.map((bd) => { const f = bd.entry?.fused; const g = f ? { touch: f.touch, Oc: bd.Oc, two: !!f.two } : bd.fuseGrip; return g ? { ...g, bi: bd.idx } : null; }).filter(Boolean);
+}
+function drawFuseGrips(ctx, v, T) {
+  for (const g of fuseGrips()) {
+    const [x, y] = v.w2s(g.touch.x, g.touch.y);
+    ctx.strokeStyle = '#38bdf8'; ctx.fillStyle = '#38bdf8'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x, y - 6); ctx.lineTo(x + 6, y); ctx.lineTo(x, y + 6); ctx.lineTo(x - 6, y); ctx.closePath();
+    if (g.two) ctx.fill(); else ctx.stroke();
+  }
+}
+function hitFuseGrip(px, py) {
+  for (const g of fuseGrips()) { const [x, y] = viewer.w2s(g.touch.x, g.touch.y); if (Math.hypot(px - x, py - y) < 8) return { kind: 'fuse', bi: g.bi, Oc: g.Oc }; }
+  return null;
+}
 function hitCadreHandle(px, py) {
   if (!S.cadres?.length) return null;
   const near = (p) => { const [x, y] = viewer.w2s(p.x, p.y); return Math.hypot(px - x, py - y) < 8; };
@@ -1756,6 +1773,7 @@ function renderScene(ctx, v, exp = null) {
   drawEch(ctx, v, T, !!exp);
   if (!exp) drawLineGrips(ctx, v, T);
   if (!exp) drawCadreHandles(ctx, v, T);
+  if (!exp) drawFuseGrips(ctx, v, T);
   if (!exp) drawOverlay(ctx, v, T);
   drawHud(ctx, v, theme, northAngle(v), imagery ? PROVIDERS[S.prj.bg.provider].attr + (places ? ' · ' + PROVIDERS.places.attr : '') : '');
 }
@@ -2955,6 +2973,8 @@ function hitHandle(px, py) {
   if (lg) return lg;
   const ch = hitCadreHandle(px, py);
   if (ch) return ch;
+  const fg = hitFuseGrip(px, py);
+  if (fg) return fg;
   for (let i = 0; i < S.prj.branches.length; i++) {
     const e = outerEnd(i);
     if (!e) continue;
@@ -3041,7 +3061,7 @@ function bindCanvas() {
     const d = S.drag;
     S.drag = null; updateCursor();
     if (!d) return;
-    if (['vertex', 'seg', 'tline', 'center', 'rpi', 'hvx', 'cvx', 'tige', 'cadm', 'cadr', 'cadl'].includes(d.kind) && d.moved) {
+    if (['vertex', 'seg', 'tline', 'center', 'rpi', 'hvx', 'cvx', 'tige', 'cadm', 'cadr', 'cadl', 'fuse'].includes(d.kind) && d.moved) {
       syncInputs(); update();
       if (d.kind === 'center') centerPlaced();
       // extrémité d'une voie secondaire amenée sur un carrefour : raccordement (branche tangente, même profil)
@@ -3082,6 +3102,7 @@ function onMove(px, py) {
     const r = moveAxisLine(o, d.k, Q, u);
     if (r) { ax[d.k] = { ...o[d.k], x: r[0].x, y: r[0].y }; ax[d.k + 1] = { ...o[d.k + 1], x: r[1].x, y: r[1].y }; d.moved = true; update({ commit: false, panels: false }); }
   }
+  else if (d?.kind === 'fuse') { const b = S.prj.branches[d.bi]; if (b) { b.fusePhi = Math.round(Math.atan2(w.y - d.Oc.y, w.x - d.Oc.x) * 1e5) / 1e5; d.moved = true; update({ commit: false, panels: false }); } }
   else if (d?.kind === 'tige') { const tp = S.prj.ramps[d.ri].tp; if (tp?.P0 && tp.u) { tp.Ys = Math.round(Math.max(250, G.dot(G.sub(w, tp.P0), tp.u))); d.moved = true; update({ commit: false, panels: false }); } }
   else if (d?.kind === 'rpi') { const q = S.prj.ramps[d.ri].pis[d.k]; S.prj.ramps[d.ri].pis[d.k] = { ...q, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
   else if (d?.kind === 'cvx') { const ax = S.prj.crosses[d.c].axis, q = ax[d.k]; ax[d.k] = { ...q, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
@@ -3608,6 +3629,7 @@ function renderBranchForm() {
       ${fld('le', 'Largeur d\'entrée le', 'm', { branch: true, title: 'Mesurée du bord de l\'îlot au bord extérieur, au droit de l\'anneau' })}
       ${fld('Re', 'Rayon d\'entrée Re', 'm', { branch: true })}
       ${nextBr ? `<label class="chk" title="Re de cette branche et Rs de la branche suivante (sens de l'anneau) remplacés par un seul arc tangent aux deux bords, de préférence tangent à la rive de l'anneau (au moins le rayon unique mini de l'onglet Anneau)"><input type="checkbox" data-bk="fuseNext"> Rayon unique avec la sortie de ${esc(nextBr.name)}</label>` : ''}
+      ${b.fusePhi != null ? `<div class="row"><span class="note">Point de contact du rayon unique sur l'anneau placé à la poignée (losange plein).</span><button id="btnFuseAuto">Contact automatique</button></div>` : nextBr ? '<p class="note">Rayon unique : son point de contact sur l\'anneau (losange bleu) se déplace à la souris ; deux arcs tangents à l\'anneau en ce point remplacent alors le rayon unique.</p>' : ''}
       <h4>Sortie</h4>
       ${fld('ls', 'Largeur de sortie ls', 'm', { branch: true })}
       ${fld('Rs', 'Rayon de sortie Rs', 'm', { branch: true })}
@@ -5893,6 +5915,7 @@ function bindUI() {
     }
     if (e.target.id === 'btnDelBranch') deleteBranch(S.sel);
     if (e.target.id === 'btnTieIn') startTie();
+    if (e.target.id === 'btnFuseAuto' && S.sel >= 0) { delete S.prj.branches[S.sel].fusePhi; update(); renderBranchForm(); }
     if (e.target.id === 'tieKeep') { S.prj.opts.tieKeep = e.target.checked; autosave(); }
     const tr = e.target.closest('#ptsTable tr[data-pt]');
     if (tr) {
