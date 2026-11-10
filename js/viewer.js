@@ -263,6 +263,18 @@ export function buildDxfCache(geo) {
     for (let i = 2; i < a.length; i += 2) g.path.lineTo(a[i] - ox, a[i + 1] - oy);
     if (p.closed) g.path.closePath();
   }
+  // Hachures : un chemin rempli (pair-impair) et son contour par calque / couleur.
+  const hgroups = new Map();
+  for (const h of geo.hatches || []) {
+    const key = h.layer + '\u0001' + (h.color || '');
+    let g = hgroups.get(key);
+    if (!g) { g = { layer: h.layer, color: h.color, path: new Path2D() }; hgroups.set(key, g); }
+    for (const a of h.rings) {
+      g.path.moveTo(a[0] - ox, a[1] - oy);
+      for (let i = 2; i < a.length; i += 2) g.path.lineTo(a[i] - ox, a[i + 1] - oy);
+      g.path.closePath();
+    }
+  }
   // Index d'accrochage (sommets) sur une grille de 5 m.
   const cell = 5, index = new Map();
   const put = (x, y) => {
@@ -272,7 +284,8 @@ export function buildDxfCache(geo) {
   };
   for (const p of geo.polys) { const a = p.pts; for (let i = 0; i < a.length; i += 2) put(a[i], a[i + 1]); }
   for (const p of geo.points) put(p.x, p.y);
-  return { ox, oy, groups: [...groups.values()], index, cell };
+  for (const h of geo.hatches || []) for (const a of h.rings) for (let i = 0; i < a.length; i += 2) put(a[i], a[i + 1]);
+  return { ox, oy, groups: [...groups.values()], hatches: [...hgroups.values()], index, cell };
 }
 
 export function snapDxf(cache, x, y, r) {
@@ -301,6 +314,13 @@ export function drawDxf(ctx, v, geo, cache, theme, opacity = 1) {
   const s = v.s, dpr = v.dpr;
   ctx.setTransform(dpr * s, 0, 0, -dpr * s, dpr * ((cache.ox - v.cx) * s + v.W / 2), dpr * (-(cache.oy - v.cy) * s + v.H / 2));
   ctx.lineWidth = 1 / s;
+  // Hachures en aplat semi-transparent (sous les traits), contour au trait.
+  for (const g of cache.hatches || []) {
+    if (geo.layers.get(g.layer)?.visible === false) continue;
+    const c = col(g.color, g.layer);
+    ctx.globalAlpha = opacity * 0.28; ctx.fillStyle = c; ctx.fill(g.path, 'evenodd');
+    ctx.globalAlpha = opacity; ctx.strokeStyle = c; ctx.stroke(g.path);
+  }
   for (const g of cache.groups) {
     if (geo.layers.get(g.layer)?.visible === false) continue;
     ctx.strokeStyle = col(g.color, g.layer);

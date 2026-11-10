@@ -21,6 +21,9 @@ import { isPeanut, peanutParams, peanutShape, autoPeanutDir, gisToVec, vecToGis,
 
 const { add, sub, mul, dot, norm, rot90, neg, ang, polar, L, A } = G;
 const num = (v, d) => (v === '' || v == null || !isFinite(+v) ? d : +v);
+// Rayon unique minimal (rive) quand Re et Rs fusionnent : rayon extérieur de giration d'un autobus, 12,50 m
+// (directive 2001/85/CE, annexe I § 7.12 — couronne 12,50 m / 5,30 m) ; à valider par l'épure du véhicule de projet.
+export const RFUS = 12.5;
 
 export { fmt, fmtGis, autoCenter };
 
@@ -33,6 +36,129 @@ export function buildDesign(prj, opt = {}) {
   // Échangeur autoroutier (section courante et bretelles), s'il est activé.
   if (!opt.only) { try { buildEchangeur(prj, D); } catch (e) { console.error(e); D.ramps = []; D.echIssues = [{ lvl: 'err', msg: 'Calcul impossible : ' + e.message }]; } }
   return D;
+}
+
+// Raccordements Re (branche bd) et Rs (branche suivante nx) qui se chevauchent sur l'anneau : un seul arc, tangent
+// aux deux rives (prolongées en ligne droite vers l'anneau) et de préférence à la rive de l'anneau (cercle Oc, Rr) ;
+// si ce rayon est inférieur à Rmin (giration d'un bus), on garde Rmin et l'arc reste en retrait de l'anneau.
+// Rayon donné à la rive (peinture), comme Re / Rs ; bord de chaussée concentrique à bdd. Sens du secteur : rive
+// d'entrée de bd vers l'anneau, puis rive de sortie de nx vers l'extérieur, terrain à droite (arc horaire).
+// Abscisse curviligne de la projection de X sur un chemin (segments droits et arcs).
+function projS(path, X) {
+  let best = Infinity, sBest = 0, acc = 0;
+  for (const sg of path) {
+    const Ls = G.segLen(sg);
+    let t;
+    if (sg.t === 'L') { const d = G.sub(sg.b, sg.a), l2 = G.dot(d, d); t = l2 > 0 ? G.clamp(G.dot(G.sub(X, sg.a), d) / l2, 0, 1) : 0; }
+    else { const sw = G.sweep(sg), a = G.ang(G.sub(X, sg.c)), da = sg.ccw ? G.ccwSweep(sg.sa, a) : G.ccwSweep(a, sg.sa); t = da <= sw ? da / sw : (da - sw < G.TAU - da ? 1 : 0); }
+    const d = G.dist(G.segAt(sg, t), X);
+    if (d < best) { best = d; sBest = acc + t * Ls; }
+    acc += Ls;
+  }
+  return sBest;
+}
+
+export function fuseFillets(bd, nx, Oc, Rr, bdd, Rmin) {
+  const { add, sub, mul, norm, dist } = G;
+  // Rive jusqu'au point de tangence Tl du raccordement (exclu), prolongée en ligne droite vers l'anneau (60 m).
+  const cut = (sd) => {
+    const P = sd.paintW, k = P.findIndex((sg) => dist(G.segEnd(sg), sd.Tl) < 1e-4);
+    if (k < 0) return null;
+    const last = P[k], Ls = G.segLen(last), e = Math.min(0.05, Ls / 2);
+    const d = norm(sub(G.segEnd(last), G.segAt(last, 1 - e / Ls)));
+    const keep = P.slice(0, k + 1), Lk = G.pathLen(keep);
+    const near = G.pathTail(keep, Math.max(0, Lk - 90)); // partie utile : les 90 derniers mètres
+    return { path: [...near, G.L(sd.Tl, add(sd.Tl, mul(d, 60)))], full: [...keep, G.L(sd.Tl, add(sd.Tl, mul(d, 60)))], Lk, Q: sd.Tl, d };
+  };
+  const A1 = cut(bd.entry), A2 = cut(nx.exit);
+  if (!A1 || !A2) return { error: 'géométrie des rives non reconnue' };
+  const poly = (segs) => G.samplePath(segs.flatMap((sg) => (sg.t === 'L' ? [sg] : [sg])), 0.25);
+  const isect = (P, Q) => {
+    const out = [];
+    for (let i = 1; i < P.length; i++) {
+      const a = P[i - 1], b = P[i], x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
+      for (let j = 1; j < Q.length; j++) {
+        const c = Q[j - 1], d = Q[j];
+        if (Math.max(c.x, d.x) < x0 || Math.min(c.x, d.x) > x1 || Math.max(c.y, d.y) < y0 || Math.min(c.y, d.y) > y1) continue;
+        const r = sub(b, a), q = sub(d, c), den = G.cross(r, q);
+        if (Math.abs(den) < 1e-12) continue;
+        const t = G.cross(sub(c, a), q) / den, u = G.cross(sub(c, a), r) / den;
+        if (t >= 0 && t <= 1 && u >= 0 && u <= 1) out.push(add(a, mul(r, t)));
+      }
+    }
+    return out;
+  };
+  // Centre du cercle de rayon R tangent aux deux rives, côté terrain (à droite de l'entrée de bd, à gauche de la
+  // sortie de nx parcourue vers l'anneau) : intersection des rives décalées de R, la plus proche de l'anneau.
+  const centre = (R) => {
+    const I = isect(poly(G.offsetPath(A1.path, -R)), poly(G.offsetPath(A2.path, R)));
+    return I.length ? I.reduce((m, p) => (!m || dist(p, Oc) < dist(m, Oc) ? p : m), null) : null;
+  };
+  const f = (R) => { const C = centre(R); return C ? dist(C, Oc) - R - Rr : null; };
+  // Rayon tangent à la rive de l'anneau (f = 0), par dichotomie sur [lo, hi].
+  let Rt = null;
+  const lo0 = bdd + 0.5, fl = f(lo0);
+  if (fl != null && fl < 0) {
+    let lo = lo0, hi = null;
+    for (let R = Math.max(lo0 * 2, 4); R <= 120; R *= 1.4) { const v = f(R); if (v == null) break; if (v >= 0) { hi = R; break; } lo = R; }
+    if (hi != null) {
+      for (let k = 0; k < 40 && hi - lo > 1e-3; k++) { const m = (lo + hi) / 2, v = f(m); if (v != null && v < 0) lo = m; else hi = m; }
+      Rt = hi;
+    }
+  }
+  // Le rayon unique ne doit pas entamer les branches : points de tangence au-delà de Tl (vers l'anneau), ou en
+  // amont seulement sur la partie rectiligne de la rive (écart ≤ 5 cm à la droite en Tl).
+  const fits = (R) => {
+    const C = centre(R);
+    if (!C) return false;
+    for (const A of [A1, A2]) {
+      const sT = projS(A.full, C);
+      if (sT >= A.Lk - 1e-6) continue;
+      const gone = G.samplePath(G.pathTail(G.pathHead(A.full, A.Lk), sT), 0.5);
+      if (gone.some((p) => Math.abs(G.cross(A.d, sub(p, A.Q))) > 0.05)) return false;
+    }
+    return true;
+  };
+  let R = Rt != null && Rt >= Rmin - 1e-6 ? Rt : Rmin, limited = false;
+  if (R === Rmin && !fits(Rmin)) {
+    // Rayon bus trop grand pour le coin : plus grand rayon qui tient (au moins le rayon tangent à l'anneau).
+    let lo = Rt ?? lo0, hi = Rmin;
+    if (!fits(lo)) return { error: `aucun rayon ne tient entre les rives (rayon tangent à l'anneau ${Rt != null ? fmt(Rt, 1) + ' m' : 'introuvable'})` };
+    for (let k = 0; k < 40 && hi - lo > 1e-3; k++) { const m = (lo + hi) / 2; if (fits(m)) lo = m; else hi = m; }
+    R = lo; limited = true;
+  }
+  const C = centre(R);
+  if (!C) return { error: `pas de cercle de rayon ${fmt(R, 1)} m tangent aux deux rives` };
+  if (dist(C, Oc) < R + Rr - 0.01) return { error: `le rayon ${fmt(R, 1)} m empiète sur l'anneau` };
+  const s1 = projS(A1.full, C), s2 = projS(A2.full, C);
+  const T1 = G.pathPointAt(A1.full, s1), T2 = G.pathPointAt(A2.full, s2);
+  if (Math.abs(dist(C, T1) - R) > 0.05 || Math.abs(dist(C, T2) - R) > 0.05) return { error: `rayon ${fmt(R, 1)} m non tangent aux rives` };
+  const arcP = G.arcThrough(C, R, T1, T2, false);
+  if (G.sweep(arcP) > Math.PI) return { error: 'arc fusionné supérieur à un demi-tour' };
+  const paint1 = [...G.pathHead(A1.full, s1), arcP], paint2 = G.pathHead(A2.full, s2);
+  // Bord de chaussée concentrique (bdd vers le terrain) ; bord d'origine conservé jusqu'au droit du point de
+  // tangence (BDD propre à la branche à son extrémité), prolongé en ligne droite s'il le faut.
+  const Re_ = R - bdd;
+  if (Re_ < 0.5) return { error: 'rayon de bordure nul' };
+  const E1 = add(T1, mul(norm(sub(C, T1)), bdd)), E2 = add(T2, mul(norm(sub(C, T2)), bdd));
+  const bridge = (segs, X) => { const E = G.segEnd(segs[segs.length - 1]); return dist(E, X) > 1e-4 ? [...segs, G.L(E, X)] : segs; };
+  const edgeTo = (path, X) => {
+    const d = G.segEnd(path[path.length - 1]), t = G.segAt(path[path.length - 1], 0.999);
+    const ext = [...path, G.L(d, add(d, mul(norm(sub(d, t)), 60)))];
+    const h = G.pathHead(ext, projS(ext, X));
+    return h.length ? bridge(h, X) : [G.L(G.segStart(path[0]), X)];
+  };
+  // bords sans leur raccordement : coupés au droit de Tl (rive) décalé de bdd vers le terrain
+  const noFil = (sd, sgn) => {
+    const P = sd.paintW, k = P.findIndex((sg) => dist(G.segEnd(sg), sd.Tl) < 1e-4), last = P[k], Ls = G.segLen(last);
+    const d = norm(sub(G.segEnd(last), G.segAt(last, 1 - Math.min(0.05, Ls / 2) / Ls)));
+    const X = add(sd.Tl, mul({ x: d.y, y: -d.x }, sgn * bdd));
+    return G.pathHead(sd.edgeW, projS(sd.edgeW, X));
+  };
+  const edge1 = [...edgeTo(noFil(bd.entry, 1), E1), G.arcThrough(C, Re_, E1, E2, false)];
+  const edge2 = edgeTo(noFil(nx.exit, -1), E2);
+  const touch = add(Oc, mul(norm(sub(C, Oc)), Rr));
+  return { R, Rt, C, T1, T2, arcP, paint1, paint2, edge1, edge2, touch, onRing: R === Rt, limited, Rmin };
 }
 
 // ext : longueurs minimales des alignements droits (abscisse locale), imposées par les voies directes de tourne-à-droite.
@@ -297,6 +423,23 @@ function buildRoundabout(prj, ext = {}) {
   }
   const pathPo = shape?.path(tRpo), path0 = shape?.path(0), Lpo = pathPo ? G.pathLen(pathPo) : 0;
   const mod = (v) => (((v % Lpo) + Lpo) % Lpo);
+  // Re / Rs qui se chevauchent : rayon unique (fuseFillets), au moins Rfus (giration d'un bus).
+  const Rfus = Math.max(1, num(ring.Rfus, RFUS));
+  const overlap = (i, bd, nx) => {
+    const msg = `${bd.name} / ${nx.name} : branches trop proches, les raccordements Re/Rs se chevauchent sur l'anneau`;
+    if (bds.length < 2 || prj.traffic?.tad?.[bd.id] || (shape && bd.lobe !== nx.lobe)) { issues.push({ lvl: 'err', msg: msg + '.' }); return; }
+    const f = fuseFillets(bd, nx, bd.Oc, bd.Rgc, sec.bdd, Rfus);
+    if (f.error) { issues.push({ lvl: 'err', msg: `${msg} ; rayon unique impossible (${f.error}).` }); return; }
+    Object.assign(bd.entry, { paintW: f.paint1, curbW: f.paint1, edgeW: f.edge1, fused: f, Tc: f.touch });
+    Object.assign(nx.exit, { paintW: f.paint2, curbW: f.paint2, edgeW: f.edge2, fused: f, Tc: f.touch });
+    bd.entry.phiTc = nx.exit.phiTc = ang(sub(f.touch, bd.Oc));
+    ringEdge[i] = [];
+    issues.push(f.onRing
+      ? { lvl: 'info', bi: bd.idx, msg: `${bd.name} / ${nx.name} : Re et Rs se chevauchaient — fusionnés en un rayon unique R = ${fmt(f.R, 2)} m, tangent à la rive de l'anneau.` }
+      : f.limited
+        ? { lvl: 'warn', bi: bd.idx, msg: `${bd.name} / ${nx.name} : Re et Rs fusionnés en un rayon unique R = ${fmt(f.R, 2)} m, limité par l'angle entre les branches (${fmt(f.Rmin, 2)} m pour la giration d'un bus ne tient pas) — le mouvement de tourne-à-droite des autobus passe par l'anneau ; vérifier l'épure de giration.` }
+        : { lvl: 'warn', bi: bd.idx, msg: `${bd.name} / ${nx.name} : Re et Rs fusionnés en un rayon unique R = ${fmt(f.R, 2)} m (minimum retenu pour la giration d'un bus${f.Rt != null ? ` ; le rayon tangent à l'anneau ne serait que de ${fmt(f.Rt, 2)} m` : ''}), en retrait de l'anneau — vérifier l'épure de giration.` });
+  };
   bds.forEach((bd, i) => {
     const nx = bds[(i + 1) % bds.length];
     if (shape) {
@@ -307,7 +450,7 @@ function buildRoundabout(prj, ext = {}) {
         ringEdge[i] = subPath(pathPo, s0, s1);
         const r0 = projectOnPath(path0, bd.entry.Tc).s, r1 = projectOnPath(path0, nx.exit.Tc).s;
         rive(subPath(path0, r0, r1));
-      } else issues.push({ lvl: 'err', msg: `${bd.name} / ${nx.name} : branches trop proches, les raccordements Re/Rs se chevauchent sur l'anneau.` });
+      } else overlap(i, bd, nx);
       return;
     }
     const span = bds.length === 1 ? G.TAU : G.ccwSweep(bd.theta, nx.theta);
@@ -315,9 +458,7 @@ function buildRoundabout(prj, ext = {}) {
     if (gap < span && gap > 1e-4) {
       ringEdge[i] = [A(O, Rpo, bd.entry.phiTc, nx.exit.phiTc, true)];
       rive([A(O, Rg, bd.entry.phiTc, nx.exit.phiTc, true)]);
-    } else {
-      issues.push({ lvl: 'err', msg: `${bd.name} / ${nx.name} : branches trop proches, les raccordements Re/Rs se chevauchent sur l'anneau.` });
-    }
+    } else overlap(i, bd, nx);
   });
   if (sec.rive) loopPrim('MARQUAGE', tRi, { wm: 0.15 });
   loopPrim('BORDURE', tRpi);
@@ -474,6 +615,10 @@ function buildRoundabout(prj, ext = {}) {
       const wr = widthAlong(pIsl, mOut, sd.curb) ?? sd.w, asked = Math.abs(wr - sd.w) > 0.05 ? ` (${fmt(sd.w, 2)} demandé)` : '';
       const [p1, p2] = sd.s > 0 ? [pIsl, add(pIsl, mul(mOut, wr))] : [add(pIsl, mul(mOut, wr)), pIsl];
       dims.aligned(W(p1), W(p2), 0, `${sd.s > 0 ? 'le' : 'ls'} = ${fmt(wr, 2)}${asked}`, { side: -1 });
+      if (sd.fused) { // rayon unique : coté une fois, sur l'arc (porté par l'entrée)
+        if (sd.s > 0) { const m = G.segAt(sd.fused.arcP, 0.5); dims.radius(m, norm(sub(sd.fused.C, m)), `R = ${fmt(sd.fused.R, 2)} (Re/Rs fusionnés)`); }
+        continue;
+      }
       const mid = G.segAt(sd.fil.arc, 0.5);
       dims.radius(W(mid), norm(sub(sd.C, W(mid))), `${sd.s > 0 ? 'Re' : 'Rs'} = ${fmt(sd.R, 2)}`);
     }

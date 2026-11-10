@@ -15,7 +15,21 @@ ou sur un fond topographique DXF.
   agrandie au lieu de « Map data not yet available »), OpenStreetMap, Esri Topo ; recherche de lieu (Nominatim)
   ou saisie « lat, lon ».
 - **Import DXF ASCII** : LINE, LWPOLYLINE / POLYLINE (arcs), ARC, CIRCLE, ELLIPSE, SPLINE, TEXT, MTEXT, POINT,
-  INSERT (blocs, attributs), DIMENSION ; calques avec couleurs, unités m / cm / mm.
+  INSERT (blocs, attributs), DIMENSION, HATCH (contours polylignes et arêtes ligne / arc / ellipse / spline, trous :
+  aplat semi-transparent sous les traits, repris en gris sur les planches du tracé combiné ; `node tools/test-hatch.mjs`) ;
+  calques avec couleurs, unités m / cm / mm.
+- **Contrôle d'emprise** (onglet Projet, fond DXF ; `js/emprise.js`) : calque protégé au choix (le calque de bâti
+  hachuré, « Bati… », est proposé à l'import). Le long de chaque bordure du projet et des autres carrefours, trottoir
+  disponible = distance au calque − caniveau − bordure : rouge sous le minimum (1,50 m par défaut), orange sous le
+  trottoir du profil (2,50 m), bordure dans un contour fermé du calque signalée ; tronçons surlignés sur le plan, cote
+  du point le plus défavorable, messages groupés par branche ou raccordement dans l'onglet Contrôles (clic : vue
+  centrée). Interurbain : la berme doit rester hors du calque. `node tools/test-emprise.mjs`.
+- **Raccorder une branche aux limites de chaussée** (fenêtre de la branche ; `js/tiein.js`) : deux clics sur les
+  bords de la voirie existante (traits ou contours de hachures du DXF) → section perpendiculaire au droit du premier
+  clic, extrémité d'axe au milieu (axe prolongé de 30 m dans la direction de la rue, sommets intérieurs conservés),
+  double sens conservé : largeur partagée entre voies entrantes et sortantes, au-delà de 3,75 m par voie voies de
+  3,50 m et surlargeur en BDD ; longueur de la branche jusqu'au raccordement, alignement droit depuis l'anneau
+  raccourci pour finir avant lui. `node tools/test-tiein.mjs`.
 - **Calques KMZ / KML** (onglet Projet) : import de fichiers Google Earth / My Maps / QGIS (plusieurs à la fois) ;
   chaque fichier devient un calque de la liste, ses dossiers KML des sous-calques cochables. Lus : Point, LineString,
   Polygon (avec trous), MultiGeometry, gx:Track ; styles KML (couleurs, épaisseurs, remplissage). Par calque :
@@ -321,6 +335,13 @@ ou sur un fond topographique DXF.
   (point de l'îlot le plus saillant ; trajectoire en S signalée quand l'arc des trois points sort de l'anneau au col).
   Dévers, profil de l'anneau, talus, vue 3D et signalisation (B21-1 sur l'îlot du lobe) suivent la forme. Tests :
   `node tools/test-cacahuete.mjs`.
+- **Rayon unique quand Re et Rs se chevauchent** (`fuseFillets`, `js/roundabout.js`) : au lieu de l'erreur
+  « branches trop proches », le rayon d'entrée d'une branche et le rayon de sortie de la suivante sont remplacés par un
+  seul arc tangent aux deux rives (prolongées en ligne droite vers l'anneau), de préférence tangent à la rive de
+  l'anneau ; si ce rayon est plus petit que le minimum « Rayon unique mini » (onglet Anneau, 12,50 m par défaut :
+  couronne de giration d'un autobus, 12,50 m / 5,30 m, directive 2001/85/CE), le minimum est retenu et l'arc reste en
+  retrait de l'anneau ; s'il ne tient pas entre les branches, le plus grand rayon qui tient. Bord de chaussée
+  concentrique, coté « R … (Re/Rs fusionnés) ». Cercle et lobe d'une cacahuète (même lobe).
 - **Accès sur VSA 90 / 110** (`js/vsa.js`, voie principale ou secondaire de catégorie VSA) : guide Cerema « VSA 90 et
   110 » (2014, § 4.2, 6.1 à 6.4) complété, pour les accès rapprochés, par le guide Certu « Conception des accès sur VRU
   de type A » (2003). Section courante par défaut 2×2 voies, BAU 2,50 m, BDG 1,00 m, avec contrôles (chaussées

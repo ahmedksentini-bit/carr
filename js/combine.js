@@ -85,7 +85,15 @@ function prepDxf(geo) {
     return { p, x0, y0, x1, y1 };
   });
   const vis = (layer) => geo.layers?.get?.(layer)?.visible !== false;
-  return { polys: polys.filter((q) => vis(q.p.layer)), points: (geo.points || []).filter((q) => vis(q.layer)), texts: (geo.texts || []).filter((q) => vis(q.layer)) };
+  // Hachures : contours fermés, rendus en aplat gris léger.
+  const hatches = (geo.hatches || []).filter((h) => vis(h.layer)).flatMap((h) => h.rings.map((pts) => ({ p: { pts, closed: true, hatch: true } })));
+  for (const q of hatches) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const a = q.p.pts;
+    for (let i = 0; i < a.length; i += 2) { const x = a[i], y = a[i + 1]; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    Object.assign(q, { x0, y0, x1, y1 });
+  }
+  return { hatches, polys: polys.filter((q) => vis(q.p.layer)), points: (geo.points || []).filter((q) => vis(q.layer)), texts: (geo.texts || []).filter((q) => vis(q.layer)) };
 }
 
 function sheet(o) {
@@ -126,6 +134,14 @@ function planBand(o) {
   out += `<g clip-path="url(#cp${o.i})">`;
   // fond topographique
   if (o.dxf) {
+    let h = '';
+    for (const q of o.dxf.hatches || []) {
+      if (!inBB(q)) continue;
+      const a = q.p.pts;
+      for (let j = 0; j < a.length; j += 2) { const t = T({ x: a[j], y: a[j + 1] }); h += `${j ? 'L' : 'M'}${P(t.x, t.y)}`; }
+      h += 'Z';
+    }
+    if (h) out += `<path d="${h}" fill="#d1d5db" fill-rule="evenodd" stroke="#9ca3af" stroke-width="0.12"/>`;
     let d = '';
     for (const q of o.dxf.polys) {
       if (!inBB(q)) continue;

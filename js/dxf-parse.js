@@ -183,6 +183,61 @@ function vertsWithBulge(vs, closed) { // vs: [{x,y,b}]
   return out;
 }
 
+// Contours d'un HATCH (codes de groupe lus dans l'ordre) : polylignes (bulges) ou arêtes ligne / arc / ellipse / spline.
+// Arcs et ellipses horaires (73 = 0) : angles stockés en complément (360 − a), parcourus en sens inverse.
+export function hatchLoops(g) {
+  const loops = [];
+  let i = g.findIndex(([k]) => k === 91);
+  if (i < 0) return loops;
+  const nPaths = +g[i][1]; i++;
+  const at = (k) => (i < g.length && g[i][0] === k ? +g[i++][1] : null);
+  const want = (k, d = 0) => { while (i < g.length && g[i][0] !== k) i++; return i < g.length ? +g[i++][1] : d; };
+  const DEG = Math.PI / 180;
+  for (let p = 0; p < nPaths && i < g.length; p++) {
+    const flag = want(92), f = [];
+    if (flag & 2) {
+      const bul = want(72), nv = (at(73), want(93)), vs = [];
+      for (let v = 0; v < nv; v++) { const x = want(10), y = want(20), b = bul && g[i]?.[0] === 42 ? +g[i++][1] : 0; vs.push({ x, y, b }); }
+      f.push(...vertsWithBulge(vs, true));
+    } else {
+      const ne = want(93);
+      for (let e = 0; e < ne; e++) {
+        const ty = want(72), seg = [];
+        if (ty === 1) seg.push(want(10), want(20), want(11), want(21));
+        else if (ty === 2 || ty === 3) {
+          const cx = want(10), cy = want(20);
+          const mx = ty === 3 ? want(11) : 0, my = ty === 3 ? want(21) : 0;
+          const r = want(40, 1), a0 = want(50), a1 = want(51), ccw = want(73, 1);
+          let sw = a1 - a0; while (sw <= 0) sw += 360; if (Math.abs(a1 - a0) >= 360 - 1e-9) sw = 360;
+          const n = Math.max(4, Math.ceil(sw / 5)), sg = ccw ? 1 : -1;
+          for (let k = 0; k <= n; k++) {
+            const a = sg * (a0 + (sw * k) / n) * DEG, c = Math.cos(a), s = Math.sin(a);
+            if (ty === 2) seg.push(cx + r * c, cy + r * s);
+            else seg.push(cx + mx * c - my * r * s, cy + my * c + mx * r * s);
+          }
+        } else if (ty === 4) {
+          const deg = want(94, 3); at(73); at(74);
+          const nk = want(95), nc = want(96), knots = [], cps = [];
+          for (let k = 0; k < nk; k++) knots.push(want(40));
+          for (let k = 0; k < nc; k++) { const x = want(10), y = want(20), w = g[i]?.[0] === 42 ? +g[i++][1] : 1; cps.push([x, y, w]); }
+          if (cps.length > deg && knots.length === cps.length + deg + 1) {
+            const lo = knots[deg], hi = knots[cps.length], n = Math.min(200, cps.length * 8);
+            for (let k = 0; k <= n; k++) seg.push(...deBoor(deg, knots, cps, lo + ((hi - lo) * k) / n - (k === n ? 1e-9 : 0)));
+          } else for (const c of cps) seg.push(c[0], c[1]);
+          if (g[i]?.[0] === 97) { const nf = +g[i++][1]; for (let k = 0; k < nf; k++) { want(11); want(21); } }
+        }
+        // Arêtes chaînées : on saute le premier point s'il prolonge le précédent.
+        const j = f.length && seg.length && Math.hypot(seg[0] - f[f.length - 2], seg[1] - f[f.length - 1]) < 1e-6 ? 2 : 0;
+        for (let k = j; k < seg.length; k++) f.push(seg[k]);
+      }
+    }
+    // Objets source associés (97 n, 330 × n).
+    if (g[i]?.[0] === 97) { const ns = +g[i++][1]; for (let k = 0; k < ns && g[i]?.[0] === 330; k++) i++; }
+    if (f.length >= 6) loops.push(f);
+  }
+  return loops;
+}
+
 function deBoor(deg, knots, cps, t) {
   const n = cps.length;
   let k = deg;
@@ -303,6 +358,16 @@ function emit(e, M, layer, color, ctx, out, depth) {
       if (e.type === '3DFACE') for (const k of [0, 1, 2, 3]) if (has(g, 10 + k)) v3(num(g, 10 + k), num(g, 20 + k), num(g, 30 + k), '3DFACE');
       break;
     }
+    case 'HATCH': {
+      // Hachures : contours remplis (pair-impair), dessinés en aplat léger ; trous gérés.
+      const rings = hatchLoops(g).map((f) => {
+        const p = new Float64Array(f.length);
+        for (let k = 0; k < f.length; k += 2) { const q = apply(Mo, f[k], f[k + 1]); p[k] = q[0]; p[k + 1] = q[1]; }
+        return p;
+      });
+      if (rings.length) out.hatches.push({ layer: lay, color: col, rings, solid: num(g, 70) === 1, pattern: str(g, 2, '') });
+      break;
+    }
     case 'LEADER': {
       const f = [];
       for (const [k, v] of g) { if (k === 10) f.push(+v, 0); else if (k === 20 && f.length) f[f.length - 1] = +v; }
@@ -364,13 +429,14 @@ function cleanMText(s) {
 
 // Convertit le résultat de parseDXF en géométrie exploitable (unité → mètres).
 export function buildDxfGeometry(parsed, unitFactor = 1) {
-  const out = { polys: [], texts: [], points: [], verts3: [] };
+  const out = { polys: [], texts: [], points: [], verts3: [], hatches: [] };
   const ctx = { blocks: parsed.blocks, layers: parsed.layers };
   for (const e of parsed.ents) emit(e, IDENT, null, null, ctx, out, 0);
   if (unitFactor !== 1) {
     for (const p of out.polys) for (let i = 0; i < p.pts.length; i++) p.pts[i] *= unitFactor;
     for (const t of out.texts) { t.x *= unitFactor; t.y *= unitFactor; t.h *= unitFactor; }
     for (const p of out.points) { p.x *= unitFactor; p.y *= unitFactor; }
+    for (const h of out.hatches) for (const r of h.rings) for (let i = 0; i < r.length; i++) r[i] *= unitFactor;
     for (const v of out.verts3) { v.x *= unitFactor; v.y *= unitFactor; if (!v.text) v.z *= unitFactor; }
   }
   // Sommets 3D par calque : nombre, nombre de cotes non nulles, étendue en z, cotes écrites (textes numériques).
@@ -387,12 +453,13 @@ export function buildDxfGeometry(parsed, unitFactor = 1) {
   const layers = new Map();
   for (const [n, l] of parsed.layers) layers.set(n, { name: n, color: l.color, visible: !l.off && !l.frozen, count: 0 });
   const touch = (n) => { if (!layers.has(n)) layers.set(n, { name: n, color: '#ffffff', visible: true, count: 0 }); layers.get(n).count++; };
-  out.polys.forEach((p) => touch(p.layer)); out.texts.forEach((t) => touch(t.layer)); out.points.forEach((p) => touch(p.layer));
+  out.polys.forEach((p) => touch(p.layer)); out.texts.forEach((t) => touch(t.layer)); out.points.forEach((p) => touch(p.layer)); out.hatches.forEach((h) => touch(h.layer));
   for (const [n, l] of layers) if (!l.count) layers.delete(n);
   // Emprise robuste (centiles 1–99 %) pour le zoom.
   const xs = [], ys = [];
   for (const p of out.polys) for (let i = 0; i < p.pts.length; i += Math.max(2, (p.pts.length >> 3) & ~1)) { xs.push(p.pts[i]); ys.push(p.pts[i + 1]); }
   for (const p of out.points) { xs.push(p.x); ys.push(p.y); }
+  for (const h of out.hatches) { const r = h.rings[0]; xs.push(r[0]); ys.push(r[1]); }
   for (const t of out.texts) { xs.push(t.x); ys.push(t.y); }
   xs.sort((a, b) => a - b); ys.sort((a, b) => a - b);
   const q = (arr, f) => arr[Math.min(arr.length - 1, Math.max(0, Math.floor(f * (arr.length - 1))))];
