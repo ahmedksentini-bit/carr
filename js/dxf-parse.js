@@ -69,7 +69,14 @@ export function parseDXF(text) {
     else if (name === 'ENTITIES') readEntities(R, ents, 'ENDSEC');
     else skipSection(R);
   }
-  return { header, layers, blocks, ents, unitFactor: UNIT_FACTORS[header.$INSUNITS] ?? null };
+  // Unités impériales déclarées ($INSUNITS pouces / pieds) dans un dessin métrique ($MEASUREMENT = 1) ou en coordonnées
+  // projetées (emprise au-delà de 10 km) : erreur fréquente des levés (gabarit par défaut) — lu en mètres, signalé.
+  let unitFactor = UNIT_FACTORS[header.$INSUNITS] ?? null, unitNote = null;
+  if ((header.$INSUNITS === 1 || header.$INSUNITS === 2) && (header.$MEASUREMENT === 1 || Math.abs(+header.$EXTMIN || 0) > 1e4)) {
+    unitNote = `unités déclarées en ${header.$INSUNITS === 1 ? 'pouces' : 'pieds'} dans un dessin métrique : lu en mètres`;
+    unitFactor = 1;
+  }
+  return { header, layers, blocks, ents, unitFactor, unitNote };
 }
 
 function skipSection(R) { while (!R.done) { const [c, v] = R.next(); if (c === 0 && v === 'ENDSEC') return; } }
