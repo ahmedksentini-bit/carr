@@ -41,6 +41,8 @@ import { clearanceChecks, worstClearance, structureSpans } from './gabarit.js';
 import { buildAxisProfiles, axisPlChecks, axisTerrainLine, axisFromTerrain, buildNodes, axisLimits } from './axpl.js';
 import { ringPlBuild } from './devers.js';
 import { chausseeOverlaps } from './overlap.js';
+import { empriseObstacles, empriseCheck, empriseMessages } from './emprise.js';
+import { nearestOnDxf, tieSection, tieLanes, tieAxis } from './tiein.js';
 import { autoProfile, newProfile, cloneProfile, findProfile } from './ptype.js';
 import { openTypeEditor } from './pttedit.js';
 import { talusPrims, rowFromSection, radialTalus, earthworkIndex } from './talus.js';
@@ -423,11 +425,97 @@ function update({ commit = true, panels = true } = {}) {
     for (const q of chausseeOverlaps(S.prj, S.D, { decks: (S.ouvr?.list || []).map((o) => o.poly).filter((p) => p?.length > 2), juncs })) S.checks.push({ lvl: q.lvl, group: 'Échangeur', msg: q.msg });
   } catch (e) { console.error(e); }
   for (const [id, msg] of S.trBad || []) { const r = S.prj.ramps.find((q) => q.id === id); if (r) S.checks.push({ lvl: 'err', group: 'Échangeur', msg: `Trompette (${r.name}) : boucle non déduite de la S-semi — ${msg}` }); else S.trBad.delete(id); }
+  try { computeEmprise(); } catch (e) { console.error(e); S.emp = null; }
   if (panels) refreshPanels();
   scheduleTalus();
   viewer.invalidate();
   if (commit) commitHistory();
   autosave();
+}
+
+// ================================================================ Raccordement aux limites de chaussée (tiein.js)
+function startTie() {
+  if (!S.dxf) { toast('Importez d\'abord un fond DXF (onglet Projet).', 'warn'); return; }
+  if (!(S.sel >= 0)) return;
+  const bi = S.sel;
+  setTool('tiein'); S.tie = { bi, e1: null }; setPrompt();
+}
+function tieClick(w) {
+  const T = S.tie, b = T && S.prj.branches[T.bi];
+  if (!b) { setTool('select'); return; }
+  const e = nearestOnDxf(S.dxf, w, Math.max(1, 12 / viewer.s));
+  if (!e) { toast('Aucun trait du fond DXF près du clic (calques visibles).', 'warn'); return; }
+  if (!T.e1) { T.e1 = e; setPrompt(); viewer.invalidate(); return; }
+  const O = S.D?.O || (S.prj.center.x != null ? { x: +S.prj.center.x, y: +S.prj.center.y } : null);
+  const sct = tieSection(T.e1, e, O);
+  if (sct.error) { toast(`Raccordement impossible : ${sct.error}.`, 'err'); T.e1 = null; setPrompt(); viewer.invalidate(); return; }
+  const L = tieLanes(sct.w, b.nIn, b.nOut);
+  b.axis = tieAxis(b.axis, sct.M, sct.t, O || sct.M);
+  b.wLane = L.wLane; b.bdd = L.bdd;
+  for (const k of ['le', 'ls']) if (b[k] !== '' && b[k] != null && +b[k] < L.wLane) b[k] = L.wLane;
+  b.length = '';
+  update({ commit: false });
+  // giratoire : l'alignement droit depuis l'anneau doit finir avant le raccordement (la branche suit ensuite l'axe)
+  let bd0 = S.D?.branches?.find((q) => q.idx === T.bi);
+  if (bd0?.axeL && O) {
+    const dM = G.dist(sct.M, bd0.Oc || O) - (bd0.Rgc || +S.prj.ring.Rg);
+    if (bd0.axeL.used > dM - 3) { b.axeL = Math.max(10, Math.round((dM - 5) * 10) / 10); update({ commit: false }); }
+  }
+  // longueur de la branche : de l'anneau (ou du bord de la principale) jusqu'au raccordement M
+  const bd = S.D?.branches?.find((q) => q.idx === T.bi);
+  if (bd) {
+    const x = bd.toL ? bd.toL(sct.M).x : G.dot(G.sub(sct.M, bd.Oc || S.D.O), bd.u);
+    if (x - bd.x0 > 1) b.length = Math.round((x - bd.x0) * 10) / 10;
+  }
+  setTool('select'); selectBranch(T.bi);
+  update();
+  toast(`${b.name} raccordée à la voirie existante : largeur ${fmt(sct.w, 2)} m → ${b.nIn || 1} + ${b.nOut || 1} voie(s) de ${fmt(L.wLane, 2)} m${L.bdd > 0 ? `, BDD ${fmt(L.bdd, 2)} m de part et d'autre` : ''}, longueur ${b.length !== '' ? fmt(+b.length, 1) + ' m' : 'auto'} depuis l'anneau.`);
+}
+
+// ================================================================ Contrôle d'emprise (emprise.js)
+// Calque protégé du fond DXF (bâti hachuré…) : trottoir disponible derrière chaque bordure du projet et des autres
+// carrefours. Urbain : caniveau + bordure retranchés, minimum opts.emprise.min (1,50 m), voulu = trottoir du profil.
+// Interurbain : la berme doit rester hors du calque.
+function empriseCfg(prj = S.prj) {
+  const e = prj.opts?.emprise || {}, sec = sectionParams(prj), urb = prj.context === 'urbain';
+  const want = urb ? sec.trottoir : sec.berme;
+  return { layer: e.layer || '', ded: urb ? sec.caniveau + sec.bordure : 0, want, min: urb ? Math.min(want, +e.min > 0 ? +e.min : 1.5) : want };
+}
+function computeEmprise() {
+  S.emp = null;
+  const cfg = empriseCfg();
+  if (!S.dxf || !cfg.layer) return;
+  if (S.empOb?.geo !== S.dxf || S.empOb?.layer !== cfg.layer) S.empOb = { geo: S.dxf, layer: cfg.layer, ob: empriseObstacles(S.dxf, cfg.layer) };
+  const ob = S.empOb.ob;
+  if (!ob) { S.checks.push({ lvl: 'warn', group: 'Emprise', msg: `Calque protégé « ${cfg.layer} » absent du fond DXF ou sans géométrie.` }); return; }
+  const designs = [{ D: S.D, name: S.prj.name || 'carrefour' }, ...(S.Do || []).map((o) => ({ D: o.D, name: S.prj.others.find((q) => q.id === o.id)?.name || 'carrefour' }))];
+  const res = empriseCheck(designs, ob, cfg);
+  S.emp = { ...res, cfg };
+  for (const q of empriseMessages(res, cfg.layer, { ...cfg, multi: designs.filter((d) => d.D).length > 1 })) S.checks.push(q);
+}
+function drawEmprise(ctx, v) {
+  if (!S.emp?.runs?.length) return;
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.setLineDash([]);
+  for (const r of S.emp.runs) {
+    ctx.strokeStyle = r.lvl === 'err' ? 'rgba(239,68,68,.85)' : 'rgba(249,115,22,.8)';
+    ctx.lineWidth = Math.max(4, 0.6 * v.s);
+    ctx.beginPath(); r.pts.forEach((p, k) => { const [x, y] = v.w2s(p.x, p.y); if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+    if (r.pts.length === 1) { const [x, y] = v.w2s(r.pts[0].x, r.pts[0].y); ctx.lineTo(x + 0.1, y); }
+    ctx.stroke();
+  }
+  // cote du point le plus défavorable de chaque tronçon rouge
+  ctx.font = '12px system-ui, sans-serif'; ctx.textBaseline = 'middle';
+  for (const r of S.emp.runs) {
+    if (r.lvl !== 'err' || !r.q || v.s < 2) continue;
+    const [x0, y0] = v.w2s(r.at.x, r.at.y), [x1, y1] = v.w2s(r.q.x, r.q.y);
+    ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 1.2; ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.setLineDash([]);
+    const s = r.inside ? 'dans le bâti' : `${r.min.toFixed(2).replace('.', ',')} m`;
+    const tx = (x0 + x1) / 2 + 6, ty = (y0 + y1) / 2 - 8, w = ctx.measureText(s).width;
+    ctx.fillStyle = 'rgba(17,24,39,.85)'; ctx.fillRect(tx - 3, ty - 8, w + 6, 16);
+    ctx.fillStyle = '#fecaca'; ctx.fillText(s, tx, ty);
+  }
+  ctx.restore();
 }
 
 // ================================================================ Talus en plan (talus.js)
@@ -1722,6 +1810,7 @@ function plusPos(e) {
 }
 
 function drawOverlay(ctx, v, T) {
+  try { drawEmprise(ctx, v); } catch (e) { console.error(e); }
   if (S.D?.O) {
     const [x, y] = v.w2s(S.D.O.x, S.D.O.y);
     ctx.strokeStyle = S.prj.center.auto ? T.L.AXE.stroke : T.sel; ctx.lineWidth = 1.6; ctx.setLineDash([]);
@@ -1741,6 +1830,10 @@ function drawOverlay(ctx, v, T) {
   if (S.tool === 'center' && S.lobe1) {   // cacahuète : centre du lobe 1 posé, axe vers le curseur
     poly(cur ? [S.lobe1, cur] : [S.lobe1], T.rubber);
     for (const q of cur ? [S.lobe1, cur] : [S.lobe1]) { const [x, y] = v.w2s(q.x, q.y); ctx.strokeStyle = T.rubber; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.stroke(); }
+  }
+  if (S.tool === 'tiein' && S.tie?.e1) { // premier bord pris : repère et section vers le curseur
+    const [x, y] = v.w2s(S.tie.e1.p.x, S.tie.e1.p.y); ctx.strokeStyle = T.rubber; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.stroke();
+    if (cur) { const [cx, cy] = v.w2s(cur.x, cur.y); ctx.setLineDash([5, 4]); ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(cx, cy); ctx.stroke(); ctx.setLineDash([]); }
   }
   if (S.tool === 'profser' && S.profA) { const [x, y] = v.w2s(S.profA.p.x, S.profA.p.y); ctx.strokeStyle = T.rubber; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.stroke(); }
   if (S.snap) {
@@ -2074,6 +2167,8 @@ const PROMPTS = {
   trumpet: 'Trompette : cliquez au croisement de la route transversale (ou sur l\'autoroute à l\'endroit de l\'ouvrage), du côté de la voirie ordinaire.',
   measure: 'Mesure : cliquez deux points.',
   insv: 'Insérer un sommet : cliquez sur l\'axe de l\'autoroute, d\'une voie secondaire, d\'une bretelle ou d\'une branche à l\'endroit où couper le segment. Le sommet reçoit un rayon (cercle) ; faites ensuite pivoter l\'une des deux droites par sa poignée de tangence, ou déplacez le sommet. Échap pour terminer.',
+  tie1: 'Raccorder la branche : cliquez la première limite de chaussée existante (trait du fond DXF), à l\'endroit où la branche s\'y raccorde.',
+  tie2: 'Raccorder la branche : cliquez la seconde limite de chaussée, en face (Échap : annuler, Ctrl+Z : reprendre le premier bord).',
   bvcut: 'Couper un bassin : cliquez les points d\'une ligne en travers du bassin, en débordant de son contour — double-clic ou Entrée pour couper, Échap pour annuler.',
 };
 
@@ -2084,6 +2179,7 @@ function setTool(t) {
   if (!['pickx', 'axis'].includes(t)) S.pendingTpl = null;
   if (t !== 'profser') S.profA = null;
   if (t !== 'bvcut') S.bvCut = null;
+  if (t !== 'tiein') S.tie = null;
   $$('.tools [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
   updateCursor(); setPrompt(); viewer.invalidate();
 }
@@ -2091,7 +2187,7 @@ function updateCursor() {
   $('#cv').style.cursor = S.space || S.tool === 'pan' ? 'grab' : S.tool === 'select' ? 'default' : 'crosshair';
 }
 function setPrompt() {
-  const k = S.tool === 'center' && isPeanut() ? (S.lobe1 ? 'centerP2' : 'centerP1') : S.tool === 'axis' ? (S.hwyDraw ? (S.hwyDraw === 'cross' ? 'cross' : S.hwyDraw === 'main' ? 'main' : 'hwy') : S.extend ? 'extend' : S.draft.length ? 'axis1' : 'axis0') : S.tool === 'profser' && S.profA ? 'profser2' : S.tool;
+  const k = S.tool === 'tiein' ? (S.tie?.e1 ? 'tie2' : 'tie1') : S.tool === 'center' && isPeanut() ? (S.lobe1 ? 'centerP2' : 'centerP1') : S.tool === 'axis' ? (S.hwyDraw ? (S.hwyDraw === 'cross' ? 'cross' : S.hwyDraw === 'main' ? 'main' : 'hwy') : S.extend ? 'extend' : S.draft.length ? 'axis1' : 'axis0') : S.tool === 'profser' && S.profA ? 'profser2' : S.tool;
   $('#stPrompt').textContent = PROMPTS[k] || '';
 }
 function cancelTool() {
@@ -2914,6 +3010,7 @@ function bindCanvas() {
     else if (['profser', 'profone', 'cadre', 'poutres'].includes(S.tool)) pickOnAxis(w);
     else if (S.tool === 'measure') { S.meas.push(w); if (S.meas.length > 2) S.meas = [w]; showMeasure(); }
     else if (S.tool === 'insv') insertVertexAt(px, py);
+    else if (S.tool === 'tiein') { const [x, y] = viewer.s2w(px, py); tieClick({ x, y }); }
     else if (S.tool === 'bvcut' && S.bvCut) { const q = S.bvCut.pts[S.bvCut.pts.length - 1]; if (!q || G.dist(q, w) > 0.01) S.bvCut.pts.push(w); }
     else if (S.tool === 'select') {
       const h = hitHandle(px, py);
@@ -3033,6 +3130,7 @@ function undoPoint() {
   else if (S.tool === 'measure' && S.meas.length) S.meas.pop();
   else if (S.tool === 'center' && S.lobe1) S.lobe1 = null;
   else if (S.tool === 'profser' && S.profA) S.profA = null;
+  else if (S.tool === 'tiein' && S.tie?.e1) S.tie.e1 = null;
   else return false;
   setPrompt(); viewer.invalidate();
   return true;
@@ -3168,6 +3266,7 @@ function buildStaticPanels() {
     fld('ring.Rg', 'Rayon extérieur Rg', 'm', { title: 'Rayon du marquage de rive extérieure de l\'anneau' }) +
     fld('ring.la', 'Largeur de l\'anneau la', 'm') +
     fld('ring.bf', 'Bande franchissable bf', 'm') +
+    fld('ring.Rfus', 'Rayon unique mini (Re et Rs fusionnés)', 'm', { ph: '12,5', title: 'Quand le rayon d\'entrée d\'une branche chevauche le rayon de sortie de la suivante, les deux sont remplacés par un seul arc tangent aux deux bords, de préférence tangent à la rive de l\'anneau ; s\'il est plus petit, ce minimum est retenu (giration d\'un autobus : couronne 12,50 m / 5,30 m, directive 2001/85/CE). Rayon mesuré à la rive, comme Re / Rs.' }) +
     sel('ring.shape', 'Forme de l\'anneau', [['cercle', 'Circulaire'], ['cacahuete', 'Cacahuète (deux lobes, Sétra RACA 2010)']], { branch: false }) +
     '<div id="peanutFields">' +
     '<p class="note">Carrefour « cacahuète » : deux lobes circulaires (Rg, Rg2) reliés par des cols concaves (rayons à la rive extérieure ; 0 = col rectiligne, giratoire oblong). Chaque branche se raccorde au lobe de son côté. Référence : fiche d\'expérience Sétra RACA, mai 2010 (Rg = 20 m, cols R = 30 m, anneau 7 m).</p>' +
@@ -3445,6 +3544,8 @@ function renderBranchForm() {
     ${srcP ? `<p class="note">Profil en travers repris de ${esc(srcP.name)} (voies, largeur, TPC, BDD, berme) à la création de la branche, puis à chaque modification de cet axe.</p>` : ''}
     <div class="row">${sel('nIn', 'Voies entrantes', [['1', '1'], ['2', '2'], ['3', '3']])}${sel('nOut', 'Voies sortantes', [['1', '1'], ['2', '2'], ['3', '3']])}</div>
     ${fld('wLane', 'Largeur de voie courante', 'm', { branch: true })}
+    <div class="row"><button id="btnTieIn" ${S.dxf ? '' : 'disabled title="Importez d\'abord un fond DXF (onglet Projet)"'}>Raccorder aux limites de chaussée (DXF)…</button></div>
+    <p class="note">Deux clics sur les bords de la voirie existante : extrémité de l'axe au milieu, largeur partagée entre les voies (double sens), surlargeur en BDD au-delà de 3,75 m par voie, longueur jusqu'au raccordement.</p>
     <div class="row">${fld('bdd', 'BDD (ou BAU) de la branche', 'm', { branch: true, ph: showNum(secP.bdd), title: 'Vide : BDD du carrefour (onglet Profil). Différente : transition linéaire sur l\'alignement droit, depuis la BDD de l\'anneau.' })}${S.prj.context === 'urbain' ? '' : fld('berme', 'Berme de la branche', 'm', { branch: true, ph: showNum(secP.berme) })}</div>`;
   const profile = (from) => `<h4>Profil et dévers</h4>
     ${fld('length', `Longueur dessinée depuis ${from}`, 'm', { branch: true, ph: 'auto' })}
@@ -3662,7 +3763,8 @@ function refreshChecks() {
   const order = { err: 0, warn: 1, info: 2, ok: 3 };
   const list = [...S.checks].sort((a, b) => order[a.lvl] - order[b.lvl]);
   const icon = { err: '✕', warn: '!', info: 'i', ok: '✓' };
-  $('#checks').innerHTML = list.map((c) => `<li class="${c.lvl}"><span class="ic">${icon[c.lvl]}</span><span class="grp">${esc(c.group)}</span><span>${esc(c.msg)}</span></li>`).join('');
+  S.checkList = list;
+  $('#checks').innerHTML = list.map((c, k) => `<li class="${c.lvl}${c.at ? ' goto' : ''}" data-k="${k}"${c.at ? ' title="Cliquer pour centrer la vue"' : ''}><span class="ic">${icon[c.lvl]}</span><span class="grp">${esc(c.group)}</span><span>${esc(c.msg)}</span></li>`).join('');
   const n = S.checks.filter((c) => c.lvl === 'err').length, w = S.checks.filter((c) => c.lvl === 'warn').length;
   const bd = $('#chkBadge');
   bd.textContent = n ? String(n) : w ? String(w) : '';
@@ -5775,6 +5877,7 @@ function bindUI() {
       return;
     }
     if (e.target.id === 'btnDelBranch') deleteBranch(S.sel);
+    if (e.target.id === 'btnTieIn') startTie();
     const tr = e.target.closest('#ptsTable tr[data-pt]');
     if (tr) {
       const q = S.D?.points[+tr.dataset.pt];
@@ -5831,11 +5934,20 @@ function bindUI() {
     if (n != null && S.dxf) { S.dxf.layers.get(n).visible = e.target.checked; viewer.invalidate(); }
     if (e.target.id === 'dxfOpacity') { S.prj.opts.dxfOpacity = +e.target.value; viewer.invalidate(); }
   });
+  $('#checks').addEventListener('click', (e) => {
+    const li = e.target.closest('li.goto'), c = li && S.checkList?.[+li.dataset.k];
+    if (!c?.at) return;
+    viewer.cx = c.at.x; viewer.cy = c.at.y; viewer.s = Math.max(viewer.s, 6); viewer.invalidate();
+  });
+  $('#dxfLayers').addEventListener('change', (e) => {
+    if (e.target.id === 'empLayer') { S.prj.opts.emprise = { ...(S.prj.opts.emprise || {}), layer: e.target.value }; update(); }
+    if (e.target.id === 'empMin' && +e.target.value > 0) { S.prj.opts.emprise = { ...(S.prj.opts.emprise || {}), min: +e.target.value }; update(); }
+  });
   $('#dxfLayers').addEventListener('click', (e) => {
     if (!S.dxf) return;
     if (e.target.dataset.all != null) { for (const l of S.dxf.layers.values()) l.visible = e.target.dataset.all === '1'; renderDxfLayers(); viewer.invalidate(); }
     if (e.target.id === 'dxfZoom') { viewer.fit(S.dxf.bbox); autosave(); }
-    if (e.target.id === 'dxfRemove') { S.dxf = null; S.dxfCache = null; S.dxfName = ''; renderDxfLayers(); viewer.invalidate(); }
+    if (e.target.id === 'dxfRemove') { S.dxf = null; S.dxfCache = null; S.dxfName = ''; renderDxfLayers(); update({ commit: false }); }
   });
 
   bindKml();
@@ -5995,17 +6107,34 @@ async function importDXF(file) {
     const sel = $('#dxfUnit').value;
     const factor = sel === 'auto' ? parsed.unitFactor ?? 1 : +sel;
     const geo = buildDxfGeometry(parsed, factor);
-    if (!geo.polys.length && !geo.texts.length && !geo.points.length) throw new Error('aucune entité lisible (le fichier est-il un DXF ASCII ?)');
+    if (!geo.polys.length && !geo.texts.length && !geo.points.length && !geo.hatches.length) throw new Error('aucune entité lisible (le fichier est-il un DXF ASCII ?)');
     S.dxf = geo; S.dxfCache = buildDxfCache(geo); S.dxfName = file.name;
     renderDxfLayers(); refreshTerrain();
+    // Calque de bâti hachuré : proposé d'office pour le contrôle d'emprise.
+    let empNote = '';
+    if (!S.prj.opts.emprise?.layer) {
+      const bl = [...new Set(geo.hatches.map((h) => h.layer))].find((n) => /b[aâ]ti|batiment|bâtiment|building|construct/i.test(n));
+      if (bl) { S.prj.opts.emprise = { ...(S.prj.opts.emprise || {}), layer: bl }; renderDxfLayers(); empNote = ` Contrôle d'emprise activé sur le calque « ${bl} » (bâti hachuré).`; }
+    }
+    if (S.prj.opts.emprise?.layer) update({ commit: false });
     const far = S.dxf.bbox && (viewer.cx < S.dxf.bbox.x0 - 5000 || viewer.cx > S.dxf.bbox.x1 + 5000 || viewer.cy < S.dxf.bbox.y0 - 5000 || viewer.cy > S.dxf.bbox.y1 + 5000);
     if (!S.prj.branches.length || far) viewer.fit(S.dxf.bbox);
     viewer.invalidate();
-    toast(`${file.name} : ${geo.polys.length} lignes, ${geo.texts.length} textes, ${geo.points.length} points, ${geo.layers.size} calques.` + (sel === 'auto' && parsed.unitNote ? ` ${parsed.unitNote[0].toUpperCase()}${parsed.unitNote.slice(1)} (choix possible : Unité).` : '') + (far && S.crs.geo ? ' Il est loin de la vue : vérifiez le système de coordonnées.' : ''));
+    toast(`${file.name} : ${geo.polys.length} lignes, ${geo.hatches.length ? `${geo.hatches.length} hachures, ` : ''}${geo.texts.length} textes, ${geo.points.length} points, ${geo.layers.size} calques.` + (sel === 'auto' && parsed.unitNote ? ` ${parsed.unitNote[0].toUpperCase()}${parsed.unitNote.slice(1)} (choix possible : Unité).` : '') + (far && S.crs.geo ? ' Il est loin de la vue : vérifiez le système de coordonnées.' : '') + empNote);
   } catch (e) {
     console.error(e);
     toast('Import DXF impossible : ' + e.message, 'err');
   }
+}
+
+function empriseUI(layers) {
+  const e = S.prj.opts.emprise || {}, cfg = empriseCfg(), cur = e.layer || '';
+  const opts = [['', '— aucun —'], ...layers.map((l) => [l.name, l.name])];
+  if (cur && !layers.some((l) => l.name === cur)) opts.push([cur, `${cur} (absent)`]);
+  const urb = S.prj.context === 'urbain';
+  return `<div class="row emp"><label class="fld"><span class="lb">Contrôle d'emprise : calque protégé</span><select id="empLayer">${opts.map(([v, l]) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>` +
+    (urb ? `<label class="fld"><span class="lb">Trottoir minimal</span><input id="empMin" type="number" min="0" step="0.05" value="${cfg.min}"><span class="u">m</span></label>` : '') + '</div>' +
+    `<p class="note">${urb ? `Trottoir disponible derrière chaque bordure (caniveau et bordure déduits) : rouge &lt; minimum, orange &lt; ${fmt(cfg.want, 2)} m (trottoir du profil). Relevé dans la liste des contrôles.` : 'La berme doit rester hors du calque protégé : tronçons signalés en rouge et dans la liste des contrôles.'}</p>`;
 }
 
 function renderDxfLayers() {
@@ -6016,6 +6145,7 @@ function renderDxfLayers() {
   const layers = [...S.dxf.layers.values()].sort((a, b) => a.name.localeCompare(b.name));
   host.innerHTML = `<div class="row"><button id="dxfZoom">Zoom sur le DXF</button><button data-all="1">Tout afficher</button><button data-all="0">Tout masquer</button><button id="dxfRemove" class="danger">Retirer</button></div>` +
     `<label class="fld wide"><span class="lb">Opacité du DXF</span><input id="dxfOpacity" type="range" min="0.15" max="1" step="0.05" value="${S.prj.opts.dxfOpacity}"></label>` +
+    empriseUI(layers) +
     '<div class="lyrs">' + layers.map((l) => `<label class="chk"><input type="checkbox" data-layer="${esc(l.name)}" ${l.visible ? 'checked' : ''}><i style="background:${l.color}"></i>${esc(l.name)} <span class="dim">${l.count}</span></label>`).join('') + '</div>';
 }
 

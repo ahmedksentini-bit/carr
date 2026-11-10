@@ -142,6 +142,8 @@ main.app { display: grid; grid-template-columns: 46px minmax(0, 1fr) 452px; min-
 .checks { list-style: none; padding: 0; margin: 8px 0; }
 .checks li { display: grid; grid-template-columns: 18px auto 1fr; gap: 8px; align-items: start; padding: 6px 8px; border-radius: 6px; margin-bottom: 4px; background: var(--panel2); font-size: 12.5px; }
 .checks .ic { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: #111; }
+.checks li.goto { cursor: pointer; }
+.checks li.goto:hover { outline: 1px solid var(--accent, #60a5fa); }
 .checks .grp { color: var(--muted); font-size: 11.5px; white-space: nowrap; padding-top: 1px; }
 .checks li.err .ic { background: var(--err); }
 .checks li.warn .ic { background: var(--warn); }
