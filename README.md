@@ -23,7 +23,11 @@ ou sur un fond topographique DXF.
   disponible = distance au calque − caniveau − bordure : rouge sous le minimum (1,50 m par défaut), orange sous le
   trottoir du profil (2,50 m), bordure dans un contour fermé du calque signalée ; tronçons surlignés sur le plan, cote
   du point le plus défavorable, messages groupés par branche ou raccordement dans l'onglet Contrôles (clic : vue
-  centrée). Interurbain : la berme doit rester hors du calque. `node tools/test-emprise.mjs`.
+  centrée). Interurbain : la berme doit rester hors du calque. Trottoirs (et bermes) coupés au bâti : largeur
+  réduite à la place disponible devant la façade, contre-bordure supprimée là où le trottoir est réduit, jamais de
+  trottoir dessiné dans le bâti. `node tools/test-emprise.mjs`.
+- **Branche courte** (raccordée à une rue proche) : l'évasement de la voie est raccourci (jusqu'au 1/5) pour tenir
+  dans la branche ; au-delà, l'extrémité est reportée des deux côtés — plus de bordure en aller-retour.
 - **Raccorder une branche aux limites de chaussée** (fenêtre de la branche ; `js/tiein.js`) : deux clics sur les
   bords de la voirie existante (traits ou contours de hachures du DXF) → section perpendiculaire au droit du premier
   clic, extrémité d'axe au milieu (axe prolongé de 30 m dans la direction de la rue, sommets intérieurs conservés),
