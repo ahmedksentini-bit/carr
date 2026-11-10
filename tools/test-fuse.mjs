@@ -46,5 +46,15 @@ ok(D.branches.every((b) => !b.entry.fused && !b.exit.fused), 'pas de fusion sans
   ok(f1 && !f1.intrude && f1.avail >= 0.8 - 1e-6 && Math.abs(f1.R - f0.R) > 0.2, `rayon modifié pour 0,80 m de trottoir (${f1 && f1.R} / ${f0.R}, ${f1 && f1.avail})`);
   ok(D1.issues.some((q) => /hors du calque B/.test(q.msg)), 'message de rayon choisi hors du bâti');
 }
+// Passages piétons et abaissés PMR recalés sur les bordures réelles après fusion (jamais dans la chaussée).
+{
+  const D2 = buildDesign(prj([0, 35, 180, 270]));
+  const pts = D2.prims.filter((p) => p.k === 'path' && p.L === 'BORDURE').flatMap((p) => p.segs.flatMap((sg) => { const n = Math.max(2, Math.ceil(G.segLen(sg) / 0.1)); return Array.from({ length: n + 1 }, (_, i) => G.segAt(sg, i / n)); }));
+  for (const bd of D2.branches) if (bd.cross) for (const e of bd.cross.ends) {
+    const P = bd.W(e.E), d = Math.min(...pts.map((q) => G.dist(q, P)));
+    ok(d < 0.1, `${bd.name} : extrémité du passage sur la bordure (${d.toFixed(2)} m)`);
+  }
+  ok(D2.branches.some((b) => b.cross), 'passages présents');
+}
 if (fails) { console.error(`${fails} échec(s)`); process.exit(1); }
 console.log('test-fuse : OK');

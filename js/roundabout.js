@@ -334,7 +334,9 @@ function buildRoundabout(prj, ext = {}, opt = {}) {
     if (sec.pp) {
       const xc = x0 + sec.ppRecul + sec.ppW / 2, hi = cutAtX(en.edge, xc), lo = cutAtX(ex.edge, xc), I = ap.island;
       if (hi && lo && xc + sec.ppW / 2 < xEnd) {
-        cross = crossing(xc, sec.ppW, lo, hi, { islands: I?.outline && I.closed ? [polyOf(I.outline)] : [], painted: I?.hatch || [] });
+        const ppOpt = { islands: I?.outline && I.closed ? [polyOf(I.outline)] : [], painted: I?.hatch || [] };
+        cross = crossing(xc, sec.ppW, lo, hi, ppOpt);
+        cross.redo = { xc, ppOpt }; // pour le recalcul sur les bords réels (rayon unique Re/Rs)
       } else issues.push({ lvl: 'info', bi: idx, msg: `${name} : passage piéton non dessiné (branche trop courte).` });
     }
     const full = (contPath, local) => [...G.revPath(contPath), ...Wp(local)];
@@ -535,6 +537,29 @@ function buildRoundabout(prj, ext = {}, opt = {}) {
     if (bpFrom.has(i)) return [...G.revPath(bd.entry.edgeCont), ...bpFrom.get(i).right, ...nx.exit.edgeCont];
     return [...bd.entry.edgeW, ...(ringEdge[i] || []), ...G.revPath(nx.exit.edgeW)];
   });
+
+  // Rayon unique : les bords réels ne sont plus ceux de l'approche locale — passage piéton (bandes, abaissés PMR)
+  // recalé sur les bordures effectives (secteurs), ramenées dans le repère de la branche : de part et d'autre de
+  // l'axe, l'intersection la plus proche de la droite x = xc.
+  if (bds.some((bd) => bd.entry.fused)) {
+    const secPts = sectors.map((S) => G.samplePath(S, 0.2));
+    for (const bd of bds) {
+      if (!bd.cross?.redo || !(bd.entry.fused || bd.exit.fused)) continue;
+      const { xc, ppOpt } = bd.cross.redo;
+      let hi = null, lo = null;
+      for (const pts of secPts) {
+        const q = pts.map((p) => bd.toL(p));
+        for (let k = 0; k + 1 < q.length; k++) {
+          const a = q[k], b = q[k + 1];
+          if ((a.x - xc) * (b.x - xc) > 0 || a.x === b.x || Math.abs(a.y - bd.a) > 40) continue;
+          const y = a.y + ((xc - a.x) / (b.x - a.x)) * (b.y - a.y), t = G.norm(G.sub(b, a));
+          if (y > bd.a && (!hi || y < hi.y)) hi = { y, t };
+          if (y < bd.a && (!lo || y > lo.y)) lo = { y, t };
+        }
+      }
+      if (hi && lo) { const c = crossing(xc, sec.ppW, lo, hi, ppOpt); c.redo = bd.cross.redo; c.pieces = bd.cross.pieces; bd.cross = c; }
+    }
+  }
 
   // Remplissage chaussée (règle pair-impair : trous = îlots).
   const outer = [];
