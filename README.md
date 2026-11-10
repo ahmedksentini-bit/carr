@@ -312,7 +312,8 @@ ou sur un fond topographique DXF.
   berme 0,75 m par défaut, terre-plein central facultatif) : on peut croiser et raccorder des routes non autoroutières.
 - **Carrefour « cacahuète »** (onglet Anneau, forme de l'anneau ; `js/ringshape.js`) : deux lobes circulaires (Rg,
   Rg2) d'entraxe e reliés par deux cols concaves (rayons à la rive extérieure, 0 = col rectiligne : giratoire oblong),
-  orientés suivant la route principale ou un gisement saisi. Référence : Sétra, fiche d'expérience RACA « Le carrefour
+  orientés suivant la route principale ou un gisement saisi. Outil Centre (C) : deux clics, centre du lobe 1 puis du
+  lobe 2 (ou X,Y / @dx,dy) — le centre (milieu), l'entraxe e et le gisement de l'axe en découlent. Référence : Sétra, fiche d'expérience RACA « Le carrefour
   cacahuète, un nouveau type de giratoire » (mai 2010 : Rg = 20 m, cols R = 30 m, anneau 7 m). Toutes les lignes de
   l'anneau (bords, rives, îlot, bande franchissable, abords) sont parallèles à la rive extérieure ; chaque branche se
   raccorde au lobe de son côté (erreur si Re / Rs empiètent sur un col). Contrôles : cols croisés (îlot coupé), largeur

@@ -15,7 +15,7 @@ import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerra
 import { tinZ } from './tin.js';
 import { planElements, profileElements, tabulation, tablesCsv, pkOrigin } from './tabexport.js';
 import { combinedSheets, combinedHtml } from './combine.js';
-import { upright } from './common.js';
+import { upright, toGon } from './common.js';
 import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF, crossSectionFrom, mainPlatform } from './pt.js';
 import { plParams, plBuild, plStations, plTerrainLine, plDXF, plChecks, axisLength, axisPointAt, PL_LIMITS } from './pl.js';
 import { createPlEditor } from './pleditor.js';
@@ -1738,6 +1738,10 @@ function drawOverlay(ctx, v, T) {
   if (S.tool === 'axis' && S.draft.length) poly(cur ? [...S.draft, cur] : S.draft, T.rubber);
   if (S.tool === 'bvcut' && S.bvCut?.pts.length) poly(cur ? [...S.bvCut.pts, cur] : S.bvCut.pts, '#f43f5e');
   if (S.tool === 'measure' && S.meas.length) poly(S.meas.length === 1 && cur ? [S.meas[0], cur] : S.meas, T.rubber);
+  if (S.tool === 'center' && S.lobe1) {   // cacahuète : centre du lobe 1 posé, axe vers le curseur
+    poly(cur ? [S.lobe1, cur] : [S.lobe1], T.rubber);
+    for (const q of cur ? [S.lobe1, cur] : [S.lobe1]) { const [x, y] = v.w2s(q.x, q.y); ctx.strokeStyle = T.rubber; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.stroke(); }
+  }
   if (S.tool === 'profser' && S.profA) { const [x, y] = v.w2s(S.profA.p.x, S.profA.p.y); ctx.strokeStyle = T.rubber; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.stroke(); }
   if (S.snap) {
     const [x, y] = v.w2s(S.snap.x, S.snap.y);
@@ -2058,6 +2062,8 @@ const PROMPTS = {
   axis1: 'Axe : point suivant vers le carrefour — Entrée / clic droit pour terminer, Retour arrière pour annuler.',
   extend: 'Prolonger l\'axe : cliquez les points suivants vers l\'extérieur — Entrée / clic droit pour terminer, Échap pour annuler.',
   center: 'Centre : cliquez la position du centre de l\'anneau.',
+  centerP1: 'Cacahuète : cliquez le centre du lobe 1 (ou saisissez X,Y).',
+  centerP2: 'Cacahuète : cliquez le centre du lobe 2 — entraxe et orientation en découlent (Échap : annuler).',
   hwy: 'Voie principale : cliquez les sommets de l\'axe (milieu du TPC ou de la chaussée) — Entrée / clic droit pour terminer.',
   main: 'Nouvelle voie principale : cliquez les sommets de l\'axe (milieu du TPC ou de la chaussée) — Entrée / clic droit pour terminer.',
   cross: 'Voie secondaire : cliquez les sommets de son axe (du côté de la voirie ordinaire vers l\'autoroute) — Entrée / clic droit pour terminer.',
@@ -2073,7 +2079,7 @@ const PROMPTS = {
 
 function setTool(t) {
   if (S.tool === 'axis' && t !== 'axis' && S.draft.length >= 2) finishAxis();
-  S.tool = t; S.draft = []; S.meas = []; S.drag = null; S.extend = null; S.hwyDraw = false;
+  S.tool = t; S.draft = []; S.meas = []; S.drag = null; S.extend = null; S.hwyDraw = false; S.lobe1 = null;
   if (!['ramp', 'trumpet', 'trefle', 'demitrefle'].includes(t)) S.rampKind = null;
   if (!['pickx', 'axis'].includes(t)) S.pendingTpl = null;
   if (t !== 'profser') S.profA = null;
@@ -2085,7 +2091,7 @@ function updateCursor() {
   $('#cv').style.cursor = S.space || S.tool === 'pan' ? 'grab' : S.tool === 'select' ? 'default' : 'crosshair';
 }
 function setPrompt() {
-  const k = S.tool === 'axis' ? (S.hwyDraw ? (S.hwyDraw === 'cross' ? 'cross' : S.hwyDraw === 'main' ? 'main' : 'hwy') : S.extend ? 'extend' : S.draft.length ? 'axis1' : 'axis0') : S.tool === 'profser' && S.profA ? 'profser2' : S.tool;
+  const k = S.tool === 'center' && isPeanut() ? (S.lobe1 ? 'centerP2' : 'centerP1') : S.tool === 'axis' ? (S.hwyDraw ? (S.hwyDraw === 'cross' ? 'cross' : S.hwyDraw === 'main' ? 'main' : 'hwy') : S.extend ? 'extend' : S.draft.length ? 'axis1' : 'axis0') : S.tool === 'profser' && S.profA ? 'profser2' : S.tool;
   $('#stPrompt').textContent = PROMPTS[k] || '';
 }
 function cancelTool() {
@@ -2557,6 +2563,25 @@ function connectJunctionToRoads(j) {
   if (nR) msgs.push(`${nR} extrémité${nR > 1 ? 's' : ''} de bretelle reportée${nR > 1 ? 's' : ''} dans ${j.plan ? 'le carrefour' : "l'anneau"}`);
   return msgs;
 }
+const isPeanut = () => S.prj.kind === 'giratoire' && S.prj.ring?.shape === 'cacahuete';
+/** Outil Centre : un clic pour un giratoire circulaire ; pour une cacahuète, deux clics (centres des lobes 1 et 2) qui
+ *  fixent le centre (milieu), l'entraxe e et le gisement de l'axe lobe 1 → lobe 2. */
+function placeCenterAt(w) {
+  if (isPeanut()) {
+    if (!S.lobe1) { S.lobe1 = { x: w.x, y: w.y }; setPrompt(); viewer.invalidate(); return; }
+    const A = S.lobe1, e = G.dist(A, w);
+    if (e < 1) { toast('Les deux centres de lobes sont confondus : cliquez un autre point.', 'warn'); return; }
+    const gis = toGon(Math.atan2(w.y - A.y, w.x - A.x));
+    Object.assign(S.prj.ring, { e: +e.toFixed(3), gis: +gis.toFixed(4) });
+    S.prj.center = { auto: false, x: (A.x + w.x) / 2, y: (A.y + w.y) / 2 };
+    S.lobe1 = null;
+    syncInputs(); update(); setTool('select'); centerPlaced();
+    toast(`Cacahuète : entraxe ${fmt(e, 2)} m, gisement de l'axe lobe 1 → lobe 2 ${fmt(gis, 3)} gr.`);
+    return;
+  }
+  S.prj.center = { auto: false, x: w.x, y: w.y };
+  syncInputs(); update(); setTool('select'); centerPlaced();
+}
 function centerPlaced() {
   const j = knownJunctions().find((q) => q.id === S.prj.jid);
   if (!j) return;
@@ -2701,7 +2726,7 @@ function pickPoint(px, py) {
     for (const L of S.kml) { if (!L.visible) continue; const k = snapDxf(kmlCacheOf(L), x, y, bd); if (k) consider(k, 'KMZ'); }
     if (best) { S.snap = best; return { x: best.x, y: best.y }; }
   }
-  const last = S.tool === 'axis' ? S.draft[S.draft.length - 1] : S.tool === 'measure' && S.meas.length === 1 ? S.meas[0] : null;
+  const last = S.tool === 'axis' ? S.draft[S.draft.length - 1] : S.tool === 'measure' && S.meas.length === 1 ? S.meas[0] : S.tool === 'center' && S.lobe1 ? S.lobe1 : null;
   if (S.tog.ortho && last) { if (Math.abs(x - last.x) > Math.abs(y - last.y)) y = last.y; else x = last.x; }
   return { x, y };
 }
@@ -2883,7 +2908,7 @@ function bindCanvas() {
     if (e.button !== 0) return;
     const w = pickPoint(px, py);
     if (S.tool === 'axis') { S.draft.push(w); setPrompt(); }
-    else if (S.tool === 'center') { S.prj.center = { auto: false, x: w.x, y: w.y }; syncInputs(); update(); setTool('select'); centerPlaced(); }
+    else if (S.tool === 'center') placeCenterAt(w);
     else if (S.tool === 'ramp') addRampAt(w);
     else if (S.tool === 'pickx') pickSecondary(w, px, py);
     else if (['profser', 'profone', 'cadre', 'poutres'].includes(S.tool)) pickOnAxis(w);
@@ -2981,7 +3006,7 @@ function onMove(px, py) {
   else $('#stLL').textContent = '';
   // Info-bulle
   const tip = $('#tip');
-  const ref = S.tool === 'axis' ? S.draft[S.draft.length - 1] : S.tool === 'measure' && S.meas.length === 1 ? S.meas[0] : null;
+  const ref = S.tool === 'axis' ? S.draft[S.draft.length - 1] : S.tool === 'measure' && S.meas.length === 1 ? S.meas[0] : S.tool === 'center' && S.lobe1 ? S.lobe1 : null;
   if (ref) {
     const L = G.dist(ref, w), a = Math.atan2(w.y - ref.y, w.x - ref.x);
     tip.textContent = `L = ${fmt(L, 2)} m · G = ${fmtGis(a, S.prj.opts.angleUnit)}${S.snap ? ' · ' + S.snap.kind : ''}`;
@@ -3050,13 +3075,13 @@ function runCmd(str) {
   if (!p) { toast('Saisie non reconnue : ' + s, 'warn'); return; }
   if (S.tool === 'axis') { S.draft.push(p); setPrompt(); }
   else if (S.tool === 'measure') { S.meas.push(p); if (S.meas.length > 2) S.meas = [p]; showMeasure(); }
-  else if (S.tool === 'center') { S.prj.center = { auto: false, x: p.x, y: p.y }; syncInputs(); update(); setTool('select'); centerPlaced(); }
+  else if (S.tool === 'center') placeCenterAt(p);
   else { viewer.cx = p.x; viewer.cy = p.y; }
   viewer.invalidate();
 }
 
 function parsePoint(s) {
-  const last = S.tool === 'axis' ? S.draft[S.draft.length - 1] : S.tool === 'measure' ? S.meas[S.meas.length - 1] : null;
+  const last = S.tool === 'axis' ? S.draft[S.draft.length - 1] : S.tool === 'measure' ? S.meas[S.meas.length - 1] : S.tool === 'center' && S.lobe1 ? S.lobe1 : null;
   s = s.replace(/\s+/g, '');
   let rel = false;
   if (s[0] === '@') { rel = true; s = s.slice(1); }
