@@ -353,6 +353,9 @@ ou sur un fond topographique DXF.
   glissée le long de l'anneau, elle impose ce point ; deux arcs tangents à la rive en ce point (et entre eux)
   raccordent alors chaque branche, le plus serré du côté où l'on déplace le contact. Bouton « Contact automatique »
   dans la fenêtre de la branche pour revenir au rayon unique calculé.
+- **Arrivée de l'axe sur l'anneau** (poignée ronde bleue, outil Sélection) : le point où l'axe d'une branche coupe la
+  rive de l'anneau se glisse le long de l'anneau ; le dernier segment de l'axe pivote sur le sommet précédent
+  (raccordement lointain conservé) et la branche devient non radiale (excentration contrôlée, Ctrl+Z pour annuler).
 - **Accès sur VSA 90 / 110** (`js/vsa.js`, voie principale ou secondaire de catégorie VSA) : guide Cerema « VSA 90 et
   110 » (2014, § 4.2, 6.1 à 6.4) complété, pour les accès rapprochés, par le guide Certu « Conception des accès sur VRU
   de type A » (2003). Section courante par défaut 2×2 voies, BAU 2,50 m, BDG 1,00 m, avec contrôles (chaussées
