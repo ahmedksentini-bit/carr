@@ -192,7 +192,7 @@ function branchDevers(prj, D, bd, { z0, d0In, d0Out, defGrade, base, arrow, TH }
   };
   const zAxis = (x) => (PL ? PL.zAt(x - bd.x0) : z0 + grade * (x - bd.x0));
   const zAt = (Pw) => {
-    const q = sub(Pw, O), x = dot(q, bd.u), y = dot(q, bd.n);
+    const { x, y } = bd.toL ? bd.toL(Pw) : (() => { const q = sub(Pw, O); return { x: dot(q, bd.u), y: dot(q, bd.n) }; })();
     const zb = base(Pw, x);
     if (zb != null) return zb;
     const s = y - bd.a >= 0 ? 1 : -1;
@@ -216,7 +216,7 @@ function branchDevers(prj, D, bd, { z0, d0In, d0Out, defGrade, base, arrow, TH }
       const isl = dx < bd.h ? bd.hb + (bd.th - bd.hb) * (dx / bd.h) : bd.th;
       const wl = dx < bd.h ? sd.w : sd.wa;
       const yc = bd.a + s * (isl + wl / 2);
-      const away = mul(bd.n, s);
+      const away = mul(bd.at ? G.rot90(bd.at(x, yc).t) : bd.n, s);
       const dir = v <= 0 ? away : G.neg(away);
       arrow(add(bd.W({ x, y: yc }), mul(dir, -1)), dir, 2, pct(Math.abs(v)), TH * 0.7);
     }

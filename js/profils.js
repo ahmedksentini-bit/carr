@@ -49,9 +49,10 @@ export function listAxes(prj, D) {
     const len = axisLength(bd);
     if (!(len > 1)) continue;
     const tan = [];
-    if (bd.cont) { // changements droite / arc de l'axe suivi (les petits segments d'une polyligne ne comptent pas)
-      let s = bd.xEnd - bd.x0, prev = 'L';
-      for (const sg of bd.cont) { if (sg.t !== prev && s > 0.5 && s < len - 0.5 && !(tan.length && s - tan[tan.length - 1].s < 0.5)) tan.push({ s, type: 'tangence droite / arc' }); prev = sg.t; s += G.segLen(sg); }
+    if (bd.cont || bd.axeC) { // changements droite / arc de l'axe suivi (les petits segments d'une polyligne ne comptent pas)
+      // approche en courbe : axe courbe complet depuis la fin de l'alignement droit (bd.xs)
+      let s = bd.axeC ? bd.xs - bd.x0 : bd.xEnd - bd.x0, prev = 'L';
+      for (const sg of bd.axeC || bd.cont) { if (sg.t !== prev && s > 0.5 && s < len - 0.5 && !(tan.length && s - tan[tan.length - 1].s < 0.5)) tan.push({ s, type: 'tangence droite / arc' }); prev = sg.t; s += G.segLen(sg); }
     }
     const at = (s) => { const q = axisPointAt(bd, Math.max(0, Math.min(len, s))); return { p: q.p, t: G.norm(q.t) }; };
     const poly = [];

@@ -73,6 +73,21 @@ export function pathHead(path, d) {
   return out;
 }
 
+// Fin d'un chemin, à partir de l'abscisse curviligne d.
+export function pathTail(path, d) {
+  const out = [];
+  for (const s of path) {
+    const l = segLen(s);
+    if (d >= l) { d -= l; continue; }
+    if (d > 1e-9) {
+      const p = segAt(s, d / l);
+      out.push(s.t === 'L' ? L(p, s.b) : A(s.c, s.r, ang(sub(p, s.c)), s.ea, s.ccw));
+    } else out.push(s);
+    d = 0;
+  }
+  return out;
+}
+
 // --- Intersections ---------------------------------------------------------------
 // Droites (p + t·d) et (q + u·e). Retourne t et le point, ou null si parallèles.
 export function lineLine(p, d, q, e) {

@@ -64,7 +64,7 @@ function along(bd, x) {
     const t = norm(sub(q, r));
     return x - bd.xEnd <= len ? { p, t, beyond: false, onRoad: true } : { p: add(p, mul(t, x - bd.xEnd - len)), t, beyond: true, onRoad: true };
   }
-  if (x <= bd.xEnd + 1e-9 || !bd.cont) return { p: bd.W({ x, y: a }), t: bd.u, beyond: x > bd.xEnd + 1e-9 };
+  if (x <= bd.xEnd + 1e-9 || !bd.cont) { const q = bd.at ? bd.at(x, a) : { p: bd.W({ x, y: a }), t: bd.u }; return { p: q.p, t: q.t, beyond: x > bd.xEnd + 1e-9 }; }
   const d = x - bd.xEnd, len = G.pathLen(bd.cont);
   if (d <= len) {
     const p = G.pathPointAt(bd.cont, d), q = G.pathPointAt(bd.cont, Math.min(len, d + 0.5));
