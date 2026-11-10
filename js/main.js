@@ -254,9 +254,9 @@ function otherDesigns() {
   const out = [];
   for (const o of S.prj.others || []) {
     const sub = { ...S.prj, ...pickJ(o), hwy: { ...S.prj.hwy, on: false }, ramps: [], crosses: [] };
-    const sig = JSON.stringify(pickJ(o)) + S.prj.opts.textH + S.prj.opts.angleUnit + roadsSig(o);
+    const sig = JSON.stringify(pickJ(o)) + S.prj.opts.textH + S.prj.opts.angleUnit + roadsSig(o) + (S.dxf ? S.dxfName + JSON.stringify(S.prj.opts.emprise || {}) : '');
     let c = junctionCache.get(o.id);
-    if (!c || c.sig !== sig) { let D = null; try { D = buildDesign(sub, { roads: roadConts(sub) }); } catch (e) { console.warn(e); } c = { sig, D }; junctionCache.set(o.id, c); }
+    if (!c || c.sig !== sig) { let D = null; try { D = buildDesign(sub, { roads: roadConts(sub), keep: empKeep(sub) }); } catch (e) { console.warn(e); } c = { sig, D }; junctionCache.set(o.id, c); }
     if (c.D) out.push({ id: o.id, name: o.name, D: c.D });
   }
   return out;
@@ -346,12 +346,12 @@ function changeCRS(cfg) {
 // ================================================================ Mise à jour
 function update({ commit = true, panels = true } = {}) {
   rebuildTerrain();
-  if (!S.D && S.prj.hwy?.on) try { S.D = buildDesign(S.prj, { roads: roadConts(S.prj) }); } catch (e) { console.error(e); } // premier calcul (ouverture) : les trompettes se recalculent sur l'autoroute construite
+  if (!S.D && S.prj.hwy?.on) try { S.D = buildDesign(S.prj, { roads: roadConts(S.prj), keep: empKeep() }); } catch (e) { console.error(e); } // premier calcul (ouverture) : les trompettes se recalculent sur l'autoroute construite
   try { syncTrumpets(); } catch (e) { console.error(e); }
   try { const nL = linkBranchesToRoads(); if (nL) toast(`${nL} branche${nL > 1 ? 's' : ''} de carrefour déduite${nL > 1 ? 's' : ''} de la route raccordée (prolongement tangent, même profil en travers).`); } catch (e) { console.error(e); }
   try { syncRoadProfiles(); } catch (e) { console.error(e); }
   try { syncRampBranches(); syncTrumpets(); } catch (e) { console.error(e); } // la tige peut avoir été raccourcie par une branche
-  try { S.D = buildDesign(S.prj, { roads: roadConts(S.prj) }); } catch (e) { console.error(e); S.D = null; toast('Erreur de calcul : ' + e.message, 'err'); }
+  try { S.D = buildDesign(S.prj, { roads: roadConts(S.prj), keep: empKeep() }); } catch (e) { console.error(e); S.D = null; toast('Erreur de calcul : ' + e.message, 'err'); }
   // Bretelle raccordée à un giratoire : elle doit y arriver en alignement droit dans l'axe de sa branche (tangence).
   // Un déplacement qui ferait arriver la courbe dans la branche (cassure) est refusé : les sommets reprennent leur
   // dernière position valide et le dessin ne change pas.
@@ -360,7 +360,7 @@ function update({ commit = true, panels = true } = {}) {
     const fixed = [];
     for (const r of kinks) { const g = S.rampGood?.[r.id]; if (g && g !== JSON.stringify(r.pis)) { r.pis = JSON.parse(g); fixed.push(r.name); } }
     if (fixed.length) {
-      try { syncRampBranches(); S.D = buildDesign(S.prj, { roads: roadConts(S.prj) }); } catch (e) { console.error(e); }
+      try { syncRampBranches(); S.D = buildDesign(S.prj, { roads: roadConts(S.prj), keep: empKeep() }); } catch (e) { console.error(e); }
       toast(`Déplacement refusé : ${fixed.join(', ')} doit arriver au giratoire en alignement droit, dans l'axe de sa branche (tangence) ; le dessin n'est pas modifié.`, 'warn');
     }
     S.rampGood = S.rampGood || {};
@@ -372,7 +372,7 @@ function update({ commit = true, panels = true } = {}) {
   try { S.checks = checkDesign(S.prj, S.D); } catch (e) { console.error(e); S.checks = []; }
   S.Do = otherDesigns();
   if (syncRoadEnds()) { // extrémités des voies secondaires calées sur celles des branches : nouveau calcul
-    try { S.D = buildDesign(S.prj, { roads: roadConts(S.prj) }); } catch (e) { console.error(e); S.D = null; }
+    try { S.D = buildDesign(S.prj, { roads: roadConts(S.prj), keep: empKeep() }); } catch (e) { console.error(e); S.D = null; }
     try { S.checks = checkDesign(S.prj, S.D); } catch (e) { console.error(e); S.checks = []; }
     S.Do = otherDesigns();
   }
@@ -485,6 +485,13 @@ function empriseCfg(prj = S.prj) {
   const e = prj.opts?.emprise || {}, sec = sectionParams(prj), urb = prj.context === 'urbain';
   const want = urb ? sec.trottoir : sec.berme;
   return { layer: e.layer || '', ded: urb ? sec.caniveau + sec.bordure : 0, want, min: urb ? Math.min(want, +e.min > 0 ? +e.min : 1.5) : want };
+}
+// Calque protégé pour le calcul du carrefour (rayons uniques choisis hors du bâti), null sans fond DXF ni calque.
+function empKeep(prj = S.prj) {
+  const cfg = empriseCfg(prj);
+  if (!S.dxf || !cfg.layer) return null;
+  if (S.empOb?.geo !== S.dxf || S.empOb?.layer !== cfg.layer) S.empOb = { geo: S.dxf, layer: cfg.layer, ob: empriseObstacles(S.dxf, cfg.layer) };
+  return S.empOb.ob ? { ob: S.empOb.ob, ded: cfg.ded, min: cfg.min, layer: cfg.layer } : null;
 }
 function computeEmprise() {
   S.emp = null;

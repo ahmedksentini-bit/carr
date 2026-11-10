@@ -17,6 +17,7 @@ import { makeDims } from './dims.js';
 import { crossing, crossingPrims, cutAtX, polyOf, closedSegs } from './crossing.js';
 import { addSigns } from './signs.js';
 import { buildEchangeur } from './echangeur.js';
+import { obstacleDist } from './emprise.js';
 import { isPeanut, peanutParams, peanutShape, autoPeanutDir, gisToVec, vecToGis, projectOnPath, subPath, pointNormalAt, waistWidth, signedOffset } from './ringshape.js';
 
 const { add, sub, mul, dot, norm, rot90, neg, ang, polar, L, A } = G;
@@ -30,7 +31,7 @@ export { fmt, fmtGis, autoCenter };
 // Point d'entrée : giratoire ou carrefour plan (T, X) selon le type du projet.
 // opt.only : { bi, label } — ne calcule que cette épure de giration (recherche des corrections).
 export function buildDesign(prj, opt = {}) {
-  const D = prj.kind === 'T' || prj.kind === 'X' ? buildPlan(prj, opt) : buildRoundabout(prj);
+  const D = prj.kind === 'T' || prj.kind === 'X' ? buildPlan(prj, opt) : buildRoundabout(prj, {}, opt);
   // Signalisation verticale (panneaux, balises J5) : ajoutée au projet dérivé, sauf pour les calculs intermédiaires.
   if (!opt.only) { try { addSigns(prj, D, opt); } catch (e) { console.error(e); D.signs = []; D.signIssues = [{ lvl: 'err', msg: 'Signalisation : ' + e.message }]; } }
   // Échangeur autoroutier (section courante et bretelles), s'il est activé.
@@ -58,7 +59,9 @@ function projS(path, X) {
   return sBest;
 }
 
-export function fuseFillets(bd, nx, Oc, Rr, bdd, Rmin) {
+// keep : calque protégé (emprise.js) { ob, ded, min } — le rayon est choisi pour que le bord de chaussée reste hors
+// du bâti (exigence), avec au moins `min` de trottoir si possible, au plus près du rayon préféré.
+export function fuseFillets(bd, nx, Oc, Rr, bdd, Rmin, keep = null) {
   const { add, sub, mul, norm, dist } = G;
   // Rive jusqu'au point de tangence Tl du raccordement (exclu), prolongée en ligne droite vers l'anneau (60 m).
   const cut = (sd) => {
@@ -128,6 +131,7 @@ export function fuseFillets(bd, nx, Oc, Rr, bdd, Rmin) {
     for (let k = 0; k < 40 && hi - lo > 1e-3; k++) { const m = (lo + hi) / 2; if (fits(m)) lo = m; else hi = m; }
     R = lo; limited = true;
   }
+  const make = (R) => {
   const C = centre(R);
   if (!C) return { error: `pas de cercle de rayon ${fmt(R, 1)} m tangent aux deux rives` };
   if (dist(C, Oc) < R + Rr - 0.01) return { error: `le rayon ${fmt(R, 1)} m empiète sur l'anneau` };
@@ -159,11 +163,34 @@ export function fuseFillets(bd, nx, Oc, Rr, bdd, Rmin) {
   const edge1 = [...edgeTo(noFil(bd.entry, 1), E1), G.arcThrough(C, Re_, E1, E2, false)];
   const edge2 = edgeTo(noFil(nx.exit, -1), E2);
   const touch = add(Oc, mul(norm(sub(C, Oc)), Rr));
-  return { R, Rt, C, T1, T2, arcP, paint1, paint2, edge1, edge2, touch, onRing: R === Rt, limited, Rmin };
+  return { R, Rt, C, T1, T2, arcP, paint1, paint2, edge1, edge2, touch, onRing: Math.abs(R - (Rt ?? -1)) < 1e-6, limited, Rmin };
+  };
+  let res = make(R);
+  if (!keep?.ob || res.error) return res;
+  // Bâti protégé : trottoir disponible le long de l'arc et des 12 derniers mètres des bords qu'il raccorde.
+  const avail = (r) => {
+    const e1 = r.edge1, arc = e1[e1.length - 1], b1 = e1.slice(0, -1);
+    const pts = [...G.samplePath([arc], 0.5), ...G.samplePath(G.pathTail(b1, Math.max(0, G.pathLen(b1) - 12)), 0.5), ...G.samplePath(G.pathTail(r.edge2, Math.max(0, G.pathLen(r.edge2) - 12)), 0.5)];
+    let m = Infinity;
+    for (const p of pts) { const d = obstacleDist(keep.ob, p.x, p.y, keep.min + keep.ded + 3).d - keep.ded; if (d < m) m = d; }
+    return m;
+  };
+  const a0 = avail(res);
+  if (a0 >= keep.min - 1e-6) return { ...res, avail: a0 };
+  // Rayons admissibles : de celui tangent à l'anneau (plus petit, l'arc entrerait dans l'anneau) au plus grand qui
+  // tient entre les branches ; au pas de 0,25 m.
+  const lo = Math.max(Rt ?? lo0, lo0), cand = [];
+  for (let r = lo; r <= 40 + 1e-9; r += 0.25) { if (!fits(r)) { if (r > R) break; continue; } const q = make(r); if (!q.error) cand.push({ q, a: avail(q) }); }
+  if (Rt != null && fits(Rt)) { const q = make(Rt); if (!q.error) cand.push({ q, a: avail(q) }); }
+  const near = (x, y) => Math.abs(x.q.R - R) - Math.abs(y.q.R - R);
+  const ok = cand.filter((c) => c.a >= keep.min - 1e-6).sort(near)[0] || cand.filter((c) => c.a >= 0).sort(near)[0];
+  if (ok) return { ...ok.q, avail: ok.a, moved: Math.abs(ok.q.R - R) > 1e-6 ? { from: R, a0 } : null, short: ok.a < keep.min - 1e-6 };
+  // aucun rayon ne sort la bordure du bâti : l'obstacle tient aux branches elles-mêmes, rayon préféré conservé
+  return { ...res, avail: a0, intrude: true };
 }
 
 // ext : longueurs minimales des alignements droits (abscisse locale), imposées par les voies directes de tourne-à-droite.
-function buildRoundabout(prj, ext = {}) {
+function buildRoundabout(prj, ext = {}, opt = {}) {
   const ring = prj.ring, sec = sectionParams(prj);
   const Rg = +ring.Rg, la = +ring.la, bf = +ring.bf || 0;
   const Ri = Rg - la;            // rive intérieure (peinture)
@@ -430,14 +457,19 @@ function buildRoundabout(prj, ext = {}) {
   const overlap = (i, bd, nx, forced = false) => {
     const msg = forced ? `${bd.name} / ${nx.name} : rayon unique demandé` : `${bd.name} / ${nx.name} : branches trop proches, les raccordements Re/Rs se chevauchent sur l'anneau`;
     if (bds.length < 2 || prj.traffic?.tad?.[bd.id] || (shape && bd.lobe !== nx.lobe)) { if (!forced) issues.push({ lvl: 'err', msg: msg + '.' }); else issues.push({ lvl: 'warn', bi: bd.idx, msg: `${msg} : impossible (voie directe, lobes différents ou branche unique).` }); return !forced; }
-    const f = fuseFillets(bd, nx, bd.Oc, bd.Rgc, sec.bdd, Rfus);
+    const f = fuseFillets(bd, nx, bd.Oc, bd.Rgc, sec.bdd, Rfus, opt.keep || null);
     if (f.error) { issues.push({ lvl: 'err', bi: bd.idx, msg: `${msg} ; rayon unique impossible (${f.error})${forced ? ' — Re et Rs conservés' : ''}.` }); return !forced; }
+    // rayon unique demandé qui ferait entrer la bordure dans le bâti : abandonné, Re et Rs conservés
+    if (forced && f.intrude) { issues.push({ lvl: 'warn', bi: bd.idx, msg: `${msg} : abandonné, tout rayon unique ferait entrer la bordure dans le calque ${opt.keep?.layer || 'bâti'} (trottoir disponible ${fmt(f.avail, 2)} m) — Re et Rs conservés.` }); return false; }
     Object.assign(bd.entry, { paintW: f.paint1, curbW: f.paint1, edgeW: f.edge1, fused: f, Tc: f.touch });
     Object.assign(nx.exit, { paintW: f.paint2, curbW: f.paint2, edgeW: f.edge2, fused: f, Tc: f.touch });
     bd.entry.phiTc = nx.exit.phiTc = ang(sub(f.touch, bd.Oc));
     ringEdge[i] = [];
     const why = forced ? 'Re et Rs remplacés (demandé)' : 'Re et Rs se chevauchaient';
-    issues.push(f.onRing
+    const lay = opt.keep?.layer || 'bâti';
+    if (f.intrude) issues.push({ lvl: 'err', bi: bd.idx, msg: `${bd.name} / ${nx.name} : rayon unique R = ${fmt(f.R, 2)} m, mais aucun rayon ne garde la bordure hors du calque ${lay} (trottoir disponible ${fmt(f.avail, 2)} m) — décaler ou réduire les branches, ou déplacer l'anneau.` });
+    else if (f.moved) issues.push({ lvl: f.R < f.Rmin - 1e-6 || f.short ? 'warn' : 'info', bi: bd.idx, msg: `${bd.name} / ${nx.name} : ${why} — rayon unique R = ${fmt(f.R, 2)} m${f.onRing ? ', tangent à la rive de l\'anneau,' : ''} choisi pour garder la bordure hors du calque ${lay} (trottoir disponible ${fmt(f.avail, 2)} m ; avec ${fmt(f.moved.from, 2)} m : ${f.moved.a0 < 0 ? 'bordure dans le bâti' : `${fmt(f.moved.a0, 2)} m seulement`})${f.R < f.Rmin - 1e-6 ? ` — inférieur aux ${fmt(f.Rmin, 2)} m de giration d'un bus : vérifier l'épure` : ''}.` });
+    else issues.push(f.onRing
       ? { lvl: 'info', bi: bd.idx, msg: `${bd.name} / ${nx.name} : ${why} — fusionnés en un rayon unique R = ${fmt(f.R, 2)} m, tangent à la rive de l'anneau.` }
       : f.limited
         ? { lvl: 'warn', bi: bd.idx, msg: `${bd.name} / ${nx.name} : Re et Rs fusionnés en un rayon unique R = ${fmt(f.R, 2)} m, limité par l'angle entre les branches (${fmt(f.Rmin, 2)} m pour la giration d'un bus ne tient pas) — le mouvement de tourne-à-droite des autobus passe par l'anneau ; vérifier l'épure de giration.` }
@@ -494,7 +526,7 @@ function buildRoundabout(prj, ext = {}) {
     bpTo.add((i + 1) % bds.length);
   });
   // Alignements droits trop courts pour la décélération ou l'insertion : on les allonge et on reconstruit (une fois).
-  if (need && !ext.again) return buildRoundabout(prj, { ...need, again: true });
+  if (need && !ext.again) return buildRoundabout(prj, { ...need, again: true }, opt);
   D.bypasses = [...bpFrom.entries()].map(([i, r]) => ({ ...r, from: bds[i].name, to: r.to.name }));
 
   // Bords extérieurs de chaussée par secteur (de l'extrémité d'une branche à celle de la suivante, terrain à droite).
