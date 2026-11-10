@@ -73,5 +73,15 @@ ok(D.branches.every((b) => !b.entry.fused && !b.exit.fused), 'pas de fusion sans
   P.branches[0].fusePhi = phi0 + 3; // contact impossible (côté opposé)
   ok(buildDesign(P).issues.some((q) => /non retenu/.test(q.msg)), 'contact impossible : rayon unique automatique, signalé');
 }
+// Branche plus courte que son évasement : bordure sans aller-retour, fin de branche commune aux deux côtés.
+{
+  const P = prj([0, 90, 180, 270]); Object.assign(P.branches[0], { length: 4, axeL: 10, le: 4, ls: 4.5, wLane: 3 });
+  const D4 = buildDesign(P), bd = D4.branches.find((b) => b.name === 'B0');
+  for (const sd of [bd.entry, bd.exit]) {
+    const xs = sd.edgeW.flatMap((sg) => [0, 0.5, 1].map((t) => bd.toL(G.segAt(sg, t)).x));
+    ok(xs.every((x, i) => i === 0 || x <= xs[i - 1] + 0.05), 'bord de chaussée parcouru sans retour vers l\'extérieur');
+  }
+  ok(Math.abs(bd.toL(bd.entry.F).x - bd.toL(bd.exit.F).x) < 0.05, 'extrémités alignées');
+}
 if (fails) { console.error(`${fails} échec(s)`); process.exit(1); }
 console.log('test-fuse : OK');

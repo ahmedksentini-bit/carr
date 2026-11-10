@@ -1,5 +1,7 @@
 // Contrôle d'emprise (js/emprise.js) : distance signée bordure ↔ calque protégé, tronçons rouge / orange.
-import { empriseObstacles, obstacleDist, empriseCheck, empriseMessages } from '../js/emprise.js';
+import { empriseObstacles, obstacleDist, empriseCheck, empriseMessages, bandClipper } from '../js/emprise.js';
+import { sideBandPrims } from '../js/common.js';
+import * as G from '../js/geom.js';
 let fails = 0;
 const ok = (c, m) => { if (!c) { fails++; console.error('ÉCHEC', m); } };
 // Bâtiment 10 × 10 (hachure) de x = 0 à 10, y = 3 à 13 ; un trou (cour) 4 × 4 au centre.
@@ -28,5 +30,16 @@ const M = empriseMessages(r, 'Bati_H', { min: 1.5, want: 2.5 });
 ok(M[0].lvl === 'err' && /0,10 m < 1,50 m/.test(M[0].msg) && /2 tronçons/.test(M[0].msg), M.map((m) => m.msg).join(' | '));
 r = empriseCheck([{ D: D(-5), name: 'a' }], ob, { ded: 0.4 });
 ok(!r.runs.length && empriseMessages(r, 'Bati_H')[0].lvl === 'info', 'tout conforme : info');
+// Trottoir coupé au bâti : bordure y = 1 (terre à droite = côté y > 1 en parcourant vers −x), bâtiment à y ≥ 3.
+{
+  const bands = [['caniveau', 0.25], ['bordure', 0.15], ['trottoir', 2.5], ['contre-bordure', 0.1]];
+  const S = [{ t: 'L', a: { x: 40, y: 1 }, b: { x: -10, y: 1 } }];
+  const pr = sideBandPrims(S, bands, 'TROTTOIR', bandClipper(ob, bands));
+  const fill = pr.find((q) => q.k === 'fill');
+  const pts = fill.rings[0].flatMap((sg) => { const n = Math.max(1, Math.ceil(G.segLen(sg) / 0.2)); return Array.from({ length: n }, (_, i) => G.segAt(sg, i / n)); });
+  ok(pts.every((q) => obstacleDist(ob, q.x, q.y, 3).d > -1e-6), 'trottoir hors du bâti');
+  ok(pts.some((q) => q.y > 3.85 && (q.x < -1 || q.x > 31)), 'trottoir de 2,50 m hors du droit du bâtiment');
+  ok(pts.some((q) => q.x > 1 && q.x < 9 && Math.abs(q.y - 3) < 0.05), 'trottoir arrêté à la façade');
+}
 if (fails) { console.error(`${fails} échec(s)`); process.exit(1); }
 console.log('test-emprise : OK');

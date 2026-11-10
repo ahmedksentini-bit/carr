@@ -167,3 +167,34 @@ export function empriseMessages(res, layer, { min = 1.5, want = 2.5, multi = fal
   if (!res.runs.length && res.nPts) out.push({ lvl: 'info', group: 'Emprise', msg: `Trottoir ≥ ${f2(want)} m le long de toutes les bordures (calque ${layer}, plus faible : ${res.worst != null && res.worst < want + 2 ? f2(res.worst) + ' m' : '> ' + f2(want + 2) + ' m'}).` });
   return out;
 }
+
+// Abords coupés au bâti : fonction wAt(p, nom, largeur) pour sideBandPrims (common.js). Le trottoir (ou la berme)
+// est réduit à la place disponible entre la bordure et le calque protégé au point p du bord de chaussée (distance au
+// plus proche, donc jamais dans le bâti), la contre-bordure supprimée là où il est réduit ; les bandes situées avant
+// (caniveau, bordure) sont gardées. base : wAt d'origine (largeurs variables d'une branche), ou null.
+export function bandClipper(ob, bands, base = null) {
+  const cache = new Map();
+  const total = bands.reduce((a, [, w]) => a + w, 0) + 1;
+  const wOf = (p, nm, w) => (base ? base(p, nm, w) : w);
+  const info = (p) => {
+    const key = p.x.toFixed(3) + ',' + p.y.toFixed(3);
+    let r = cache.get(key);
+    if (!r) {
+      const d = obstacleDist(ob, p.x, p.y, total).d;
+      let before = 0, clipped = false;
+      const w = {};
+      for (const [nm, w0] of bands) {
+        const wb = wOf(p, nm, w0);
+        if (nm === 'trottoir' || nm === 'berme') { const v = Math.max(0, Math.min(wb, d - before)); clipped = v < wb - 1e-3; w[nm] = v; }
+        else if (nm === 'contre-bordure') w[nm] = clipped ? 0 : wb;
+        else w[nm] = wb;
+        before += w[nm];
+      }
+      r = w; cache.set(key, r);
+    }
+    return r;
+  };
+  const f = (p, nm, w) => { const r = info(p); return nm in r ? r[nm] : wOf(p, nm, w); };
+  f.step = 0.5;
+  return f;
+}

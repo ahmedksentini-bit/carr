@@ -113,7 +113,16 @@ export function buildApproach(cfg, issues) {
     const ctrl = [F];
     let lp, ld, lm;
     if (delta > 0.05) {
-      ctrl.push({ x: xT + Math.max(10, 15 * delta), y: yE2 }, E1T);
+      // évasement au 1/15 jusqu'à xT : l'extrémité de la bordure est reportée au-delà s'il dépasse la branche
+      // (sinon la bordure ferait un aller-retour)
+      let xF = xT + Math.max(10, 15 * delta);
+      // branche courte (raccordement à une rue proche) : évasement raidi jusqu'au 1/5 pour tenir dans la branche
+      if (xF + 5 > xEnd && xEnd - 5 >= xT + 5 * delta) {
+        xF = xEnd - 5;
+        issues.push({ lvl: 'info', bi: idx, msg: `${name} : évasement ${label} raccourci à ${fmt(xF - xT, 1)} m (1/${fmt((xF - xT) / delta, 0)}) pour tenir dans la longueur de la branche.` });
+      }
+      if (F.x < xF + 5) F.x = xF + 5;
+      ctrl.push({ x: xF, y: yE2 }, E1T);
       lp = E1T; ld = neg(dI); lm = mOut;
     } else {
       const hit = G.lineLine(E1p, dI, { x: 0, y: yE2 }, { x: 1, y: 0 });

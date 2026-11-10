@@ -14,7 +14,7 @@ export const upright = (r) => { r = G.normAng(r); return r > Math.PI / 2 && r <=
 export function sideBandPrims(S, bands, layer, wAt = null) {
   // wAt(p, nom, largeur) : largeur de la bande au point p du bord (branche d'un profil différent de celui du carrefour) ;
   // les bandes sont alors décalées d'une distance variable (cumul des largeurs au point du bord).
-  const off = (k) => (wAt ? G.offsetPathVar(S, (p) => -bands.slice(0, k).reduce((a, [nm, w]) => a + wAt(p, nm, w), 0)) : G.offsetPath(S, -bands.slice(0, k).reduce((a, [, w]) => a + w, 0)));
+  const off = (k) => (wAt ? G.offsetPathVar(S, (p) => -bands.slice(0, k).reduce((a, [nm, w]) => a + wAt(p, nm, w), 0), wAt.step || 1) : G.offsetPath(S, -bands.slice(0, k).reduce((a, [, w]) => a + w, 0)));
   const out = [];
   let d = 0;
   bands.forEach(([nm, w], k) => {

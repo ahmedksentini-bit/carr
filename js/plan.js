@@ -7,6 +7,7 @@ import * as G from './geom.js';
 import { islandDims, planParams, secondaryAuto, sectionParams, sideBands } from './norms.js';
 import { addDeversPlan } from './devers.js';
 import { fmt, fmtGis, upright, autoCenter, branchDirection, frame, nearFar, polylineAfter, sideBandPrims } from './common.js';
+import { bandClipper } from './emprise.js';
 import { buildApproach, aciBranch, aciCircles, crossLine, targetX0, widthAlong } from './approach.js';
 import { makeDims } from './dims.js';
 import { crossing, crossingPrims, cutAtX, polyOf, closedSegs } from './crossing.js';
@@ -446,7 +447,7 @@ export function buildPlan(prj, opt = {}) {
         const i = rest.findIndex((q) => G.dist(tail(ch), head(q)) < 0.05 || G.dist(tail(q), head(ch)) < 0.05);
         if (i >= 0) { const q = rest.splice(i, 1)[0]; ch = G.dist(tail(ch), head(q)) < 0.05 ? [...ch, ...q] : [...q, ...ch]; grown = true; }
       }
-      if (ch.length) sideBandPrims(ch, bands, prj.context === 'urbain' ? 'TROTTOIR' : 'ACCOTEMENT').forEach(Pp);
+      if (ch.length) sideBandPrims(ch, bands, prj.context === 'urbain' ? 'TROTTOIR' : 'ACCOTEMENT', opt.keep?.ob ? bandClipper(opt.keep.ob, bands) : null).forEach(Pp);
     }
   }
 

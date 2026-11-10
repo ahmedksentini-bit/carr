@@ -17,7 +17,7 @@ import { makeDims } from './dims.js';
 import { crossing, crossingPrims, cutAtX, polyOf, closedSegs } from './crossing.js';
 import { addSigns } from './signs.js';
 import { buildEchangeur } from './echangeur.js';
-import { obstacleDist } from './emprise.js';
+import { obstacleDist, bandClipper } from './emprise.js';
 import { isPeanut, peanutParams, peanutShape, autoPeanutDir, gisToVec, vecToGis, projectOnPath, subPath, pointNormalAt, waistWidth, signedOffset } from './ringshape.js';
 
 const { add, sub, mul, dot, norm, rot90, neg, ang, polar, L, A } = G;
@@ -354,8 +354,16 @@ function buildRoundabout(prj, ext = {}, opt = {}) {
     }
     if (cont && !cont.length) cont = null;
 
-    const ap = buildApproach({ name, idx, target, a, ai, x0, xT, xEnd, hb, th, hasIsland, isl, le, ls, wIn, wOut, Re, Rs }, issues);
+    let ap = buildApproach({ name, idx, target, a, ai, x0, xT, xEnd, hb, th, hasIsland, isl, le, ls, wIn, wOut, Re, Rs }, issues);
     if (!ap) return;
+    // Branche plus courte que ses évasements (longueur saisie, raccordement à une rue proche) : extrémité reportée
+    // au-delà, des deux côtés, pour une fin de branche perpendiculaire.
+    const xNeed = Math.max(ap.en.F.x, ap.ex.F.x);
+    if (!cont && xNeed > xEnd + 0.01) {
+      issues.push({ lvl: 'info', bi: idx, msg: `${name} : branche prolongée à ${fmt(xNeed - x0, 1)} m de l'anneau (évasement de la voie jusqu'à la chaussée courante).` });
+      xEnd = xNeed;
+      ap = buildApproach({ name, idx, target, a, ai, x0, xT, xEnd, hb, th, hasIsland, isl, le, ls, wIn, wOut, Re, Rs }, []) || ap;
+    }
     const { en, ex } = ap;
     const off = (d) => (cont ? G.offsetPath(cont, d) : []);
     // Rives (peinture) et bords de chaussée, de l'extrémité de la branche jusqu'à la tangence sur l'anneau.
@@ -626,7 +634,7 @@ function buildRoundabout(prj, ext = {}, opt = {}) {
     P({ k: 'path', L: 'BORDURE', segs: S });
     const nx = bds[(i + 1) % bds.length], own = [bds[i], nx];
     const wAt = varB ? (p, nm, w) => { if (nm !== 'berme') return w; const q = own.find((bd) => bd.near(p)); return q ? q.bermeAtW(p) : w; } : null;
-    sideBandPrims(S, bands, bandLayer, wAt).forEach(P);
+    sideBandPrims(S, bands, bandLayer, opt.keep?.ob ? bandClipper(opt.keep.ob, bands, wAt) : wAt).forEach(P);
   });
 
   // Voies directes : îlot de séparation, bords côté îlot, rives, axe.
