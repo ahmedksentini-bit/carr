@@ -1519,6 +1519,35 @@ function drawCadreHandles(ctx, v, T) {
     for (const q of [h.lenM, h.lenP]) { if (!q) continue; const [lx, ly] = v.w2s(q.x, q.y); ctx.fillRect(lx - 3.5, ly - 3.5, 7, 7); }
   }
 }
+// Poignée de l'axe d'une branche à son entrée sur l'anneau (rond bleu, outil Sélection) : glissée le long de
+// l'anneau, elle déplace le point d'arrivée de l'axe ; le dernier segment de l'axe pivote sur le sommet précédent
+// (orientation lointaine conservée), la branche devient non radiale (axe excentré).
+function axRingGrips() {
+  if (S.tool !== 'select' || !S.D?.branches || S.prj.kind !== 'giratoire') return [];
+  return S.D.branches.filter((bd) => bd.role === 'branche' && bd.W && bd.x0 != null && S.prj.branches[bd.idx]?.axis?.length >= 2)
+    .map((bd) => ({ p: bd.W({ x: bd.x0, y: bd.a }), Oc: bd.Oc, R: bd.Rgc, bi: bd.idx }));
+}
+function drawAxRingGrips(ctx, v) {
+  for (const g of axRingGrips()) {
+    const [x, y] = v.w2s(g.p.x, g.p.y);
+    ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, 5.5, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, 1.5, 0, Math.PI * 2); ctx.fillStyle = '#38bdf8'; ctx.fill();
+  }
+}
+function hitAxRingGrip(px, py) {
+  for (const g of axRingGrips()) { const [x, y] = viewer.w2s(g.p.x, g.p.y); if (Math.hypot(px - x, py - y) < 8) return { kind: 'axring', bi: g.bi, Oc: g.Oc, R: g.R }; }
+  return null;
+}
+// Nouvel axe : point d'arrivée Q sur la rive Rg de l'anneau ; le sommet le plus proche de l'anneau est replacé sur la
+// droite (sommet précédent → Q), à 2 m au-delà de Q, les autres sommets inchangés.
+function moveAxisRingEnd(b, Oc, R, w) {
+  const Q = G.add(Oc, G.mul(G.norm(G.sub(w, Oc)), R));
+  const ax = b.axis, near = G.dist(ax[0], Oc) < G.dist(ax[ax.length - 1], Oc) ? 0 : ax.length - 1, prev = near === 0 ? 1 : ax.length - 2;
+  const P = ax[prev], d = G.norm(G.sub(P, Q)), L = Math.min(2, G.dist(P, Q) / 3);
+  ax[near] = { ...ax[near], x: Math.round((Q.x + d.x * L) * 1000) / 1000, y: Math.round((Q.y + d.y * L) * 1000) / 1000 };
+  b.radial = false;
+}
+
 // Poignées des rayons uniques Re/Rs : point de contact sur la rive de l'anneau, à glisser le long de l'anneau.
 function fuseGrips() {
   if (S.tool !== 'select' || !S.D?.branches) return [];
@@ -1774,6 +1803,7 @@ function renderScene(ctx, v, exp = null) {
   if (!exp) drawLineGrips(ctx, v, T);
   if (!exp) drawCadreHandles(ctx, v, T);
   if (!exp) drawFuseGrips(ctx, v, T);
+  if (!exp) drawAxRingGrips(ctx, v);
   if (!exp) drawOverlay(ctx, v, T);
   drawHud(ctx, v, theme, northAngle(v), imagery ? PROVIDERS[S.prj.bg.provider].attr + (places ? ' · ' + PROVIDERS.places.attr : '') : '');
 }
@@ -2975,6 +3005,8 @@ function hitHandle(px, py) {
   if (ch) return ch;
   const fg = hitFuseGrip(px, py);
   if (fg) return fg;
+  const ag = hitAxRingGrip(px, py);
+  if (ag) return ag;
   for (let i = 0; i < S.prj.branches.length; i++) {
     const e = outerEnd(i);
     if (!e) continue;
@@ -3061,7 +3093,7 @@ function bindCanvas() {
     const d = S.drag;
     S.drag = null; updateCursor();
     if (!d) return;
-    if (['vertex', 'seg', 'tline', 'center', 'rpi', 'hvx', 'cvx', 'tige', 'cadm', 'cadr', 'cadl', 'fuse'].includes(d.kind) && d.moved) {
+    if (['vertex', 'seg', 'tline', 'center', 'rpi', 'hvx', 'cvx', 'tige', 'cadm', 'cadr', 'cadl', 'fuse', 'axring'].includes(d.kind) && d.moved) {
       syncInputs(); update();
       if (d.kind === 'center') centerPlaced();
       // extrémité d'une voie secondaire amenée sur un carrefour : raccordement (branche tangente, même profil)
@@ -3102,6 +3134,7 @@ function onMove(px, py) {
     const r = moveAxisLine(o, d.k, Q, u);
     if (r) { ax[d.k] = { ...o[d.k], x: r[0].x, y: r[0].y }; ax[d.k + 1] = { ...o[d.k + 1], x: r[1].x, y: r[1].y }; d.moved = true; update({ commit: false, panels: false }); }
   }
+  else if (d?.kind === 'axring') { const b = S.prj.branches[d.bi]; if (b) { moveAxisRingEnd(b, d.Oc, d.R, w); d.moved = true; update({ commit: false, panels: false }); } }
   else if (d?.kind === 'fuse') { const b = S.prj.branches[d.bi]; if (b) { b.fusePhi = Math.round(Math.atan2(w.y - d.Oc.y, w.x - d.Oc.x) * 1e5) / 1e5; d.moved = true; update({ commit: false, panels: false }); } }
   else if (d?.kind === 'tige') { const tp = S.prj.ramps[d.ri].tp; if (tp?.P0 && tp.u) { tp.Ys = Math.round(Math.max(250, G.dot(G.sub(w, tp.P0), tp.u))); d.moved = true; update({ commit: false, panels: false }); } }
   else if (d?.kind === 'rpi') { const q = S.prj.ramps[d.ri].pis[d.k]; S.prj.ramps[d.ri].pis[d.k] = { ...q, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
