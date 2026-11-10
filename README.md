@@ -349,7 +349,10 @@ ou sur un fond topographique DXF.
   entrer dans le bâti : le rayon unique est choisi, entre le rayon tangent à l'anneau et le plus grand qui tient, au
   plus près du rayon voulu avec au moins le trottoir minimal (sinon au moins hors du bâti) ; un rayon unique demandé
   qui entrerait forcément dans le bâti est abandonné (Re et Rs conservés), un chevauchement sans solution est signalé
-  en erreur.
+  en erreur. Poignée (losange bleu, outil Sélection) au point de contact du rayon unique sur la rive de l'anneau :
+  glissée le long de l'anneau, elle impose ce point ; deux arcs tangents à la rive en ce point (et entre eux)
+  raccordent alors chaque branche, le plus serré du côté où l'on déplace le contact. Bouton « Contact automatique »
+  dans la fenêtre de la branche pour revenir au rayon unique calculé.
 - **Accès sur VSA 90 / 110** (`js/vsa.js`, voie principale ou secondaire de catégorie VSA) : guide Cerema « VSA 90 et
   110 » (2014, § 4.2, 6.1 à 6.4) complété, pour les accès rapprochés, par le guide Certu « Conception des accès sur VRU
   de type A » (2003). Section courante par défaut 2×2 voies, BAU 2,50 m, BDG 1,00 m, avec contrôles (chaussées

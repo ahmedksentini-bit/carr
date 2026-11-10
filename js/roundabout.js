@@ -61,7 +61,8 @@ function projS(path, X) {
 
 // keep : calque protégé (emprise.js) { ob, ded, min } — le rayon est choisi pour que le bord de chaussée reste hors
 // du bâti (exigence), avec au moins `min` de trottoir si possible, au plus près du rayon préféré.
-export function fuseFillets(bd, nx, Oc, Rr, bdd, Rmin, keep = null) {
+export function fuseFillets(bd, nx, Oc, Rr, bdd, Rmin, keep = null, phi = null) {
+  let phiErr = null;
   const { add, sub, mul, norm, dist } = G;
   // Rive jusqu'au point de tangence Tl du raccordement (exclu), prolongée en ligne droite vers l'anneau (60 m).
   const cut = (sd) => {
@@ -122,15 +123,62 @@ export function fuseFillets(bd, nx, Oc, Rr, bdd, Rmin, keep = null) {
     }
     return true;
   };
-  let R = Rt != null && Rt >= Rmin - 1e-6 ? Rt : Rmin, limited = false;
-  if (R === Rt && !fits(Rt)) return { error: `le rayon tangent à l'anneau (${fmt(Rt, 1)} m) déborde des alignements des branches` };
-  if (R === Rmin && !fits(Rmin)) {
+  let R = Rt != null && Rt >= Rmin - 1e-6 ? Rt : Rmin, limited = false, selErr = null;
+  if (R === Rt && !fits(Rt)) selErr = `le rayon tangent à l'anneau (${fmt(Rt, 1)} m) déborde des alignements des branches`;
+  else if (R === Rmin && !fits(Rmin)) {
     // Rayon bus trop grand pour le coin : plus grand rayon qui tient (au moins le rayon tangent à l'anneau).
     let lo = Rt ?? lo0, hi = Rmin;
-    if (!fits(lo)) return { error: `aucun rayon ne tient entre les rives (rayon tangent à l'anneau ${Rt != null ? fmt(Rt, 1) + ' m' : 'introuvable'})` };
-    for (let k = 0; k < 40 && hi - lo > 1e-3; k++) { const m = (lo + hi) / 2; if (fits(m)) lo = m; else hi = m; }
-    R = lo; limited = true;
+    if (!fits(lo)) selErr = `aucun rayon ne tient entre les rives (rayon tangent à l'anneau ${Rt != null ? fmt(Rt, 1) + ' m' : 'introuvable'})`;
+    else {
+      for (let k = 0; k < 40 && hi - lo > 1e-3; k++) { const m = (lo + hi) / 2; if (fits(m)) lo = m; else hi = m; }
+      R = lo; limited = true;
+    }
   }
+  const bridge = (segs, X) => { const E = G.segEnd(segs[segs.length - 1]); return dist(E, X) > 1e-4 ? [...segs, G.L(E, X)] : segs; };
+  const edgeTo = (path, X) => {
+    const d = G.segEnd(path[path.length - 1]), t = G.segAt(path[path.length - 1], 0.999);
+    const ext = [...path, G.L(d, add(d, mul(norm(sub(d, t)), 60)))];
+    const h = G.pathHead(ext, projS(ext, X));
+    return h.length ? bridge(h, X) : [G.L(G.segStart(path[0]), X)];
+  };
+  // bords sans leur raccordement : coupés au droit de Tl (rive) décalé de bdd vers le terrain
+  const noFil = (sd, sgn) => {
+    const P = sd.paintW, k = P.findIndex((sg) => dist(G.segEnd(sg), sd.Tl) < 1e-4), last = P[k], Ls = G.segLen(last);
+    const d = norm(sub(G.segEnd(last), G.segAt(last, 1 - Math.min(0.05, Ls / 2) / Ls)));
+    const X = add(sd.Tl, mul({ x: d.y, y: -d.x }, sgn * bdd));
+    return G.pathHead(sd.edgeW, projS(sd.edgeW, X));
+  };
+  // Point de contact imposé sur la rive de l'anneau (poignée) : deux arcs tangents à la rive en P, l'un à la rive
+  // d'entrée de bd, l'autre à celle de sortie de nx — tangents entre eux en P (centres sur le rayon OcP).
+  const make2 = (phi) => {
+    const u = G.unit(phi), P = add(Oc, mul(u, Rr));
+    const g0 = G.ang(sub(bd.W({ x: bd.x0, y: bd.a }), Oc)), g1 = G.ang(sub(nx.W({ x: nx.x0, y: nx.a }), Oc));
+    if (G.ccwSweep(g0, phi) >= G.ccwSweep(g0, g1)) return { error: 'point de contact hors du secteur entre les deux branches' };
+    const tan = (A) => {
+      const g = (R) => { const C = add(Oc, mul(u, Rr + R)), sT = projS(A.full, C), T = G.pathPointAt(A.full, sT); return { C, sT, T, v: dist(C, T) - R }; };
+      let lo = bdd + 0.3, hi = 150, a = g(lo);
+      if (a.v <= 0) return null;
+      if (g(hi).v > 0) return null;
+      for (let k = 0; k < 60 && hi - lo > 1e-4; k++) { const m = (lo + hi) / 2; if (g(m).v > 0) lo = m; else hi = m; }
+      const r = g(hi);
+      return Math.abs(r.v) < 0.02 ? { R: hi, ...r } : null;
+    };
+    const t1 = tan(A1), t2 = tan(A2);
+    if (!t1 || !t2) return { error: 'point de contact sans arc tangent aux deux rives' };
+    for (const [A, t] of [[A1, t1], [A2, t2]]) if (t.sT < A.Lk - 1e-6) {
+      const gone = G.samplePath(G.pathTail(G.pathHead(A.full, A.Lk), t.sT), 0.5);
+      if (gone.some((q) => Math.abs(G.cross(A.d, sub(q, A.Q))) > 0.05)) return { error: 'point de contact trop éloigné : l\'arc entamerait la courbe de la branche' };
+    }
+    const a1 = G.arcThrough(t1.C, t1.R, t1.T, P, false), a2 = G.arcThrough(t2.C, t2.R, P, t2.T, false);
+    if (G.sweep(a1) > Math.PI || G.sweep(a2) > Math.PI) return { error: 'arc supérieur à un demi-tour' };
+    if (t1.R - bdd < 0.5 || t2.R - bdd < 0.5) return { error: 'rayon de bordure nul' };
+    const E1 = add(t1.T, mul(norm(sub(t1.C, t1.T)), bdd)), E2 = add(t2.T, mul(norm(sub(t2.C, t2.T)), bdd)), Pe = add(Oc, mul(u, Rr + bdd));
+    const edge1 = [...edgeTo(noFil(bd.entry, 1), E1), G.arcThrough(t1.C, t1.R - bdd, E1, Pe, false), G.arcThrough(t2.C, t2.R - bdd, Pe, E2, false)];
+    return {
+      R: t1.R, R2: t2.R, Rt, C: t1.C, C2: t2.C, T1: t1.T, T2: t2.T, arcP: a1, arcP2: a2, paint1: [...G.pathHead(A1.full, t1.sT), a1, a2], paint2: G.pathHead(A2.full, t2.sT),
+      edge1, edge2: edgeTo(noFil(nx.exit, -1), E2), touch: P, onRing: true, two: true, nArc: 2, phi, Rmin,
+    };
+  };
   const make = (R) => {
   const C = centre(R);
   if (!C) return { error: `pas de cercle de rayon ${fmt(R, 1)} m tangent aux deux rives` };
@@ -146,35 +194,28 @@ export function fuseFillets(bd, nx, Oc, Rr, bdd, Rmin, keep = null) {
   const Re_ = R - bdd;
   if (Re_ < 0.5) return { error: 'rayon de bordure nul' };
   const E1 = add(T1, mul(norm(sub(C, T1)), bdd)), E2 = add(T2, mul(norm(sub(C, T2)), bdd));
-  const bridge = (segs, X) => { const E = G.segEnd(segs[segs.length - 1]); return dist(E, X) > 1e-4 ? [...segs, G.L(E, X)] : segs; };
-  const edgeTo = (path, X) => {
-    const d = G.segEnd(path[path.length - 1]), t = G.segAt(path[path.length - 1], 0.999);
-    const ext = [...path, G.L(d, add(d, mul(norm(sub(d, t)), 60)))];
-    const h = G.pathHead(ext, projS(ext, X));
-    return h.length ? bridge(h, X) : [G.L(G.segStart(path[0]), X)];
-  };
-  // bords sans leur raccordement : coupés au droit de Tl (rive) décalé de bdd vers le terrain
-  const noFil = (sd, sgn) => {
-    const P = sd.paintW, k = P.findIndex((sg) => dist(G.segEnd(sg), sd.Tl) < 1e-4), last = P[k], Ls = G.segLen(last);
-    const d = norm(sub(G.segEnd(last), G.segAt(last, 1 - Math.min(0.05, Ls / 2) / Ls)));
-    const X = add(sd.Tl, mul({ x: d.y, y: -d.x }, sgn * bdd));
-    return G.pathHead(sd.edgeW, projS(sd.edgeW, X));
-  };
   const edge1 = [...edgeTo(noFil(bd.entry, 1), E1), G.arcThrough(C, Re_, E1, E2, false)];
   const edge2 = edgeTo(noFil(nx.exit, -1), E2);
   const touch = add(Oc, mul(norm(sub(C, Oc)), Rr));
-  return { R, Rt, C, T1, T2, arcP, paint1, paint2, edge1, edge2, touch, onRing: Math.abs(R - (Rt ?? -1)) < 1e-6, limited, Rmin };
+  return { R, Rt, C, T1, T2, arcP, paint1, paint2, edge1, edge2, touch, onRing: Math.abs(R - (Rt ?? -1)) < 1e-6, limited, Rmin, nArc: 1 };
   };
-  let res = make(R);
-  if (!keep?.ob || res.error) return res;
   // Bâti protégé : trottoir disponible le long de l'arc et des 12 derniers mètres des bords qu'il raccorde.
   const avail = (r) => {
-    const e1 = r.edge1, arc = e1[e1.length - 1], b1 = e1.slice(0, -1);
-    const pts = [...G.samplePath([arc], 0.5), ...G.samplePath(G.pathTail(b1, Math.max(0, G.pathLen(b1) - 12)), 0.5), ...G.samplePath(G.pathTail(r.edge2, Math.max(0, G.pathLen(r.edge2) - 12)), 0.5)];
+    const e1 = r.edge1, k = r.nArc || 1, arcs = e1.slice(-k), b1 = e1.slice(0, -k);
+    const pts = [...G.samplePath(arcs, 0.5), ...G.samplePath(G.pathTail(b1, Math.max(0, G.pathLen(b1) - 12)), 0.5), ...G.samplePath(G.pathTail(r.edge2, Math.max(0, G.pathLen(r.edge2) - 12)), 0.5)];
     let m = Infinity;
     for (const p of pts) { const d = obstacleDist(keep.ob, p.x, p.y, keep.min + keep.ded + 3).d - keep.ded; if (d < m) m = d; }
     return m;
   };
+  if (phi != null && isFinite(phi)) { // point de contact imposé (poignée)
+    const q = make2(phi);
+    if (!q.error) { if (keep?.ob) { q.avail = avail(q); q.intrude = q.avail < 0; q.short = q.avail < keep.min - 1e-6; } return q; }
+    phiErr = q.error;
+  }
+  if (selErr) return { error: selErr, phiErr };
+  let res = make(R);
+  if (phiErr) res.phiErr = phiErr;
+  if (!keep?.ob || res.error) return res;
   const a0 = avail(res);
   if (a0 >= keep.min - 1e-6) return { ...res, avail: a0 };
   // Rayons admissibles : de celui tangent à l'anneau (plus petit, l'arc entrerait dans l'anneau) au plus grand qui
@@ -459,17 +500,21 @@ function buildRoundabout(prj, ext = {}, opt = {}) {
   const overlap = (i, bd, nx, forced = false) => {
     const msg = forced ? `${bd.name} / ${nx.name} : rayon unique demandé` : `${bd.name} / ${nx.name} : branches trop proches, les raccordements Re/Rs se chevauchent sur l'anneau`;
     if (bds.length < 2 || prj.traffic?.tad?.[bd.id] || (shape && bd.lobe !== nx.lobe)) { if (!forced) issues.push({ lvl: 'err', msg: msg + '.' }); else issues.push({ lvl: 'warn', bi: bd.idx, msg: `${msg} : impossible (voie directe, lobes différents ou branche unique).` }); return !forced; }
-    const f = fuseFillets(bd, nx, bd.Oc, bd.Rgc, sec.bdd, Rfus, opt.keep || null);
+    const f = fuseFillets(bd, nx, bd.Oc, bd.Rgc, sec.bdd, Rfus, opt.keep || null, prj.branches[bd.idx]?.fusePhi ?? null);
     if (f.error) { issues.push({ lvl: 'err', bi: bd.idx, msg: `${msg} ; rayon unique impossible (${f.error})${forced ? ' — Re et Rs conservés' : ''}.` }); return !forced; }
     // rayon unique demandé qui ferait entrer la bordure dans le bâti : abandonné, Re et Rs conservés
-    if (forced && f.intrude) { issues.push({ lvl: 'warn', bi: bd.idx, msg: `${msg} : abandonné, tout rayon unique ferait entrer la bordure dans le calque ${opt.keep?.layer || 'bâti'} (trottoir disponible ${fmt(f.avail, 2)} m) — Re et Rs conservés.` }); return false; }
+    if (forced && f.intrude) { issues.push({ lvl: 'warn', bi: bd.idx, msg: `${msg} : abandonné, ${f.two ? 'le point de contact choisi sur l\'anneau fait' : 'tout rayon unique ferait'} entrer la bordure dans le calque ${opt.keep?.layer || 'bâti'} (trottoir disponible ${fmt(f.avail, 2)} m) — Re et Rs conservés${f.two ? ' ; déplacer la poignée' : ''}.` }); bd.fuseGrip = { touch: f.touch, Oc: bd.Oc }; return false; }
     Object.assign(bd.entry, { paintW: f.paint1, curbW: f.paint1, edgeW: f.edge1, fused: f, Tc: f.touch });
     Object.assign(nx.exit, { paintW: f.paint2, curbW: f.paint2, edgeW: f.edge2, fused: f, Tc: f.touch });
     bd.entry.phiTc = nx.exit.phiTc = ang(sub(f.touch, bd.Oc));
     ringEdge[i] = [];
     const why = forced ? 'Re et Rs remplacés (demandé)' : 'Re et Rs se chevauchaient';
     const lay = opt.keep?.layer || 'bâti';
-    if (f.intrude) issues.push({ lvl: 'err', bi: bd.idx, msg: `${bd.name} / ${nx.name} : rayon unique R = ${fmt(f.R, 2)} m, mais aucun rayon ne garde la bordure hors du calque ${lay} (trottoir disponible ${fmt(f.avail, 2)} m) — décaler ou réduire les branches, ou déplacer l'anneau.` });
+    if (f.phiErr) issues.push({ lvl: 'warn', bi: bd.idx, msg: `${bd.name} / ${nx.name} : point de contact sur l'anneau non retenu (${f.phiErr}) — rayon unique automatique.` });
+    if (f.two) {
+      const low = Math.min(f.R, f.R2) < f.Rmin - 1e-6;
+      issues.push({ lvl: f.intrude ? 'err' : low || f.short ? 'warn' : 'info', bi: bd.idx, msg: `${bd.name} / ${nx.name} : point de contact imposé sur la rive de l'anneau — R = ${fmt(f.R, 2)} m côté ${bd.name}, ${fmt(f.R2, 2)} m côté ${nx.name}${f.intrude ? `, bordure dans le calque ${lay} : déplacer la poignée` : f.avail != null ? ` (trottoir disponible ${fmt(f.avail, 2)} m)` : ''}${low ? ` ; rayon < ${fmt(f.Rmin, 2)} m (giration d'un bus) : vérifier l'épure` : ''}.` });
+    } else if (f.intrude) issues.push({ lvl: 'err', bi: bd.idx, msg: `${bd.name} / ${nx.name} : rayon unique R = ${fmt(f.R, 2)} m, mais aucun rayon ne garde la bordure hors du calque ${lay} (trottoir disponible ${fmt(f.avail, 2)} m) — décaler ou réduire les branches, ou déplacer l'anneau.` });
     else if (f.moved) issues.push({ lvl: f.R < f.Rmin - 1e-6 || f.short ? 'warn' : 'info', bi: bd.idx, msg: `${bd.name} / ${nx.name} : ${why} — rayon unique R = ${fmt(f.R, 2)} m${f.onRing ? ', tangent à la rive de l\'anneau,' : ''} choisi pour garder la bordure hors du calque ${lay} (trottoir disponible ${fmt(f.avail, 2)} m ; avec ${fmt(f.moved.from, 2)} m : ${f.moved.a0 < 0 ? 'bordure dans le bâti' : `${fmt(f.moved.a0, 2)} m seulement`})${f.R < f.Rmin - 1e-6 ? ` — inférieur aux ${fmt(f.Rmin, 2)} m de giration d'un bus : vérifier l'épure` : ''}.` });
     else issues.push(f.onRing
       ? { lvl: 'info', bi: bd.idx, msg: `${bd.name} / ${nx.name} : ${why} — fusionnés en un rayon unique R = ${fmt(f.R, 2)} m, tangent à la rive de l'anneau.` }
@@ -680,7 +725,11 @@ function buildRoundabout(prj, ext = {}, opt = {}) {
       const [p1, p2] = sd.s > 0 ? [pIsl, add(pIsl, mul(mOut, wr))] : [add(pIsl, mul(mOut, wr)), pIsl];
       dims.aligned(W(p1), W(p2), 0, `${sd.s > 0 ? 'le' : 'ls'} = ${fmt(wr, 2)}${asked}`, { side: -1 });
       if (sd.fused) { // rayon unique : coté une fois, sur l'arc (porté par l'entrée)
-        if (sd.s > 0) { const m = G.segAt(sd.fused.arcP, 0.5); dims.radius(m, norm(sub(sd.fused.C, m)), `R = ${fmt(sd.fused.R, 2)} (Re/Rs fusionnés)`); }
+        if (sd.s > 0) {
+          const f = sd.fused, m = G.segAt(f.arcP, 0.5);
+          dims.radius(m, norm(sub(f.C, m)), f.two ? `R = ${fmt(f.R, 2)}` : `R = ${fmt(f.R, 2)} (Re/Rs fusionnés)`);
+          if (f.two) { const m2 = G.segAt(f.arcP2, 0.5); dims.radius(m2, norm(sub(f.C2, m2)), `R = ${fmt(f.R2, 2)}`); }
+        }
         continue;
       }
       const mid = G.segAt(sd.fil.arc, 0.5);

@@ -132,9 +132,9 @@ function locate(r, cache) {
       for (const sd of [bd.entry, bd.exit]) {
         const segs = sd?.edgeW;
         if (!segs?.length) continue;
-        const fusedArc = sd === bd.entry && sd.fused ? segs[segs.length - 1] : null;
+        const fusedArcs = sd === bd.entry && sd.fused ? segs.slice(-(sd.fused.nArc || 1)) : [];
         const nx = bds[(i + 1) % n];
-        for (const sg of segs) E.push({ pts: sample([sg], 1), name: sg === fusedArc ? `raccordement ${bd.name} / ${nx.name}` : `branche ${bd.name}` });
+        for (const sg of segs) E.push({ pts: sample([sg], 1), name: fusedArcs.includes(sg) ? `raccordement ${bd.name} / ${nx.name}` : `branche ${bd.name}` });
       }
     });
     cache.set(D, E);

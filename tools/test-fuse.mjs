@@ -56,5 +56,22 @@ ok(D.branches.every((b) => !b.entry.fused && !b.exit.fused), 'pas de fusion sans
   }
   ok(D2.branches.some((b) => b.cross), 'passages présents');
 }
+// Point de contact imposé (poignée) : deux arcs tangents à la rive de l'anneau au point choisi, et entre eux.
+{
+  const P = prj([0, 90, 180, 270]); P.branches[0].fuseNext = true;
+  const f0 = buildDesign(P).branches[0].entry.fused, phi0 = Math.atan2(f0.touch.y, f0.touch.x);
+  P.branches[0].fusePhi = phi0 - 0.08;
+  const D3 = buildDesign(P), h = D3.branches[0].entry.fused;
+  ok(h && h.two, 'deux arcs');
+  if (h?.two) {
+    ok(Math.abs(G.dist(h.C, D3.O) - (h.R + 15)) < 0.02 && Math.abs(G.dist(h.C2, D3.O) - (h.R2 + 15)) < 0.02, 'arcs tangents à la rive de l\'anneau');
+    ok(Math.abs(Math.atan2(h.touch.y, h.touch.x) - (phi0 - 0.08)) < 1e-6, 'contact au point choisi');
+    ok(h.R < h.R2, `arc côté B0 plus serré quand le contact se rapproche de B0 (${h.R.toFixed(2)} / ${h.R2.toFixed(2)})`);
+    const e = D3.branches[0].entry.edgeW, x = D3.branches[1].exit.edgeW;
+    ok(G.dist(G.segEnd(e[e.length - 1]), G.segEnd(x[x.length - 1])) < 1e-3, 'bord continu');
+  }
+  P.branches[0].fusePhi = phi0 + 3; // contact impossible (côté opposé)
+  ok(buildDesign(P).issues.some((q) => /non retenu/.test(q.msg)), 'contact impossible : rayon unique automatique, signalé');
+}
 if (fails) { console.error(`${fails} échec(s)`); process.exit(1); }
 console.log('test-fuse : OK');
