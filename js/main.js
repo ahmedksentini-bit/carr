@@ -3025,13 +3025,26 @@ function showMeasure() {
 }
 
 // --------------------------------------------------------- Clavier
+/** Retire le dernier point de la saisie en cours (axe, prolongement, coupe, mesure, lobe de cacahuète, profil en
+ *  service) ; faux s'il n'y a aucun point à retirer (Ctrl+Z annule alors la dernière modification du projet). */
+function undoPoint() {
+  if (S.tool === 'axis' && S.draft.length) S.draft.pop();
+  else if (S.tool === 'bvcut' && S.bvCut?.pts.length) S.bvCut.pts.pop();
+  else if (S.tool === 'measure' && S.meas.length) S.meas.pop();
+  else if (S.tool === 'center' && S.lobe1) S.lobe1 = null;
+  else if (S.tool === 'profser' && S.profA) S.profA = null;
+  else return false;
+  setPrompt(); viewer.invalidate();
+  return true;
+}
 function bindKeys() {
   window.addEventListener('keydown', (e) => {
-    const t = e.target;
-    const typing = t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName);
-    if ((e.ctrlKey || e.metaKey) && (!typing || t.id === 'cmd')) {
+    const tg = e.target;
+    const typing = tg && /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName);
+    if ((e.ctrlKey || e.metaKey) && (!typing || tg.id === 'cmd')) {
       const k = e.key.toLowerCase();
-      if (k === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+      // Ctrl+Z pendant une saisie : retire le dernier point (puis les précédents), sinon annule la dernière modification
+      if (k === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else if (!undoPoint()) undo(); return; }
       if (k === 'y') { e.preventDefault(); redo(); return; }
       if (k === 's') { e.preventDefault(); saveProject(); return; }
     }
@@ -3040,7 +3053,7 @@ function bindKeys() {
     switch (e.key) {
       case 'Escape': if (S.ttr) { S.ttr = null; toast(t('Raccordement annulé.')); return; } if (S.pop) { closePop(); return; } cancelTool(); return;
       case 'Enter': if (S.tool === 'axis') finishAxis(); else if (S.tool === 'bvcut') { e.preventDefault(); bvFinishCut(); } return; // sans preventDefault, l'appui atteindrait le premier bouton de la fiche rouverte
-      case 'Backspace': if (S.tool === 'axis' && S.draft.length) { e.preventDefault(); S.draft.pop(); setPrompt(); viewer.invalidate(); } return;
+      case 'Backspace': if (undoPoint()) e.preventDefault(); return;
       case 'Delete': if (S.pop) { popDelete(); return; } if (S.sel >= 0) deleteBranch(S.sel); return;
       case 'F3': e.preventDefault(); toggle('snap'); return;
       case 'F7': e.preventDefault(); toggle('grid'); return;
