@@ -82,6 +82,19 @@ export function crossLine(sd, tg, off) {
   return a && b ? { a, b } : null;
 }
 
+// Abscisse de fin d'évasement (retour des bordures à la largeur courante, pente 1/15, 10 m au moins après l'îlot), la
+// plus grande des deux rives : l'alignement droit de la branche doit au moins l'atteindre (construction ci-dessous).
+export function flareEnd({ x0, xT, a, ai, hb, th, le, ls, wIn, wOut }) {
+  let xe = xT;
+  for (const [s, w, wa] of [[1, le, wIn], [-1, ls, wOut]]) {
+    const H = { x: x0, y: ai + s * hb }, T = { x: xT, y: ai + s * th }, dI = norm(sub(T, H));
+    const mOut = s > 0 ? rot90(dI) : neg(rot90(dI)), E1p = add(H, mul(mOut, w)), E1T = add(E1p, mul(dI, (xT - E1p.x) / dI.x));
+    const delta = s * (E1T.y - (a + s * (th + wa)));
+    if (delta > 0.05) xe = Math.max(xe, xT + Math.max(10, 15 * delta));
+  }
+  return xe;
+}
+
 // cfg : { name, idx, target, a, ai, x0, xT, xEnd, hb, th, hasIsland, isl, le, ls, wIn, wOut, Re, Rs, labels }
 // Retourne { en, ex, island } en coordonnées locales, ou null (les anomalies sont ajoutées à `issues`).
 export function buildApproach(cfg, issues) {

@@ -56,7 +56,10 @@ ou sur un fond topographique DXF.
   des T et X, de part et d'autre du débouché, îlot central coupé. Abaissés de trottoir (plan incliné à 8 %, ressaut de
   2 cm) et bandes d'éveil de vigilance de 0,42 m à 0,50 m du nez de bordure (calque `GIRA_PMR`). Réglages : onglet Profil.
 - **Branches** : alignement droit dirigé vers le centre près de l'anneau, puis raccordement à l'axe saisi, qu'elles
-  suivent jusqu'au bout (polylignes à plusieurs segments). Le centre se place sur la carte (outil C) ou se déplace
+  suivent jusqu'au bout (polylignes à plusieurs segments). Longueur de l'alignement droit, comptée depuis l'anneau :
+  îlot et évasement réel (fin du retour des bordures à 1/15), plus 20 m de marge par défaut ; saisissable par branche
+  (« Alignement droit avant le raccordement », plancher îlot + évasement). Axe dessiné trop court pour la marge : la
+  courbe dessinée est suivie dès la fin de l'évasement ; encore plus court : branche droite et avertissement. Le centre se place sur la carte (outil C) ou se déplace
   à la souris ; les branches se réorientent vers lui. Rayons de raccordement de l'axe saisis par branche (raccordement
   à l'alignement radial) et par sommet de l'axe saisi, cotés sur le plan (rayon réduit signalé) ; poignées
   de sommet et de milieu de segment (le segment se déplace, les raccordements suivent) ; un « + » au bout extérieur
