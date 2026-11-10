@@ -29,7 +29,9 @@ ou sur un fond topographique DXF.
   clic, extrémité d'axe au milieu (axe prolongé de 30 m dans la direction de la rue, sommets intérieurs conservés),
   double sens conservé : largeur partagée entre voies entrantes et sortantes, au-delà de 3,75 m par voie voies de
   3,50 m et surlargeur en BDD ; longueur de la branche jusqu'au raccordement, alignement droit depuis l'anneau
-  raccourci pour finir avant lui. `node tools/test-tiein.mjs`.
+  raccourci pour finir avant lui. Case « garder l'orientation de l'axe » (cochée par défaut) : l'axe saisi n'est pas
+  réorienté, le raccordement se fait au point de l'axe au droit du milieu de la section (écart latéral affiché) ;
+  décochée, l'axe suit la rue existante. `node tools/test-tiein.mjs`.
 - **Calques KMZ / KML** (onglet Projet) : import de fichiers Google Earth / My Maps / QGIS (plusieurs à la fois) ;
   chaque fichier devient un calque de la liste, ses dossiers KML des sous-calques cochables. Lus : Point, LineString,
   Polygon (avec trous), MultiGeometry, gx:Track ; styles KML (couleurs, épaisseurs, remplissage). Par calque :
@@ -341,7 +343,9 @@ ou sur un fond topographique DXF.
   l'anneau ; si ce rayon est plus petit que le minimum « Rayon unique mini » (onglet Anneau, 12,50 m par défaut :
   couronne de giration d'un autobus, 12,50 m / 5,30 m, directive 2001/85/CE), le minimum est retenu et l'arc reste en
   retrait de l'anneau ; s'il ne tient pas entre les branches, le plus grand rayon qui tient. Bord de chaussée
-  concentrique, coté « R … (Re/Rs fusionnés) ». Cercle et lobe d'une cacahuète (même lobe).
+  concentrique, coté « R … (Re/Rs fusionnés) ». Cercle et lobe d'une cacahuète (même lobe). Sans chevauchement, la case « Rayon unique
+  avec la sortie de … » (fenêtre de la branche, Entrée) impose le même arc entre l'entrée de la branche et la sortie
+  de la suivante dans le sens de l'anneau.
 - **Accès sur VSA 90 / 110** (`js/vsa.js`, voie principale ou secondaire de catégorie VSA) : guide Cerema « VSA 90 et
   110 » (2014, § 4.2, 6.1 à 6.4) complété, pour les accès rapprochés, par le guide Certu « Conception des accès sur VRU
   de type A » (2003). Section courante par défaut 2×2 voies, BAU 2,50 m, BDG 1,00 m, avec contrôles (chaussées

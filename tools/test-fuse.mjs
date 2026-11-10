@@ -26,5 +26,13 @@ ok(g && g.onRing && Math.abs(G.dist(g.C, D.O) - (g.R + 15)) < 0.02, `rayon tange
 // Branches bien séparées : Re / Rs inchangés.
 D = buildDesign(prj([0, 90, 180, 270]));
 ok(D.branches.every((b) => !b.entry.fused && !b.exit.fused), 'pas de fusion sans chevauchement');
+// Rayon unique demandé (fuseNext) entre deux branches bien séparées : arc tangent à l'anneau.
+{
+  const P = prj([0, 90, 180, 270]); P.branches[0].fuseNext = true;
+  D = buildDesign(P);
+  const h = D.branches[0].entry.fused;
+  ok(h && D.branches[1].exit.fused === h && h.onRing, `fusion demandée, tangente à l'anneau (${h && h.R})`);
+  ok(D.branches.slice(1).every((b) => !b.entry.fused), 'autres secteurs inchangés');
+}
 if (fails) { console.error(`${fails} échec(s)`); process.exit(1); }
 console.log('test-fuse : OK');
