@@ -6001,7 +6001,7 @@ async function importDXF(file) {
     const far = S.dxf.bbox && (viewer.cx < S.dxf.bbox.x0 - 5000 || viewer.cx > S.dxf.bbox.x1 + 5000 || viewer.cy < S.dxf.bbox.y0 - 5000 || viewer.cy > S.dxf.bbox.y1 + 5000);
     if (!S.prj.branches.length || far) viewer.fit(S.dxf.bbox);
     viewer.invalidate();
-    toast(`${file.name} : ${geo.polys.length} lignes, ${geo.texts.length} textes, ${geo.points.length} points, ${geo.layers.size} calques.` + (far && S.crs.geo ? ' Il est loin de la vue : vérifiez le système de coordonnées.' : ''));
+    toast(`${file.name} : ${geo.polys.length} lignes, ${geo.texts.length} textes, ${geo.points.length} points, ${geo.layers.size} calques.` + (sel === 'auto' && parsed.unitNote ? ` ${parsed.unitNote[0].toUpperCase()}${parsed.unitNote.slice(1)} (choix possible : Unité).` : '') + (far && S.crs.geo ? ' Il est loin de la vue : vérifiez le système de coordonnées.' : ''));
   } catch (e) {
     console.error(e);
     toast('Import DXF impossible : ' + e.message, 'err');
