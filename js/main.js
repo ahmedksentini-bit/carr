@@ -3257,7 +3257,7 @@ function syncInputs() {
     let h = hintFor(el.dataset.h, S.prj, isBranch ? br : null);
     if (el.dataset.h === 'axeL' && isBranch) {   // longueurs calculées par l'épure de la branche
       const L = S.D?.branches?.find((q) => q.idx === S.sel)?.axeL;
-      if (L) h = { txt: `auto : ${fmt(L.auto, 1)} m (îlot, évasement + 20 m) ; minimum ${fmt(L.min, 1)} m ; retenu ${fmt(L.used, 1)} m — au-delà, la branche suit la courbe dessinée`, lvl: +br?.axeL > 0 && L.used > +br.axeL + 0.05 ? 'warn' : '' };
+      if (L) h = { txt: `auto : ${fmt(L.auto, 1)} m (îlot, évasement + 20 m) ; retenu ${fmt(L.used, 1)} m${L.used < L.min - 0.05 ? ` — approche en courbe : îlot et évasement (${fmt(L.min, 1)} m) suivent l'axe courbe` : ' — au-delà, la branche suit la courbe dessinée'} ; 10 m au moins`, lvl: +br?.axeL > 0 && L.used > +br.axeL + 0.05 ? 'warn' : '' };
     }
     el.textContent = h?.txt || '';
     el.className = 'hint' + (h?.lvl ? ' ' + h.lvl : '');

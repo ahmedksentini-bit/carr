@@ -58,8 +58,11 @@ ou sur un fond topographique DXF.
 - **Branches** : alignement droit dirigé vers le centre près de l'anneau, puis raccordement à l'axe saisi, qu'elles
   suivent jusqu'au bout (polylignes à plusieurs segments). Longueur de l'alignement droit, comptée depuis l'anneau :
   îlot et évasement réel (fin du retour des bordures à 1/15), plus 20 m de marge par défaut ; saisissable par branche
-  (« Alignement droit avant le raccordement », plancher îlot + évasement). Axe dessiné trop court pour la marge : la
-  courbe dessinée est suivie dès la fin de l'évasement ; encore plus court : branche droite et avertissement. Le centre se place sur la carte (outil C) ou se déplace
+  (« Alignement droit avant le raccordement », 10 m au moins). **Approche en courbe** : alignement plus court que
+  l'îlot et l'évasement (saisi, ou axe dessiné trop court) — îlot, bordures, évasement, marquages et axe sont construits
+  dans le repère droit puis enroulés sur l'axe courbe (raccordement axeR, puis axe saisi) à partir de la fin de
+  l'alignement ; dévers, profils, signalisation et profil en long suivent l'axe courbe. Exclue avec une voie directe de
+  tourne-à-droite (alignement porté à îlot + évasement). Le centre se place sur la carte (outil C) ou se déplace
   à la souris ; les branches se réorientent vers lui. Rayons de raccordement de l'axe saisis par branche (raccordement
   à l'alignement radial) et par sommet de l'axe saisi, cotés sur le plan (rayon réduit signalé) ; poignées
   de sommet et de milieu de segment (le segment se déplace, les raccordements suivent) ; un « + » au bout extérieur

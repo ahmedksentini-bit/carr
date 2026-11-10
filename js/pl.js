@@ -63,7 +63,7 @@ export function plBuild(pl, z0) {
 // Point (monde) et tangente de l'axe projet de la branche à l'abscisse s depuis x0 (alignement, axe suivi, prolongement).
 export function axisPointAt(bd, s) {
   const x = bd.x0 + s, a = bd.a || 0;
-  if (x <= bd.xEnd + 1e-9 || !bd.cont) return { p: bd.W({ x, y: a }), t: bd.u, beyond: x > bd.xEnd + 1e-9 };
+  if (x <= bd.xEnd + 1e-9 || !bd.cont) { const q = bd.at ? bd.at(x, a) : { p: bd.W({ x, y: a }), t: bd.u }; return { p: q.p, t: q.t, beyond: x > bd.xEnd + 1e-9 }; }
   const d = x - bd.xEnd, len = G.pathLen(bd.cont);
   if (d <= len) { const p = G.pathPointAt(bd.cont, d), q = G.pathPointAt(bd.cont, Math.min(len, d + 0.5)); return { p, t: d + 0.5 <= len ? G.norm(G.sub(q, p)) : bd.farDir, beyond: false }; }
   return { p: G.add(bd.farAxis, G.mul(bd.farDir, d - len)), t: bd.farDir, beyond: true };

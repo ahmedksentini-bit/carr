@@ -125,10 +125,65 @@ export function circleCircle(c1, r1, c2, r2) {
 }
 
 // Repère local d'une branche : origine O, x suivant u, y suivant rot90(u).
+// at(x, y) : point (monde) et tangente de la ligne d'ordonnée y à l'abscisse x.
 export function frame(O, u) {
   const n = rot90(u), theta = G.ang(u);
   const W = (p) => ({ x: O.x + u.x * p.x + n.x * p.y, y: O.y + u.y * p.x + n.y * p.y });
   const Ws = (s) => (s.t === 'L' ? G.L(W(s.a), W(s.b)) : G.A(W(s.c), s.r, s.sa + theta, s.ea + theta, s.ccw));
   const toL = (P) => { const q = sub(P, O); return { x: dot(q, u), y: dot(q, n) }; };
-  return { u, n, theta, W, Ws, Wp: (p) => p.map(Ws), toL };
+  return { u, n, theta, W, Ws, Wp: (p) => p.map(Ws), toL, at: (x, y = 0) => ({ p: W({ x, y }), t: u }) };
+}
+
+/**
+ * Repère local courbé (approche en courbe) : identique à frame(O, u) jusqu'à l'abscisse xs, puis l'axe local y = 0 suit
+ * le chemin C (monde, issu de O + xs·u tangentiellement à u) : le point local (x, y) est porté à la distance y,
+ * à gauche, du point de C d'abscisse curviligne x − xs (prolongement droit au-delà de la fin de C). Les éléments
+ * construits dans le repère droit (îlot, bordures, évasement) sont ainsi enroulés sur l'axe courbe. Wp échantillonne
+ * les segments qui dépassent xs (pas de 1 m) ; toL est l'inverse (projection sur C).
+ */
+export function warpFrame(O, u, C, xs) {
+  const F0 = frame(O, u), { n, theta } = F0;
+  const pts = [add(O, mul(u, xs)), ...G.samplePath(C, 0.5).slice(1)], cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + G.dist(pts[i - 1], pts[i]));
+  const Ltot = cum[cum.length - 1];
+  const tanAt = (i) => norm(sub(pts[Math.min(i + 1, pts.length - 1)], pts[Math.max(0, Math.min(i, pts.length - 2))]));
+  const axe = (s) => {   // point et tangente de C à l'abscisse curviligne s ≥ 0
+    if (s >= Ltot) { const t = tanAt(pts.length - 2); return { p: add(pts[pts.length - 1], mul(t, s - Ltot)), t }; }
+    let lo = 0, hi = cum.length - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (cum[m] <= s) lo = m; else hi = m; }
+    const f = (s - cum[lo]) / (cum[hi] - cum[lo] || 1), p = add(pts[lo], mul(sub(pts[hi], pts[lo]), f));
+    // tangente lissée (moyenne des segments voisins) pour que les décalages restent continus
+    const t0 = tanAt(Math.max(0, lo - 1)), t1 = tanAt(lo), t2 = tanAt(hi);
+    return { p, t: norm(add(mul(add(t0, t1), 1 - f), mul(add(t1, t2), f))) };
+  };
+  const at = (x, y = 0) => {
+    if (x <= xs) return { p: F0.W({ x, y }), t: u };
+    const q = axe(x - xs);
+    return { p: add(q.p, mul(rot90(q.t), y)), t: q.t };
+  };
+  const W = (p) => at(p.x, p.y).p;
+  const xMax = (s) => (s.t === 'L' ? Math.max(s.a.x, s.b.x) : Math.max(...G.samplePath([s], 0.5).map((q) => q.x)));
+  const Ws = (s) => (xMax(s) <= xs + 1e-9 ? F0.Ws(s) : G.L(W(G.segAt(s, 0)), W(G.segAt(s, 1))));   // corde : préférer Wp
+  const Wp = (path) => path.flatMap((s) => {
+    if (xMax(s) <= xs + 1e-9) return [F0.Ws(s)];
+    const N = Math.max(2, Math.ceil(G.segLen(s) / 1)), out = [];
+    let prev = W(G.segAt(s, 0));
+    for (let i = 1; i <= N; i++) { const q = W(G.segAt(s, i / N)); out.push(G.L(prev, q)); prev = q; }
+    return out;
+  });
+  const toL = (P) => {
+    const q = F0.toL(P);
+    if (q.x <= xs) return q;
+    let best = null, d = Infinity;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i], b = pts[i + 1], ab = sub(b, a), l2 = dot(ab, ab) || 1, t = G.clamp(dot(sub(P, a), ab) / l2, 0, 1);
+      const h = add(a, mul(ab, t)), dd = G.dist(P, h);
+      if (dd < d) { d = dd; best = { s: cum[i] + t * Math.sqrt(l2), y: dot(sub(P, h), rot90(norm(ab))) }; }
+    }
+    // au-delà de la fin de C : prolongement droit
+    const tE = tanAt(pts.length - 2), e = sub(P, pts[pts.length - 1]);
+    if (dot(e, tE) > 0 && Math.abs(dot(e, rot90(tE))) <= d + 1e-9) return { x: xs + Ltot + dot(e, tE), y: dot(e, rot90(tE)) };
+    return { x: xs + best.s, y: best.y };
+  };
+  return { u, n, theta, W, Ws, Wp, toL, at, xs, warped: true };
 }
