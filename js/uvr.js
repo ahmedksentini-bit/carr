@@ -139,11 +139,11 @@ const llDist = (a, b) => { const k = Math.cos(((a.lat + b.lat) / 2) * Math.PI / 
 
 // Repère KMZ / KML → type de déclencheur d'après son nom ou celui de son dossier (null si non reconnu).
 const KW = [
-  ['ecole', /(é|e)cole|lyc(é|e)e|coll(è|e)ge|universit|madrasa|medersa|kutt?ab|jardin d.enfant|cr(è|e)che|school|kindergarten|مدرسة|معهد|روضة|كتاب|جامعة/i],
-  ['marche', /march(é|e)|souk|suq|market|commerc|échoppe|echoppe|سوق/i],
-  ['gare', /gare routi|station (de )?(bus|louage)|bus station|louage|محطة/i],
-  ['tc', /arr(ê|e)t|abribus|bus stop|taxi|transport (en )?commun|موقف/i],
-  ['sante', /h(ô|o)pital|clinique|dispensaire|centre de sant|sant(é|e) de base|\bcsb\b|hospital|clinic|health|مستشفى|مستوصف|صحة/i],
+  ['ecole', /(é|e)cole|lyc(é|e)e|coll(è|e)ge|universit|madrasa|medersa|kutt?ab|daara|\bcem\b|jardin d.enfant|cr(è|e)che|school|kindergarten|مدرسة|معهد|روضة|كتاب|جامعة/i],
+  ['marche', /march(é|e)|souk|suq|louma|market|commerc|échoppe|echoppe|سوق/i],
+  ['gare', /gare routi|garage (des |de )?(cars|taxis|bus)|station (de )?(bus|louage)|bus station|louage|محطة/i],
+  ['tc', /arr(ê|e)t|abribus|bus stop|taxi|cars? rapides?|ndiaga|transport (en )?commun|موقف/i],
+  ['sante', /h(ô|o)pital|clinique|dispensaire|centre de sant|poste de sant|case de sant|maternit|sant(é|e) de base|\bcsb\b|hospital|clinic|health|مستشفى|مستوصف|صحة/i],
   ['culte', /mosqu(é|e)e|(é|e)glise|zaou?ia|lieu de culte|mosque|church|جامع|مسجد|كنيسة/i],
   ['residentiel', /r(é|e)sidenti|lotissement|cit(é|e)\b|quartier|habitat|حي/i],
 ];
@@ -324,6 +324,11 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
     if (!ch) break;
   }
   segs = segs.filter((g) => g.s1 - g.s0 > 0.5);
+  { // même vitesse de part et d'autre d'une fin de traversée (ex. gare routière juste après) : une seule section
+    const m = [];
+    for (const g of segs) { const l = m[m.length - 1]; if (l && l.v === g.v) { l.s1 = g.s1; l.tr = l.tr || g.tr; } else m.push({ ...g }); }
+    segs = m;
+  }
   for (const g of segs) {
     g.cat = g.v >= base.vt ? baseCat : g.v <= 40 ? 'E' : 'D';
     g.vc = g.v >= base.vt ? base.vc : g.v + 10; // C1.5 : VC ≤ vitesse-cible + 10 km/h
@@ -413,6 +418,24 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
   }
   if (!hits.length && !trav.length) checks.push({ lvl: 'info', msg: `${ax.name} : aucun déclencheur UVR à moins de ${o.R} m — profil standard de la catégorie ${baseCat} (AD 1.2).` });
   for (const h of hits) if (h.type === 'ecole' && !(input.trav || []).length && !o.types.ecole.rural) checks.push({ lvl: 'warn', msg: `${ax.name}, ${pk(h.s)} : école hors traversée sans zone 30 — F1.17 impose une zone 30 aménagée pour toute école déclencheur.` });
+  // ------------------------------------------------ retouches de l'utilisateur (input.edits)
+  // Chaque aménagement proposé a une clé « code:sens:déclencheur:PK » ; une retouche s'applique à l'aménagement de même
+  // code, sens et déclencheur dont le PK est à moins de 15 m de celui de la clé (le tracé peut avoir un peu bougé).
+  for (const q of treat) { q.key = treatKey(q); q.auto = true; }
+  const E = input.edits || {};
+  const match = (k) => { const a = parseKey(k); if (!a) return null; let best = null; for (const q of treat) if (q.auto && q.code === a.code && q.dir === a.dir && (q.trg || '') === a.trg && Math.abs(q.s0key - a.s) <= 15 && (!best || Math.abs(q.s0key - a.s) < Math.abs(best.s0key - a.s))) best = q; return best; };
+  for (const q of treat) q.s0key = q.s;
+  for (const k of E.del || []) { const q = match(k); if (q) q.deleted = true; }
+  for (const [k, s] of Object.entries(E.mv || {})) { const q = match(k); if (q && isFinite(+s)) { q.s = clamp(+s, 0, ax.len); q.moved = true; } }
+  for (const [k, c] of Object.entries(E.sign || {})) { const q = match(k); if (q) { q.sign = c || null; q.signEdited = true; } }
+  const removed = treat.filter((q) => q.deleted);
+  for (let i = treat.length - 1; i >= 0; i--) if (treat[i].deleted) treat.splice(i, 1);
+  for (const a of E.add || []) {
+    const C = MANUAL[a.code]; if (!C || !isFinite(+a.s)) continue;
+    const v = +a.v || null;
+    treat.push({ s: clamp(+a.s, 0, ax.len), dir: +a.dir || 0, code: a.code, label: `${C.label(v)} (ajouté)`, fiche: C.fiche, lvl: a.lvl || 'MUST', sign: a.sign !== undefined ? a.sign : C.sign(v), manual: a.id, key: `manual:${a.id}` });
+  }
+  treat.sort((a, b) => a.s - b.s);
   // vitesse visée (approche) : rampe linéaire sur la transition côté rapide
   const vv = V.map((q) => {
     const g = segs.find((x) => q.s >= x.s0 - 1e-6 && q.s <= x.s1 + 1e-6) || segs[segs.length - 1];
@@ -430,8 +453,23 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
   }
   for (const t of trans) rows.push({ s0: t.from, s1: t.to, cat: `Transition ${t.dir === 1 ? `${t.catH}→${t.catL}` : `${t.catL}←${t.catH}`}`, vt: `${t.vh}→${t.vl} km/h`, vc: '—', trig: '—', disp: t.gate ? 'Annonce 250 m, bandes rugueuses 150/100/50 m, rétrécissement 150 m, portail, plateau +50 m (F1.12, F1.13, F1.15)' : t.vl <= 30 ? 'Entrée de zone 30, plateau, chicane (F1.17, F1.14)' : 'Limitation et marquage' , trans: true });
   rows.sort((a, b) => a.s0 - b.s0 || (a.trans ? 1 : -1));
-  return { key: ax.key, name: ax.name, len: ax.len, baseCat, V0, width, hits, trav, segs, trans, treat, v85, vv, rows, checks };
+  return { key: ax.key, name: ax.name, len: ax.len, baseCat, V0, width, hits, trav, segs, trans, treat, removed, v85, vv, rows, checks };
 }
+export const treatKey = (q) => `${q.code}:${q.dir}:${q.trg || ''}:${Math.round(q.s0key ?? q.s)}`;
+const parseKey = (k) => { const m = /^([a-z0-9]+):(-?\d+):([^:]*):(-?\d+(?:\.\d+)?)$/.exec(k || ''); return m ? { code: m[1], dir: +m[2], trg: m[3], s: +m[4] } : null; };
+// Aménagements ajoutables à la main (onglet Vitesses / UVR) : libellé, fiche M1, panneau par défaut.
+export const MANUAL = {
+  portail: { name: 'Portail d\'entrée (gateway)', fiche: 'F1.12', label: () => 'Portail d\'entrée : îlot central ≥ 2,0 × 10 m, voies 3,00–3,25 m, éclairage', sign: () => 'EB10' },
+  plateau: { name: 'Plateau traversant', fiche: 'F1.09', label: () => 'Plateau traversant (h < 15 cm, ≥ 4 m, rampes ≤ 10 %)', sign: () => 'C20a' },
+  passage: { name: 'Passage piéton protégé', fiche: 'F1.10', label: () => 'Passage piéton protégé + éclairage dédié', sign: () => 'C20a' },
+  chicane: { name: 'Chicane / rétrécissement', fiche: 'F1.14', label: () => 'Chicane ou rétrécissement de voie', sign: () => null },
+  bandes: { name: 'Bandes rugueuses', fiche: 'F1.15', label: () => 'Bandes rugueuses transversales (3 bandes)', sign: () => null },
+  zone30: { name: 'Entrée de zone 30', fiche: 'F1.17', label: () => 'Entrée de zone 30', sign: () => 'B30' },
+  limite: { name: 'Limitation de vitesse', fiche: 'C1.5', label: (v) => `Limitation ${v || 50} km/h`, sign: (v) => `B14-${v || 50}` },
+  annonce: { name: 'Panneau d\'annonce', fiche: 'F1.13', label: () => 'Panneau d\'annonce de zone de modération', sign: () => 'ANN' },
+  ecole: { name: 'Panneau « enfants »', fiche: 'F1.17', label: () => 'Signalisation de danger « enfants »', sign: () => 'A13a' },
+};
+export const SIGN_CHOICES = [['', '(aucun)'], ['B14-30', 'Limitation 30'], ['B14-50', 'Limitation 50'], ['B14-60', 'Limitation 60'], ['B14-70', 'Limitation 70'], ['B14-80', 'Limitation 80'], ['B30', 'Zone 30'], ['B51', 'Fin de zone 30'], ['EB10', 'Entrée d\'agglomération'], ['EB20', 'Sortie d\'agglomération'], ['A13a', 'Enfants'], ['C20a', 'Passage piéton'], ['ANN', 'Annonce « Ralentir »']];
 export const CODE_LBL = { annonce: 'annonce', bandes: 'bandes rugueuses', retrec: 'rétrécissement', portail: 'portail d\'entrée', zone30: 'zone 30', plateau: 'plateaux traversants', sortie: 'séquence de sortie', chicane: 'chicane', limite: 'limitation', passage: 'passages piétons protégés', lineaire: 'trottoirs, éclairage continu, dépassement interdit', cloture: 'clôture directrice', rappel30: 'rappels zone 30', prescr: 'prescriptions UVR' };
 
 // ------------------------------------------------------------------ exports
