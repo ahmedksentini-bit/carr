@@ -1,5 +1,5 @@
 // Tests du module UVR / plan de gestion des vitesses (js/uvr.js) — node tools/test-uvr.mjs
-import { analyzeAxis, detectBuilt, classifyOsm, classifyName, parseOverpass, v85FromRadius, v85Profile, rowsCsv, speedSvg, overpassQL } from '../js/uvr.js';
+import { analyzeAxis, detectBuilt, classifyOsm, classifyName, parseOverpass, v85FromRadius, v85Profile, rowsCsv, speedSvg, overpassQL, overpassBBoxOf, overpassPoiQL, overpassBldQL } from '../js/uvr.js';
 
 let fail = 0;
 const ok = (c, m) => { if (!c) { fail++; console.error('✖', m); } else console.log('✔', m); };
@@ -103,6 +103,13 @@ ok(/around:200,34\.700000,10\.700000/.test(overpassQL([[34.7, 10.7], [34.71, 10.
 const Rc = 200, curve = { key: 'x:1', name: 'Courbe', len: 600, at: (s) => { const a = s / Rc; return { p: { x: Rc * Math.sin(a), y: Rc * (1 - Math.cos(a)) }, t: { x: Math.cos(a), y: Math.sin(a) } }; }, project: () => null };
 const pf = v85Profile(curve, { V0: 102 });
 ok(Math.abs(pf[30].v - v85FromRadius(102, Rc)) < 1.5, 'V85 en courbe circulaire R = 200 m');
+
+// requêtes Overpass par tronçon : rectangle englobant élargi de R, bâtiments à part
+const bb = overpassBBoxOf([[18.08, -15.98], [18.10, -15.96]], 200);
+ok(bb[0] < 18.08 && bb[2] > 18.10 && Math.abs(bb[0] - (18.08 - 200 / 111320)) < 1e-9 && bb[1] < -15.98 && bb[3] > -15.96, 'rectangle englobant du tronçon élargi de R');
+const qp = overpassPoiQL(bb), qb = overpassBldQL([[18.08, -15.98], [18.10, -15.96]], 120);
+ok(/timeout:60/.test(qp) && !/building/.test(qp) && !/around/.test(qp) && /amenity/.test(qp) && /landuse/.test(qp), 'requête légère sans bâtiments ni « around »');
+ok(/way\["building"\]\(around:120,/.test(qb) && /out ids center/.test(qb), 'requête bâtiments séparée');
 
 if (fail) { console.error(`${fail} échec(s)`); process.exit(1); }
 console.log('Tous les tests UVR passent.');

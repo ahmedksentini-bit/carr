@@ -3,7 +3,7 @@
 // tracés, tableau des résultats, dessin sur le plan, note imprimable). Sources des déclencheurs : OpenStreetMap
 // (Overpass), calques KMZ / KML du projet (nom du repère ou de son dossier), saisie sur le plan.
 import { registerIcon } from './signicons.js';
-import { MANUAL, SIGN_CHOICES, REFS, M1_BASES, R4L_BASES, UVR_TYPES, TYPE_KEYS, CATS, uvrOpts, defaultUvrOpts, baseCatOf, analyzeAxis, detectBuilt, overpassQL, parseOverpass, classifyName, BUILT_RE, speedSvg, rowsCsv, treatCsv, fmtPK, V0_PROFILES } from './uvr.js';
+import { MANUAL, SIGN_CHOICES, REFS, M1_BASES, R4L_BASES, UVR_TYPES, TYPE_KEYS, CATS, uvrOpts, defaultUvrOpts, baseCatOf, analyzeAxis, detectBuilt, overpassBBoxOf, overpassPoiQL, overpassBldQL, parseOverpass, classifyName, BUILT_RE, speedSvg, rowsCsv, treatCsv, fmtPK, V0_PROFILES } from './uvr.js';
 
 const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
 
@@ -122,14 +122,21 @@ export function initUvr(api) {
   function polylineLL(axes, step = 80) {
     return axes.map((ax) => { const out = []; for (let s = 0; s <= ax.len + 1e-6; s += Math.min(step, ax.len)) { const p = ax.at(s).p, ll = S.crs.toLL(p.x, p.y); out.push([ll.lat, ll.lon]); } const p = ax.at(ax.len).p, ll = S.crs.toLL(p.x, p.y); out.push([ll.lat, ll.lon]); return out; });
   }
+  // Requête Overpass : chaque serveur à son tour, deux tours (le second après une pause), 75 s au plus par essai.
   async function overpass(q) {
     let last = null;
-    for (const url of OVERPASS) {
-      try {
-        const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(q) });
-        if (!r.ok) { last = new Error(`${new URL(url).host} : HTTP ${r.status}`); continue; }
-        return await r.json();
-      } catch (e) { last = e; }
+    for (let round = 0; round < 2; round++) {
+      if (round) await new Promise((ok) => setTimeout(ok, 3000));
+      for (const url of OVERPASS) {
+        const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 75000);
+        try {
+          const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(q), signal: ctl.signal });
+          if (!r.ok) { last = new Error(`${new URL(url).host} : HTTP ${r.status}`); continue; }
+          const j = await r.json();
+          if (OVERPASS[0] !== url) OVERPASS.splice(0, OVERPASS.length, url, ...OVERPASS.filter((v) => v !== url)); // le serveur qui a répondu passe en tête
+          return j;
+        } catch (e) { last = e.name === 'AbortError' ? new Error(`${new URL(url).host} : délai dépassé`) : e; } finally { clearTimeout(tm); }
+      }
     }
     throw last || new Error('Overpass indisponible');
   }
@@ -139,28 +146,41 @@ export function initUvr(api) {
     if (!geo()) { toast('OpenStreetMap demande un système de coordonnées géoréférencé (onglet Projet).', 'warn'); return; }
     const info = (t) => { const el = $('#uvrInfo'); if (el) el.textContent = t; }, btn = $('#btnUvrOsm');
     if (btn) btn.disabled = true;
+    let nT = 0, nB = 0, nP = 0;
+    const failed = [], bldFailed = [], step = 80;
+    let bldKo = 0;
+    const take = (P) => {
+      for (const t of P.triggers) if (!u.trg.some((q) => q.osm && q.osm === t.osm)) { u.trg.push({ id: uid(), src: 'OSM', on: true, ...t }); nT++; }
+      for (const b of P.built) if (!u.built.polys.some((q) => q.ring[0][0] === b.ring[0][0] && q.ring[0][1] === b.ring[0][1])) { u.built.polys.push({ ...b, src: 'OSM' }); nP++; }
+      const seen = new Set(u.built.bld.map((q) => q.join(',')));
+      for (const b of P.bld) { const k2 = b.join(','); if (!seen.has(k2)) { seen.add(k2); u.built.bld.push(b); nB++; } }
+    };
+    // un tronçon dont la requête échoue est coupé en deux et retenté une fois
+    const poi = async (pl, depth = 0) => {
+      try { take(parseOverpass(await overpass(overpassPoiQL(overpassBBoxOf(pl, u.opts.R))))); return true; }
+      catch (e) { if (depth < 1 && pl.length > 3) { const m = Math.floor(pl.length / 2); const a = await poi(pl.slice(0, m + 1), depth + 1), b = await poi(pl.slice(m), depth + 1); return a && b; } console.warn(e); return false; }
+    };
     try {
-      let nT = 0, nB = 0, nP = 0;
-      const polys = polylineLL(axes);
+      const polys = polylineLL(axes, step);
       for (let i = 0; i < polys.length; i++) {
-        // requêtes par tronçons de ~6 km (limite de taille des requêtes Overpass)
-        const pl = polys[i], chunk = 75;
-        for (let k = 0; k < pl.length - 1; k += chunk) {
-          info(`OpenStreetMap — ${axes[i].name} : tronçon ${Math.floor(k / chunk) + 1} / ${Math.ceil((pl.length - 1) / chunk)}…`);
-          const json = await overpass(overpassQL(pl.slice(k, k + chunk + 1), u.opts.R, 120));
-          const P = parseOverpass(json);
-          for (const t of P.triggers) if (!u.trg.some((q) => q.osm && q.osm === t.osm)) { u.trg.push({ id: uid(), src: 'OSM', on: true, ...t }); nT++; }
-          for (const b of P.built) if (!u.built.polys.some((q) => q.ring[0][0] === b.ring[0][0] && q.ring[0][1] === b.ring[0][1])) { u.built.polys.push({ ...b, src: 'OSM' }); nP++; }
-          const seen = new Set(u.built.bld.map((q) => q.join(',')));
-          for (const b of P.bld) { const k2 = b.join(','); if (!seen.has(k2)) { seen.add(k2); u.built.bld.push(b); nB++; } }
+        // tronçons d'environ 2 km
+        const pl = polys[i], chunk = 25, n = Math.ceil((pl.length - 1) / chunk);
+        for (let k = 0, j = 1; k < pl.length - 1; k += chunk, j++) {
+          const part = pl.slice(k, k + chunk + 1), s0 = k * step, s1 = Math.min(axes[i].len, (k + chunk) * step);
+          info(`OpenStreetMap — ${axes[i].name} : tronçon ${j} / ${n} (PK ${fmtPK(s0)} – ${fmtPK(s1)})…`);
+          if (!(await poi(part))) failed.push(`${axes[i].name} ${fmtPK(s0)}–${fmtPK(s1)}`);
+          // bâtiments : après trois échecs de suite, on cesse de les demander (les traversées restent à vérifier)
+          if (bldKo >= 3) bldFailed.push(`${fmtPK(s0)}–${fmtPK(s1)}`);
+          else try { take(parseOverpass(await overpass(overpassBldQL(part, 120)))); bldKo = 0; } catch (e) { console.warn(e); bldKo++; bldFailed.push(`${fmtPK(s0)}–${fmtPK(s1)}`); }
         }
       }
       if (u.built.bld.length > 40000) u.built.bld = u.built.bld.slice(-40000);
       u.run = true;
       const nTr = detectTrav();
       update();
-      info(`OSM : ${nT} déclencheur(s), ${nP} zone(s) bâtie(s), ${nB} bâtiment(s) ; ${nTr} traversée(s) de localité détectée(s).`);
-      toast(`OpenStreetMap : ${nT} déclencheur(s) UVR ajouté(s), ${nTr} traversée(s) de localité. Vérifiez la liste (sources OSM incomplètes : confirmation terrain C1.6).`);
+      info(`OSM : ${nT} déclencheur(s), ${nP} zone(s) bâtie(s), ${nB} bâtiment(s) ; ${nTr} traversée(s) de localité détectée(s).${failed.length ? ` Tronçons sans réponse : ${failed.join(', ')}.` : ''}${bldFailed.length ? ` Bâtiments non lus : PK ${bldFailed.join(', ')}.` : ''}`);
+      if (failed.length) toast(`OpenStreetMap : ${nT} déclencheur(s) ajouté(s), mais ${failed.length} tronçon(s) sans réponse des serveurs (${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}) — relancez la recherche plus tard : les déclencheurs déjà trouvés sont gardés, sans doublon.`, 'warn');
+      else toast(`OpenStreetMap : ${nT} déclencheur(s) UVR ajouté(s), ${nTr} traversée(s) de localité${bldFailed.length ? ` (bâtiments non lus sur ${bldFailed.length} tronçon(s) : traversées à vérifier)` : ''}. Vérifiez la liste (sources OSM incomplètes : confirmation terrain C1.6).`);
     } catch (e) {
       console.error(e); info(`OpenStreetMap indisponible : ${e.message}`);
       toast(`Requête OpenStreetMap impossible (${e.message}) : importez un KMZ ou saisissez les déclencheurs sur le plan.`, 'err');
