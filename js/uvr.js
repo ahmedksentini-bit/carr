@@ -531,7 +531,8 @@ export function treatCsv(results) {
 
 // Diagramme SVG du profil des vitesses d'un axe (vitesse-cible, vitesse visée, V85 géométrique, déclencheurs,
 // catégories, aménagements). width en px ; renvoie une chaîne SVG autonome (couleurs fixes, imprimable).
-export function speedSvg(r, { width = 1000, height = width < 760 ? 345 : 330, s0 = 0, s1 = r.len } = {}) {
+export function speedSvg(r, { width = 1000, s0 = 0, s1 = r.len } = {}) {
+  const height = 330;
   const ml = 46, mr = 12, mt = 16, chartH = 170, bandY = mt + chartH + 22, bandH = 16, trY = bandY + bandH + 10;
   const vmax = Math.max(60, ...r.v85.map((q) => q.v), ...r.segs.map((g) => g.v)) + 10;
   const X = (s) => ml + ((s - s0) / Math.max(1, s1 - s0)) * (width - ml - mr), Y = (v) => mt + chartH - (v / vmax) * chartH;
@@ -567,11 +568,36 @@ export function speedSvg(r, { width = 1000, height = width < 760 ? 345 : 330, s0
     g += `<text x="${x.toFixed(1)}" y="${(trY + 9 + lane * 12).toFixed(1)}" text-anchor="middle" fill="${sym[q.code][1]}" font-size="${sym[q.code][0].length > 1 ? 7.5 : 10}" font-weight="700">${sym[q.code][0]}</text>`;
   }
   g += `<text x="${width - mr}" y="${trY + 9}" text-anchor="end" fill="#94a3b8" font-size="8">sens →</text><text x="${width - mr}" y="${trY + 33}" text-anchor="end" fill="#94a3b8" font-size="8">← sens</text>`;
-  // légende
-  const narrow = width < 760, ly = height - (narrow ? 22 : 8), ly2 = narrow ? height - 7 : ly, x2 = narrow ? ml : ml + 300;
-  g += `<line x1="${ml}" x2="${ml + 22}" y1="${ly - 3}" y2="${ly - 3}" stroke="#1d4ed8" stroke-width="2.4"/><text x="${ml + 26}" y="${ly}" fill="#334155">${r.ref === 'R4L' ? 'vitesse max. (R4L)' : 'vitesse-cible (M1)'}</text>`;
-  g += `<line x1="${ml + 130}" x2="${ml + 152}" y1="${ly - 3}" y2="${ly - 3}" stroke="#f59e0b" stroke-width="1.6"/><text x="${ml + 156}" y="${ly}" fill="#334155">vitesse visée (F1.13)</text>`;
-  g += `<line x1="${x2}" x2="${x2 + 22}" y1="${ly2 - 3}" y2="${ly2 - 3}" stroke="#94a3b8" stroke-width="1.4" stroke-dasharray="4 3"/><text x="${x2 + 26}" y="${ly2}" fill="#334155">V85 géométrique (V0 = ${r.V0} km/h)</text>`;
-  g += `<rect x="${x2 + 210}" y="${ly2 - 8}" width="16" height="8" fill="#fde68a" opacity="0.6"/><text x="${x2 + 230}" y="${ly2}" fill="#334155">transition</text>`;
+  // légende : ce que contient ce profil (lignes, catégories, déclencheurs, aménagements présents), en lignes qui se
+  // replient selon la largeur
+  const items = [], sec = (title) => items.push({ title });
+  const it = (w, draw, label) => items.push({ w: w + 6 + label.length * 6.1, draw, label, sw: w });
+  sec('Courbes');
+  it(22, (x, y) => `<line x1="${x}" x2="${x + 22}" y1="${y - 3}" y2="${y - 3}" stroke="#1d4ed8" stroke-width="2.4"/>`, r.ref === 'R4L' ? 'vitesse maximale R4L par section' : 'vitesse-cible M1 par section');
+  it(22, (x, y) => `<line x1="${x}" x2="${x + 22}" y1="${y - 3}" y2="${y - 3}" stroke="#f59e0b" stroke-width="1.6"/>`, 'vitesse visée en approche (séquence F1.13)');
+  it(22, (x, y) => `<line x1="${x}" x2="${x + 22}" y1="${y - 3}" y2="${y - 3}" stroke="#94a3b8" stroke-width="1.4" stroke-dasharray="4 3"/>`, `V85 permise par la géométrie (V0 = ${r.V0} km/h)`);
+  it(16, (x, y) => `<rect x="${x}" y="${y - 8}" width="16" height="9" fill="#fde68a" opacity="0.7"/>`, 'zone de transition de vitesse');
+  if (r.hits.length) it(16, (x, y) => `<rect x="${x}" y="${y - 6}" width="16" height="6" fill="#94a3b8" opacity="0.5"/>`, 'zone d\'influence d\'un déclencheur (couleur du type)');
+  const types = [...new Set(r.hits.map((h) => h.type))];
+  if (types.length) { sec('Déclencheurs UVR'); for (const k of types) it(14, (x, y) => `<circle cx="${x + 7}" cy="${y - 4}" r="7" fill="${UVR_TYPES[k].color}"/><text x="${x + 7}" y="${y - 1}" text-anchor="middle" fill="#fff" font-size="7.5" font-weight="700">${UVR_TYPES[k].short}</text>`, UVR_TYPES[k].label.split(' /')[0]); }
+  const cats = [...new Set(r.segs.map((s) => s.cat))];
+  sec('Catégories (bandeau « Cat. »)'); for (const c of cats) it(16, (x, y) => `<rect x="${x}" y="${y - 9}" width="16" height="10" fill="${CATS[c].color}"/>`, CATS[c].r4l ? CATS[c].label.replace('R4L — ', '') : `${c} — ${CATS[c].label.replace(/^[A-E] — /, '')} (${CATS[c].vt} km/h)`);
+  const SYML = { annonce: 'panneau d\'annonce / présignalisation', bandes: 'bandes rugueuses', retrec: 'rétrécissement de voie + panneau 60', portail: 'portail d\'entrée (gateway)', zone30: 'entrée de zone 30', rappel30: 'rappel zone 30', plateau: 'plateau traversant', chicane: 'chicane / rétrécissement', passage: 'passage piéton protégé', limite: 'limitation de vitesse', sortie: 'sortie de zone (séquence inverse)' };
+  const codes = Object.keys(SYML).filter((c) => r.treat.some((q) => q.code === c && inR(q.s)));
+  if (codes.length) {
+    sec('Aménagements (bandeau « Am. »)');
+    it(0, () => '', 'lignes : haut = sens des PK croissants · milieu = deux sens · bas = PK décroissants');
+    for (const c of codes) it(12, (x, y) => `<text x="${x + 6}" y="${y}" text-anchor="middle" fill="${sym[c][1]}" font-size="${sym[c][0].length > 1 ? 7.5 : 10}" font-weight="700">${sym[c][0]}</text>`, SYML[c]);
+  }
+  let lx = ml, ly = trY + 52, leg = '';
+  for (const q of items) {
+    if (q.title) { if (lx > ml) ly += 15; lx = ml; ly += 4; leg += `<text x="${ml}" y="${ly}" fill="#0f172a" font-weight="700" font-size="9.5">${q.title}</text>`; ly += 14; continue; }
+    if (lx + q.w > width - mr && lx > ml) { lx = ml; ly += 15; }
+    leg += q.draw(lx, ly) + `<text x="${lx + q.sw + 5}" y="${ly}" fill="#334155" font-size="9.5">${q.label}</text>`;
+    lx += q.w + 14;
+  }
+  const H = ly + 10;
+  g = g.replace(`viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"`, `viewBox="0 0 ${width} ${H}" width="${width}" height="${H}"`).replace(`<rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"/>`, `<rect x="0" y="0" width="${width}" height="${H}" fill="#ffffff"/>`);
+  g += `<line x1="${ml}" x2="${width - mr}" y1="${trY + 42}" y2="${trY + 42}" stroke="#e2e8f0"/>` + leg;
   return g + '</svg>';
 }
