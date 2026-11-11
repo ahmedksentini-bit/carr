@@ -2103,6 +2103,7 @@ function hitElement(px, py) {
   const wq = { x: viewer.s2w(px, py)[0], y: viewer.s2w(px, py)[1] };
   for (const o of S.ouvr?.list || []) if (o.poly?.length > 2 && (inPolyW(wq, o.poly) || polyDist([...o.poly, o.poly[0]]) < 6)) cands.push({ type: 'ouvr', i: o.key, sc: -300 });
   for (const g of S.cadres || []) if (g.poly?.length > 2 && (inPolyW(wq, g.poly) || polyDist([...g.poly, g.poly[0]]) < 6)) cands.push({ type: 'ouvr', i: `c:${g.c.id}`, sc: -310 });
+  if (S.tool === 'select') { const h = UV?.hit(px, py); if (h) cands.push({ type: 'uvram', i: h, sc: -400 + h.d }); } // aménagement de l'onglet Vitesses / UVR
   if (!cands.length) { const id = bvAt(wq); if (id) cands.push({ type: 'bv', i: id, sc: 5000 }); } // bassin versant : seulement hors des éléments du projet
   cands.sort((a, b) => a.sc - b.sc);
   const c0 = cands[0];
@@ -2135,6 +2136,7 @@ function openPop(el, px, py) {
     toast(t('Raccordement annulé : la seconde droite doit appartenir au même axe.'), 'warn');
   }
   closePop(false);
+  if (el.type === 'uvram') { UV?.openTreat(el.i); return; }
   if (el.type === 'bv') { openBvSheet(el.i); return; }
   if (el.type === 'junction') { switchJunction(el.i, { zoom: false }); el = { type: 'ring', i: 0 }; }
   if (el.type === 'ramp') { S.rsel = el.i; refreshPanels(); }

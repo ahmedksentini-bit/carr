@@ -448,7 +448,7 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
     if (isLow(g.cat) && vmax > g.v + 10) {
       checks.push({ lvl: 'warn', msg: `${ax.name}, ${where} (cat. ${g.cat}, ${g.v} km/h) : la géométrie autorise une V85 de ${Math.round(vmax)} km/h (> vitesse-cible + 10) — vitesse-cible non crédible sans modération physique : plateaux / chicanes répétés (F1.09, F1.14).` });
       const step = isE(g.cat) ? 75 : 150, n = Math.floor(g.len / step);
-      for (let k = 1; k <= n; k++) { const s = g.s0 + (g.len * k) / (n + 1); if (!treat.some((q) => ['plateau', 'chicane', 'portail'].includes(q.code) && Math.abs(q.s - s) < step / 2)) T(s, 0, isE(g.cat) ? 'plateau' : 'chicane', `Dispositif de modération physique (${isE(g.cat) ? 'plateau traversant' : 'chicane ou rétrécissement'}) : V85 géométrique ${Math.round(vAt(s))} km/h pour ${g.v} km/h`, isE(g.cat) ? 'F1.09' : 'F1.14', 'SHOULD'); }
+      for (let k = 1; k <= n; k++) { const s = g.s0 + (g.len * k) / (n + 1); if (!treat.some((q) => (['plateau', 'chicane', 'portail'].includes(q.code) && Math.abs(q.s - s) < step / 2) || (['passage', 'zone30', 'bandes'].includes(q.code) && Math.abs(q.s - s) < 25))) T(s, 0, isE(g.cat) ? 'plateau' : 'chicane', `Dispositif de modération physique (${isE(g.cat) ? 'plateau traversant' : 'chicane ou rétrécissement'}) : V85 géométrique ${Math.round(vAt(s))} km/h pour ${g.v} km/h`, isE(g.cat) ? 'F1.09' : 'F1.14', 'SHOULD'); }
     } else if (!isLow(g.cat) && vmax > g.vc) checks.push({ lvl: 'info', msg: `${ax.name}, ${where} : V85 géométrique ${Math.round(vmax)} km/h > VC ${g.vc} km/h (C1.5 : VC ≤ vitesse-cible + 10) — contrôle des vitesses (signalisation, radar) ou reprise du tracé.` });
     if (vmin < g.v - 15 && !isE(g.cat)) {
       const q = inG.find((r) => r.v === vmin);
