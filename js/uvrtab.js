@@ -31,7 +31,7 @@ export function initUvr(api) {
 
   // ---------------------------------------------------------------- calcul
   function compute() {
-    S.uvr = null;
+    S.uvr = null; S.uvrHits = [];
     if (!S.D || !used()) return;
     const u = cfg(), axes = allAxes().filter((ax) => axOn(u, ax));
     if (!axes.length) return;
@@ -48,6 +48,7 @@ export function initUvr(api) {
 
   // ---------------------------------------------------------------- plan
   function draw(res, axes) {
+    S.uvrHits = [];
     const TH = (S.prj.opts?.textH || 0.8) * 1.2, P = (o) => S.D.prims.push(o);
     const u = cfg();
     for (const r of res) {
@@ -70,15 +71,29 @@ export function initUvr(api) {
         const s = q.s, w = half + 0.5;
         const poly = (pts) => pts.map((p, i) => G.L(p, pts[(i + 1) % pts.length]));
         const band = (a, b, o0, o1) => { const n = Math.max(1, Math.ceil((b - a) / 2)), L = [], R = []; for (let i = 0; i <= n; i++) { const x = a + ((b - a) * i) / n; L.push(ptAt(x, o0)); R.push(ptAt(x, o1)); } return poly([...L, ...R.reverse()]); };
-        if (q.code === 'bandes') { for (const d of [-0.3, 0, 0.3]) P({ k: 'path', L: 'UVR', role: 'am', segs: across(Math.max(0, Math.min(r.len, s + d)), q.dir === 1 ? -w : 0, q.dir === 1 ? 0 : w) }); }
-        else if (q.code === 'portail') {
-          const s1 = Math.max(0, Math.min(r.len, s - q.dir * 10));
-          P({ k: 'path', L: 'UVR', role: 'am', closed: true, segs: band(Math.min(s, s1), Math.max(s, s1), 1, -1) });
+        const fillPoly = (segs, color) => { P({ k: 'fill', L: 'UVR', rings: [segs], color }); P({ k: 'path', L: 'UVR', role: 'am', closed: true, segs }); };
+        const cl = (v) => Math.max(0, Math.min(r.len, v));
+        const half2 = q.dir === 1 ? [-w, 0] : q.dir === -1 ? [0, w] : [-w, w];
+        if (q.code === 'bandes') { for (const d of [-0.3, 0, 0.3]) P({ k: 'path', L: 'UVR', role: 'am', segs: across(cl(s + d), half2[0], half2[1]) }); }
+        else if (q.code === 'portail') { // îlot central 2 × 10 m (rempli) et ligne du portail
+          const s1 = cl(s - q.dir * 10);
+          fillPoly(band(Math.min(s, s1), Math.max(s, s1), 1, -1), 'rgba(250,204,21,0.55)');
           P({ k: 'path', L: 'UVR', role: 'am', segs: across(s, -w, w) });
-        } else if (q.code === 'plateau') P({ k: 'path', L: 'UVR', role: 'am', closed: true, segs: band(Math.max(0, s - 2), Math.min(r.len, s + 2), w, -w) });
-        else if (q.code === 'passage') { for (const d of [-1.25, 1.25]) P({ k: 'path', L: 'UVR', role: 'am', segs: across(Math.max(0, Math.min(r.len, s + d)), -w, w) }); }
-        else if (q.code === 'chicane') P({ k: 'path', L: 'UVR', role: 'am', segs: [G.L(ptAt(Math.max(0, s - 10), w), ptAt(s, w - 2)), G.L(ptAt(s, -w), ptAt(Math.min(r.len, s + 10), -w + 2))] });
-        else P({ k: 'path', L: 'UVR', role: 'am', segs: q.dir === 1 ? across(s, -w, 0) : q.dir === -1 ? across(s, 0, w) : across(s, -w, w) });
+        } else if (q.code === 'plateau') { // plateau de 4 m (rempli) et rampes de 1,5 m de part et d'autre
+          fillPoly(band(cl(s - 2), cl(s + 2), w, -w), 'rgba(234,88,12,0.45)');
+          for (const d of [-3.5, 3.5]) P({ k: 'path', L: 'UVR', role: 'am', dash: [0.6, 0.4], segs: across(cl(s + d), -w, w) });
+        } else if (q.code === 'passage') { // zébra : bandes de 0,5 m parallèles à l'axe sur 2,5 m
+          for (let o = -w + 0.25; o < w - 0.2; o += 1.0) fillPoly(band(cl(s - 1.25), cl(s + 1.25), o, o + 0.5), 'rgba(255,255,255,0.9)');
+        } else if (q.code === 'chicane') { // deux îlots décalés (2 m de saillie sur 10 m), de part et d'autre
+          fillPoly(poly([ptAt(cl(s - 12), w), ptAt(cl(s - 7), w - 2), ptAt(cl(s - 3), w - 2), ptAt(cl(s), w)]), 'rgba(22,163,74,0.55)');
+          fillPoly(poly([ptAt(cl(s), -w), ptAt(cl(s + 3), -w + 2), ptAt(cl(s + 7), -w + 2), ptAt(cl(s + 12), -w)]), 'rgba(22,163,74,0.55)');
+        } else P({ k: 'path', L: 'UVR', role: 'am', segs: across(s, half2[0], half2[1]) });
+        // étiquette courte au bord de la chaussée, côté du sens concerné
+        const LBL = { bandes: 'Bandes ×3', portail: 'Portail', plateau: 'Plateau', passage: 'Passage', chicane: 'Chicane', zone30: 'Zone 30', rappel30: 'Rappel 30', annonce: 'Annonce', retrec: 'Rétréciss.', limite: 'Limitation', sortie: 'Sortie', cloture: 'Clôture' };
+        const lp = ptAt(s, (q.dir === -1 ? 1 : -1) * (w + 2.2));
+        if (LBL[q.code]) P({ k: 'text', L: 'UVR', p: lp, s: LBL[q.code], rot: ang(s), align: 'center', h: TH * 1.3, color: '#fbbf24' });
+        // points de sélection : l'étiquette (au bord, hors des poignées de l'axe) et le symbole sur la chaussée
+        for (const hp of [lp, ptAt(s, (q.dir === -1 ? 1 : -1) * w * 0.5)]) (S.uvrHits = S.uvrHits || []).push({ key: q.key, ax: r.key, p: hp, label: q.label });
         // panneau : à droite du sens concerné (les deux côtés si le dispositif vaut pour les deux sens)
         if (q.sign) for (const sd of q.dir === 1 ? [-1] : q.dir === -1 ? [1] : [-1, 1]) {
           const t = ax.at(s).t, n = G.rot90(t), out = G.mul(n, sd);
@@ -258,7 +273,7 @@ export function initUvr(api) {
 
   // Plan du tracé (SVG, nord en haut) : fond satellite Esri si le projet est géoréférencé, axe coloré par catégorie,
   // PK, déclencheurs (pastilles) et aménagements principaux, flèche du nord et échelle graphique.
-  function planSvg(r, { W = 1000, sat = true, s0 = 0, s1 = null } = {}) {
+  function planSvg(r, { W = 1000, sat = true, s0 = 0, s1 = null, tiles = null, collect = null } = {}) {
     const ax = allAxes().find((a) => a.key === r.key); if (!ax) return '';
     if (s1 == null) s1 = ax.len; s0 = Math.max(0, s0); s1 = Math.min(ax.len, s1);
     const inW = (s) => s >= s0 - 1e-6 && s <= s1 + 1e-6, hits = r.hits.filter((h) => inW(h.s));
@@ -272,14 +287,15 @@ export function initUvr(api) {
     let g = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-family="Segoe UI, Arial, sans-serif" font-size="11"><rect width="${W}" height="${H}" fill="#e5e7eb"/>`;
     // fond satellite : tuiles Esri World Imagery placées par leurs coins projetés dans le système du projet
     if (sat && geo()) {
-      const c = S.crs.toLL(cx, cy), z = Math.max(1, Math.min(19, Math.round(Math.log2((156543.03 * Math.cos((c.lat * Math.PI) / 180)) / m))));
+      const c = S.crs.toLL(cx, cy), z = Math.max(1, Math.min(19, Math.round(Math.log2((156543.03 * Math.cos((c.lat * Math.PI) / 180)) / m)) + 1)); // un niveau de plus : image nette à l'impression
       const lon2x = (lon) => ((lon + 180) / 360) * 2 ** z, lat2y = (lat) => { const r2 = (lat * Math.PI) / 180; return ((1 - Math.log(Math.tan(r2) + 1 / Math.cos(r2)) / Math.PI) / 2) * 2 ** z; };
       const x2lon = (x) => (x / 2 ** z) * 360 - 180, y2lat = (y) => { const k = Math.PI - (2 * Math.PI * y) / 2 ** z; return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(k) - Math.exp(-k))); };
       const cs = [[x0, y0], [x1, y0], [x0, y1], [x1, y1]].map(([x, y]) => S.crs.toLL(x, y));
       const tx0 = Math.floor(Math.min(...cs.map((q) => lon2x(q.lon)))), tx1 = Math.floor(Math.max(...cs.map((q) => lon2x(q.lon)))), ty0 = Math.floor(Math.min(...cs.map((q) => lat2y(q.lat)))), ty1 = Math.floor(Math.max(...cs.map((q) => lat2y(q.lat))));
-      if ((tx1 - tx0 + 1) * (ty1 - ty0 + 1) <= 80) for (let tx = tx0; tx <= tx1; tx++) for (let ty = ty0; ty <= ty1; ty++) {
+      if ((tx1 - tx0 + 1) * (ty1 - ty0 + 1) <= 160) for (let tx = tx0; tx <= tx1; tx++) for (let ty = ty0; ty <= ty1; ty++) {
         const a = S.crs.fromLL(x2lon(tx), y2lat(ty)), b = S.crs.fromLL(x2lon(tx + 1), y2lat(ty + 1));
-        g += `<image href="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}" x="${f(X(a.x))}" y="${f(Y(a.y))}" width="${f(X(b.x) - X(a.x) + 0.6)}" height="${f(Y(b.y) - Y(a.y) + 0.6)}" preserveAspectRatio="none"/>`;
+        const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`; if (collect) collect.push(url);
+        g += `<image href="${tiles?.get(url) || url}" x="${f(X(a.x))}" y="${f(Y(a.y))}" width="${f(X(b.x) - X(a.x) + 0.6)}" height="${f(Y(b.y) - Y(a.y) + 0.6)}" preserveAspectRatio="none"/>`;
       }
     }
     // axe : liseré blanc, puis sections colorées par catégorie
@@ -322,8 +338,24 @@ export function initUvr(api) {
   }
 
   // Page imprimable : plan de gestion des vitesses du corridor (E.4) + checklist de la faisabilité / APS.
-  function notePage() {
+  // Tuiles satellite incorporées dans la page (data URI) : le plan s'imprime en PDF avec son fond, même hors ligne.
+  async function embedTiles(urls) {
+    const map = new Map(), list = [...new Set(urls)];
+    let k = 0;
+    await Promise.all(Array.from({ length: 6 }, async () => {
+      while (k < list.length) {
+        const u = list[k++];
+        try { const b = await (await fetch(u, { mode: 'cors' })).blob(); map.set(u, await new Promise((ok) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = () => ok(u); fr.readAsDataURL(b); })); } catch { /* la page gardera l'adresse de la tuile */ }
+      }
+    }));
+    return map;
+  }
+  async function notePage() {
     const res = S.uvr?.res || []; if (!res.length) { toast('Aucun résultat.', 'warn'); return; }
+    const w = window.open('', '_blank');
+    if (w) w.document.write('<p style="font:14px sans-serif;margin:24px">Préparation du plan de gestion des vitesses et du fond satellite…</p>');
+    let tiles = null;
+    if (geo()) { const urls = []; for (const r of res) { planSvg(r, { collect: urls }); for (const z of zonesOf(r)) planSvg(r, { s0: z.s0 - 250, s1: z.s1 + 250, collect: urls }); } try { tiles = await embedTiles(urls); } catch { tiles = null; } }
     const u = cfg(), date = new Date().toLocaleDateString('fr-FR');
     const ck = (id, txt, ok) => `<tr><td>${id}</td><td>${txt}</td><td>${ok ? '✔ produit par GIRA' : 'à compléter'}</td></tr>`;
     const nT = res.reduce((a, r) => a + r.hits.length, 0);
@@ -332,7 +364,7 @@ export function initUvr(api) {
 <button class="noprint" onclick="print()" style="float:right;padding:6px 14px;font-size:13px">Imprimer / PDF</button><h1>Plan de gestion des vitesses du corridor — ${esc(S.prj.name || 'projet')}</h1>
 <div class="n">${u.opts.ref === 'R4L' ? 'Vitesses : cadre Roads-for-Life (R4L), Banque mondiale / WRI, Guide for Safe Speeds (2024), § 2.2–2.3, figures 7 et 8 (p. 28–35). Aménagements : ' : ''}Guide M1 ESCWA/UNRSF (version internationale 2026), sections B.5.4, C1.3, C1.5, C1.6, E.4 ; arbres AD 1.1 et AD 1.2 ; fiches F1.09–F1.17. Établi le ${date} avec GIRA. ${nT} déclencheur(s) UVR rattaché(s) à moins de ${u.opts.R} m.</div>
 <h2>E.4.1 Informations générales</h2><table><tr><th>Projet</th><td>${esc(S.prj.name || '')}</td></tr><tr><th>Corridor</th><td>${res.map((r) => `${esc(r.name)} : PK 0+000 — ${fmtPK(r.len)} (${fmt(r.len / 1000, 2)} km)`).join('<br>')}</td></tr><tr><th>Date / version</th><td>${date}</td></tr><tr><th>Hypothèses</th><td>Référentiel : ${REFS[u.opts.ref]} ; rayon d'influence ${u.opts.R} m ; traversée de localité ≥ ${u.opts.travMin} m ; ${u.opts.junc ? `carrefours à 50 km/h sur ±${u.opts.juncL} m ; ` : ''}${u.opts.ref === 'R4L' ? `pôles d'activité humaine à ${u.opts.sep ? '50 km/h (usagers vulnérables séparés)' : '30 km/h'}` : 'vitesses par type :'} ${u.opts.ref === 'R4L' ? '' : TYPE_KEYS.map((k) => `${UVR_TYPES[k].label.split(' /')[0]} ${u.opts.types[k].v} km/h${u.opts.types[k].rural ? '' : ' (en traversée seulement)'}`).join(', ')} ; VC = vitesse-cible + 10 km/h (C1.5).</td></tr></table>
-${res.map((r, i) => `<h2${i ? ' class="pb"' : ''}>${esc(r.name)} — plan du tracé</h2>${planSvg(r)}${zonesOf(r).map((z, k) => `<h3>Détail ${k + 1} : PK ${fmtPK(z.s0)} – ${fmtPK(z.s1)} (${esc(z.lbl)})</h3>${planSvg(r, { s0: z.s0 - 250, s1: z.s1 + 250, W: 1000 })}`).join('')}<p class="n">Axe coloré par catégorie (voir la légende du profil), PK tous les ${[100, 200, 250, 500, 1000, 2000, 5000].find((k) => r.len / k <= 14) || 10000} m, déclencheurs UVR (pastilles) et aménagements principaux (▮ portail, ▬ plateau, 30 zone 30, ‖ passage piéton, S chicane, ○ limitation).</p><h2 class="pb">${esc(r.name)} — profil des vitesses</h2>${speedSvg(r, { width: 1000 })}
+${res.map((r, i) => `<h2${i ? ' class="pb"' : ''}>${esc(r.name)} — plan du tracé</h2>${planSvg(r, { tiles })}${zonesOf(r).map((z, k) => `<h3>Détail ${k + 1} : PK ${fmtPK(z.s0)} – ${fmtPK(z.s1)} (${esc(z.lbl)})</h3>${planSvg(r, { s0: z.s0 - 250, s1: z.s1 + 250, W: 1000, tiles })}`).join('')}<p class="n">Axe coloré par catégorie (voir la légende du profil), PK tous les ${[100, 200, 250, 500, 1000, 2000, 5000].find((k) => r.len / k <= 14) || 10000} m, déclencheurs UVR (pastilles) et aménagements principaux (▮ portail, ▬ plateau, 30 zone 30, ‖ passage piéton, S chicane, ○ limitation).</p><h2 class="pb">${esc(r.name)} — profil des vitesses</h2>${speedSvg(r, { width: 1000 })}
 <h3>E.4.2 Tableau linéaire des vitesses</h3><table><thead><tr><th>PK début</th><th>PK fin</th><th>Cat.</th><th>Vitesse-cible</th><th>VC</th><th>Déclencheurs UVR</th><th>Dispositifs de modération</th></tr></thead><tbody>${r.rows.map((q) => `<tr><td>${fmtPK(q.s0)}</td><td>${fmtPK(q.s1)}</td><td>${esc(q.cat)}</td><td>${esc(q.vt)}</td><td>${esc(q.vc)}</td><td>${esc(q.trig)}</td><td>${esc(q.disp)}</td></tr>`).join('')}</tbody></table>
 <h3>Cartographie des déclencheurs UVR (C1.6)</h3>${r.hits.length ? `<table><thead><tr><th>Type</th><th>Nom</th><th>PK</th><th>Distance à l'axe</th><th>Zone</th><th>Prescriptions MUST (AD 1.2)</th><th>SHOULD</th></tr></thead><tbody>${r.hits.map((h) => `<tr><td>${esc(UVR_TYPES[h.type].label)}</td><td>${esc(h.name)}</td><td>${fmtPK(h.s)}</td><td>${fmt(Math.abs(h.off), 0)} m ${h.off > 0 ? 'à gauche' : 'à droite'}</td><td>${fmtPK(h.s0)} — ${fmtPK(h.s1)}</td><td>${UVR_TYPES[h.type].must.map(esc).join('<br>')}</td><td>${UVR_TYPES[h.type].should.map(esc).join('<br>')}</td></tr>`).join('')}</tbody></table>` : '<p class="n">Aucun déclencheur à moins du rayon d\'influence : profil standard de la catégorie (AD 1.2).</p>'}
 <h3>Aménagements</h3><table><thead><tr><th>PK</th><th>Sens</th><th>Aménagement</th><th>Niveau</th><th>Fiche</th></tr></thead><tbody>${r.treat.filter((q) => !q.list).map((q) => `<tr><td>${fmtPK(q.s)}</td><td>${q.dir === 1 ? 'PK croissants' : q.dir === -1 ? 'PK décroissants' : 'deux sens'}</td><td>${esc(q.label)}</td><td class="${q.lvl === 'MUST' ? 'must' : ''}">${q.lvl}</td><td>${esc(q.fiche)}</td></tr>`).join('')}</tbody></table>
@@ -342,9 +374,8 @@ ${ck('CK-F03', 'Générateurs UVR identifiés et cartographiés', nT > 0)}${ck('
 </tbody></table>
 <p class="n">Les déclencheurs issus d'OpenStreetMap ou d'un KMZ doivent être confirmés sur le terrain (enquête, comptages UVR — C1.6). La V85 géométrique (formules SETRA reprises de BVTrace) ne tient pas compte des dispositifs de modération : la V85 doit être mesurée après mise en service (F1.13, F1.17).</p>
 </body></html>`;
-    const w = window.open('', '_blank');
-    if (!w) { download(fname('html').replace(/\.html$/, '_plan_vitesses.html'), html, 'text/html;charset=utf-8'); return; }
-    w.document.write(html); w.document.close();
+    if (!w || w.closed) { download(fname('html').replace(/\.html$/, '_plan_vitesses.html'), html, 'text/html;charset=utf-8'); return; }
+    w.document.open(); w.document.write(html); w.document.close();
   }
 
   function bind() {
@@ -398,6 +429,34 @@ ${ck('CK-F03', 'Générateurs UVR identifiés et cartographiés', nT > 0)}${ck('
       if (ts && !e.target.closest('input,select')) { const r = (S.uvr?.res || []).find((q) => q.key === (S.uvrAx || S.uvr.res[0].key)), ax = allAxes().find((a) => a.key === r?.key); if (ax) { const p = ax.at(+ts.dataset.uvs).p; viewer.fit({ x0: p.x - 80, y0: p.y - 80, x1: p.x + 80, y1: p.y + 80 }, 0.02); } }
     });
   }
-  return { compute, render, bind, pick, cfg };
+  // Aménagement touché sur le plan : fiche (PK, sens, panneau, fiche M1) avec Supprimer / Fermer.
+  function hit(px, py) {
+    let best = null;
+    for (const h of S.uvrHits || []) { const [x, y] = viewer.w2s(h.p.x, h.p.y), d = Math.hypot(px - x, py - y); if (d < 16 && (!best || d < best.d)) best = { ...h, d }; }
+    return best;
+  }
+  function openTreat(h) {
+    const u = cfg(), r = (S.uvr?.res || []).find((q) => q.key === h.ax), q = r?.treat.find((x) => x.key === h.key); if (!q) return;
+    let dlg = document.getElementById('dlgUvrAm');
+    if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'dlgUvrAm'; document.body.appendChild(dlg); }
+    const fixed = q.list || q.code === 'lineaire';
+    dlg.innerHTML = `<h3 style="margin-top:0">${esc((MANUAL[q.code]?.name) || q.code)}</h3><p>${esc(q.label)}</p>
+      <p class="note">${esc(r.name)} · ${q.dir === 1 ? 'sens des PK croissants' : q.dir === -1 ? 'sens des PK décroissants' : 'deux sens'} · ${q.lvl} · fiche ${esc(q.fiche)}</p>
+      ${fixed ? '' : `<div class="row"><label class="fld"><span class="lb">PK</span><input id="amPk" type="text" inputmode="decimal" size="8" value="${Math.round(q.s)}"><span class="un">m</span></label>
+      <label class="fld"><span class="lb">Panneau</span><select id="amSign">${SIGN_CHOICES.map(([v, l]) => `<option value="${esc(v)}"${(q.sign || '') === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label></div>`}
+      <div class="row right"><button id="amDel" class="danger">Supprimer</button>${fixed ? '' : '<button id="amOk" class="primary">Appliquer</button>'}<button id="amClose">Fermer</button></div>`;
+    const ed = edOf(u, r.key), man = q.key.startsWith('manual:') ? ed.add.find((x) => `manual:${x.id}` === q.key) : null;
+    dlg.querySelector('#amClose').onclick = () => dlg.close();
+    dlg.querySelector('#amDel').onclick = () => { if (man) ed.add = ed.add.filter((x) => x !== man); else { ed.del.push(q.key); delete ed.mv[q.key]; delete ed.sign[q.key]; } u.run = true; dlg.close(); update(); toast('Aménagement supprimé (rétablissable dans l\'onglet Vitesses / UVR).'); };
+    const ok = dlg.querySelector('#amOk');
+    if (ok) ok.onclick = () => {
+      const v = parseNum(dlg.querySelector('#amPk').value), sg = dlg.querySelector('#amSign').value;
+      if (man) { if (isFinite(v)) man.s = v; man.sign = sg || null; }
+      else { if (isFinite(v) && Math.abs(v - q.s) > 0.05) ed.mv[q.key] = v; if ((q.sign || '') !== sg) ed.sign[q.key] = sg; }
+      u.run = true; dlg.close(); update();
+    };
+    dlg.showModal();
+  }
+  return { compute, render, bind, pick, cfg, hit, openTreat };
 }
 export { defaultUvrOpts };
