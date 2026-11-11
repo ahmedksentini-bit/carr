@@ -50,6 +50,7 @@ import { analyse, SITES } from './capacity.js';
 import { initLang, getLang, t } from './i18n.js';
 import { analysePlan, gapParams, GAPS } from './capacity-plan.js';
 import { initUvr } from './uvrtab.js';
+import { axisFromPolyline, kmlLines } from './axisimport.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -1626,6 +1627,8 @@ function bindEch() {
   $('#btnHwyAxis').addEventListener('click', () => { setTool('axis'); S.hwyDraw = 'hwy'; setPrompt(); });
   $('#btnCrossAxis').addEventListener('click', () => { setTool('axis'); S.hwyDraw = 'cross'; setPrompt(); });
   // + Voie principale : la voie principale 1 tant qu'elle n'est pas tracée, sinon une voie de plus (autoroute par défaut)
+  $('#btnAxisKml').addEventListener('click', () => $('#fileAxisKml').click());
+  $('#fileAxisKml').addEventListener('change', async (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) await importAxisKml(f); });
   $('#btnMainAxis').addEventListener('click', () => { setTool('axis'); S.hwyDraw = S.prj.hwy?.axis?.length >= 2 ? 'main' : 'hwy'; setPrompt(); });
   $('#mainList').addEventListener('click', (e) => { const li = e.target.closest('li[data-mi]'); if (!li) return; S.msel = +li.dataset.mi; S.echSig = ''; refreshPanels(); viewer.invalidate(); });
   $('#crossFields').addEventListener('click', (e) => { const b = e.target.closest('[data-xconnect]'); if (!b) return; const msg = connectCross(+b.dataset.xconnect); if (msg) { S.echSig = ''; update(); toast(msg); } else toast('Aucun carrefour ni croisement à raccorder pour cette voie.', 'warn'); });
@@ -2794,6 +2797,45 @@ function connectCross(k, { ends = false } = {}) {
   return msgs.length ? `${msgs.join(' ; ')}.` : '';
 }
 
+// Axe importé d'une ligne KMZ / KML (axisimport.js) : voie principale, ou nouvelle voie secondaire si la principale
+// existe déjà et que l'utilisateur ne veut pas la remplacer.
+async function importAxisKml(file) {
+  try {
+    const lines = kmlLines(parseKML(await kmlTextOf(await file.arrayBuffer(), file.name)));
+    if (!lines.length) { toast(`${file.name} : aucune ligne (LineString) — dessinez l'axe en « trajet » dans Google Earth.`, 'warn'); return; }
+    let L = lines[0];
+    if (lines.length > 1) {
+      const ans = prompt(`${file.name} contient ${lines.length} lignes. Numéro de la ligne à importer :\n${lines.map((q, i) => `${i + 1}. ${q.name} (${q.ll.length} points)`).join('\n')}`, '1');
+      if (ans == null) return;
+      L = lines[Math.max(1, Math.min(lines.length, parseInt(ans, 10) || 1)) - 1];
+    }
+    const [lonM, latM] = L.ll[Math.floor(L.ll.length / 2)], empty = !S.prj.branches.length && !(S.prj.hwy?.axis?.length) && !S.prj.crosses.some((c) => c.axis?.length);
+    // projet en UTM d'un autre fuseau (ex. fuseau 32 de la Tunisie pour un tracé au Sénégal, fuseau 28) : déformation
+    // de plusieurs % des longueurs et des rayons — un projet vide passe au fuseau du tracé
+    if (S.crs.geo && S.prj.crs?.id === 'utm' && (+S.prj.crs.zone || utmZoneOf(lonM)) !== utmZoneOf(lonM)) {
+      if (empty) { changeCRS({ id: 'utm', zone: utmZoneOf(lonM), south: latM < 0, def: '' }); toast(`Système passé en UTM WGS84 fuseau ${utmZoneOf(lonM)}${latM < 0 ? 'S' : 'N'} (fuseau du tracé).`); }
+      else toast(`Le tracé est dans le fuseau UTM ${utmZoneOf(lonM)}, le projet dans le fuseau ${S.prj.crs.zone} : longueurs et rayons déformés — changez de système dans l'onglet Projet.`, 'warn');
+    }
+    if (!S.crs.geo) {
+      const [lon, lat] = L.ll[Math.floor(L.ll.length / 2)];
+      if (S.prj.branches.length || S.prj.hwy?.axis?.length) { toast('Le projet est en coordonnées locales : choisissez un système géoréférencé (onglet Projet) avant d\'importer un axe KMZ.', 'warn'); return; }
+      changeCRS({ id: 'utm', zone: utmZoneOf(lon), south: lat < 0, def: '' });
+      toast(`Système passé en UTM WGS84 fuseau ${utmZoneOf(lon)}${lat < 0 ? 'S' : 'N'}.`);
+    }
+    const pts = L.ll.map(([lon, lat]) => { const q = S.crs.fromLL(lon, lat); return [q.x, q.y]; });
+    const R = axisFromPolyline(pts);
+    const name = L.name && !/^Ligne \d+$/.test(L.name) ? L.name : null;
+    let where;
+    if (S.prj.hwy?.axis?.length >= 2 && !confirm(`Remplacer l'axe de la voie principale « ${S.prj.hwy.name || 'voie principale'} » ?\n(Annuler : l'axe est ajouté comme nouvelle voie secondaire.)`)) {
+      const k = S.prj.crosses.length; S.prj.crosses.push({ ...newCross(k), axis: R.axis, ...(name ? { name } : {}) }); S.xsel = k; where = 'nouvelle voie secondaire';
+    } else { S.prj.hwy.axis = R.axis; S.prj.hwy.on = true; if (name) S.prj.hwy.name = name; S.msel = -1; where = 'voie principale'; }
+    S.echSig = ''; update();
+    const xs = R.axis.map((q) => q.x), ys = R.axis.map((q) => q.y);
+    viewer.fit({ x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) });
+    toast(`${L.name} importée (${where}) : ${R.axis.length} sommets, ${R.virages} virage${R.virages > 1 ? 's' : ''} (rayons et clothoïdes reconstitués), écart maximal ${fmt(R.ecart, 2)} m aux points du fichier. Vérifiez le type de voie et sa catégorie (onglet Échangeur).`);
+  } catch (e) { console.error(e); toast(`Import de l'axe impossible : ${e.message}`, 'err'); }
+}
+
 function finishAxis() {
   const pts = dedupe(S.draft);
   S.draft = [];
@@ -3055,6 +3097,44 @@ function bindCanvas() {
     viewer.zoomAt(Math.pow(1.0016, -dy), px, py);
     onMove(px, py); autosave();
   }, { passive: false });
+
+  // Téléphone / tablette : zoom et panoramique à deux doigts (pincement). Ces écouteurs passent avant ceux de la
+  // souris : pendant un pincement, les autres gestes sont neutralisés ; le second doigt annule un point d'axe que le
+  // premier vient de poser.
+  const touches = new Map();
+  let pinch = null, lastTap = null;
+  const tpos = (e) => pos(e);
+  const twoFingers = () => { const [a, b] = [...touches.values()]; return { d: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, m: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }; };
+  cv.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    touches.set(e.pointerId, tpos(e));
+    if (touches.size === 1) { lastTap = { t: performance.now(), draft: S.draft.length, meas: S.meas.length }; return; }
+    e.stopImmediatePropagation();
+    if (touches.size === 2) {
+      if (lastTap && performance.now() - lastTap.t < 500) { if (S.draft.length > lastTap.draft) S.draft.length = lastTap.draft; if (S.meas.length > lastTap.meas) S.meas.length = lastTap.meas; setPrompt(); }
+      S.drag = null; pinch = twoFingers(); viewer.invalidate();
+    }
+  }, true);
+  cv.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'touch' || !touches.has(e.pointerId)) return;
+    touches.set(e.pointerId, tpos(e));
+    if (!pinch) return;
+    e.stopImmediatePropagation();
+    if (touches.size < 2) return;
+    const q = twoFingers();
+    viewer.zoomAt(q.d / pinch.d, q.m[0], q.m[1]);
+    viewer.panPx(q.m[0] - pinch.m[0], q.m[1] - pinch.m[1]);
+    pinch = q;
+  }, true);
+  const tEnd = (e) => {
+    if (e.pointerType !== 'touch') return;
+    touches.delete(e.pointerId);
+    if (!pinch) return;
+    e.stopImmediatePropagation(); S.drag = null;
+    if (!touches.size) { pinch = null; autosave(); }
+  };
+  cv.addEventListener('pointerup', tEnd, true);
+  cv.addEventListener('pointercancel', tEnd, true);
 
   cv.addEventListener('pointerdown', (e) => {
     cv.setPointerCapture(e.pointerId);
