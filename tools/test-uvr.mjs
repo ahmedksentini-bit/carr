@@ -65,6 +65,7 @@ const P = parseOverpass({ elements: [
   { type: 'way', id: 5, tags: { landuse: 'residential' }, geometry: [{ lat: 34.7, lon: 10.7 }, { lat: 34.71, lon: 10.7 }, { lat: 34.71, lon: 10.71 }] },
 ] });
 ok(P.triggers.length === 2 && P.bld.length === 1 && P.built.length === 1, 'réponse Overpass : déclencheurs (arrêt TC dédoublonné), bâtiments, zones bâties');
+ok(classifyName('Daara Serigne Touba') === 'ecole' && classifyName('Louma de Keur') === 'marche' && classifyName('Poste de santé') === 'sante' && classifyName('Garage des cars') === 'gare' && classifyName('Arrêt cars rapides') === 'tc', 'termes sénégalais (daara, louma, poste de santé, garage)');
 ok(classifyName('Ecole primaire Sidi Mansour') === 'ecole' && classifyName('Souk hebdomadaire') === 'marche' && classifyName('جامع') === 'culte' && classifyName('Pont') === null, 'classement des repères KMZ par leur nom');
 ok(/around:200,34\.700000,10\.700000/.test(overpassQL([[34.7, 10.7], [34.71, 10.71]])), 'requête Overpass le long de l\'axe');
 

@@ -139,11 +139,11 @@ const llDist = (a, b) => { const k = Math.cos(((a.lat + b.lat) / 2) * Math.PI / 
 
 // Repère KMZ / KML → type de déclencheur d'après son nom ou celui de son dossier (null si non reconnu).
 const KW = [
-  ['ecole', /(é|e)cole|lyc(é|e)e|coll(è|e)ge|universit|madrasa|medersa|kutt?ab|jardin d.enfant|cr(è|e)che|school|kindergarten|مدرسة|معهد|روضة|كتاب|جامعة/i],
-  ['marche', /march(é|e)|souk|suq|market|commerc|échoppe|echoppe|سوق/i],
-  ['gare', /gare routi|station (de )?(bus|louage)|bus station|louage|محطة/i],
-  ['tc', /arr(ê|e)t|abribus|bus stop|taxi|transport (en )?commun|موقف/i],
-  ['sante', /h(ô|o)pital|clinique|dispensaire|centre de sant|sant(é|e) de base|\bcsb\b|hospital|clinic|health|مستشفى|مستوصف|صحة/i],
+  ['ecole', /(é|e)cole|lyc(é|e)e|coll(è|e)ge|universit|madrasa|medersa|kutt?ab|daara|\bcem\b|jardin d.enfant|cr(è|e)che|school|kindergarten|مدرسة|معهد|روضة|كتاب|جامعة/i],
+  ['marche', /march(é|e)|souk|suq|louma|market|commerc|échoppe|echoppe|سوق/i],
+  ['gare', /gare routi|garage (des |de )?(cars|taxis|bus)|station (de )?(bus|louage)|bus station|louage|محطة/i],
+  ['tc', /arr(ê|e)t|abribus|bus stop|taxi|cars? rapides?|ndiaga|transport (en )?commun|موقف/i],
+  ['sante', /h(ô|o)pital|clinique|dispensaire|centre de sant|poste de sant|case de sant|maternit|sant(é|e) de base|\bcsb\b|hospital|clinic|health|مستشفى|مستوصف|صحة/i],
   ['culte', /mosqu(é|e)e|(é|e)glise|zaou?ia|lieu de culte|mosque|church|جامع|مسجد|كنيسة/i],
   ['residentiel', /r(é|e)sidenti|lotissement|cit(é|e)\b|quartier|habitat|حي/i],
 ];
@@ -324,6 +324,11 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
     if (!ch) break;
   }
   segs = segs.filter((g) => g.s1 - g.s0 > 0.5);
+  { // même vitesse de part et d'autre d'une fin de traversée (ex. gare routière juste après) : une seule section
+    const m = [];
+    for (const g of segs) { const l = m[m.length - 1]; if (l && l.v === g.v) { l.s1 = g.s1; l.tr = l.tr || g.tr; } else m.push({ ...g }); }
+    segs = m;
+  }
   for (const g of segs) {
     g.cat = g.v >= base.vt ? baseCat : g.v <= 40 ? 'E' : 'D';
     g.vc = g.v >= base.vt ? base.vc : g.v + 10; // C1.5 : VC ≤ vitesse-cible + 10 km/h
