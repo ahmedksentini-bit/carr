@@ -432,6 +432,33 @@ ou sur un fond topographique DXF.
     et signalée avec l'allongement nécessaire du demi-ouvrage ;
   - tests : `node tools/test-watershed.mjs`, `node tools/test-hydrology.mjs`, `node tools/test-culvert.mjs`,
     `node tools/test-basinedit.mjs`.
+- **Vitesses / UVR (onglet dédié, Guide M1 ESCWA/UNRSF ; `js/uvr.js`, `js/uvrtab.js`)** : déclencheurs UVR et plan de
+  gestion des vitesses le long des axes cochés (route, autoroute, voies secondaires, bretelles, branches), comme les
+  bassins versants de BVTrace :
+  - déclencheurs (B.5.4, AD 1.2) : école, marché / zone commerciale, arrêt TC, centre de santé, lieu de culte, zone
+    résidentielle dense, gare routière — cherchés dans OpenStreetMap (API Overpass, rayon d'influence 200 m le long du
+    tracé), lus dans les calques KMZ / KML (nom du repère ou de son dossier : « école », « souk », « mosquée »,
+    « arrêt », « dispensaire »…, arabe compris) ou cliqués sur le plan ; type, nom et prise en compte modifiables ;
+  - traversées de localité (B.5.4 : > 400 m) détectées sur le bâti (zones résidentielles / commerciales et bâtiments
+    OSM, polygones KMZ « agglomération », « village », « zone bâtie ») ou saisies par PK ;
+  - sections de vitesse constante : catégorie de base A / B / C de l'axe, D (traversée, 50 km/h), E (zone sensible,
+    30 km/h) ; vitesse par type de déclencheur (AD 1.2, réglable) et application hors traversée ou non (l'arrêt TC
+    hors agglomération ne fait pas baisser la vitesse, comme dans le tableau E.4.2) ; zone 30 scolaire à ±200 m de
+    l'entrée (F1.17) ; VC = vitesse-cible + 10 km/h (C1.5) ; remontées de vitesse < 300 m supprimées ;
+  - transitions et aménagements placés aux PK, par sens : annonce à 250 m, bandes rugueuses à 150 / 100 / 50 m,
+    rétrécissement et panneau 60 à 150 m, portail d'entrée, premier plateau à +50 m, séquence inverse en sortie
+    (F1.12, F1.13, F1.15) ; entrée de zone 30, chicane (F1.14, F1.17) ; plateau au droit de l'école, passages protégés
+    (+ refuge si la traversée dépasse 7 m) aux arrêts et tous les ≤ 200 m en D / E, trottoirs continus 2,50 m
+    (1,50 m minimum), éclairage, dépassement interdit ; prescriptions MUST / SHOULD de chaque déclencheur ;
+  - V85 géométrique (formules SETRA reprises de BVTrace : V0 / (1 + 346 / R^1,5), V0 − 0,31 p² sur le profil en long,
+    accélérations ±0,85 m/s²) : vitesse-cible non crédible signalée en D / E (V85 > vitesse-cible + 10, dispositifs de
+    modération répétés proposés), VC dépassée en rase campagne, courbes sous la vitesse-cible (Contrôles) ;
+  - profil des vitesses (vitesse-cible, vitesse visée de la séquence F1.13, V85, déclencheurs, bandeaux des catégories
+    et des aménagements), tableau linéaire E.4.2, page imprimable « Plan de gestion des vitesses » (E.4.1, profils,
+    E.4.2, cartographie C1.6, aménagements, checklists CK-F03 à F06, CK-A08, A12, A13), CSV ; sur le plan, calque
+    `GIRA_UVR` : bandes colorées des catégories, déclencheurs, aménagements et panneaux (B14, entrée / sortie
+    d'agglomération, zone 30, passage piéton, enfants) ;
+  - tests : `node tools/test-uvr.mjs`.
 - **Ouvrages numérotés** : passages supérieurs, tiges, anneaux de giratoire dénivelé et cadres sont numérotés OA1, OA2…
   dans l'ordre des abscisses de l'autoroute (numéro cerclé sur le plan) ; le nom de chaque ouvrage se modifie dans
   l'onglet Ouvrages. **+ Passage supérieur** : dessinez une voie secondaire qui franchit l'autoroute, l'ouvrage est
@@ -560,6 +587,8 @@ js/talus.js         talus en plan : EET, barbules, découpe entre axes
 js/viewer.js        rendu canvas (projet, DXF, HUD)
 js/geom.js          géométrie (droites, arcs, raccordements, décalages)
 js/clotho.js        alignements en plan avec clothoïdes (raccordements progressifs)
+js/uvr.js           déclencheurs UVR, sections A–E, transitions et aménagements du Guide M1, V85 géométrique, E.4.2
+js/uvrtab.js        onglet Vitesses / UVR : OpenStreetMap (Overpass), KMZ, saisie, dessin sur le plan, page imprimable
 js/roadcat.js       catégories de conception (ARP, ICTAAL, VSA, AU70), dévers, clothoïdes, contrôles (BVTrace)
 js/echangeur.js     échangeur : section courante, bretelles, divergents / convergents, contrôles
 js/dxf-parse.js     lecture DXF        js/dxf-write.js   écriture DXF R12

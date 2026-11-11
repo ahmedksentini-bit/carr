@@ -33,6 +33,7 @@ export const THEMES = {
       IMPLANTATION: { stroke: '#e879f9', w: 1, text: '#f0abfc' },
       PROFILS: { stroke: '#4ade80', w: 1.1, text: '#86efac' },
       BASSINS: { stroke: '#38bdf8', w: 1.2, text: '#7dd3fc', fill: { bv: 'rgba(56,189,248,0.07)' }, roles: { stream: { stroke: 'rgba(96,165,250,0.85)', w: 1 }, part: { stroke: 'rgba(56,189,248,0.45)', w: 0.8 } } },
+      UVR: { stroke: '#f9a8d4', w: 1.2, text: '#fbcfe8', roles: { link: { stroke: 'rgba(249,168,212,0.6)', w: 0.8, dash: [4, 3] }, am: { stroke: '#fde68a', w: 1.4 } } },
     },
   },
   light: {
@@ -65,6 +66,7 @@ export const THEMES = {
       IMPLANTATION: { stroke: '#a21caf', w: 1, text: '#86198f' },
       PROFILS: { stroke: '#15803d', w: 1.1, text: '#166534' },
       BASSINS: { stroke: '#0369a1', w: 1.2, text: '#075985', fill: { bv: 'rgba(3,105,161,0.07)' }, roles: { stream: { stroke: 'rgba(37,99,235,0.8)', w: 1 }, part: { stroke: 'rgba(3,105,161,0.4)', w: 0.8 } } },
+      UVR: { stroke: '#be185d', w: 1.2, text: '#9d174d', roles: { link: { stroke: 'rgba(190,24,93,0.55)', w: 0.8, dash: [4, 3] }, am: { stroke: '#92400e', w: 1.4 } } },
     },
   },
 };
@@ -135,7 +137,7 @@ export function tracePath(ctx, v, segs, move = true) {
 }
 
 function setStroke(ctx, v, st, prim) {
-  ctx.strokeStyle = st.stroke;
+  ctx.strokeStyle = prim.color || st.stroke;
   let w = st.w || 1;
   if (prim.wm) w = Math.max(w, prim.wm * v.s);
   ctx.lineWidth = w;
@@ -171,7 +173,7 @@ function arrowHead(ctx, x0, y0, x1, y1, size) {
 export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
   if (!D) return;
   const T = THEMES[theme];
-  const order = ['MNT', 'BASSINS', 'CHAUSSEE', 'TALUS', 'EET', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'RETENUE', 'OUVRAGE', 'PSGR', 'PMR', 'VISIBILITE', 'EPURE', 'AXE', 'PROFILS', 'DEVERS', 'COTATION', 'SIGNALISATION'];
+  const order = ['MNT', 'BASSINS', 'CHAUSSEE', 'TALUS', 'EET', 'ILOT_CENTRAL', 'ILOT_SEP', 'CONSTRUCTION', 'LIMITE', 'ACCOTEMENT', 'TROTTOIR', 'BORDURE', 'MARQUAGE', 'RETENUE', 'OUVRAGE', 'PSGR', 'PMR', 'VISIBILITE', 'EPURE', 'AXE', 'PROFILS', 'DEVERS', 'COTATION', 'SIGNALISATION', 'UVR'];
   ctx.lineCap = 'butt'; ctx.lineJoin = 'round';
   for (const layer of order) {
     if (vis[layer] === false) continue;
@@ -221,7 +223,7 @@ export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
           ctx.fillText(pr.code, x, y + px / 2 + 2);
         }
       } else if (pr.k === 'text') {
-        drawText(ctx, v, pr.p, pr.s, pr.h, pr.rot, pr.align, st.text || st.stroke);
+        drawText(ctx, v, pr.p, pr.s, pr.h, pr.rot, pr.align, pr.color || st.text || st.stroke);
       } else if (pr.k === 'arrow') {
         if (pr.len * v.s < 10) continue;
         const b = G.add(pr.p, G.mul(pr.dir, pr.len));

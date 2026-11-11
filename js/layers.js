@@ -26,4 +26,5 @@ export const LAYERS = {
   IMPLANTATION: { label: "Points d'implantation", dxf: 'GIRA_IMPLANTATION', aci: 6 },
   PROFILS: { label: 'Profils en travers (implantation)', dxf: 'GIRA_PROFILS', aci: 3 },
   BASSINS: { label: 'Bassins versants et écoulements', dxf: 'GIRA_BASSINS', aci: 150 },
+  UVR: { label: 'Déclencheurs UVR, vitesses-cibles et aménagements (M1)', dxf: 'GIRA_UVR', aci: 6 },
 };
