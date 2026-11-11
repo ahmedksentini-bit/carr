@@ -6116,10 +6116,15 @@ function bindUI() {
   bindKml();
   bindPsgr();
   $('#btnNew').addEventListener('click', () => {
-    if (S.prj.branches.length && !confirm(t('Créer un nouveau projet ? Le projet en cours non enregistré sera perdu.'))) return;
+    // tout ce qui appartient au projet compte (carrefours, voies, bretelles, déclencheurs UVR, bassins, calques KMZ)
+    const filled = S.prj.branches.length || S.prj.hwy?.axis?.length || S.prj.crosses?.some((c) => c.axis?.length) || S.prj.ramps?.length || S.prj.others?.length || S.prj.uvr?.trg?.length || S.prj.hydro?.res || S.kml.length;
+    if (filled && !confirm(t('Créer un nouveau projet ? Le projet en cours non enregistré sera perdu.'))) return;
     const keep = { crs: S.prj.crs, bg: S.prj.bg, opts: S.prj.opts, kind: S.prj.kind };
     S.prj = { ...newProject(S.prj.context), ...keep };
-    S.sel = -1; S.hist = []; S.fut = [];
+    S.sel = -1; S.hist = []; S.fut = []; S.D = null;
+    // les calques KMZ / KML font partie du projet (enregistrés avec lui) : un nouveau projet repart sans calque
+    S.kml = []; S.kmlCache.clear(); S.kmlOpen?.clear?.(); saveKml(); renderKmlLayers();
+    S.uvr = null; S.hyRes = null; S.hyWork = null;
     syncCtxUI(); syncCrsUI(); renderBranchForm(); update();
   });
   $('#btnOpen').addEventListener('click', () => $('#fileOpen').click());
