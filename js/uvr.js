@@ -131,6 +131,34 @@ way["landuse"~"^(residential|retail|commercial)$"]${ar(R)}->.l;
 way["building"]${ar(Rb)}->.b;
 .b out ids center;`;
 }
+// Requêtes Overpass légères, par tronçon (plus robustes sur les longs axes et les villes denses) :
+//   • déclencheurs et zones bâties dans le rectangle englobant du tronçon élargi de R (le tri par distance à l'axe
+//     est fait ensuite) — une requête « around » sur une polyligne est bien plus coûteuse pour le serveur ;
+//   • bâtiments (centres seuls) à moins de Rb de la polyligne, requête séparée dont l'échec n'arrête pas la recherche.
+export function overpassBBoxOf(polyLL, R = 200) {
+  const lat = polyLL.map((p) => p[0]), lon = polyLL.map((p) => p[1]), la = Math.max(...lat.map(Math.abs)), dLat = R / 111320, dLon = R / (111320 * Math.cos((la * Math.PI) / 180));
+  return [Math.min(...lat) - dLat, Math.min(...lon) - dLon, Math.max(...lat) + dLat, Math.max(...lon) + dLon];
+}
+export function overpassPoiQL(bbox) {
+  const b = `(${bbox.map((v) => v.toFixed(6)).join(',')})`;
+  return `[out:json][timeout:60];
+(
+  nwr["amenity"~"^(school|kindergarten|college|university|childcare|marketplace|bus_station|taxi|hospital|clinic|doctors|place_of_worship)$"]${b};
+  nwr["highway"="bus_stop"]${b};
+  nwr["public_transport"~"^(platform|station)$"]${b};
+  nwr["healthcare"~"^(hospital|clinic|centre|doctor)$"]${b};
+  nwr["shop"~"^(mall|supermarket)$"]${b};
+)->.p;
+.p out tags center;
+way["landuse"~"^(residential|retail|commercial)$"]${b}->.l;
+.l out tags geom;`;
+}
+export function overpassBldQL(polyLL, Rb = 120) {
+  const pts = polyLL.map(([lat, lon]) => `${lat.toFixed(6)},${lon.toFixed(6)}`).join(',');
+  return `[out:json][timeout:60];
+way["building"](around:${Math.round(Rb)},${pts});
+out ids center;`;
+}
 // Réponse Overpass → { triggers: [{ type, name, lon, lat, ring?, osm }], built: [{ kind, ring: [[lon, lat]] }], bld: [[lon, lat]] }
 export function parseOverpass(json) {
   const triggers = [], built = [], bld = [], seen = new Set();
