@@ -466,6 +466,11 @@ ou sur un fond topographique DXF.
     E.4.2, cartographie C1.6, aménagements, checklists CK-F03 à F06, CK-A08, A12, A13), CSV ; sur le plan, calque
     `GIRA_UVR` : bandes colorées des catégories, déclencheurs, aménagements et panneaux (B14, entrée / sortie
     d'agglomération, zone 30, passage piéton, enfants) ;
+  - référentiel au choix : Guide M1 (catégories A à E) ou **Roads-for-Life (R4L)** du Guide for Safe Speeds de la
+    Banque mondiale / WRI (2024, § 2.2–2.3, fig. 7–8) : base de l'axe (accès contrôlé 100, liaison rurale 80 avec
+    séparateur ou 70, accès rurale 70 / 50, liaison urbaine, axe urbain principal), tout générateur d'usagers
+    vulnérables → pôle d'activité humaine à 30 km/h (50 si les usagers vulnérables sont séparés), y compris hors
+    village ; carrefours du projet sur l'axe : zone d'approche à 50 km/h (±100 m réglable, M1 AD 1.3 et R4L) ;
   - aménagements et panneaux modifiables un par un (tableau de l'onglet) : PK, panneau (ou aucun), suppression
     (liste des supprimés, « Rétablir »), ajout au PK saisi ou par clic sur le plan (portail, plateau, passage,
     chicane, bandes rugueuses, zone 30, limitation, annonce, panneau « enfants ») ; retouches enregistrées avec le

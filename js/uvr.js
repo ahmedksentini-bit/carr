@@ -21,6 +21,8 @@ const rot90 = (a) => ({ x: -a.y, y: a.x });
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const pk = (s) => { const k = Math.floor(Math.round(s) / 1000), m = Math.round(s) - k * 1000; return `${k}+${String(m).padStart(3, '0')}`; };
 export const fmtPK = pk;
+const isLow = (c) => ['D', 'E', 'HUB', 'HUBS'].includes(c);
+const isE = (c) => c === 'E' || c === 'HUB';
 
 // ------------------------------------------------------------------ Référentiel M1
 export const CATS = Object.freeze({
@@ -29,7 +31,22 @@ export const CATS = Object.freeze({
   C: { label: 'C — Régionale', vt: 70, vc: 80, color: '#0891b2' },
   D: { label: 'D — Traversée de localité', vt: 50, vc: 60, color: '#f59e0b' },
   E: { label: 'E — Zone sensible', vt: 30, vc: 40, color: '#dc2626' },
+  // Cadre Roads-for-Life (R4L), Banque mondiale / WRI, Guide for Safe Speeds (2024), § 2.3 et figure 8 (routes rurales)
+  // et § 2.2 et figure 7 (routes urbaines) : vitesses maximales.
+  AC: { label: 'R4L — Rurale à accès contrôlé (100)', short: 'Accès contrôlé', vt: 100, vc: 110, color: '#7c3aed', r4l: true },
+  L80: { label: 'R4L — Liaison rurale avec TPC / séparateur (80)', short: 'Liaison', vt: 80, vc: 90, color: '#2563eb', r4l: true },
+  L70: { label: 'R4L — Liaison rurale sans séparateur (70)', short: 'Liaison', vt: 70, vc: 80, color: '#2563eb', r4l: true },
+  A70: { label: 'R4L — Accès rurale, abords protégés (70)', short: 'Accès', vt: 70, vc: 80, color: '#0891b2', r4l: true },
+  A50: { label: 'R4L — Accès rurale, abords non protégés (50)', short: 'Accès', vt: 50, vc: 60, color: '#0891b2', r4l: true },
+  UL: { label: 'R4L — Liaison urbaine (50–70)', short: 'Liaison urbaine', vt: 70, vc: 80, color: '#0e7490', r4l: true },
+  UM: { label: 'R4L — Axe urbain principal (50)', short: 'Axe principal', vt: 50, vc: 60, color: '#d97706', r4l: true },
+  HUB: { label: 'R4L — Pôle d\'activité humaine (30)', short: 'Pôle d\'activité', vt: 30, vc: 40, color: '#dc2626', r4l: true },
+  HUBS: { label: 'R4L — Pôle d\'activité, usagers vulnérables séparés (50)', short: 'Pôle (UVR séparés)', vt: 50, vc: 60, color: '#f59e0b', r4l: true },
+  IX: { label: 'R4L — Approche de carrefour (50)', short: 'Carrefour', vt: 50, vc: 60, color: '#a855f7', r4l: true },
 });
+export const M1_BASES = ['A', 'B', 'C'];
+export const R4L_BASES = ['AC', 'L80', 'L70', 'A70', 'A50', 'UL', 'UM'];
+export const REFS = { M1: 'Guide M1 ESCWA/UNRSF (2026)', R4L: 'Roads-for-Life — Banque mondiale, Guide for Safe Speeds (2024)' };
 
 // Types de déclencheurs (B.5.4, AD 1.2). v : vitesse-cible (AD 1.2) ; rural : la vitesse s'applique aussi hors
 // traversée (sinon, hors agglomération, seuls les aménagements ponctuels sont prescrits — cas de l'arrêt TC du
@@ -63,19 +80,25 @@ export function defaultUvrOpts() {
     bldMin: 4, // bâtiments (OSM) dans la fenêtre de ±50 m × 80 m pour qu'un point de l'axe soit « bâti »
     spacing: 200, // espacement maximal des traversées piétonnes en cat. D / E (AD 1.2)
     v0: 'auto', // profil V85 : auto | 120 | 102 | 92
+    ref: 'M1', // référentiel des vitesses : M1 (ESCWA/UNRSF) ou R4L (Banque mondiale)
+    sep: false, // R4L : usagers vulnérables séparés du trafic dans les pôles d'activité (trottoirs, traversées sûres) → 50 km/h
+    junc: true, // carrefours plans sur l'axe : vitesse d'approche ≤ 50 km/h (M1 AD 1.3, R4L § 2.3)
+    juncL: 100, // longueur de la zone à 50 km/h de part et d'autre du centre du carrefour (m)
     types: Object.fromEntries(TYPE_KEYS.map((k) => [k, { v: UVR_TYPES[k].v, rural: UVR_TYPES[k].rural }])),
   };
 }
 export function uvrOpts(o) {
   const d = defaultUvrOpts(), r = { ...d, ...(o || {}) };
   r.types = Object.fromEntries(TYPE_KEYS.map((k) => [k, { ...d.types[k], ...(o?.types?.[k] || {}) }]));
-  for (const k of ['R', 'travMin', 'gapMin', 'travGap', 'bldMin', 'spacing']) if (!(+r[k] > 0)) r[k] = d[k]; else r[k] = +r[k];
+  if (r.ref !== 'R4L') r.ref = 'M1';
+  for (const k of ['R', 'travMin', 'gapMin', 'travGap', 'bldMin', 'spacing', 'juncL']) if (!(+r[k] > 0)) r[k] = d[k]; else r[k] = +r[k];
   return r;
 }
 // Catégorie de base d'un axe (rase campagne) : autoroute → A ; route à chaussées séparées → B ; sinon B.
-export function baseCatOf(ax) {
-  if (ax?.key === 'hwy' && ax?.H && ax.H.kind !== 'route') return 'A';
-  return 'B';
+export function baseCatOf(ax, ref = 'M1') {
+  const auto = ax?.key === 'hwy' && ax?.H && ax.H.kind !== 'route';
+  if (ref === 'R4L') return auto ? 'AC' : (ax?.H?.median || 0) > 0 ? 'L80' : 'L70';
+  return auto ? 'A' : 'B';
 }
 
 // ------------------------------------------------------------------ OpenStreetMap (Overpass)
@@ -264,7 +287,17 @@ export function v85Profile(ax, { V0 = 102, ds = 10, zAt = null, a = 0.85 } = {})
 // ------------------------------------------------------------------ analyse d'un axe
 // input : { triggers: [{ id, type, name, x, y, ring? }], trav: [{ s0, s1, on }], baseCat, zAt, width }
 export function analyzeAxis(ax, input = {}, opts = {}) {
-  const o = uvrOpts(opts), baseCat = CATS[input.baseCat] ? input.baseCat : baseCatOf(ax), base = CATS[baseCat];
+  const o = uvrOpts(opts), R4L = o.ref === 'R4L';
+  const okBase = (c) => CATS[c] && (R4L ? R4L_BASES : M1_BASES).includes(c);
+  const baseCat = okBase(input.baseCat) ? input.baseCat : baseCatOf(ax, o.ref), base = CATS[baseCat];
+  // R4L : tout générateur d'usagers vulnérables (hameau, école, commerce de bord de route, lieu de culte, arrêt, accès)
+  // fait de la section un pôle d'activité humaine à 30 km/h, hors traversée comme en traversée ; 50 km/h si les
+  // usagers vulnérables sont séparés du trafic (§ 2.3, p. 34).
+  const hubV = o.sep ? 50 : 30;
+  const typeV = (k) => (R4L ? { v: hubV, rural: true } : o.types[k]);
+  const travV = R4L ? hubV : 50;
+  // carrefours sur l'axe (centres projetés) : zone d'approche à 50 km/h
+  const juncs = o.junc ? (input.junctions || []).map((s) => clamp(+s, 0, ax.len)).filter((s) => isFinite(s)) : [];
   const ds = 5, smp = sampleAxis(ax, ds), checks = [];
   const width = +input.width > 0 ? +input.width : (ax.half ? 2 * ax.half : 7);
   // traversées retenues
@@ -282,20 +315,22 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
   const V = smp.map((q) => {
     let v = base.vt, why = [];
     const tr = inTrav(q.s);
-    if (tr && 50 < v) { v = 50; why.push('traversée'); }
+    if (tr && travV < v) { v = travV; why.push('traversée'); }
     for (const h of hits) {
       if (q.s < h.s0 || q.s > h.s1) continue;
-      const T = o.types[h.type];
+      const T = typeV(h.type);
       if (!(T.rural || tr)) continue;
       if (T.v < v) { v = T.v; why = [h.type]; } else if (T.v === v && !why.includes(h.type)) why.push(h.type);
     }
-    return { s: q.s, v, tr };
+    let ix = false;
+    if (juncs.some((s) => Math.abs(q.s - s) <= o.juncL) && 50 < v) { v = 50; ix = true; }
+    return { s: q.s, v, tr, ix };
   });
   // sections de vitesse constante
   let segs = [];
   for (const q of V) {
     const l = segs[segs.length - 1];
-    if (l && l.v === q.v && l.tr === q.tr) l.s1 = q.s; else { if (l) l.s1 = q.s; segs.push({ s0: q.s, s1: q.s, v: q.v, tr: q.tr }); }
+    if (l && l.v === q.v && l.tr === q.tr && l.ix === q.ix) l.s1 = q.s; else { if (l) l.s1 = q.s; segs.push({ s0: q.s, s1: q.s, v: q.v, tr: q.tr, ix: q.ix }); }
   }
   // remontées de vitesse trop courtes entre deux zones lentes (effet « yo-yo ») : supprimées
   for (let pass = 0; pass < 20; pass++) {
@@ -305,7 +340,7 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
       if (g.v > a.v && g.v > b.v && g.s1 - g.s0 < o.gapMin) { g.v = Math.max(a.v, b.v); g.tr = g.tr || (a.tr && b.tr); ch = true; }
     }
     const m = [];
-    for (const g of segs) { const l = m[m.length - 1]; if (l && l.v === g.v && l.tr === g.tr) l.s1 = g.s1; else m.push({ ...g }); }
+    for (const g of segs) { const l = m[m.length - 1]; if (l && l.v === g.v && l.tr === g.tr) { l.s1 = g.s1; l.ix = l.ix && g.ix; } else m.push({ ...g }); }
     segs = m;
     if (!ch) break;
   }
@@ -319,18 +354,19 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
       if (g.v > lo && g.v < hi) { const L = a.v < b.v ? a : b; g.v = L.v; g.tr = L.tr; ch = true; }
     }
     const m = [];
-    for (const g of segs) { const l = m[m.length - 1]; if (l && l.v === g.v && l.tr === g.tr) l.s1 = g.s1; else m.push({ ...g }); }
+    for (const g of segs) { const l = m[m.length - 1]; if (l && l.v === g.v && l.tr === g.tr) { l.s1 = g.s1; l.ix = l.ix && g.ix; } else m.push({ ...g }); }
     segs = m;
     if (!ch) break;
   }
   segs = segs.filter((g) => g.s1 - g.s0 > 0.5);
   { // même vitesse de part et d'autre d'une fin de traversée (ex. gare routière juste après) : une seule section
     const m = [];
-    for (const g of segs) { const l = m[m.length - 1]; if (l && l.v === g.v) { l.s1 = g.s1; l.tr = l.tr || g.tr; } else m.push({ ...g }); }
+    for (const g of segs) { const l = m[m.length - 1]; if (l && l.v === g.v) { l.s1 = g.s1; l.tr = l.tr || g.tr; l.ix = l.ix && g.ix; } else m.push({ ...g }); }
     segs = m;
   }
   for (const g of segs) {
-    g.cat = g.v >= base.vt ? baseCat : g.v <= 40 ? 'E' : 'D';
+    g.cat = g.v >= base.vt ? baseCat : R4L ? (g.ix && !g.tr ? 'IX' : g.v <= 30 ? 'HUB' : 'HUBS') : g.v <= 40 ? 'E' : 'D';
+    if (!R4L && g.ix && !g.tr && g.v === 50 && g.v < base.vt) g.cat = 'D';
     g.vc = g.v >= base.vt ? base.vc : g.v + 10; // C1.5 : VC ≤ vitesse-cible + 10 km/h
     g.hits = hits.filter((h) => h.s1 >= g.s0 && h.s0 <= g.s1);
     g.len = g.s1 - g.s0;
@@ -345,7 +381,14 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
     const hi = a.v > b.v ? a : b, lo = a.v > b.v ? b : a, dir = a.v > b.v ? 1 : -1; // dir : sens de circulation qui entre dans la zone lente
     const at = (d) => sb - dir * d; // d > 0 : en amont (côté rapide) pour le sens entrant
     const dv = hi.v - lo.v, gate = hi.v >= 70 && lo.v <= 50, Ltr = gate || dv > 20 ? 250 : 100;
-    trans.push({ s: sb, dir, vh: hi.v, vl: lo.v, catH: hi.cat, catL: lo.cat, gate, from: Math.min(sb, at(Ltr)), to: Math.max(sb, at(Ltr)), Ltr });
+    trans.push({ s: sb, dir, vh: hi.v, vl: lo.v, catH: hi.cat, catL: lo.cat, gate, ix: lo.ix && !lo.tr, from: Math.min(sb, at(Ltr)), to: Math.max(sb, at(Ltr)), Ltr });
+    if (lo.ix && !lo.tr && lo.cat !== 'E' && lo.cat !== 'HUB') { // approche d'un carrefour plan
+      T(at(Math.min(250, Ltr)), dir, 'annonce', `Présignalisation du carrefour et limitation ${lo.v} km/h`, R4L ? 'R4L § 2.3' : 'AD 1.3', 'MUST', { sign: `B14-${lo.v}` });
+      if (dv > 20) for (const d of [150, 100, 50]) T(at(d), dir, 'bandes', `Bandes rugueuses transversales — série à ${d} m`, 'F1.15', 'SHOULD');
+      T(sb, dir, 'limite', `Approche du carrefour à ${lo.v} km/h au plus : giratoire compact, plateau ou îlot séparateur (chocs au-delà de 50 km/h rarement survivables)`, R4L ? 'R4L § 2.3, p. 34–35' : 'AD 1.3, F1.05–F1.07', 'MUST');
+      T(sb, -dir, 'sortie', `Fin de la zone de carrefour (reprise ${hi.v} km/h)`, R4L ? 'R4L § 2.3' : 'AD 1.3', 'MUST', { sign: `B14-${hi.v}` });
+      continue;
+    }
     if (gate) {
       T(at(250), dir, 'annonce', `Panneau d'annonce${lo.tr ? ' « agglomération »' : ''} + pré-signalisation (250 m)`, 'F1.12, F1.13', 'MUST', { sign: 'ANN' });
       for (const d of [150, 100, 50]) T(at(d), dir, 'bandes', `Bandes rugueuses transversales — série à ${d} m (3 bandes de 15–20 cm, espacées de 30 cm)`, 'F1.15', 'SHOULD');
@@ -383,7 +426,7 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
   }
   // traversées piétonnes régulières et linéaires en D / E
   for (const g of segs) {
-    if (g.cat !== 'D' && g.cat !== 'E') continue;
+    if (!isLow(g.cat)) continue;
     const fixed = treat.filter((q) => (q.code === 'passage' || q.code === 'plateau') && q.s >= g.s0 && q.s <= g.s1).map((q) => q.s);
     const n = Math.max(0, Math.ceil(g.len / o.spacing) - 1);
     for (let k = 1; k <= n; k++) {
@@ -391,7 +434,7 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
       if (fixed.some((f) => Math.abs(f - s) < o.spacing / 2)) continue;
       T(s, 0, 'passage', `Passage piéton protégé${width > 7 ? ' + refuge ≥ 2,00 m' : ''} + éclairage dédié (espacement ≤ ${o.spacing} m)`, width > 7 ? 'F1.10, AD 1.2' : 'AD 1.2', 'MUST', { sign: 'C20a' });
     }
-    T((g.s0 + g.s1) / 2, 0, 'lineaire', `Sur ${pk(g.s0)} – ${pk(g.s1)} : trottoirs continus des deux côtés ${g.cat === 'E' ? '≥ 2,50 m (PMR)' : '2,50 m (1,50 m minimum)'}, bateaux aux traversées, éclairage continu, dépassement interdit (ligne continue)`, 'F1.11, C3.2.2', 'MUST', { s0: g.s0, s1: g.s1 });
+    T((g.s0 + g.s1) / 2, 0, 'lineaire', `Sur ${pk(g.s0)} – ${pk(g.s1)} : trottoirs continus des deux côtés ${isE(g.cat) ? '≥ 2,50 m (PMR)' : '2,50 m (1,50 m minimum)'}, bateaux aux traversées, éclairage continu, dépassement interdit (ligne continue)`, 'F1.11, C3.2.2', 'MUST', { s0: g.s0, s1: g.s1 });
   }
   treat.sort((a, b) => a.s - b.s);
   // ------------------------------------------------ V85 géométrique et cohérence vitesse-géométrie
@@ -402,12 +445,12 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
     const inG = v85.filter((q) => q.s >= g.s0 && q.s <= g.s1);
     if (!inG.length) continue;
     const vmax = Math.max(...inG.map((q) => q.v)), vmin = Math.min(...inG.map((q) => q.v)), where = `${pk(g.s0)} – ${pk(g.s1)}`;
-    if ((g.cat === 'D' || g.cat === 'E') && vmax > g.v + 10) {
+    if (isLow(g.cat) && vmax > g.v + 10) {
       checks.push({ lvl: 'warn', msg: `${ax.name}, ${where} (cat. ${g.cat}, ${g.v} km/h) : la géométrie autorise une V85 de ${Math.round(vmax)} km/h (> vitesse-cible + 10) — vitesse-cible non crédible sans modération physique : plateaux / chicanes répétés (F1.09, F1.14).` });
-      const step = g.cat === 'E' ? 75 : 150, n = Math.floor(g.len / step);
-      for (let k = 1; k <= n; k++) { const s = g.s0 + (g.len * k) / (n + 1); if (!treat.some((q) => ['plateau', 'chicane', 'portail'].includes(q.code) && Math.abs(q.s - s) < step / 2)) T(s, 0, g.cat === 'E' ? 'plateau' : 'chicane', `Dispositif de modération physique (${g.cat === 'E' ? 'plateau traversant' : 'chicane ou rétrécissement'}) : V85 géométrique ${Math.round(vAt(s))} km/h pour ${g.v} km/h`, g.cat === 'E' ? 'F1.09' : 'F1.14', 'SHOULD'); }
-    } else if (g.cat !== 'D' && g.cat !== 'E' && vmax > g.vc) checks.push({ lvl: 'info', msg: `${ax.name}, ${where} : V85 géométrique ${Math.round(vmax)} km/h > VC ${g.vc} km/h (C1.5 : VC ≤ vitesse-cible + 10) — contrôle des vitesses (signalisation, radar) ou reprise du tracé.` });
-    if (vmin < g.v - 15 && g.cat !== 'E') {
+      const step = isE(g.cat) ? 75 : 150, n = Math.floor(g.len / step);
+      for (let k = 1; k <= n; k++) { const s = g.s0 + (g.len * k) / (n + 1); if (!treat.some((q) => ['plateau', 'chicane', 'portail'].includes(q.code) && Math.abs(q.s - s) < step / 2)) T(s, 0, isE(g.cat) ? 'plateau' : 'chicane', `Dispositif de modération physique (${isE(g.cat) ? 'plateau traversant' : 'chicane ou rétrécissement'}) : V85 géométrique ${Math.round(vAt(s))} km/h pour ${g.v} km/h`, isE(g.cat) ? 'F1.09' : 'F1.14', 'SHOULD'); }
+    } else if (!isLow(g.cat) && vmax > g.vc) checks.push({ lvl: 'info', msg: `${ax.name}, ${where} : V85 géométrique ${Math.round(vmax)} km/h > VC ${g.vc} km/h (C1.5 : VC ≤ vitesse-cible + 10) — contrôle des vitesses (signalisation, radar) ou reprise du tracé.` });
+    if (vmin < g.v - 15 && !isE(g.cat)) {
       const q = inG.find((r) => r.v === vmin);
       checks.push({ lvl: 'warn', msg: `${ax.name}, ${pk(q.s)} : courbe R ≈ ${q.R ?? '—'} m, V85 ${Math.round(vmin)} km/h, nettement sous la vitesse-cible de ${g.v} km/h — signalisation de virage, balisage, vitesse conseillée ; à éviter en approche d'un déclencheur.` });
     }
@@ -449,11 +492,11 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
     const trigs = g.hits.map((h) => `${UVR_TYPES[h.type].label.split(' /')[0]}${h.name ? ` « ${h.name} »` : ''} PK ${pk(h.s)}`);
     const IN = new Set(['passage', 'plateau', 'chicane', 'cloture', 'rappel30', 'lineaire']);
     const disp = [...new Set(treat.filter((q) => IN.has(q.code) && q.s > g.s0 + 1 && q.s < g.s1 - 1 && (q.lvl === 'MUST' || q.code === 'chicane' || q.code === 'plateau')).map((q) => q.code))].map((c) => CODE_LBL[c] || c);
-    rows.push({ s0: g.s0, s1: g.s1, cat: g.cat, vt: `${g.v} km/h`, vc: `${g.vc} km/h`, trig: trigs.join(' ; ') || 'Aucun', disp: disp.join(', ') || (g.cat === baseCat ? 'Profil standard de la catégorie (F1.01)' : '—') });
+    rows.push({ s0: g.s0, s1: g.s1, cat: CATS[g.cat].r4l ? CATS[g.cat].short : g.cat, vt: `${g.v} km/h`, vc: `${g.vc} km/h`, trig: trigs.join(' ; ') || 'Aucun', disp: disp.join(', ') || (g.cat === baseCat ? 'Profil standard de la catégorie (F1.01)' : '—') });
   }
-  for (const t of trans) rows.push({ s0: t.from, s1: t.to, cat: `Transition ${t.dir === 1 ? `${t.catH}→${t.catL}` : `${t.catL}←${t.catH}`}`, vt: `${t.vh}→${t.vl} km/h`, vc: '—', trig: '—', disp: t.gate ? 'Annonce 250 m, bandes rugueuses 150/100/50 m, rétrécissement 150 m, portail, plateau +50 m (F1.12, F1.13, F1.15)' : t.vl <= 30 ? 'Entrée de zone 30, plateau, chicane (F1.17, F1.14)' : 'Limitation et marquage' , trans: true });
+  for (const t of trans) rows.push({ s0: t.from, s1: t.to, cat: `Transition ${t.dir === 1 ? `${t.catH}→${t.catL}` : `${t.catL}←${t.catH}`}`, vt: `${t.vh}→${t.vl} km/h`, vc: '—', trig: '—', disp: t.ix ? 'Présignalisation, limitation 50, bandes rugueuses, carrefour aménagé (giratoire / plateau)' : t.gate ? 'Annonce 250 m, bandes rugueuses 150/100/50 m, rétrécissement 150 m, portail, plateau +50 m (F1.12, F1.13, F1.15)' : t.vl <= 30 ? 'Entrée de zone 30, plateau, chicane (F1.17, F1.14)' : 'Limitation et marquage' , trans: true });
   rows.sort((a, b) => a.s0 - b.s0 || (a.trans ? 1 : -1));
-  return { key: ax.key, name: ax.name, len: ax.len, baseCat, V0, width, hits, trav, segs, trans, treat, removed, v85, vv, rows, checks };
+  return { key: ax.key, name: ax.name, len: ax.len, ref: o.ref, baseCat, V0, width, hits, trav, segs, trans, treat, removed, v85, vv, rows, checks };
 }
 export const treatKey = (q) => `${q.code}:${q.dir}:${q.trg || ''}:${Math.round(q.s0key ?? q.s)}`;
 const parseKey = (k) => { const m = /^([a-z0-9]+):(-?\d+):([^:]*):(-?\d+(?:\.\d+)?)$/.exec(k || ''); return m ? { code: m[1], dir: +m[2], trg: m[3], s: +m[4] } : null; };
@@ -512,7 +555,7 @@ export function speedSvg(r, { width = 1000, height = width < 760 ? 345 : 330, s0
   for (const h of r.hits) if (inR(h.s)) g += `<line x1="${X(h.s).toFixed(1)}" x2="${X(h.s).toFixed(1)}" y1="${mt}" y2="${mt + chartH}" stroke="${UVR_TYPES[h.type].color}" stroke-dasharray="2 2"/><circle cx="${X(h.s).toFixed(1)}" cy="${mt + 7}" r="7" fill="${UVR_TYPES[h.type].color}"/><text x="${X(h.s).toFixed(1)}" y="${mt + 10}" text-anchor="middle" fill="#fff" font-size="7.5" font-weight="700">${UVR_TYPES[h.type].short}</text>`;
   // bandeau des catégories
   g += `<text x="6" y="${bandY + 11}" fill="#334155">Cat.</text>`;
-  for (const s of r.segs) if (s.s1 > s0 && s.s0 < s1) { const xa = X(Math.max(s0, s.s0)), xb = X(Math.min(s1, s.s1)); g += `<rect x="${xa.toFixed(1)}" y="${bandY}" width="${Math.max(0, xb - xa).toFixed(1)}" height="${bandH}" fill="${CATS[s.cat].color}"/>`; if (xb - xa > 14) g += `<text x="${((xa + xb) / 2).toFixed(1)}" y="${bandY + 11.5}" text-anchor="middle" fill="#fff" font-weight="700">${s.cat}</text>`; }
+  for (const s of r.segs) if (s.s1 > s0 && s.s0 < s1) { const xa = X(Math.max(s0, s.s0)), xb = X(Math.min(s1, s.s1)); g += `<rect x="${xa.toFixed(1)}" y="${bandY}" width="${Math.max(0, xb - xa).toFixed(1)}" height="${bandH}" fill="${CATS[s.cat].color}"/>`; const lb = CATS[s.cat].r4l ? CATS[s.cat].short : s.cat; if (xb - xa > Math.max(14, lb.length * 5.6)) g += `<text x="${((xa + xb) / 2).toFixed(1)}" y="${bandY + 11.5}" text-anchor="middle" fill="#fff" font-weight="700">${lb}</text>`; }
   // bandeau des aménagements (symboles)
   g += `<text x="6" y="${trY + 10}" fill="#334155">Am.</text>`;
   const sym = { portail: ['▮', '#7c2d12'], plateau: ['▬', '#b45309'], bandes: ['≡', '#92400e'], annonce: ['▲', '#dc2626'], retrec: ['◇', '#9a3412'], zone30: ['30', '#dc2626'], chicane: ['S', '#a16207'], passage: ['‖', '#0f766e'], sortie: ['◁', '#64748b'], limite: ['○', '#dc2626'], rappel30: ['30', '#ef4444'] };
@@ -526,7 +569,7 @@ export function speedSvg(r, { width = 1000, height = width < 760 ? 345 : 330, s0
   g += `<text x="${width - mr}" y="${trY + 9}" text-anchor="end" fill="#94a3b8" font-size="8">sens →</text><text x="${width - mr}" y="${trY + 33}" text-anchor="end" fill="#94a3b8" font-size="8">← sens</text>`;
   // légende
   const narrow = width < 760, ly = height - (narrow ? 22 : 8), ly2 = narrow ? height - 7 : ly, x2 = narrow ? ml : ml + 300;
-  g += `<line x1="${ml}" x2="${ml + 22}" y1="${ly - 3}" y2="${ly - 3}" stroke="#1d4ed8" stroke-width="2.4"/><text x="${ml + 26}" y="${ly}" fill="#334155">vitesse-cible (M1)</text>`;
+  g += `<line x1="${ml}" x2="${ml + 22}" y1="${ly - 3}" y2="${ly - 3}" stroke="#1d4ed8" stroke-width="2.4"/><text x="${ml + 26}" y="${ly}" fill="#334155">${r.ref === 'R4L' ? 'vitesse max. (R4L)' : 'vitesse-cible (M1)'}</text>`;
   g += `<line x1="${ml + 130}" x2="${ml + 152}" y1="${ly - 3}" y2="${ly - 3}" stroke="#f59e0b" stroke-width="1.6"/><text x="${ml + 156}" y="${ly}" fill="#334155">vitesse visée (F1.13)</text>`;
   g += `<line x1="${x2}" x2="${x2 + 22}" y1="${ly2 - 3}" y2="${ly2 - 3}" stroke="#94a3b8" stroke-width="1.4" stroke-dasharray="4 3"/><text x="${x2 + 26}" y="${ly2}" fill="#334155">V85 géométrique (V0 = ${r.V0} km/h)</text>`;
   g += `<rect x="${x2 + 210}" y="${ly2 - 8}" width="16" height="8" fill="#fde68a" opacity="0.6"/><text x="${x2 + 230}" y="${ly2}" fill="#334155">transition</text>`;

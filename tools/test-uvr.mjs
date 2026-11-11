@@ -59,6 +59,21 @@ ok(R.checks.some((c) => /non crédible/.test(c.msg)), 'alignement droit en trave
   ok(C.treat.some((q) => q.code === 'portail' && q.dir === 1 && q.s === 1950), 'retouche gardée après un léger déplacement de la traversée');
 }
 
+// référentiel R4L (Banque mondiale) : liaison rurale 70, pôles d'activité à 30 (hors traversée aussi), carrefour à 50
+{
+  const inp = { trav: [{ s0: 2000, s1: 3000 }], triggers: [{ id: 't1', type: 'tc', x: 4800, y: -15 }], junctions: [1000] };
+  const Q = analyzeAxis(ax, inp, { ref: 'R4L' });
+  const at = (s) => Q.segs.find((g) => s >= g.s0 && s <= g.s1);
+  ok(Q.baseCat === 'L70' && at(500).v === 70, 'R4L : route 2 voies sans séparateur → liaison rurale 70 km/h');
+  ok(at(2500).v === 30 && at(2500).cat === 'HUB', 'R4L : traversée de village → pôle d\'activité humaine 30 km/h');
+  ok(at(4800).v === 30, 'R4L : arrêt de bus hors village → 30 km/h (hop-on / hop-off)');
+  ok(at(1000).v === 50 && at(1000).cat === 'IX' && Q.treat.some((q) => q.code === 'limite' && /carrefour/.test(q.label)), 'R4L : carrefour → approche à 50 km/h');
+  const Qs = analyzeAxis(ax, inp, { ref: 'R4L', sep: true });
+  ok(Qs.segs.find((g) => g.s0 <= 2500 && g.s1 >= 2500).v === 50, 'R4L : usagers vulnérables séparés → 50 km/h');
+  const M = analyzeAxis(ax, inp, {});
+  ok(M.segs.find((g) => g.s0 <= 1000 && g.s1 >= 1000).v === 50, 'M1 : carrefour → approche ≤ 50 km/h (AD 1.3)');
+}
+
 // remontée courte entre deux zones lentes supprimée
 const R2 = analyzeAxis(straight(3000), { baseCat: 'B', trav: [{ s0: 500, s1: 1000 }, { s0: 1150, s1: 1700 }] }, {});
 ok(R2.segs.filter((g) => g.cat === 'D').length === 1, 'deux traversées séparées de 150 m : une seule zone 50 (pas de yo-yo)');
