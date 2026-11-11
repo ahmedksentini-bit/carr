@@ -2210,6 +2210,7 @@ const PROMPTS = {
   pan: 'Panoramique : glissez pour déplacer la vue.',
   profser: 'Profils en série : cliquez le premier point sur un axe (autoroute, voie secondaire, bretelle ou branche), puis le second sur le même axe.',
   profser2: 'Profils en série : cliquez le second point sur le même axe (Échap pour annuler).',
+  uvram: 'Aménagement : cliquez sur un axe à l\'endroit de l\'aménagement choisi dans l\'onglet Vitesses / UVR (plusieurs clics possibles ; clic droit ou Échap pour terminer).',
   uvrpt: 'Déclencheur UVR : cliquez sur le plan à l\'emplacement de l\'école, du marché, de l\'arrêt… (type choisi dans l\'onglet Vitesses / UVR ; clic droit ou Échap pour terminer).',
   profone: 'Profil isolé : cliquez sur un axe à l\'endroit du profil (plusieurs clics possibles ; Échap pour terminer).',
   cadre: 'PICF / PIPO : cliquez sur l\'axe de la voie portée, à l\'endroit de l\'ouvrage.',
@@ -3075,7 +3076,7 @@ function bindCanvas() {
     else if (S.tool === 'ramp') addRampAt(w);
     else if (S.tool === 'pickx') pickSecondary(w, px, py);
     else if (['profser', 'profone', 'cadre', 'poutres'].includes(S.tool)) pickOnAxis(w);
-    else if (S.tool === 'uvrpt') UV?.pick(w);
+    else if (S.tool === 'uvrpt' || S.tool === 'uvram') UV?.pick(w);
     else if (S.tool === 'measure') { S.meas.push(w); if (S.meas.length > 2) S.meas = [w]; showMeasure(); }
     else if (S.tool === 'insv') insertVertexAt(px, py);
     else if (S.tool === 'tiein') { const [x, y] = viewer.s2w(px, py); tieClick({ x, y }); }

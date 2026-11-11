@@ -458,6 +458,11 @@ ou sur un fond topographique DXF.
     E.4.2, cartographie C1.6, aménagements, checklists CK-F03 à F06, CK-A08, A12, A13), CSV ; sur le plan, calque
     `GIRA_UVR` : bandes colorées des catégories, déclencheurs, aménagements et panneaux (B14, entrée / sortie
     d'agglomération, zone 30, passage piéton, enfants) ;
+  - aménagements et panneaux modifiables un par un (tableau de l'onglet) : PK, panneau (ou aucun), suppression
+    (liste des supprimés, « Rétablir »), ajout au PK saisi ou par clic sur le plan (portail, plateau, passage,
+    chicane, bandes rugueuses, zone 30, limitation, annonce, panneau « enfants ») ; retouches enregistrées avec le
+    projet et rattachées à l'aménagement proposé le plus proche (15 m) quand le calcul est refait ;
+    « Rétablir la proposition » les efface ;
   - tests : `node tools/test-uvr.mjs`.
 - **Ouvrages numérotés** : passages supérieurs, tiges, anneaux de giratoire dénivelé et cadres sont numérotés OA1, OA2…
   dans l'ordre des abscisses de l'autoroute (numéro cerclé sur le plan) ; le nom de chaque ouvrage se modifie dans

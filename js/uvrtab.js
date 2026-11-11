@@ -3,7 +3,7 @@
 // tracés, tableau des résultats, dessin sur le plan, note imprimable). Sources des déclencheurs : OpenStreetMap
 // (Overpass), calques KMZ / KML du projet (nom du repère ou de son dossier), saisie sur le plan.
 import { registerIcon } from './signicons.js';
-import { UVR_TYPES, TYPE_KEYS, CATS, uvrOpts, defaultUvrOpts, baseCatOf, analyzeAxis, detectBuilt, overpassQL, parseOverpass, classifyName, BUILT_RE, speedSvg, rowsCsv, treatCsv, fmtPK, V0_PROFILES } from './uvr.js';
+import { MANUAL, SIGN_CHOICES, UVR_TYPES, TYPE_KEYS, CATS, uvrOpts, defaultUvrOpts, baseCatOf, analyzeAxis, detectBuilt, overpassQL, parseOverpass, classifyName, BUILT_RE, speedSvg, rowsCsv, treatCsv, fmtPK, V0_PROFILES } from './uvr.js';
 
 const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
 
@@ -13,7 +13,7 @@ export function initUvr(api) {
   const { S, $, toast, update, listAxes, viewer, setTool, esc, fmt, parseNum, download, fname, G } = api;
   const cfg = () => {
     const u = (S.prj.uvr = S.prj.uvr || {});
-    u.opts = uvrOpts(u.opts); u.trg = u.trg || []; u.trav = u.trav || {}; u.axes = u.axes || {}; u.built = u.built || { polys: [], bld: [] };
+    u.opts = uvrOpts(u.opts); u.trg = u.trg || []; u.trav = u.trav || {}; u.axes = u.axes || {}; u.built = u.built || { polys: [], bld: [] }; u.edits = u.edits || {};
     return u;
   };
   const allAxes = () => (S.prof?.axes || (S.D ? listAxes(S.prj, S.D) : []));
@@ -24,6 +24,7 @@ export function initUvr(api) {
   const ringXY = (r) => (geo() && r?.length ? r.map(([lon, lat]) => { const q = S.crs.fromLL(lon, lat); return { x: q.x, y: q.y }; }) : null);
   const uid = () => 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const used = () => { const u = S.prj.uvr; return !!u && (u.trg?.length || Object.values(u.trav || {}).some((a) => a.length) || u.run); };
+  const edOf = (u, k) => (u.edits[k] = u.edits[k] || { del: [], mv: {}, sign: {}, add: [] });
 
   // ---------------------------------------------------------------- calcul
   function compute() {
@@ -35,7 +36,7 @@ export function initUvr(api) {
     const res = [];
     for (const ax of axes) {
       const A = S.axpl?.get?.(ax.key), zAt = A?.defined && A.PL?.zAt ? (s) => A.PL.zAt(s) : null;
-      try { res.push(analyzeAxis(ax, { baseCat: axBase(u, ax), trav: u.trav[ax.key] || [], triggers: trg, zAt }, u.opts)); } catch (e) { console.error(e); }
+      try { res.push(analyzeAxis(ax, { baseCat: axBase(u, ax), trav: u.trav[ax.key] || [], triggers: trg, zAt, edits: u.edits[ax.key] }, u.opts)); } catch (e) { console.error(e); }
     }
     S.uvr = { res };
     for (const r of res) for (const c of r.checks) S.checks.push({ lvl: c.lvl, group: 'Vitesses / UVR', msg: c.msg });
@@ -190,6 +191,15 @@ export function initUvr(api) {
   }
   // Clic sur le plan (outil « uvrpt ») : déclencheur du type choisi.
   function pick(w) {
+    if (S.tool === 'uvram') { // aménagement ajouté à la main au droit du clic, sur l'axe coché le plus proche
+      const u = cfg(), axes = allAxes().filter((ax) => axOn(u, ax));
+      let best = null; for (const ax of axes) { const pr = ax.project(w); if (pr && (!best || Math.abs(pr.off) < Math.abs(best.pr.off))) best = { ax, pr }; }
+      if (!best || Math.abs(best.pr.off) > 60) { toast('Cliquez près d\'un axe coché (à moins de 60 m).', 'warn'); return; }
+      const code = S.uvrAm || 'plateau', dir = +(S.uvrAmDir ?? 0), v = +(S.uvrAmV || 50);
+      edOf(u, best.ax.key).add.push({ id: uid(), code, dir, s: Math.round(best.pr.s * 10) / 10, ...(code === 'limite' ? { v } : {}) });
+      u.run = true; S.uvrAx = best.ax.key; update();
+      toast(`${MANUAL[code].name} ajouté(e) sur ${best.ax.name} au PK ${fmtPK(best.pr.s)} (clic droit ou Échap pour terminer).`); return;
+    }
     const u = cfg(), type = S.uvrType || 'ecole', t = { id: uid(), src: 'plan', on: true, type, name: '', x: +w.x.toFixed(3), y: +w.y.toFixed(3) };
     if (geo()) { const ll = S.crs.toLL(w.x, w.y); t.lon = +ll.lon.toFixed(7); t.lat = +ll.lat.toFixed(7); }
     u.trg.push(t); u.run = true; update();
@@ -226,8 +236,16 @@ export function initUvr(api) {
       <div class="uvr-chart" style="overflow-x:auto">${speedSvg(r, { width: W })}</div>
       <h4>Plan de gestion des vitesses — tableau linéaire (E.4.2)</h4>
       <div class="tablewrap"><table class="pts"><thead><tr><th>PK début</th><th>PK fin</th><th>Cat.</th><th>Vitesse-cible</th><th>VC</th><th>Déclencheurs UVR</th><th>Dispositifs de modération</th></tr></thead><tbody>${r.rows.map((q) => `<tr${q.trans ? ' class="note"' : ''}><td class="mono">${fmtPK(q.s0)}</td><td class="mono">${fmtPK(q.s1)}</td><td>${esc(q.cat)}</td><td>${esc(q.vt)}</td><td>${esc(q.vc)}</td><td>${esc(q.trig)}</td><td>${esc(q.disp)}</td></tr>`).join('')}</tbody></table></div>
-      <h4>Aménagements (${r.treat.filter((q) => q.lvl === 'MUST').length} obligatoires, ${r.treat.filter((q) => q.lvl === 'SHOULD').length} recommandés)</h4>
-      <div class="tablewrap"><table class="pts"><thead><tr><th>PK</th><th>Sens</th><th>Aménagement</th><th>Niveau</th><th>Fiche M1</th></tr></thead><tbody>${r.treat.map((q) => `<tr data-uvs="${q.s.toFixed(1)}"><td class="mono">${fmtPK(q.s)}</td><td>${q.dir === 1 ? '→' : q.dir === -1 ? '←' : '⇄'}</td><td>${esc(q.label)}</td><td>${q.lvl === 'MUST' ? '<b>MUST</b>' : 'SHOULD'}</td><td>${esc(q.fiche)}</td></tr>`).join('')}</tbody></table></div>
+      <h4>Aménagements (${r.treat.filter((q) => q.lvl === 'MUST').length} obligatoires, ${r.treat.filter((q) => q.lvl === 'SHOULD').length} recommandés) — modifiables</h4>
+      <p class="note">PK et panneau modifiables ligne par ligne, ✕ pour supprimer ; les retouches sont gardées quand le calcul est refait (rattachées à l'aménagement proposé le plus proche, à 15 m près).</p>
+      <div class="row"><select id="uvrAmCode" class="mini-in">${optRow(S.uvrAm || 'plateau', Object.entries(MANUAL).map(([k, c]) => [k, c.name]))}</select>
+        <select id="uvrAmDir" class="mini-in">${optRow(S.uvrAmDir ?? 0, [[0, 'deux sens'], [1, 'sens PK croissants'], [-1, 'sens PK décroissants']])}</select>
+        <label class="fld" title="Pour une limitation de vitesse"><span class="lb">V</span><input id="uvrAmV" class="mini-in" type="text" size="3" value="${S.uvrAmV || 50}"><span class="un">km/h</span></label>
+        <label class="fld"><span class="lb">PK</span><input id="uvrAmS" class="mini-in" type="text" size="7" placeholder="m"></label>
+        <button id="btnUvrAmAdd" title="Ajoute l'aménagement au PK saisi">Ajouter</button><button id="btnUvrAmPlan" title="Ajoute l'aménagement au droit de chaque clic sur le plan">Ajouter sur le plan</button>
+        ${(() => { const e = u.edits[r.key]; const n = e ? e.del.length + Object.keys(e.mv).length + Object.keys(e.sign).length + e.add.length : 0; return n ? `<button id="btnUvrAmReset" class="danger" title="Supprime toutes les retouches de cet axe">Rétablir la proposition (${n} retouche${n > 1 ? 's' : ''})</button>` : ''; })()}</div>
+      <div class="tablewrap"><table class="pts"><thead><tr><th>PK</th><th>Sens</th><th>Aménagement</th><th>Panneau</th><th>Niveau</th><th>Fiche M1</th><th></th></tr></thead><tbody>${r.treat.map((q) => `<tr data-uvs="${q.s.toFixed(1)}"${q.manual || q.moved || q.signEdited ? ' class="on"' : ''}><td>${q.list || q.code === 'lineaire' ? `<span class="mono">${fmtPK(q.s)}</span>` : `<input class="mini-in" data-uvmv="${esc(q.key)}" type="text" size="6" value="${Math.round(q.s)}" title="PK en m">`}</td><td>${q.dir === 1 ? '→' : q.dir === -1 ? '←' : '⇄'}</td><td>${esc(q.label)}${q.moved ? ' <i>(déplacé)</i>' : ''}</td><td>${q.list || q.code === 'lineaire' ? '' : `<select class="mini-in" data-uvsign="${esc(q.key)}">${optRow(q.sign || '', SIGN_CHOICES)}</select>`}</td><td>${q.lvl === 'MUST' ? '<b>MUST</b>' : 'SHOULD'}</td><td>${esc(q.fiche)}</td><td><button class="mini danger" data-uvtdel="${esc(q.key)}" title="Supprimer">✕</button></td></tr>`).join('')}</tbody></table></div>
+      ${r.removed?.length ? `<details><summary>Aménagements supprimés (${r.removed.length})</summary><ul class="blist">${r.removed.map((q) => `<li>${fmtPK(q.s)} — ${esc(q.label)} <button class="mini" data-uvrest="${esc(q.key)}">Rétablir</button></li>`).join('')}</ul></details>` : ''}
       ${r.checks.length ? `<h4>Contrôles</h4><ul class="blist">${r.checks.map((c) => `<li class="${c.lvl}">${esc(c.msg)}</li>`).join('')}</ul>` : ''}`;
   }
 
@@ -260,6 +278,7 @@ ${ck('CK-F03', 'Générateurs UVR identifiés et cartographiés', nT > 0)}${ck('
   function bind() {
     const tab = $('#tab-uvr'); if (!tab) return;
     const done = () => { cfg().run = true; update(); };
+    const curKey = () => { const res = S.uvr?.res || []; return (res.find((q) => q.key === S.uvrAx) || res[0])?.key; };
     tab.addEventListener('change', (e) => {
       const el = e.target, u = cfg(), d = el.dataset;
       if (d.uvo) { if (d.uvo === 'plan') u.plan = el.checked; else if (d.uvo === 'v0') u.opts.v0 = el.value; else { const v = parseNum(el.value); if (v > 0) u.opts[d.uvo] = v; } done(); }
@@ -271,6 +290,11 @@ ${ck('CK-F03', 'Générateurs UVR identifiés et cartographiés', nT > 0)}${ck('
       else if (d.uvname != null) { u.trg[+d.uvname].name = el.value; done(); }
       else if (d.uvtron) { const [k, i] = d.uvtron.split('|'); u.trav[k][+i].on = el.checked; done(); }
       else if (d.uvtr) { const [k, i, f] = d.uvtr.split('|'); const v = parseNum(el.value); if (isFinite(v)) { const t = u.trav[k][+i]; t[f] = Math.max(0, v); t.src = 'saisie'; if (t.s1 < t.s0) [t.s0, t.s1] = [t.s1, t.s0]; } done(); }
+      else if (d.uvmv) { const v = parseNum(el.value); const k = d.uvmv, e = edOf(u, curKey()); if (isFinite(v)) { if (k.startsWith('manual:')) { const a = e.add.find((x) => `manual:${x.id}` === k); if (a) a.s = v; } else e.mv[k] = v; } done(); }
+      else if (d.uvsign) { const k = d.uvsign, e = edOf(u, curKey()); if (k.startsWith('manual:')) { const a = e.add.find((x) => `manual:${x.id}` === k); if (a) a.sign = el.value || null; } else e.sign[k] = el.value; done(); }
+      else if (el.id === 'uvrAmCode') S.uvrAm = el.value;
+      else if (el.id === 'uvrAmDir') S.uvrAmDir = +el.value;
+      else if (el.id === 'uvrAmV') S.uvrAmV = parseNum(el.value) || 50;
       else if (el.id === 'uvrAxSel') { S.uvrAx = el.value; render(); }
       else if (el.id === 'uvrTypeSel') S.uvrType = el.value;
     });
@@ -283,6 +307,11 @@ ${ck('CK-F03', 'Générateurs UVR identifiés et cartographiés', nT > 0)}${ck('
       if (b?.id === 'btnUvrCsv') { const res = S.uvr?.res || []; if (!res.length) return; download(fname('csv').replace(/\.csv$/, '_plan_vitesses_E42.csv'), '﻿' + rowsCsv(res), 'text/csv;charset=utf-8'); download(fname('csv').replace(/\.csv$/, '_amenagements_UVR.csv'), '﻿' + treatCsv(res), 'text/csv;charset=utf-8'); return; }
       if (b?.id === 'btnUvrNote') { notePage(); return; }
       if (b?.id === 'btnUvrClear') { if (!confirm('Effacer les déclencheurs, les traversées et les données de bâti de l\'onglet Vitesses / UVR ?')) return; S.prj.uvr = { opts: u.opts, axes: u.axes, plan: u.plan }; update(); return; }
+      if (b?.dataset.uvtdel) { const k = b.dataset.uvtdel, e = edOf(u, curKey()); if (k.startsWith('manual:')) e.add = e.add.filter((x) => `manual:${x.id}` !== k); else { e.del.push(k); delete e.mv[k]; delete e.sign[k]; } done(); return; }
+      if (b?.dataset.uvrest) { const e = edOf(u, curKey()); e.del = e.del.filter((x) => x !== b.dataset.uvrest); done(); return; }
+      if (b?.id === 'btnUvrAmReset') { if (confirm('Supprimer toutes les retouches des aménagements de cet axe ?')) { delete u.edits[curKey()]; done(); } return; }
+      if (b?.id === 'btnUvrAmAdd') { const s = parseNum($('#uvrAmS').value), code = $('#uvrAmCode').value; if (!isFinite(s)) { toast('Saisissez le PK (m).', 'warn'); return; } edOf(u, curKey()).add.push({ id: uid(), code, dir: +$('#uvrAmDir').value, s, ...(code === 'limite' ? { v: parseNum($('#uvrAmV').value) || 50 } : {}) }); S.uvrAm = code; done(); return; }
+      if (b?.id === 'btnUvrAmPlan') { S.uvrAm = $('#uvrAmCode').value; S.uvrAmDir = +$('#uvrAmDir').value; S.uvrAmV = parseNum($('#uvrAmV').value) || 50; setTool('uvram'); return; }
       if (b?.dataset.uvdel != null) { u.trg.splice(+b.dataset.uvdel, 1); done(); return; }
       if (b?.dataset.uvtadd) { const ax = allAxes().find((a) => a.key === b.dataset.uvtadd); const L = ax?.len || 500; (u.trav[b.dataset.uvtadd] = u.trav[b.dataset.uvtadd] || []).push({ s0: Math.round(L * 0.4), s1: Math.round(Math.min(L, L * 0.4 + 500)), on: true, src: 'saisie' }); done(); return; }
       if (b?.dataset.uvtrdel) { const [k, i] = b.dataset.uvtrdel.split('|'); u.trav[k].splice(+i, 1); done(); return; }
@@ -294,7 +323,7 @@ ${ck('CK-F03', 'Générateurs UVR identifiés et cartographiés', nT > 0)}${ck('
         render(); return;
       }
       const ts = e.target.closest('tr[data-uvs]');
-      if (ts) { const r = (S.uvr?.res || []).find((q) => q.key === (S.uvrAx || S.uvr.res[0].key)), ax = allAxes().find((a) => a.key === r?.key); if (ax) { const p = ax.at(+ts.dataset.uvs).p; viewer.fit({ x0: p.x - 80, y0: p.y - 80, x1: p.x + 80, y1: p.y + 80 }, 0.02); } }
+      if (ts && !e.target.closest('input,select')) { const r = (S.uvr?.res || []).find((q) => q.key === (S.uvrAx || S.uvr.res[0].key)), ax = allAxes().find((a) => a.key === r?.key); if (ax) { const p = ax.at(+ts.dataset.uvs).p; viewer.fit({ x0: p.x - 80, y0: p.y - 80, x1: p.x + 80, y1: p.y + 80 }, 0.02); } }
     });
   }
   return { compute, render, bind, pick, cfg };

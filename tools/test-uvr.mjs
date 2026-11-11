@@ -44,6 +44,21 @@ ok(rowsCsv([R]).split('\r\n').length === R.rows.length + 1, 'CSV E.4.2');
 ok(speedSvg(R).startsWith('<svg'), 'diagramme SVG');
 ok(R.checks.some((c) => /non crédible/.test(c.msg)), 'alignement droit en traversée : V85 géométrique > vitesse-cible + 10 signalée');
 
+// retouches : suppression, déplacement, changement de panneau, ajout manuel — gardées après recalcul
+{
+  const inp = { baseCat: 'B', trav: [{ s0: 2000, s1: 3000 }], triggers: [{ id: 'e1', type: 'ecole', name: 'École A', x: 2500, y: 40 }] };
+  const A = analyzeAxis(ax, inp, {});
+  const ann = A.treat.find((q) => q.code === 'annonce' && q.dir === 1), por = A.treat.find((q) => q.code === 'portail' && q.dir === 1), pla = A.treat.find((q) => q.code === 'plateau' && q.trg === 'e1');
+  const B = analyzeAxis(ax, { ...inp, edits: { del: [ann.key], mv: { [por.key]: 1950 }, sign: { [pla.key]: '' }, add: [{ id: 'm1', code: 'limite', v: 70, dir: 1, s: 1500 }] } }, {});
+  ok(!B.treat.some((q) => q.code === 'annonce' && q.dir === 1 && Math.abs(q.s - ann.s) < 1) && B.removed.length === 1, 'retouche : aménagement supprimé (rétablissable)');
+  ok(B.treat.some((q) => q.code === 'portail' && q.dir === 1 && q.s === 1950 && q.moved), 'retouche : portail déplacé au PK 1+950');
+  ok(!B.treat.find((q) => q.code === 'plateau' && q.trg === 'e1').sign, 'retouche : panneau retiré');
+  ok(B.treat.some((q) => q.manual === 'm1' && q.sign === 'B14-70' && q.s === 1500), 'ajout manuel : limitation 70 avec son panneau');
+  // le tracé bouge de quelques mètres : les retouches suivent l'aménagement le plus proche (15 m)
+  const C = analyzeAxis(ax, { ...inp, trav: [{ s0: 2008, s1: 3000 }], edits: { mv: { [por.key]: 1950 } } }, {});
+  ok(C.treat.some((q) => q.code === 'portail' && q.dir === 1 && q.s === 1950), 'retouche gardée après un léger déplacement de la traversée');
+}
+
 // remontée courte entre deux zones lentes supprimée
 const R2 = analyzeAxis(straight(3000), { baseCat: 'B', trav: [{ s0: 500, s1: 1000 }, { s0: 1150, s1: 1700 }] }, {});
 ok(R2.segs.filter((g) => g.cat === 'D').length === 1, 'deux traversées séparées de 150 m : une seule zone 50 (pas de yo-yo)');
