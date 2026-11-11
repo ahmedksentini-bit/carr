@@ -5,7 +5,7 @@
 import { registerIcon } from './signicons.js';
 import { UVR_TYPES, TYPE_KEYS, CATS, uvrOpts, defaultUvrOpts, baseCatOf, analyzeAxis, detectBuilt, overpassQL, parseOverpass, classifyName, BUILT_RE, speedSvg, rowsCsv, treatCsv, fmtPK, V0_PROFILES } from './uvr.js';
 
-const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
 
 for (const [k, T] of Object.entries(UVR_TYPES)) registerIcon(`UVR:${k}`, () => `<circle cx="32" cy="32" r="28" fill="${T.color}" stroke="#ffffff" stroke-width="4"/><text x="32" y="40" font-family="Arial, sans-serif" font-weight="bold" font-size="22" fill="#ffffff" text-anchor="middle">${T.short}</text>`);
 
