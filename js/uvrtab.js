@@ -3,7 +3,7 @@
 // tracés, tableau des résultats, dessin sur le plan, note imprimable). Sources des déclencheurs : OpenStreetMap
 // (Overpass), calques KMZ / KML du projet (nom du repère ou de son dossier), saisie sur le plan.
 import { registerIcon } from './signicons.js';
-import { MANUAL, SIGN_CHOICES, UVR_TYPES, TYPE_KEYS, CATS, uvrOpts, defaultUvrOpts, baseCatOf, analyzeAxis, detectBuilt, overpassQL, parseOverpass, classifyName, BUILT_RE, speedSvg, rowsCsv, treatCsv, fmtPK, V0_PROFILES } from './uvr.js';
+import { MANUAL, SIGN_CHOICES, REFS, M1_BASES, R4L_BASES, UVR_TYPES, TYPE_KEYS, CATS, uvrOpts, defaultUvrOpts, baseCatOf, analyzeAxis, detectBuilt, overpassQL, parseOverpass, classifyName, BUILT_RE, speedSvg, rowsCsv, treatCsv, fmtPK, V0_PROFILES } from './uvr.js';
 
 const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
 
@@ -18,7 +18,10 @@ export function initUvr(api) {
   };
   const allAxes = () => (S.prof?.axes || (S.D ? listAxes(S.prj, S.D) : []));
   const axOn = (u, ax) => u.axes[ax.key]?.on ?? (ax.key === 'hwy' || ax.key.startsWith('x:'));
-  const axBase = (u, ax) => (CATS[u.axes[ax.key]?.base] ? u.axes[ax.key].base : baseCatOf(ax));
+  const bKey = (u) => (u.opts.ref === 'R4L' ? 'baseR' : 'base');
+  const axBase = (u, ax) => { const b = u.axes[ax.key]?.[bKey(u)]; return (u.opts.ref === 'R4L' ? R4L_BASES : M1_BASES).includes(b) ? b : baseCatOf(ax, u.opts.ref); };
+  // centres des carrefours (actif et autres) à moins de 40 m de l'axe : abscisses des zones d'approche à 50 km/h
+  const junctionsOn = (ax) => { const O = [S.D?.branches?.length ? S.D.O : null, ...(S.Do || []).map((o) => (o.D?.branches?.length ? o.D.O : null))].filter((p) => p && isFinite(p.x)); const out = []; for (const p of O) { const pr = ax.project(p); if (pr && Math.abs(pr.off) <= 40) out.push(pr.s); } return out; };
   const geo = () => !!S.crs?.geo;
   const xyOf = (t) => { if (t.lon != null && geo()) { const q = S.crs.fromLL(t.lon, t.lat); return { x: q.x, y: q.y }; } return { x: +t.x, y: +t.y }; };
   const ringXY = (r) => (geo() && r?.length ? r.map(([lon, lat]) => { const q = S.crs.fromLL(lon, lat); return { x: q.x, y: q.y }; }) : null);
@@ -36,7 +39,7 @@ export function initUvr(api) {
     const res = [];
     for (const ax of axes) {
       const A = S.axpl?.get?.(ax.key), zAt = A?.defined && A.PL?.zAt ? (s) => A.PL.zAt(s) : null;
-      try { res.push(analyzeAxis(ax, { baseCat: axBase(u, ax), trav: u.trav[ax.key] || [], triggers: trg, zAt, edits: u.edits[ax.key] }, u.opts)); } catch (e) { console.error(e); }
+      try { res.push(analyzeAxis(ax, { baseCat: axBase(u, ax), trav: u.trav[ax.key] || [], triggers: trg, zAt, edits: u.edits[ax.key], junctions: junctionsOn(ax) }, u.opts)); } catch (e) { console.error(e); }
     }
     S.uvr = { res };
     for (const r of res) for (const c of r.checks) S.checks.push({ lvl: c.lvl, group: 'Vitesses / UVR', msg: c.msg });
@@ -58,7 +61,7 @@ export function initUvr(api) {
         if (g.s1 - g.s0 < 1) continue;
         for (const sd of [1, -1]) P({ k: 'path', L: 'UVR', segs: line(g.s0, g.s1, sd * off), color: CATS[g.cat].color, wm: 0.9 });
         const step = Math.max(150, Math.min(600, g.len / 2));
-        for (let s = g.s0 + Math.min(g.len / 2, step / 2); s < g.s1; s += step) P({ k: 'text', L: 'UVR', p: ptAt(s, off + TH * 3), s: `Cat. ${g.cat} · ${g.v} km/h`, rot: ang(s), align: 'center', h: TH * 2.5, color: CATS[g.cat].color });
+        for (let s = g.s0 + Math.min(g.len / 2, step / 2); s < g.s1; s += step) P({ k: 'text', L: 'UVR', p: ptAt(s, off + TH * 3), s: `${CATS[g.cat].r4l ? CATS[g.cat].short : `Cat. ${g.cat}`} · ${g.v} km/h`, rot: ang(s), align: 'center', h: TH * 2.5, color: CATS[g.cat].color });
       }
       // aménagements
       const across = (s, o0, o1) => [G.L(ptAt(s, o0), ptAt(s, o1))];
@@ -212,15 +215,19 @@ export function initUvr(api) {
     const tab = $('#tab-uvr'); if (!tab || tab.hidden && !S.uvrForce) return;
     const u = cfg(), axes = allAxes(), res = S.uvr?.res || [];
     const o = u.opts;
-    $('#uvrParams').innerHTML = `<div class="row">
+    const R4 = o.ref === 'R4L';
+    $('#uvrParams').innerHTML = `<div class="row"><label class="fld"><span class="lb">Référentiel</span><select data-uvo="ref">${optRow(o.ref, Object.entries(REFS))}</select></label>
+      ${R4 ? `<label class="chk" title="R4L § 2.3 (p. 34) : 50 km/h possible dans un pôle d'activité seulement si les usagers vulnérables sont séparés du trafic (trottoirs, traversées sûres)"><input type="checkbox" data-uvo="sep"${o.sep ? ' checked' : ''}> Usagers vulnérables séparés (pôles à 50 km/h)</label>` : ''}
+      <label class="chk" title="${R4 ? 'R4L § 2.3 (p. 34–35) : vitesse réduite à 50 km/h aux carrefours' : 'M1 AD 1.3 : vitesse d\'approche ≤ 50 km/h'}"><input type="checkbox" data-uvo="junc"${o.junc ? ' checked' : ''}> Carrefours à 50 km/h sur ±</label><label class="fld"><input data-uvo="juncL" class="mini-in" type="text" size="4" value="${o.juncL}"><span class="un">m</span></label></div>
+      ${R4 ? '<p class="note">Roads-for-Life (Guide for Safe Speeds, Banque mondiale / WRI, 2024, § 2.2–2.3, fig. 7–8, p. 28–35) : catégorie de base de chaque axe ci-dessus ; tout générateur d\'usagers vulnérables (école, commerce de bord de route, lieu de culte, arrêt de bus, hameau, village) fait de la section un pôle d\'activité humaine à 30 km/h maximum, hors village comme en traversée.</p>' : ''}<div class="row">
       <label class="fld"><span class="lb">Rayon d'influence</span><input data-uvo="R" type="text" inputmode="decimal" value="${o.R}"><span class="un">m</span></label>
       <label class="fld"><span class="lb">Traversée minimale</span><input data-uvo="travMin" type="text" inputmode="decimal" value="${o.travMin}"><span class="un">m</span></label>
       <label class="fld"><span class="lb">Remontée minimale</span><input data-uvo="gapMin" type="text" inputmode="decimal" value="${o.gapMin}" title="Une zone à vitesse plus élevée plus courte que cette longueur, entre deux zones lentes, est supprimée (pas d'effet « yo-yo »)"><span class="un">m</span></label>
       <label class="fld"><span class="lb">Traversées piétonnes ≤</span><input data-uvo="spacing" type="text" inputmode="decimal" value="${o.spacing}"><span class="un">m</span></label>
       <label class="fld"><span class="lb">V85 géométrique (V0)</span><select data-uvo="v0">${optRow(o.v0, [['auto', 'auto (selon l\'axe)'], ...Object.entries(V0_PROFILES).map(([k, l]) => [k, `${k} km/h — ${l}`])])}</select></label>
       <label class="chk"><input type="checkbox" data-uvo="plan"${u.plan !== false ? ' checked' : ''}> Afficher sur le plan</label></div>
-      <details><summary>Vitesses par type de déclencheur (AD 1.2)</summary><table class="pts"><thead><tr><th>Type</th><th>Vitesse-cible</th><th>Hors traversée</th><th>Fiches</th></tr></thead><tbody>${TYPE_KEYS.map((k) => `<tr><td>${esc(UVR_TYPES[k].label)}</td><td><input class="mini-in" data-uvt="${k}" data-f="v" type="text" size="4" value="${o.types[k].v}"> km/h</td><td><label class="chk"><input type="checkbox" data-uvt="${k}" data-f="rural"${o.types[k].rural ? ' checked' : ''}> vitesse appliquée</label></td><td>${esc(UVR_TYPES[k].fiches)}</td></tr>`).join('')}</tbody></table><p class="note">Hors traversée, un type non coché ne fait pas baisser la vitesse : seuls ses aménagements ponctuels sont prescrits (cas de l'arrêt TC du tableau E.4.2).</p></details>`;
-    $('#uvrAxes').innerHTML = axes.length ? axes.map((ax) => `<label class="chk"><input type="checkbox" data-uvax="${esc(ax.key)}"${axOn(u, ax) ? ' checked' : ''}> ${esc(ax.name)}</label> <select class="mini-in" data-uvbase="${esc(ax.key)}" title="Catégorie de base de l'axe en rase campagne (AD 1.1)">${optRow(axBase(u, ax), ['A', 'B', 'C'].map((c) => [c, `${c} — ${CATS[c].vt} km/h`]))}</select>`).join(' &nbsp; ') : '<span class="note">Aucun axe : dessinez une route, une autoroute ou un carrefour.</span>';
+      <details${R4 ? ' hidden' : ''}><summary>Vitesses par type de déclencheur (AD 1.2)</summary><table class="pts"><thead><tr><th>Type</th><th>Vitesse-cible</th><th>Hors traversée</th><th>Fiches</th></tr></thead><tbody>${TYPE_KEYS.map((k) => `<tr><td>${esc(UVR_TYPES[k].label)}</td><td><input class="mini-in" data-uvt="${k}" data-f="v" type="text" size="4" value="${o.types[k].v}"> km/h</td><td><label class="chk"><input type="checkbox" data-uvt="${k}" data-f="rural"${o.types[k].rural ? ' checked' : ''}> vitesse appliquée</label></td><td>${esc(UVR_TYPES[k].fiches)}</td></tr>`).join('')}</tbody></table><p class="note">Hors traversée, un type non coché ne fait pas baisser la vitesse : seuls ses aménagements ponctuels sont prescrits (cas de l'arrêt TC du tableau E.4.2).</p></details>`;
+    $('#uvrAxes').innerHTML = axes.length ? axes.map((ax) => `<label class="chk"><input type="checkbox" data-uvax="${esc(ax.key)}"${axOn(u, ax) ? ' checked' : ''}> ${esc(ax.name)}</label> <select class="mini-in" data-uvbase="${esc(ax.key)}" title="Catégorie de base de l'axe en rase campagne (AD 1.1)">${optRow(axBase(u, ax), (o.ref === 'R4L' ? R4L_BASES : M1_BASES).map((c) => [c, CATS[c].r4l ? CATS[c].label.replace('R4L — ', '') : `${c} — ${CATS[c].vt} km/h`]))}</select>`).join(' &nbsp; ') : '<span class="note">Aucun axe : dessinez une route, une autoroute ou un carrefour.</span>';
     $('#uvrTypeSel').innerHTML = optRow(S.uvrType || 'ecole', TYPE_KEYS.map((k) => [k, UVR_TYPES[k].label]));
     // déclencheurs
     const hitOf = (t) => { for (const r of res) { const h = r.hits.find((q) => q.id === t.id); if (h) return { r, h }; } return null; };
@@ -258,8 +265,8 @@ export function initUvr(api) {
     const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Plan de gestion des vitesses — ${esc(S.prj.name || 'projet')}</title>
 <style>body{font:12px "Segoe UI",Arial,sans-serif;color:#0f172a;margin:24px}h1{font-size:18px;margin:0 0 4px}h2{font-size:15px;margin:22px 0 6px;border-bottom:2px solid #1d4ed8;padding-bottom:3px}h3{font-size:13px;margin:14px 0 4px}table{border-collapse:collapse;width:100%;margin:6px 0}th,td{border:1px solid #cbd5e1;padding:3px 5px;text-align:left;vertical-align:top}th{background:#eff6ff}.n{color:#64748b}.must{font-weight:700}svg{max-width:100%;height:auto}@media print{h2{page-break-before:auto}.pb{page-break-before:always}}</style></head><body>
 <h1>Plan de gestion des vitesses du corridor — ${esc(S.prj.name || 'projet')}</h1>
-<div class="n">Guide M1 ESCWA/UNRSF (version internationale 2026), sections B.5.4, C1.3, C1.5, C1.6, E.4 ; arbres AD 1.1 et AD 1.2 ; fiches F1.09–F1.17. Établi le ${date} avec GIRA. ${nT} déclencheur(s) UVR rattaché(s) à moins de ${u.opts.R} m.</div>
-<h2>E.4.1 Informations générales</h2><table><tr><th>Projet</th><td>${esc(S.prj.name || '')}</td></tr><tr><th>Corridor</th><td>${res.map((r) => `${esc(r.name)} : PK 0+000 — ${fmtPK(r.len)} (${fmt(r.len / 1000, 2)} km)`).join('<br>')}</td></tr><tr><th>Date / version</th><td>${date}</td></tr><tr><th>Hypothèses</th><td>Rayon d'influence ${u.opts.R} m ; traversée de localité ≥ ${u.opts.travMin} m ; vitesses par type : ${TYPE_KEYS.map((k) => `${UVR_TYPES[k].label.split(' /')[0]} ${u.opts.types[k].v} km/h${u.opts.types[k].rural ? '' : ' (en traversée seulement)'}`).join(', ')} ; VC = vitesse-cible + 10 km/h (C1.5).</td></tr></table>
+<div class="n">${u.opts.ref === 'R4L' ? 'Vitesses : cadre Roads-for-Life (R4L), Banque mondiale / WRI, Guide for Safe Speeds (2024), § 2.2–2.3, figures 7 et 8 (p. 28–35). Aménagements : ' : ''}Guide M1 ESCWA/UNRSF (version internationale 2026), sections B.5.4, C1.3, C1.5, C1.6, E.4 ; arbres AD 1.1 et AD 1.2 ; fiches F1.09–F1.17. Établi le ${date} avec GIRA. ${nT} déclencheur(s) UVR rattaché(s) à moins de ${u.opts.R} m.</div>
+<h2>E.4.1 Informations générales</h2><table><tr><th>Projet</th><td>${esc(S.prj.name || '')}</td></tr><tr><th>Corridor</th><td>${res.map((r) => `${esc(r.name)} : PK 0+000 — ${fmtPK(r.len)} (${fmt(r.len / 1000, 2)} km)`).join('<br>')}</td></tr><tr><th>Date / version</th><td>${date}</td></tr><tr><th>Hypothèses</th><td>Référentiel : ${REFS[u.opts.ref]} ; rayon d'influence ${u.opts.R} m ; traversée de localité ≥ ${u.opts.travMin} m ; ${u.opts.junc ? `carrefours à 50 km/h sur ±${u.opts.juncL} m ; ` : ''}${u.opts.ref === 'R4L' ? `pôles d'activité humaine à ${u.opts.sep ? '50 km/h (usagers vulnérables séparés)' : '30 km/h'}` : 'vitesses par type :'} ${u.opts.ref === 'R4L' ? '' : TYPE_KEYS.map((k) => `${UVR_TYPES[k].label.split(' /')[0]} ${u.opts.types[k].v} km/h${u.opts.types[k].rural ? '' : ' (en traversée seulement)'}`).join(', ')} ; VC = vitesse-cible + 10 km/h (C1.5).</td></tr></table>
 ${res.map((r, i) => `<h2${i ? ' class="pb"' : ''}>${esc(r.name)} — profil des vitesses</h2>${speedSvg(r, { width: 1000 })}
 <h3>E.4.2 Tableau linéaire des vitesses</h3><table><thead><tr><th>PK début</th><th>PK fin</th><th>Cat.</th><th>Vitesse-cible</th><th>VC</th><th>Déclencheurs UVR</th><th>Dispositifs de modération</th></tr></thead><tbody>${r.rows.map((q) => `<tr><td>${fmtPK(q.s0)}</td><td>${fmtPK(q.s1)}</td><td>${esc(q.cat)}</td><td>${esc(q.vt)}</td><td>${esc(q.vc)}</td><td>${esc(q.trig)}</td><td>${esc(q.disp)}</td></tr>`).join('')}</tbody></table>
 <h3>Cartographie des déclencheurs UVR (C1.6)</h3>${r.hits.length ? `<table><thead><tr><th>Type</th><th>Nom</th><th>PK</th><th>Distance à l'axe</th><th>Zone</th><th>Prescriptions MUST (AD 1.2)</th><th>SHOULD</th></tr></thead><tbody>${r.hits.map((h) => `<tr><td>${esc(UVR_TYPES[h.type].label)}</td><td>${esc(h.name)}</td><td>${fmtPK(h.s)}</td><td>${fmt(Math.abs(h.off), 0)} m ${h.off > 0 ? 'à gauche' : 'à droite'}</td><td>${fmtPK(h.s0)} — ${fmtPK(h.s1)}</td><td>${UVR_TYPES[h.type].must.map(esc).join('<br>')}</td><td>${UVR_TYPES[h.type].should.map(esc).join('<br>')}</td></tr>`).join('')}</tbody></table>` : '<p class="n">Aucun déclencheur à moins du rayon d\'influence : profil standard de la catégorie (AD 1.2).</p>'}
@@ -281,10 +288,10 @@ ${ck('CK-F03', 'Générateurs UVR identifiés et cartographiés', nT > 0)}${ck('
     const curKey = () => { const res = S.uvr?.res || []; return (res.find((q) => q.key === S.uvrAx) || res[0])?.key; };
     tab.addEventListener('change', (e) => {
       const el = e.target, u = cfg(), d = el.dataset;
-      if (d.uvo) { if (d.uvo === 'plan') u.plan = el.checked; else if (d.uvo === 'v0') u.opts.v0 = el.value; else { const v = parseNum(el.value); if (v > 0) u.opts[d.uvo] = v; } done(); }
+      if (d.uvo) { if (d.uvo === 'plan') u.plan = el.checked; else if (d.uvo === 'v0' || d.uvo === 'ref') u.opts[d.uvo] = el.value; else if (d.uvo === 'sep' || d.uvo === 'junc') u.opts[d.uvo] = el.checked; else { const v = parseNum(el.value); if (v > 0) u.opts[d.uvo] = v; } done(); }
       else if (d.uvt) { const T = u.opts.types[d.uvt]; if (d.f === 'rural') T.rural = el.checked; else { const v = parseNum(el.value); if (v >= 10 && v <= 130) T.v = Math.round(v); } done(); }
-      else if (d.uvax) { const ax = allAxes().find((a) => a.key === d.uvax); u.axes[d.uvax] = { ...(u.axes[d.uvax] || {}), on: el.checked, ...(ax && !u.axes[d.uvax]?.base ? { base: baseCatOf(ax) } : {}) }; done(); }
-      else if (d.uvbase) { u.axes[d.uvbase] = { on: true, ...(u.axes[d.uvbase] || {}), base: el.value }; done(); }
+      else if (d.uvax) { const ax = allAxes().find((a) => a.key === d.uvax); u.axes[d.uvax] = { ...(u.axes[d.uvax] || {}), on: el.checked }; done(); }
+      else if (d.uvbase) { u.axes[d.uvbase] = { on: true, ...(u.axes[d.uvbase] || {}), [bKey(u)]: el.value }; done(); }
       else if (d.uvon != null) { u.trg[+d.uvon].on = el.checked; done(); }
       else if (d.uvtype != null) { u.trg[+d.uvtype].type = el.value; done(); }
       else if (d.uvname != null) { u.trg[+d.uvname].name = el.value; done(); }
