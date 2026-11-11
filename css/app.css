@@ -235,7 +235,16 @@ dialog li { margin: 4px 0; }
   #stLL, .prompt { display: none; }
 }
 @media (max-width: 760px) {
-  body { grid-template-rows: auto minmax(0, 1fr) auto; overflow: auto; }
+  /* Téléphone : la page défile ; plan en haut (55 % de l'écran), panneau dessous à sa hauteur naturelle (au moins
+     l'écran), onglets sur une seule ligne défilant au doigt, barre d'état réduite. */
+  html, body { height: auto; }
+  body { display: block; overflow: auto; }
+  main.app { height: auto; }
+  .panel { min-height: 85vh; }
+  .tabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; position: sticky; top: 0; z-index: 5; background: var(--panel); }
+  .tabs button { flex: none; white-space: nowrap; padding: 10px 10px 8px; font-size: 13.5px; }
+  .tab { overflow: visible; flex: none; }
+  footer.status .cmd { display: none; }
   header.top { flex-wrap: wrap; padding: 6px 10px; gap: 6px; }
   .actions { flex-wrap: wrap; margin-left: 0; }
   main.app { grid-template-columns: 40px minmax(0, 1fr); grid-template-rows: 60vh auto; }

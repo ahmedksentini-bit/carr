@@ -432,6 +432,14 @@ ou sur un fond topographique DXF.
     et signalée avec l'allongement nécessaire du demi-ouvrage ;
   - tests : `node tools/test-watershed.mjs`, `node tools/test-hydrology.mjs`, `node tools/test-culvert.mjs`,
     `node tools/test-basinedit.mjs`.
+- **Import d'un axe depuis un KMZ / KML** (onglet Échangeur, « Importer l'axe (KMZ / KML) » ; `js/axisimport.js`) :
+  ligne Google Earth, GPS ou QGIS (choix de la ligne si le fichier en contient plusieurs) → voie principale, ou nouvelle
+  voie secondaire si la principale existe et n'est pas remplacée. Droites, arcs et clothoïdes reconstitués par le
+  diagramme des courbures (clofit.js), puis un sommet par virage : intersection des tangentes, R calé sur la flèche,
+  longueur de clothoïde ajustée aux points (arc seul quand il suffit) ; écart maximal aux points affiché. Un projet
+  vide passe dans le fuseau UTM du tracé. `node tools/test-axisimport.mjs`.
+- **Téléphone** : onglets sur une ligne défilant au doigt, panneau sous le plan à sa hauteur, zoom et panoramique à
+  deux doigts (pincement) sur le plan.
 - **Vitesses / UVR (onglet dédié, Guide M1 ESCWA/UNRSF ; `js/uvr.js`, `js/uvrtab.js`)** : déclencheurs UVR et plan de
   gestion des vitesses le long des axes cochés (route, autoroute, voies secondaires, bretelles, branches), comme les
   bassins versants de BVTrace :
@@ -592,6 +600,7 @@ js/talus.js         talus en plan : EET, barbules, découpe entre axes
 js/viewer.js        rendu canvas (projet, DXF, HUD)
 js/geom.js          géométrie (droites, arcs, raccordements, décalages)
 js/clotho.js        alignements en plan avec clothoïdes (raccordements progressifs)
+js/axisimport.js    axe (sommets, R, clothoïdes) reconstitué depuis une ligne KMZ / KML
 js/uvr.js           déclencheurs UVR, sections A–E, transitions et aménagements du Guide M1, V85 géométrique, E.4.2
 js/uvrtab.js        onglet Vitesses / UVR : OpenStreetMap (Overpass), KMZ, saisie, dessin sur le plan, page imprimable
 js/roadcat.js       catégories de conception (ARP, ICTAAL, VSA, AU70), dévers, clothoïdes, contrôles (BVTrace)
