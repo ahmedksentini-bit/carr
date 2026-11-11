@@ -79,6 +79,8 @@ export function defaultUvrOpts() {
     travGap: 150, // trous de bâti fusionnés pour former une traversée (m)
     bldMin: 4, // bâtiments (OSM) dans la fenêtre de ±50 m × 80 m pour qu'un point de l'axe soit « bâti »
     spacing: 200, // espacement maximal des traversées piétonnes en cat. D / E (AD 1.2)
+    physE: 150, // espacement des dispositifs physiques (plateaux, traversées surélevées) en cat. E / 30 km/h (m)
+    physD: 250, // espacement des chicanes / rétrécissements en cat. D, là où la V85 géométrique dépasse la vitesse-cible + 10 (m)
     v0: 'auto', // profil V85 : auto | 120 | 102 | 92
     ref: 'M1', // référentiel des vitesses : M1 (ESCWA/UNRSF) ou R4L (Banque mondiale)
     sep: false, // R4L : usagers vulnérables séparés du trafic dans les pôles d'activité (trottoirs, traversées sûres) → 50 km/h
@@ -91,7 +93,7 @@ export function uvrOpts(o) {
   const d = defaultUvrOpts(), r = { ...d, ...(o || {}) };
   r.types = Object.fromEntries(TYPE_KEYS.map((k) => [k, { ...d.types[k], ...(o?.types?.[k] || {}) }]));
   if (r.ref !== 'R4L') r.ref = 'M1';
-  for (const k of ['R', 'travMin', 'gapMin', 'travGap', 'bldMin', 'spacing', 'juncL']) if (!(+r[k] > 0)) r[k] = d[k]; else r[k] = +r[k];
+  for (const k of ['R', 'travMin', 'gapMin', 'travGap', 'bldMin', 'spacing', 'juncL', 'physE', 'physD']) if (!(+r[k] > 0)) r[k] = d[k]; else r[k] = +r[k];
   return r;
 }
 // Catégorie de base d'un axe (rase campagne) : autoroute → A ; route à chaussées séparées → B ; sinon B.
@@ -447,7 +449,8 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
       for (const s of [h.s - 100, h.s + 100]) if (s > g.s0 + 20 && s < g.s1 - 20) T(s, 0, 'rappel30', 'Rappel zone 30 (panneau tous les 100 m, marquage « 30 » tous les 50 m)', 'F1.17', 'MUST', { trg: h.id, sign: 'B30' });
     } else if (h.type === 'tc' || h.type === 'culte' || h.type === 'gare' || h.type === 'sante' || h.type === 'marche') {
       const plat = g.v <= 50 && (h.type === 'marche' || h.type === 'sante');
-      T(h.s, 0, plat ? 'plateau' : 'passage', `${plat ? 'Plateau traversant' : 'Passage piéton protégé'}${width > 7 ? ' + refuge ≥ 2,00 m (traversée > 7 m)' : ''} + éclairage dédié — ${lbl}`, plat ? 'F1.09, F1.10' : 'F1.10', plat ? 'SHOULD' : 'MUST', { trg: h.id, sign: 'C20a' });
+      const calm = !plat && isLow(g.cat); // en traversée, la voie est rétrécie au droit du passage (refuge ou avancées)
+      T(h.s, 0, plat ? 'plateau' : 'passage', `${plat ? 'Plateau traversant' : 'Passage piéton protégé'}${width > 7 ? ' + refuge ≥ 2,00 m (traversée > 7 m)' : calm ? ' + avancées de trottoir' : ''} + éclairage dédié — ${lbl}`, plat ? 'F1.09, F1.10' : calm ? 'F1.10, F1.14' : 'F1.10', plat ? 'SHOULD' : 'MUST', { trg: h.id, sign: 'C20a', ...(calm ? { calm: true } : {}) });
     }
     for (const m of Ty.must) if (!/plateau traversant au droit|passage piéton \+|^passage protégé$/i.test(m)) T(h.s, 0, 'prescr', m, Ty.fiches, 'MUST', { trg: h.id, list: true });
     for (const m of Ty.should) T(h.s, 0, 'prescr', m, Ty.fiches, 'SHOULD', { trg: h.id, list: true });
@@ -460,7 +463,10 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
     for (let k = 1; k <= n; k++) {
       const s = g.s0 + (g.len * k) / (n + 1);
       if (fixed.some((f) => Math.abs(f - s) < o.spacing / 2)) continue;
-      T(s, 0, 'passage', `Passage piéton protégé${width > 7 ? ' + refuge ≥ 2,00 m' : ''} + éclairage dédié (espacement ≤ ${o.spacing} m)`, width > 7 ? 'F1.10, AD 1.2' : 'AD 1.2', 'MUST', { sign: 'C20a' });
+      // en cat. E (30 km/h) la traversée est surélevée : elle sert aussi de dispositif de modération (un ouvrage au lieu de deux)
+      if (isE(g.cat)) T(s, 0, 'plateau', `Passage piéton surélevé (plateau traversant)${width > 7 ? ' + refuge ≥ 2,00 m' : ''} + éclairage dédié (espacement ≤ ${o.spacing} m)`, width > 7 ? 'F1.09, F1.10, AD 1.2' : 'F1.09, AD 1.2', 'MUST', { sign: 'C20a' });
+      // en cat. D, le refuge ou les avancées de trottoir rétrécissent la voie : la traversée modère aussi la vitesse (pas de chicane en plus)
+      else T(s, 0, 'passage', `Passage piéton protégé${width > 7 ? ' + refuge ≥ 2,00 m' : ' + avancées de trottoir'} (voie rétrécie à 3,00–3,25 m) + éclairage dédié (espacement ≤ ${o.spacing} m)`, width > 7 ? 'F1.10, F1.14, AD 1.2' : 'F1.10, F1.14, AD 1.2', 'MUST', { sign: 'C20a', calm: true });
     }
     T((g.s0 + g.s1) / 2, 0, 'lineaire', `Sur ${pk(g.s0)} – ${pk(g.s1)} : trottoirs continus des deux côtés ${isE(g.cat) ? '≥ 2,50 m (PMR)' : '2,50 m (1,50 m minimum)'}, bateaux aux traversées, éclairage continu, dépassement interdit (ligne continue)`, 'F1.11, C3.2.2', 'MUST', { s0: g.s0, s1: g.s1 });
   }
@@ -469,26 +475,33 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
   const V0 = v0Of(ax, o.v0);
   const v85 = v85Profile(ax, { V0, zAt: input.zAt || null });
   const vAt = (s) => { const i = clamp(Math.round((s / ax.len) * (v85.length - 1)), 0, v85.length - 1); return v85[i]?.v ?? V0; };
+  // contrôles regroupés par nature : un message par constat, avec la liste des sections concernées
+  const grp = {}, add = (k, item) => (grp[k] = grp[k] || []).push(item);
   for (const g of segs) {
     const inG = v85.filter((q) => q.s >= g.s0 && q.s <= g.s1);
     if (!inG.length) continue;
-    const vmax = Math.max(...inG.map((q) => q.v)), vmin = Math.min(...inG.map((q) => q.v)), where = `${pk(g.s0)} – ${pk(g.s1)}`;
+    const vmax = Math.max(...inG.map((q) => q.v)), vmin = Math.min(...inG.map((q) => q.v)), where = `${pk(g.s0)}–${pk(g.s1)}`;
     if (isLow(g.cat) && vmax > g.v + 10) {
-      checks.push({ lvl: 'warn', msg: `${ax.name}, ${where} (cat. ${g.cat}, ${g.v} km/h) : la géométrie autorise une V85 de ${Math.round(vmax)} km/h (> vitesse-cible + 10) — vitesse-cible non crédible sans modération physique : plateaux / chicanes répétés (F1.09, F1.14).` });
-      const step = isE(g.cat) ? 75 : 150, n = Math.floor(g.len / step);
-      for (let k = 1; k <= n; k++) { const s = g.s0 + (g.len * k) / (n + 1); if (!treat.some((q) => (['plateau', 'chicane', 'portail'].includes(q.code) && Math.abs(q.s - s) < step / 2) || (['passage', 'zone30', 'bandes'].includes(q.code) && Math.abs(q.s - s) < 25))) T(s, 0, isE(g.cat) ? 'plateau' : 'chicane', `Dispositif de modération physique (${isE(g.cat) ? 'plateau traversant' : 'chicane ou rétrécissement'}) : V85 géométrique ${Math.round(vAt(s))} km/h pour ${g.v} km/h`, isE(g.cat) ? 'F1.09' : 'F1.14', 'SHOULD'); }
-    } else if (!isLow(g.cat) && vmax > g.vc) checks.push({ lvl: 'info', msg: `${ax.name}, ${where} : V85 géométrique ${Math.round(vmax)} km/h > VC ${g.vc} km/h (C1.5 : VC ≤ vitesse-cible + 10) — contrôle des vitesses (signalisation, radar) ou reprise du tracé.` });
-    if (vmin < g.v - 15 && !isE(g.cat)) {
-      const q = inG.find((r) => r.v === vmin);
-      checks.push({ lvl: 'warn', msg: `${ax.name}, ${pk(q.s)} : courbe R ≈ ${q.R ?? '—'} m, V85 ${Math.round(vmin)} km/h, nettement sous la vitesse-cible de ${g.v} km/h — signalisation de virage, balisage, vitesse conseillée ; à éviter en approche d'un déclencheur.` });
-    }
+      add('hi', `${where} (${g.v} km/h, V85 ${Math.round(vmax)})`);
+      // dispositifs physiques espacés de physE (cat. E) ou physD (cat. D, seulement là où la V85 locale est trop forte)
+      const E = isE(g.cat), step = E ? o.physE : o.physD, n = Math.floor(g.len / step);
+      for (let k = 1; k <= n; k++) {
+        const s = g.s0 + (g.len * k) / (n + 1);
+        if (!E && vAt(s) <= g.v + 10) continue;
+        if (treat.some((q) => ((['plateau', 'chicane', 'portail', 'zone30'].includes(q.code) || q.calm) && Math.abs(q.s - s) < step / 2) || (['passage', 'bandes'].includes(q.code) && Math.abs(q.s - s) < 25))) continue;
+        T(s, 0, E ? 'plateau' : 'chicane', `Dispositif de modération physique (${E ? 'plateau traversant' : 'chicane ou rétrécissement'}) : V85 géométrique ${Math.round(vAt(s))} km/h pour ${g.v} km/h`, E ? 'F1.09' : 'F1.14', 'SHOULD');
+      }
+    } else if (!isLow(g.cat) && vmax > g.vc) add('vc', `${where} (V85 ${Math.round(vmax)} > VC ${g.vc})`);
+    if (vmin < g.v - 15 && !isE(g.cat)) { const q = inG.find((r) => r.v === vmin); add('curve', `${pk(q.s)} (R ≈ ${q.R ?? '—'} m, V85 ${Math.round(vmin)} pour ${g.v})`); }
   }
-  for (const t of trans) if (t.gate) {
-    const v = vAt(t.s);
-    if (v > 70) checks.push({ lvl: 'info', msg: `${ax.name}, portail ${pk(t.s)} : V85 géométrique d'approche ${Math.round(v)} km/h — le portail et le rétrécissement doivent ramener la V85 à ≤ 55 km/h (F1.12) : mesure de la V85 après mise en service (F1.13).` });
-  }
+  for (const t of trans) if (t.gate) { const v = vAt(t.s); if (v > 70) add('gate', `${pk(t.s)} (${Math.round(v)} km/h)`); }
+  const list = (a) => (a.length > 5 ? `${a.slice(0, 5).join(' ; ')} et ${a.length - 5} autre(s)` : a.join(' ; '));
+  if (grp.hi) checks.push({ lvl: 'warn', msg: `${ax.name} — vitesse-cible non crédible sans modération physique sur ${grp.hi.length} section(s) : ${list(grp.hi)}. Plateaux / chicanes proposés (F1.09, F1.14).` });
+  if (grp.vc) checks.push({ lvl: 'info', msg: `${ax.name} — V85 géométrique au-dessus de la VC (C1.5) sur ${grp.vc.length} section(s) : ${list(grp.vc)}. Contrôle des vitesses ou reprise du tracé.` });
+  if (grp.curve) checks.push({ lvl: 'warn', msg: `${ax.name} — courbe(s) nettement sous la vitesse-cible : ${list(grp.curve)}. Signalisation de virage, balisage ; à éviter en approche d'un déclencheur.` });
+  if (grp.gate) checks.push({ lvl: 'info', msg: `${ax.name} — portail(s) abordé(s) à plus de 70 km/h : ${list(grp.gate)}. Le portail doit ramener la V85 à ≤ 55 km/h (F1.12) ; V85 à mesurer après mise en service (F1.13).` });
   if (!hits.length && !trav.length) checks.push({ lvl: 'info', msg: `${ax.name} : aucun déclencheur UVR à moins de ${o.R} m — profil standard de la catégorie ${baseCat} (AD 1.2).` });
-  for (const h of hits) if (h.type === 'ecole' && !(input.trav || []).length && !o.types.ecole.rural) checks.push({ lvl: 'warn', msg: `${ax.name}, ${pk(h.s)} : école hors traversée sans zone 30 — F1.17 impose une zone 30 aménagée pour toute école déclencheur.` });
+  { const ec = hits.filter((h) => h.type === 'ecole' && !(input.trav || []).length && !o.types.ecole.rural).map((h) => pk(h.s)); if (ec.length) checks.push({ lvl: 'warn', msg: `${ax.name} — école(s) hors traversée sans zone 30 : PK ${list(ec)}. F1.17 impose une zone 30 aménagée pour toute école déclencheur.` }); }
   // ------------------------------------------------ retouches de l'utilisateur (input.edits)
   // Chaque aménagement proposé a une clé « code:sens:déclencheur:PK » ; une retouche s'applique à l'aménagement de même
   // code, sens et déclencheur dont le PK est à moins de 15 m de celui de la clé (le tracé peut avoir un peu bougé).

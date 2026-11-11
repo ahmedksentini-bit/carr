@@ -566,3 +566,10 @@ ul.ouvr-items li.info { color: var(--muted); }
 .psgr { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; margin: 8px 0; }
 .psgr h4 { margin: 10px 0 4px; }
 .psgr-svg { margin: 6px 0; overflow-x: auto; color: var(--text, #d7dde5); background: var(--panel2); border-radius: 6px; padding: 4px; }
+/* Vitesses / UVR : contrôles repliables, une ligne de texte pleine largeur par constat */
+.uvck { margin: 10px 0; }
+.uvck summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.uvck .blist { max-height: 220px; overflow-y: auto; margin: 4px 0 0; }
+.uvck .blist li { display: block; cursor: default; padding: 5px 10px; font-size: 12px; line-height: 1.35; }
+.uvck .blist li.warn { border-left: 3px solid #f59e0b; }
+.uvck .blist li.info { border-left: 3px solid #3b82f6; }

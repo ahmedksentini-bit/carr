@@ -258,7 +258,7 @@ export function initUvr(api) {
       <label class="fld"><span class="lb">Rayon d'influence</span><input data-uvo="R" type="text" inputmode="decimal" value="${o.R}"><span class="un">m</span></label>
       <label class="fld"><span class="lb">Traversée minimale</span><input data-uvo="travMin" type="text" inputmode="decimal" value="${o.travMin}"><span class="un">m</span></label>
       <label class="fld"><span class="lb">Remontée minimale</span><input data-uvo="gapMin" type="text" inputmode="decimal" value="${o.gapMin}" title="Une zone à vitesse plus élevée plus courte que cette longueur, entre deux zones lentes, est supprimée (pas d'effet « yo-yo »)"><span class="un">m</span></label>
-      <label class="fld"><span class="lb">Traversées piétonnes ≤</span><input data-uvo="spacing" type="text" inputmode="decimal" value="${o.spacing}"><span class="un">m</span></label>
+      <label class="fld"><span class="lb">Traversées piétonnes ≤</span><input data-uvo="spacing" type="text" inputmode="decimal" value="${o.spacing}"><span class="un">m</span></label><label class="fld" title="Plateaux / traversées surélevées en zone 30 (cat. E)"><span class="lb">Plateaux (30 km/h) tous les</span><input data-uvo="physE" type="text" inputmode="decimal" value="${o.physE}"><span class="un">m</span></label><label class="fld" title="Chicanes / rétrécissements en cat. D, seulement là où la V85 géométrique dépasse la vitesse-cible + 10"><span class="lb">Chicanes (50 km/h) tous les</span><input data-uvo="physD" type="text" inputmode="decimal" value="${o.physD}"><span class="un">m</span></label>
       <label class="fld"><span class="lb">V85 géométrique (V0)</span><select data-uvo="v0">${optRow(o.v0, [['auto', 'auto (selon l\'axe)'], ...Object.entries(V0_PROFILES).map(([k, l]) => [k, `${k} km/h — ${l}`])])}</select></label>
       <label class="chk"><input type="checkbox" data-uvo="plan"${u.plan !== false ? ' checked' : ''}> Afficher sur le plan</label></div>
       <details${R4 ? ' hidden' : ''}><summary>Vitesses par type de déclencheur (AD 1.2)</summary><table class="pts"><thead><tr><th>Type</th><th>Vitesse-cible</th><th>Hors traversée</th><th>Fiches</th></tr></thead><tbody>${TYPE_KEYS.map((k) => `<tr><td>${esc(UVR_TYPES[k].label)}</td><td><input class="mini-in" data-uvt="${k}" data-f="v" type="text" size="4" value="${o.types[k].v}"> km/h</td><td><label class="chk"><input type="checkbox" data-uvt="${k}" data-f="rural"${o.types[k].rural ? ' checked' : ''}> vitesse appliquée</label></td><td>${esc(UVR_TYPES[k].fiches)}</td></tr>`).join('')}</tbody></table><p class="note">Hors traversée, un type non coché ne fait pas baisser la vitesse : seuls ses aménagements ponctuels sont prescrits (cas de l'arrêt TC du tableau E.4.2).</p></details>`;
@@ -288,7 +288,7 @@ export function initUvr(api) {
         ${(() => { const e = u.edits[r.key]; const n = e ? e.del.length + Object.keys(e.mv).length + Object.keys(e.sign).length + e.add.length : 0; return n ? `<button id="btnUvrAmReset" class="danger" title="Supprime toutes les retouches de cet axe">Rétablir la proposition (${n} retouche${n > 1 ? 's' : ''})</button>` : ''; })()}</div>
       <div class="tablewrap"><table class="pts"><thead><tr><th>PK</th><th>Sens</th><th>Aménagement</th><th>Panneau</th><th>Niveau</th><th>Fiche M1</th><th></th></tr></thead><tbody>${r.treat.map((q) => `<tr data-uvs="${q.s.toFixed(1)}"${q.manual || q.moved || q.signEdited ? ' class="on"' : ''}><td>${q.list || q.code === 'lineaire' ? `<span class="mono">${fmtPK(q.s)}</span>` : `<input class="mini-in" data-uvmv="${esc(q.key)}" type="text" size="6" value="${Math.round(q.s)}" title="PK en m">`}</td><td>${q.dir === 1 ? '→' : q.dir === -1 ? '←' : '⇄'}</td><td>${esc(q.label)}${q.moved ? ' <i>(déplacé)</i>' : ''}</td><td>${q.list || q.code === 'lineaire' ? '' : `<select class="mini-in" data-uvsign="${esc(q.key)}">${optRow(q.sign || '', SIGN_CHOICES)}</select>`}</td><td>${q.lvl === 'MUST' ? '<b>MUST</b>' : 'SHOULD'}</td><td>${esc(q.fiche)}</td><td><button class="mini danger" data-uvtdel="${esc(q.key)}" title="Supprimer">✕</button></td></tr>`).join('')}</tbody></table></div>
       ${r.removed?.length ? `<details><summary>Aménagements supprimés (${r.removed.length})</summary><ul class="blist">${r.removed.map((q) => `<li>${fmtPK(q.s)} — ${esc(q.label)} <button class="mini" data-uvrest="${esc(q.key)}">Rétablir</button></li>`).join('')}</ul></details>` : ''}
-      ${r.checks.length ? `<h4>Contrôles</h4><ul class="blist">${r.checks.map((c) => `<li class="${c.lvl}">${esc(c.msg)}</li>`).join('')}</ul>` : ''}`;
+      ${r.checks.length ? `<details class="uvck"><summary>Contrôles (${r.checks.length}) — ${r.checks.filter((c) => c.lvl === 'warn').length} alerte(s)</summary><ul class="blist">${r.checks.map((c) => `<li class="${c.lvl}">${esc(c.msg)}</li>`).join('')}</ul></details>` : ''}`;
   }
 
   // Plan du tracé (SVG, nord en haut) : fond satellite Esri si le projet est géoréférencé, axe coloré par catégorie,
@@ -308,39 +308,65 @@ export function initUvr(api) {
     // fond satellite : tuiles Esri World Imagery placées par leurs coins projetés dans le système du projet
     if (sat && geo()) {
       const c = S.crs.toLL(cx, cy), z = Math.max(1, Math.min(19, Math.round(Math.log2((156543.03 * Math.cos((c.lat * Math.PI) / 180)) / m)) + 1)); // un niveau de plus : image nette à l'impression
-      const lon2x = (lon) => ((lon + 180) / 360) * 2 ** z, lat2y = (lat) => { const r2 = (lat * Math.PI) / 180; return ((1 - Math.log(Math.tan(r2) + 1 / Math.cos(r2)) / Math.PI) / 2) * 2 ** z; };
-      const x2lon = (x) => (x / 2 ** z) * 360 - 180, y2lat = (y) => { const k = Math.PI - (2 * Math.PI * y) / 2 ** z; return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(k) - Math.exp(-k))); };
-      const cs = [[x0, y0], [x1, y0], [x0, y1], [x1, y1]].map(([x, y]) => S.crs.toLL(x, y));
-      const tx0 = Math.floor(Math.min(...cs.map((q) => lon2x(q.lon)))), tx1 = Math.floor(Math.max(...cs.map((q) => lon2x(q.lon)))), ty0 = Math.floor(Math.min(...cs.map((q) => lat2y(q.lat)))), ty1 = Math.floor(Math.max(...cs.map((q) => lat2y(q.lat))));
-      if ((tx1 - tx0 + 1) * (ty1 - ty0 + 1) <= 160) for (let tx = tx0; tx <= tx1; tx++) for (let ty = ty0; ty <= ty1; ty++) {
-        // tuile placée par trois coins projetés (transformation affine) : les tuiles Web Mercator sont tournées dans le
-        // système du projet (convergence des méridiens), un simple rectangle laissait des bandes vides en escalier
-        const tl = S.crs.fromLL(x2lon(tx), y2lat(ty)), tr = S.crs.fromLL(x2lon(tx + 1), y2lat(ty)), bl = S.crs.fromLL(x2lon(tx), y2lat(ty + 1));
-        const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`; if (collect) collect.push(url);
-        const e = X(tl.x), fy = Y(tl.y), ax_ = X(tr.x) - e, ay_ = Y(tr.y) - fy, cx_ = X(bl.x) - e, cy_ = Y(bl.y) - fy, k = 1.004; // léger recouvrement
-        g += `<image href="${tiles?.get(url) || url}" x="0" y="0" width="1" height="1" preserveAspectRatio="none" transform="matrix(${(ax_ * k).toFixed(3)} ${(ay_ * k).toFixed(3)} ${(cx_ * k).toFixed(3)} ${(cy_ * k).toFixed(3)} ${e.toFixed(2)} ${fy.toFixed(2)})"/>`;
-      }
+      // sous-couche à z − 2 (16 fois moins de tuiles) : une tuile manquante laisse voir une image floue, pas un trou gris
+      const layer = (z) => {
+        const lon2x = (lon) => ((lon + 180) / 360) * 2 ** z, lat2y = (lat) => { const r2 = (lat * Math.PI) / 180; return ((1 - Math.log(Math.tan(r2) + 1 / Math.cos(r2)) / Math.PI) / 2) * 2 ** z; };
+        const x2lon = (x) => (x / 2 ** z) * 360 - 180, y2lat = (y) => { const k = Math.PI - (2 * Math.PI * y) / 2 ** z; return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(k) - Math.exp(-k))); };
+        // coins de la vue réellement dessinée (la hauteur est bornée : la vue déborde souvent le rectangle de l'axe)
+        const vx0 = cx - (W / 2) * m, vx1 = cx + (W / 2) * m, vy0 = cy - (H / 2) * m, vy1 = cy + (H / 2) * m;
+        const cs = []; for (let i = 0; i <= 8; i++) { const a = vx0 + ((vx1 - vx0) * i) / 8, b = vy0 + ((vy1 - vy0) * i) / 8; cs.push(S.crs.toLL(a, vy0), S.crs.toLL(a, vy1), S.crs.toLL(vx0, b), S.crs.toLL(vx1, b)); } // bords échantillonnés : ils se courbent en lon/lat
+        const tx0 = Math.floor(Math.min(...cs.map((q) => lon2x(q.lon)))), tx1 = Math.floor(Math.max(...cs.map((q) => lon2x(q.lon)))), ty0 = Math.floor(Math.min(...cs.map((q) => lat2y(q.lat)))), ty1 = Math.floor(Math.max(...cs.map((q) => lat2y(q.lat))));
+        if ((tx1 - tx0 + 1) * (ty1 - ty0 + 1) > 160) return;
+        for (let tx = tx0; tx <= tx1; tx++) for (let ty = ty0; ty <= ty1; ty++) {
+          // tuile placée par trois coins projetés (transformation affine) : les tuiles Web Mercator sont tournées dans le
+          // système du projet (convergence des méridiens), un simple rectangle laissait des bandes vides en escalier
+          const tl = S.crs.fromLL(x2lon(tx), y2lat(ty)), tr = S.crs.fromLL(x2lon(tx + 1), y2lat(ty)), bl = S.crs.fromLL(x2lon(tx), y2lat(ty + 1));
+          const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`; if (collect) collect.push(url);
+          const href = tiles?.get(url) || url; // tuile non téléchargée : adresse directe ; si elle échoue aussi, la sous-couche reste visible
+          const e = X(tl.x), fy = Y(tl.y), ax_ = X(tr.x) - e, ay_ = Y(tr.y) - fy, cx_ = X(bl.x) - e, cy_ = Y(bl.y) - fy, k = 1.004; // léger recouvrement
+          g += `<image href="${href}" x="0" y="0" width="1" height="1" preserveAspectRatio="none" transform="matrix(${(ax_ * k).toFixed(3)} ${(ay_ * k).toFixed(3)} ${(cx_ * k).toFixed(3)} ${(cy_ * k).toFixed(3)} ${e.toFixed(2)} ${fy.toFixed(2)})"/>`;
+        }
+      };
+      if (z > 3) layer(z - 2);
+      layer(z);
     }
     // axe : liseré blanc, puis sections colorées par catégorie
     const path = (arr) => arr.map((p, i) => `${i ? 'L' : 'M'}${f(X(p.x))},${f(Y(p.y))}`).join('');
     g += `<path d="${path(P)}" fill="none" stroke="#ffffff" stroke-width="9" stroke-linejoin="round" opacity="0.9"/>`;
     for (const s of r.segs) { if (s.s1 < s0 || s.s0 > s1) continue; const a0 = Math.max(s0, s.s0), a1 = Math.min(s1, s.s1); const q = P.filter((p) => p.s >= a0 - 1e-6 && p.s <= a1 + 1e-6); q.unshift({ ...ax.at(a0).p }); q.push({ ...ax.at(a1).p }); g += `<path d="${path(q)}" fill="none" stroke="${CATS[s.cat].color}" stroke-width="5.5" stroke-linejoin="round"/>`; }
     // PK
+    const occ = []; // emprises déjà occupées (PK, symboles) : les étiquettes des déclencheurs les évitent
     const stepPk = [50, 100, 200, 250, 500, 1000, 2000, 5000].find((k) => (s1 - s0) / k <= 14) || 10000;
     for (let s = Math.ceil(s0 / stepPk) * stepPk; s <= s1 + 1e-6; s += stepPk) { const q = ax.at(s), nx = -q.t.y, ny = q.t.x, p = q.p; const a = { x: p.x + nx * 7 * m, y: p.y + ny * 7 * m }, b = { x: p.x - nx * 7 * m, y: p.y - ny * 7 * m }, l = { x: p.x + nx * 16 * m, y: p.y + ny * 16 * m };
+      occ.push({ x0: X(l.x) - 20, x1: X(l.x) + 20, y0: Y(l.y) - 7, y1: Y(l.y) + 7 });
       g += `<line x1="${f(X(a.x))}" y1="${f(Y(a.y))}" x2="${f(X(b.x))}" y2="${f(Y(b.y))}" stroke="#111827" stroke-width="1.5"/><text x="${f(X(l.x))}" y="${f(Y(l.y) + 4)}" text-anchor="middle" fill="#111827" stroke="#ffffff" stroke-width="3" paint-order="stroke" font-weight="600">${fmtPK(s)}</text>`; }
     // aménagements principaux (même symboles que le profil)
     const sym = { portail: ['▮', '#7c2d12'], plateau: ['▬', '#b45309'], zone30: ['30', '#dc2626'], passage: ['‖', '#0f766e'], chicane: ['S', '#a16207'], limite: ['○', '#dc2626'] }, seen = [];
     for (const q of r.treat) {
       if (!sym[q.code] || !inW(q.s)) continue;
       const tq = ax.at(q.s), side = q.dir === -1 ? 1 : -1, p = { x: tq.p.x - tq.t.y * side * 11 * m, y: tq.p.y + tq.t.x * side * 11 * m };
-      if (seen.some((o) => Math.hypot(o.x - X(p.x), o.y - Y(p.y)) < 11)) continue; seen.push({ x: X(p.x), y: Y(p.y) });
+      if (seen.some((o) => Math.hypot(o.x - X(p.x), o.y - Y(p.y)) < 11)) continue; seen.push({ x: X(p.x), y: Y(p.y) }); occ.push({ x0: X(p.x) - 6, x1: X(p.x) + 6, y0: Y(p.y) - 7, y1: Y(p.y) + 7 });
       g += `<text x="${f(X(p.x))}" y="${f(Y(p.y) + 4)}" text-anchor="middle" fill="${sym[q.code][1]}" stroke="#ffffff" stroke-width="2.5" paint-order="stroke" font-weight="700" font-size="${sym[q.code][0].length > 1 ? 9 : 12}">${sym[q.code][0]}</text>`;
     }
     // déclencheurs
+    // étiquettes : placées à droite, sinon à gauche de la pastille, et omises si elles chevauchent une autre étiquette ou pastille
+    const boxes = [...occ, ...hits.map((h) => ({ x0: X(h.x) - 9, x1: X(h.x) + 9, y0: Y(h.y) - 9, y1: Y(h.y) + 9 }))], lab = [];
+    const free = (bx) => !boxes.some((o) => bx.x0 < o.x1 && bx.x1 > o.x0 && bx.y0 < o.y1 && bx.y1 > o.y0);
+    for (const h of hits) {
+      if (!h.name) continue;
+      // nom bilingue (français + arabe) : la partie latine seule sur le plan, le texte mêlé se dessine mal en SVG
+      let nm = /[A-Za-zÀ-ÿ]/.test(h.name) && /[\u0600-\u06FF]/.test(h.name) ? h.name.replace(/[\u0600-\u06FF\u0750-\u077F]+/g, '').replace(/\s+/g, ' ').trim() : h.name;
+      if (nm.length > 28) nm = `${nm.slice(0, 27)}…`;
+      const w = nm.length * 5.6, hx = X(h.x), hy = Y(h.y);
+      const cand = [{ x0: hx + 11, x1: hx + 11 + w, y0: hy - 6, y1: hy + 6, a: 'start', tx: hx + 11 }, { x0: hx - 11 - w, x1: hx - 11, y0: hy - 6, y1: hy + 6, a: 'end', tx: hx - 11 }]
+        .map((c) => ({ ...c, x0: c.x0 - 2, x1: c.x1 + 2, y0: c.y0 - 2, y1: c.y1 + 2 })).filter((c) => c.x0 >= 0 && c.x1 <= W && free(c));
+      if (!cand.length) continue;
+      const c = cand[0]; boxes.push(c); lab.push(`<text x="${f(c.tx)}" y="${f(hy + 4)}" text-anchor="${c.a}" fill="#111827" stroke="#ffffff" stroke-width="3" paint-order="stroke" font-size="10">${esc(nm)}</text>`);
+    }
     for (const h of hits) { const T = UVR_TYPES[h.type], foot = ax.at(h.s).p;
       g += `<line x1="${f(X(h.x))}" y1="${f(Y(h.y))}" x2="${f(X(foot.x))}" y2="${f(Y(foot.y))}" stroke="${T.color}" stroke-dasharray="3 2" stroke-width="1.2"/><circle cx="${f(X(h.x))}" cy="${f(Y(h.y))}" r="8.5" fill="${T.color}" stroke="#ffffff" stroke-width="1.5"/><text x="${f(X(h.x))}" y="${f(Y(h.y) + 3.5)}" text-anchor="middle" fill="#ffffff" font-size="8.5" font-weight="700">${T.short}</text>`;
-      if (h.name) g += `<text x="${f(X(h.x) + 11)}" y="${f(Y(h.y) + 4)}" fill="#111827" stroke="#ffffff" stroke-width="3" paint-order="stroke" font-size="10">${esc(h.name)}</text>`; }
+    }
+    g += lab.join('');
     // nord, échelle
     let rotN = 0; if (geo()) { const c0 = S.crs.toLL(cx, cy), q0 = S.crs.fromLL(c0.lon, c0.lat), q1 = S.crs.fromLL(c0.lon, c0.lat + 0.01); rotN = (Math.atan2(q1.x - q0.x, q1.y - q0.y) * 180) / Math.PI; } // nord géographique dans le système du projet
     g += `<g transform="translate(${W - 34},34) rotate(${rotN.toFixed(1)})"><circle r="18" fill="#ffffff" opacity="0.85"/><path d="M0,-13 L6,8 L0,4 L-6,8 Z" fill="#111827"/><text y="16" text-anchor="middle" font-size="9" font-weight="700">N</text></g>`;
@@ -358,7 +384,9 @@ export function initUvr(api) {
       const l = out[out.length - 1];
       if (l && g.s0 - l.s1 < 300) { l.s1 = g.s1; l.cats.add(g.cat); } else out.push({ s0: g.s0, s1: g.s1, cats: new Set([g.cat]) });
     }
-    return out.map((z) => ({ ...z, lbl: [...z.cats].map((c) => (CATS[c].r4l ? CATS[c].short : `cat. ${c}`)).join(', ') }));
+    // une zone de plus de 3 km est découpée en plans de détail égaux (échelle lisible)
+    const cut = []; for (const z of out) { const n = Math.max(1, Math.ceil((z.s1 - z.s0) / 3000)), d = (z.s1 - z.s0) / n; for (let i = 0; i < n; i++) cut.push({ ...z, s0: z.s0 + i * d, s1: z.s0 + (i + 1) * d }); }
+    return cut.map((z) => ({ ...z, lbl: [...z.cats].map((c) => (CATS[c].r4l ? CATS[c].short : `cat. ${c}`)).join(', ') }));
   }
 
   // Page imprimable : plan de gestion des vitesses du corridor (E.4) + checklist de la faisabilité / APS.
@@ -366,10 +394,19 @@ export function initUvr(api) {
   async function embedTiles(urls) {
     const map = new Map(), list = [...new Set(urls)];
     let k = 0;
-    await Promise.all(Array.from({ length: 6 }, async () => {
+    // 4 téléchargements simultanés, 3 essais par tuile ; une tuile perdue est omise (la sous-couche z − 2 la remplace)
+    await Promise.all(Array.from({ length: 4 }, async () => {
       while (k < list.length) {
         const u = list[k++];
-        try { const b = await (await fetch(u, { mode: 'cors' })).blob(); map.set(u, await new Promise((ok) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = () => ok(u); fr.readAsDataURL(b); })); } catch { /* la page gardera l'adresse de la tuile */ }
+        for (let a = 0; a < 3 && !map.has(u); a++) {
+          if (a) await new Promise((ok) => setTimeout(ok, 500 * a));
+          try {
+            const r = await fetch(u, { mode: 'cors' }); if (!r.ok) continue;
+            const b = await r.blob(); if (!b.size || !/^image\//.test(b.type)) continue;
+            const d = await new Promise((ok) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = () => ok(null); fr.readAsDataURL(b); });
+            if (d) map.set(u, d);
+          } catch { /* nouvel essai */ }
+        }
       }
     }));
     return map;
@@ -379,16 +416,16 @@ export function initUvr(api) {
     const w = window.open('', '_blank');
     if (w) w.document.write('<p style="font:14px sans-serif;margin:24px">Préparation du plan de gestion des vitesses et du fond satellite…</p>');
     let tiles = null;
-    if (geo()) { const urls = []; for (const r of res) { planSvg(r, { collect: urls }); for (const z of zonesOf(r)) planSvg(r, { s0: z.s0 - 250, s1: z.s1 + 250, collect: urls }); } try { tiles = await embedTiles(urls); } catch { tiles = null; } }
-    const u = cfg(), date = new Date().toLocaleDateString('fr-FR');
+    if (geo()) { const urls = []; for (const r of res) { planSvg(r, { collect: urls }); for (const z of zonesOf(r)) planSvg(r, { s0: z.s0 - 150, s1: z.s1 + 150, collect: urls }); } try { tiles = await embedTiles(urls); } catch { tiles = null; } }
+    const u = cfg(), date = new Date().toLocaleDateString('fr-FR'), pname = !S.prj.name || /sans titre/i.test(S.prj.name) ? res.map((r) => r.name).join(', ') : S.prj.name;
     const ck = (id, txt, ok) => `<tr><td>${id}</td><td>${txt}</td><td>${ok ? '✔ produit par GIRA' : 'à compléter'}</td></tr>`;
     const nT = res.reduce((a, r) => a + r.hits.length, 0);
-    const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Plan de gestion des vitesses — ${esc(S.prj.name || 'projet')}</title>
+    const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Plan de gestion des vitesses — ${esc(pname)}</title>
 <style>body{font:12px "Segoe UI",Arial,sans-serif;color:#0f172a;margin:24px}h1{font-size:18px;margin:0 0 4px}h2{font-size:15px;margin:22px 0 6px;border-bottom:2px solid #1d4ed8;padding-bottom:3px}h3{font-size:13px;margin:14px 0 4px}table{border-collapse:collapse;width:100%;margin:6px 0}th,td{border:1px solid #cbd5e1;padding:3px 5px;text-align:left;vertical-align:top}th{background:#eff6ff}.n{color:#64748b}.must{font-weight:700}svg{max-width:100%;height:auto}@media print{h2{page-break-before:auto}.pb{page-break-before:always}.noprint{display:none}}</style></head><body>
-<button class="noprint" onclick="print()" style="float:right;padding:6px 14px;font-size:13px">Imprimer / PDF</button><h1>Plan de gestion des vitesses du corridor — ${esc(S.prj.name || 'projet')}</h1>
+<button class="noprint" onclick="print()" style="float:right;padding:6px 14px;font-size:13px">Imprimer / PDF</button><h1>Plan de gestion des vitesses du corridor — ${esc(pname)}</h1>
 <div class="n">${u.opts.ref === 'R4L' ? 'Vitesses : cadre Roads-for-Life (R4L), Banque mondiale / WRI, Guide for Safe Speeds (2024), § 2.2–2.3, figures 7 et 8 (p. 28–35). Aménagements : ' : ''}Guide M1 ESCWA/UNRSF (version internationale 2026), sections B.5.4, C1.3, C1.5, C1.6, E.4 ; arbres AD 1.1 et AD 1.2 ; fiches F1.09–F1.17. Établi le ${date} avec GIRA. ${nT} déclencheur(s) UVR rattaché(s) à moins de ${u.opts.R} m.</div>
-<h2>E.4.1 Informations générales</h2><table><tr><th>Projet</th><td>${esc(S.prj.name || '')}</td></tr><tr><th>Corridor</th><td>${res.map((r) => `${esc(r.name)} : PK 0+000 — ${fmtPK(r.len)} (${fmt(r.len / 1000, 2)} km)`).join('<br>')}</td></tr><tr><th>Date / version</th><td>${date}</td></tr><tr><th>Hypothèses</th><td>Référentiel : ${REFS[u.opts.ref]} ; rayon d'influence ${u.opts.R} m ; traversée de localité ≥ ${u.opts.travMin} m ; ${u.opts.junc ? `carrefours à 50 km/h sur ±${u.opts.juncL} m ; ` : ''}${u.opts.ref === 'R4L' ? `pôles d'activité humaine à ${u.opts.sep ? '50 km/h (usagers vulnérables séparés)' : '30 km/h'}` : 'vitesses par type :'} ${u.opts.ref === 'R4L' ? '' : TYPE_KEYS.map((k) => `${UVR_TYPES[k].label.split(' /')[0]} ${u.opts.types[k].v} km/h${u.opts.types[k].rural ? '' : ' (en traversée seulement)'}`).join(', ')} ; VC = vitesse-cible + 10 km/h (C1.5).</td></tr></table>
-${res.map((r, i) => `<h2${i ? ' class="pb"' : ''}>${esc(r.name)} — plan du tracé</h2>${planSvg(r, { tiles })}${zonesOf(r).map((z, k) => `<h3>Détail ${k + 1} : PK ${fmtPK(z.s0)} – ${fmtPK(z.s1)} (${esc(z.lbl)})</h3>${planSvg(r, { s0: z.s0 - 250, s1: z.s1 + 250, W: 1000, tiles })}`).join('')}<p class="n">Axe coloré par catégorie (voir la légende du profil), PK tous les ${[100, 200, 250, 500, 1000, 2000, 5000].find((k) => r.len / k <= 14) || 10000} m, déclencheurs UVR (pastilles) et aménagements principaux (▮ portail, ▬ plateau, 30 zone 30, ‖ passage piéton, S chicane, ○ limitation).</p><h2 class="pb">${esc(r.name)} — profil des vitesses</h2>${speedSvg(r, { width: 1000 })}
+<h2>E.4.1 Informations générales</h2><table><tr><th>Projet</th><td>${esc(pname)}</td></tr><tr><th>Corridor</th><td>${res.map((r) => `${esc(r.name)} : PK 0+000 — ${fmtPK(r.len)} (${fmt(r.len / 1000, 2)} km)`).join('<br>')}</td></tr><tr><th>Date / version</th><td>${date}</td></tr><tr><th>Hypothèses</th><td>Référentiel : ${REFS[u.opts.ref]} ; rayon d'influence ${u.opts.R} m ; traversée de localité ≥ ${u.opts.travMin} m ; ${u.opts.junc ? `carrefours à 50 km/h sur ±${u.opts.juncL} m ; ` : ''}${u.opts.ref === 'R4L' ? `pôles d'activité humaine à ${u.opts.sep ? '50 km/h (usagers vulnérables séparés)' : '30 km/h'}` : 'vitesses par type :'} ${u.opts.ref === 'R4L' ? '' : TYPE_KEYS.map((k) => `${UVR_TYPES[k].label.split(' /')[0]} ${u.opts.types[k].v} km/h${u.opts.types[k].rural ? '' : ' (en traversée seulement)'}`).join(', ')} ; VC = vitesse-cible + 10 km/h (C1.5).</td></tr></table>
+${res.map((r, i) => `<h2${i ? ' class="pb"' : ''}>${esc(r.name)} — plan du tracé</h2>${planSvg(r, { tiles })}${zonesOf(r).map((z, k) => `<h3>Détail ${k + 1} : PK ${fmtPK(z.s0)} – ${fmtPK(z.s1)} (${esc(z.lbl)})</h3>${planSvg(r, { s0: z.s0 - 150, s1: z.s1 + 150, W: 1000, tiles })}`).join('')}<p class="n">Axe coloré par catégorie (voir la légende du profil), PK tous les ${[100, 200, 250, 500, 1000, 2000, 5000].find((k) => r.len / k <= 14) || 10000} m, déclencheurs UVR (pastilles) et aménagements principaux (▮ portail, ▬ plateau, 30 zone 30, ‖ passage piéton, S chicane, ○ limitation).</p><h2 class="pb">${esc(r.name)} — profil des vitesses</h2>${speedSvg(r, { width: 1000 })}
 <h3>E.4.2 Tableau linéaire des vitesses</h3><table><thead><tr><th>PK début</th><th>PK fin</th><th>Cat.</th><th>Vitesse-cible</th><th>VC</th><th>Déclencheurs UVR</th><th>Dispositifs de modération</th></tr></thead><tbody>${r.rows.map((q) => `<tr><td>${fmtPK(q.s0)}</td><td>${fmtPK(q.s1)}</td><td>${esc(q.cat)}</td><td>${esc(q.vt)}</td><td>${esc(q.vc)}</td><td>${esc(q.trig)}</td><td>${esc(q.disp)}</td></tr>`).join('')}</tbody></table>
 <h3>Cartographie des déclencheurs UVR (C1.6)</h3>${r.hits.length ? `<table><thead><tr><th>Type</th><th>Nom</th><th>PK</th><th>Distance à l'axe</th><th>Zone</th><th>Prescriptions MUST (AD 1.2)</th><th>SHOULD</th></tr></thead><tbody>${r.hits.map((h) => `<tr><td>${esc(UVR_TYPES[h.type].label)}</td><td>${esc(h.name)}</td><td>${fmtPK(h.s)}</td><td>${fmt(Math.abs(h.off), 0)} m ${h.off > 0 ? 'à gauche' : 'à droite'}</td><td>${fmtPK(h.s0)} — ${fmtPK(h.s1)}</td><td>${UVR_TYPES[h.type].must.map(esc).join('<br>')}</td><td>${UVR_TYPES[h.type].should.map(esc).join('<br>')}</td></tr>`).join('')}</tbody></table>` : '<p class="n">Aucun déclencheur à moins du rayon d\'influence : profil standard de la catégorie (AD 1.2).</p>'}
 <h3>Aménagements</h3><table><thead><tr><th>PK</th><th>Sens</th><th>Aménagement</th><th>Niveau</th><th>Fiche</th></tr></thead><tbody>${r.treat.filter((q) => !q.list).map((q) => `<tr><td>${fmtPK(q.s)}</td><td>${q.dir === 1 ? 'PK croissants' : q.dir === -1 ? 'PK décroissants' : 'deux sens'}</td><td>${esc(q.label)}</td><td class="${q.lvl === 'MUST' ? 'must' : ''}">${q.lvl}</td><td>${esc(q.fiche)}</td></tr>`).join('')}</tbody></table>
