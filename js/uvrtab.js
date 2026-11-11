@@ -293,9 +293,12 @@ export function initUvr(api) {
       const cs = [[x0, y0], [x1, y0], [x0, y1], [x1, y1]].map(([x, y]) => S.crs.toLL(x, y));
       const tx0 = Math.floor(Math.min(...cs.map((q) => lon2x(q.lon)))), tx1 = Math.floor(Math.max(...cs.map((q) => lon2x(q.lon)))), ty0 = Math.floor(Math.min(...cs.map((q) => lat2y(q.lat)))), ty1 = Math.floor(Math.max(...cs.map((q) => lat2y(q.lat))));
       if ((tx1 - tx0 + 1) * (ty1 - ty0 + 1) <= 160) for (let tx = tx0; tx <= tx1; tx++) for (let ty = ty0; ty <= ty1; ty++) {
-        const a = S.crs.fromLL(x2lon(tx), y2lat(ty)), b = S.crs.fromLL(x2lon(tx + 1), y2lat(ty + 1));
+        // tuile placée par trois coins projetés (transformation affine) : les tuiles Web Mercator sont tournées dans le
+        // système du projet (convergence des méridiens), un simple rectangle laissait des bandes vides en escalier
+        const tl = S.crs.fromLL(x2lon(tx), y2lat(ty)), tr = S.crs.fromLL(x2lon(tx + 1), y2lat(ty)), bl = S.crs.fromLL(x2lon(tx), y2lat(ty + 1));
         const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`; if (collect) collect.push(url);
-        g += `<image href="${tiles?.get(url) || url}" x="${f(X(a.x))}" y="${f(Y(a.y))}" width="${f(X(b.x) - X(a.x) + 0.6)}" height="${f(Y(b.y) - Y(a.y) + 0.6)}" preserveAspectRatio="none"/>`;
+        const e = X(tl.x), fy = Y(tl.y), ax_ = X(tr.x) - e, ay_ = Y(tr.y) - fy, cx_ = X(bl.x) - e, cy_ = Y(bl.y) - fy, k = 1.004; // léger recouvrement
+        g += `<image href="${tiles?.get(url) || url}" x="0" y="0" width="1" height="1" preserveAspectRatio="none" transform="matrix(${(ax_ * k).toFixed(3)} ${(ay_ * k).toFixed(3)} ${(cx_ * k).toFixed(3)} ${(cy_ * k).toFixed(3)} ${e.toFixed(2)} ${fy.toFixed(2)})"/>`;
       }
     }
     // axe : liseré blanc, puis sections colorées par catégorie
@@ -319,7 +322,8 @@ export function initUvr(api) {
       g += `<line x1="${f(X(h.x))}" y1="${f(Y(h.y))}" x2="${f(X(foot.x))}" y2="${f(Y(foot.y))}" stroke="${T.color}" stroke-dasharray="3 2" stroke-width="1.2"/><circle cx="${f(X(h.x))}" cy="${f(Y(h.y))}" r="8.5" fill="${T.color}" stroke="#ffffff" stroke-width="1.5"/><text x="${f(X(h.x))}" y="${f(Y(h.y) + 3.5)}" text-anchor="middle" fill="#ffffff" font-size="8.5" font-weight="700">${T.short}</text>`;
       if (h.name) g += `<text x="${f(X(h.x) + 11)}" y="${f(Y(h.y) + 4)}" fill="#111827" stroke="#ffffff" stroke-width="3" paint-order="stroke" font-size="10">${esc(h.name)}</text>`; }
     // nord, échelle
-    g += `<g transform="translate(${W - 34},34)"><circle r="18" fill="#ffffff" opacity="0.85"/><path d="M0,-13 L6,8 L0,4 L-6,8 Z" fill="#111827"/><text y="16" text-anchor="middle" font-size="9" font-weight="700">N</text></g>`;
+    let rotN = 0; if (geo()) { const c0 = S.crs.toLL(cx, cy), q0 = S.crs.fromLL(c0.lon, c0.lat), q1 = S.crs.fromLL(c0.lon, c0.lat + 0.01); rotN = (Math.atan2(q1.x - q0.x, q1.y - q0.y) * 180) / Math.PI; } // nord géographique dans le système du projet
+    g += `<g transform="translate(${W - 34},34) rotate(${rotN.toFixed(1)})"><circle r="18" fill="#ffffff" opacity="0.85"/><path d="M0,-13 L6,8 L0,4 L-6,8 Z" fill="#111827"/><text y="16" text-anchor="middle" font-size="9" font-weight="700">N</text></g>`;
     const sc = [50, 100, 200, 250, 500, 1000, 2000, 5000].find((k) => k / m >= 90) || 10000, sw = sc / m;
     g += `<g transform="translate(18,${H - 18})"><rect x="-6" y="-16" width="${f(sw + 60)}" height="24" fill="#ffffff" opacity="0.85" rx="3"/><rect width="${f(sw / 2)}" height="5" fill="#111827"/><rect x="${f(sw / 2)}" width="${f(sw / 2)}" height="5" fill="#ffffff" stroke="#111827"/><text x="${f(sw + 6)}" y="6" font-size="10">${sc >= 1000 ? `${sc / 1000} km` : `${sc} m`}</text></g>`;
     if (sat && geo()) g += `<text x="${W - 6}" y="${H - 5}" text-anchor="end" font-size="8" fill="#ffffff" stroke="#000000" stroke-width="2" paint-order="stroke">Imagerie © Esri, Maxar, Earthstar Geographics</text>`;
