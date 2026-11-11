@@ -2253,7 +2253,28 @@ function setTool(t) {
 function updateCursor() {
   $('#cv').style.cursor = S.space || S.tool === 'pan' ? 'grab' : S.tool === 'select' ? 'default' : 'crosshair';
 }
+// Barre de saisie : visible pendant les outils qui posent des points (indispensable sur téléphone : pas de clic droit,
+// de touche Échap ni de Retour arrière).
+const DRAW_TOOLS = { axis: 'Axe', bvcut: 'Coupe du bassin', measure: 'Mesure', uvrpt: 'Déclencheurs UVR', uvram: 'Aménagements', profser: 'Série de profils', profone: 'Profils isolés', tiein: 'Raccordement', center: 'Centre' };
+function refreshDrawBar() {
+  const bar = $('#drawBar'); if (!bar) return;
+  const on = !!DRAW_TOOLS[S.tool]; bar.hidden = !on; if (!on) return;
+  const n = S.tool === 'axis' ? S.draft.length : S.tool === 'bvcut' ? (S.bvCut?.pts.length || 0) : S.tool === 'measure' ? S.meas.length : 0;
+  $('#dbInfo').textContent = `${DRAW_TOOLS[S.tool]}${['axis', 'bvcut', 'measure'].includes(S.tool) ? ` · ${n} point${n > 1 ? 's' : ''}` : ''}`;
+  $('#dbUndo').hidden = !['axis', 'bvcut', 'measure', 'center', 'profser', 'tiein'].includes(S.tool);
+  $('#dbUndo').disabled = ['axis', 'bvcut', 'measure'].includes(S.tool) && !n;
+  $('#dbDone').disabled = S.tool === 'axis' && n < 2;
+}
+function bindDrawBar() {
+  $('#dbUndo').addEventListener('click', () => { undoPoint(); refreshDrawBar(); });
+  $('#dbDone').addEventListener('click', () => {
+    if (S.tool === 'axis') finishAxis(); else if (S.tool === 'bvcut') bvFinishCut(); else setTool('select');
+    refreshDrawBar();
+  });
+  $('#dbCancel').addEventListener('click', () => { S.draft = []; S.extend = null; if (S.bvCut) S.bvCut.pts = []; setTool('select'); refreshDrawBar(); });
+}
 function setPrompt() {
+  try { refreshDrawBar(); } catch (e) { console.error(e); }
   const k = S.tool === 'tiein' ? (S.tie?.e1 ? 'tie2' : 'tie1') : S.tool === 'center' && isPeanut() ? (S.lobe1 ? 'centerP2' : 'centerP1') : S.tool === 'axis' ? (S.hwyDraw ? (S.hwyDraw === 'cross' ? 'cross' : S.hwyDraw === 'main' ? 'main' : 'hwy') : S.extend ? 'extend' : S.draft.length ? 'axis1' : 'axis0') : S.tool === 'profser' && S.profA ? 'profser2' : S.tool;
   $('#stPrompt').textContent = PROMPTS[k] || '';
 }
@@ -6085,7 +6106,7 @@ function bindUI() {
   bindTerrain();
   bindPL();
   bindPT();
-  bindHydro(); bindBvSheet();
+  bindHydro(); bindBvSheet(); bindDrawBar();
   UV = initUvr({ S, $, toast, update, listAxes, viewer, setTool, esc, fmt, parseNum, download, fname, G }); UV.bind();
   if (/[?&]debug\b/.test(location.search)) window.__gira = { S, get viewer() { return viewer; }, get v3d() { return v3d; }, lineGrips: () => gripAxes().flatMap(axisLineGrips), ew: () => earthworkCorridors() }; // tests de navigateur (?debug)
   bind3D();

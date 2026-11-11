@@ -54,6 +54,13 @@ main.app { display: grid; grid-template-columns: 46px minmax(0, 1fr) 452px; min-
 .tsep { width: 24px; height: 1px; background: var(--line); margin: 4px 0; }
 
 .stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+/* Barre de saisie (axes, coupes, mesures, déclencheurs) : indispensable au doigt, sans clic droit ni Échap */
+.drawbar { position: absolute; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 6; display: flex; gap: 6px; align-items: center;
+  background: var(--panel); border: 1px solid var(--line2); border-radius: 10px; padding: 6px 8px; box-shadow: 0 4px 16px rgba(0,0,0,.35); max-width: calc(100% - 16px); flex-wrap: nowrap; justify-content: center; white-space: nowrap; }
+.drawbar[hidden] { display: none; }
+.drawbar button { padding: 7px 12px; font-size: 13.5px; }
+.drawbar #dbInfo { color: var(--muted); font-size: 12px; margin-right: 2px; }
+@media (max-width: 760px) { .drawbar { top: 8px; bottom: auto; padding: 4px 5px; gap: 4px; } .drawbar #dbInfo { display: none; } .drawbar button { padding: 6px 9px; font-size: 13px; } }
 #cv { display: block; touch-action: none; }
 .tip {
   position: absolute; pointer-events: none; background: rgba(12, 15, 19, .9); border: 1px solid var(--line2);
