@@ -49,6 +49,7 @@ import { talusPrims, rowFromSection, radialTalus, earthworkIndex } from './talus
 import { analyse, SITES } from './capacity.js';
 import { initLang, getLang, t } from './i18n.js';
 import { analysePlan, gapParams, GAPS } from './capacity-plan.js';
+import { initUvr } from './uvrtab.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -425,6 +426,7 @@ function update({ commit = true, panels = true } = {}) {
     for (const q of chausseeOverlaps(S.prj, S.D, { decks: (S.ouvr?.list || []).map((o) => o.poly).filter((p) => p?.length > 2), juncs })) S.checks.push({ lvl: q.lvl, group: 'Échangeur', msg: q.msg });
   } catch (e) { console.error(e); }
   for (const [id, msg] of S.trBad || []) { const r = S.prj.ramps.find((q) => q.id === id); if (r) S.checks.push({ lvl: 'err', group: 'Échangeur', msg: `Trompette (${r.name}) : boucle non déduite de la S-semi — ${msg}` }); else S.trBad.delete(id); }
+  try { UV?.compute(); } catch (e) { console.error(e); S.uvr = null; }
   try { computeEmprise(); } catch (e) { console.error(e); S.emp = null; }
   if (panels) refreshPanels();
   scheduleTalus();
@@ -2208,6 +2210,7 @@ const PROMPTS = {
   pan: 'Panoramique : glissez pour déplacer la vue.',
   profser: 'Profils en série : cliquez le premier point sur un axe (autoroute, voie secondaire, bretelle ou branche), puis le second sur le même axe.',
   profser2: 'Profils en série : cliquez le second point sur le même axe (Échap pour annuler).',
+  uvrpt: 'Déclencheur UVR : cliquez sur le plan à l\'emplacement de l\'école, du marché, de l\'arrêt… (type choisi dans l\'onglet Vitesses / UVR ; clic droit ou Échap pour terminer).',
   profone: 'Profil isolé : cliquez sur un axe à l\'endroit du profil (plusieurs clics possibles ; Échap pour terminer).',
   cadre: 'PICF / PIPO : cliquez sur l\'axe de la voie portée, à l\'endroit de l\'ouvrage.',
   poutres: 'Pont à poutres : cliquez sur l\'axe de la voie portée, au milieu de l\'ouvrage (au droit de l\'écoulement).',
@@ -3072,6 +3075,7 @@ function bindCanvas() {
     else if (S.tool === 'ramp') addRampAt(w);
     else if (S.tool === 'pickx') pickSecondary(w, px, py);
     else if (['profser', 'profone', 'cadre', 'poutres'].includes(S.tool)) pickOnAxis(w);
+    else if (S.tool === 'uvrpt') UV?.pick(w);
     else if (S.tool === 'measure') { S.meas.push(w); if (S.meas.length > 2) S.meas = [w]; showMeasure(); }
     else if (S.tool === 'insv') insertVertexAt(px, py);
     else if (S.tool === 'tiein') { const [x, y] = viewer.s2w(px, py); tieClick({ x, y }); }
@@ -3542,6 +3546,7 @@ function refreshPanels() {
   refreshPL();
   refreshPT();
   try { renderHydro(); } catch (e) { console.error(e); }
+  try { UV?.render(); } catch (e) { console.error(e); }
   setPrompt();
 }
 
@@ -4753,6 +4758,9 @@ function bindPT() {
 }
 
 
+// Vitesses / UVR (Guide M1 ESCWA/UNRSF) : onglet et calcul dans js/uvrtab.js, moteur dans js/uvr.js.
+let UV = null;
+
 // --------------------------------------------------------- Hydrologie et hydraulique (moteur BVTrace)
 const HY_T = [2, 5, 10, 20, 50, 100];
 function hyCfg() {
@@ -5892,6 +5900,7 @@ function showTab(name) {
   $$('.tabs [data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
   $$('.tab').forEach((t) => (t.hidden = t.id !== 'tab-' + name));
   if (name === 'implantation') try { refreshTabAxes(); } catch (e) { console.error(e); }
+  if (name === 'uvr') try { UV?.render(); } catch (e) { console.error(e); }
 }
 
 // --------------------------------------------------------- Liaisons
@@ -5996,6 +6005,7 @@ function bindUI() {
   bindPL();
   bindPT();
   bindHydro(); bindBvSheet();
+  UV = initUvr({ S, $, toast, update, listAxes, viewer, setTool, esc, fmt, parseNum, download, fname, G }); UV.bind();
   if (/[?&]debug\b/.test(location.search)) window.__gira = { S, get viewer() { return viewer; }, get v3d() { return v3d; }, lineGrips: () => gripAxes().flatMap(axisLineGrips), ew: () => earthworkCorridors() }; // tests de navigateur (?debug)
   bind3D();
   bindEch();
