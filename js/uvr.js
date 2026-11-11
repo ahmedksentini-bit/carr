@@ -323,7 +323,11 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
   // R4L : tout générateur d'usagers vulnérables (hameau, école, commerce de bord de route, lieu de culte, arrêt, accès)
   // fait de la section un pôle d'activité humaine à 30 km/h, hors traversée comme en traversée ; 50 km/h si les
   // usagers vulnérables sont séparés du trafic (§ 2.3, p. 34).
-  const hubV = o.sep ? 50 : 30;
+  // artère à fort trafic (TMJA > 3 000 véh/j, > 300 PL/j ou ligne de transport collectif) : pas de dénivellation verticale
+  // ni de chicane sur la chaussée principale — vitesse plancher 50 km/h, piétons séparés et traversées gérées par feux.
+  // Seuil repris du décret français n° 94-447 du 27 mai 1994 (référence de pratique, non opposable hors de France).
+  const art = !!input.arterial;
+  const hubV = o.sep || art ? 50 : 30;
   const typeV = (k) => (R4L ? { v: hubV, rural: true } : o.types[k]);
   const travV = R4L ? hubV : 50;
   // carrefours sur l'axe (centres projetés) : zone d'approche à 50 km/h
@@ -348,9 +352,9 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
     if (tr && travV < v) { v = travV; why.push('traversée'); }
     for (const h of hits) {
       if (q.s < h.s0 || q.s > h.s1) continue;
-      const T = typeV(h.type);
+      const T = typeV(h.type), tv = art ? Math.max(50, T.v) : T.v;
       if (!(T.rural || tr)) continue;
-      if (T.v < v) { v = T.v; why = [h.type]; } else if (T.v === v && !why.includes(h.type)) why.push(h.type);
+      if (tv < v) { v = tv; why = [h.type]; } else if (tv === v && !why.includes(h.type)) why.push(h.type);
     }
     let ix = false;
     if (juncs.some((s) => Math.abs(q.s - s) <= o.juncL) && 50 < v) { v = 50; ix = true; }
@@ -425,7 +429,8 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
       T(at(150), dir, 'retrec', `Réduction de largeur de voie 3,50 → 3,25 m + panneau ${Math.min(hi.v, 60)} km/h + marquage d'approche`, 'F1.13', 'MUST', { sign: hi.v > 60 ? 'B14-60' : null });
       T(sb, dir, 'portail', `Portail d'entrée (gateway) : îlot central ≥ 2,0 × 10 m surélevé, voies 3,00–3,25 m, panneau ${lo.v} km/h, changement de texture, éclairage — V85 visée ≤ 55 km/h`, 'F1.12', 'MUST', { sign: lo.tr ? 'EB10' : `B14-${lo.v}` });
       if (lo.v <= 30) T(sb, dir, 'zone30', 'Entrée de zone 30 : panneau zone 30, marquage « 30 »', 'F1.17', 'MUST', { sign: 'B30' });
-      T(sb + dir * Math.min(50, lo.len / 2), dir, 'plateau', 'Premier plateau traversant (ou giratoire compact) à +50 m du portail — h < 15 cm, plateau ≥ 4 m, rampes ≤ 10 %', 'F1.13, F1.09', 'MUST');
+      if (art) T(sb + dir * Math.min(50, lo.len / 2), dir, 'retrec', 'Îlot central surélevé prolongé et voies 3,00–3,25 m sur 50 m après le portail (artère à fort trafic : pas de plateau)', 'F1.13, F1.14', 'MUST');
+      else T(sb + dir * Math.min(50, lo.len / 2), dir, 'plateau', 'Premier plateau traversant (ou giratoire compact) à +50 m du portail — h < 15 cm, plateau ≥ 4 m, rampes ≤ 10 %', 'F1.13, F1.09', 'MUST');
       T(sb, -dir, 'sortie', `Sortie : séquence inverse (fin ${lo.tr ? 'd\'agglomération' : 'de zone'}, élargissement progressif, reprise ${hi.v} km/h)`, 'F1.13', 'MUST', { sign: lo.tr ? 'EB20' : `B14-${hi.v}` });
     } else if (lo.v <= 30) { // D → E (entrée de zone 30)
       T(at(50), dir, 'chicane', 'Chicane ou rétrécissement en amont de la zone 30 (décalage ≥ 2,0 m, voie 3,00–3,50 m)', 'F1.14, F1.17', 'SHOULD');
@@ -443,14 +448,19 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
   for (const h of hits) {
     const Ty = UVR_TYPES[h.type], g = segs.find((q) => h.s >= q.s0 - 1e-6 && h.s <= q.s1 + 1e-6) || segs[0];
     const lbl = `${Ty.label}${h.name ? ` « ${h.name} »` : ''}`;
-    if (h.type === 'ecole') {
+    if (art && (h.type === 'ecole' || h.type === 'marche' || h.type === 'gare')) {
+      // artère : traversée gérée par feux au droit des grands générateurs piétons
+      T(h.s, 0, 'feux', `Traversée gérée par feux (bouton poussoir piétons) + refuge central ≥ 2,00 m + barrières directrices ≥ 20 m de part et d'autre + éclairage dédié — ${lbl}`, 'F1.10, AD 1.2', 'MUST', { trg: h.id, sign: h.type === 'ecole' ? 'A13a' : 'C20a', calm: true });
+      if (h.type === 'ecole') T(h.s, 0, 'pmv', '30 km/h aux heures d\'entrée et de sortie des élèves : panneau à message variable ou feux clignotants « école » (300 m de part et d\'autre)', 'F1.17', 'SHOULD', { trg: h.id, sign: 'B14-30' });
+      T(h.s, 0, 'cloture', 'Barrières piétonnes directrices ≥ 1,10 m sur ≥ 50 m de part et d\'autre (pas de traversée hors des feux)', 'F1.17', 'MUST', { trg: h.id });
+    } else if (h.type === 'ecole') {
       T(h.s, 0, 'plateau', `Plateau traversant au droit de l'entrée — ${lbl}`, 'F1.09, F1.17', 'MUST', { trg: h.id, sign: 'A13a' });
       T(h.s, 0, 'cloture', 'Clôture directrice ≥ 1,10 m sur ≥ 20 m de part et d\'autre de l\'entrée', 'F1.17', 'SHOULD', { trg: h.id });
       for (const s of [h.s - 100, h.s + 100]) if (s > g.s0 + 20 && s < g.s1 - 20) T(s, 0, 'rappel30', 'Rappel zone 30 (panneau tous les 100 m, marquage « 30 » tous les 50 m)', 'F1.17', 'MUST', { trg: h.id, sign: 'B30' });
     } else if (h.type === 'tc' || h.type === 'culte' || h.type === 'gare' || h.type === 'sante' || h.type === 'marche') {
-      const plat = g.v <= 50 && (h.type === 'marche' || h.type === 'sante');
-      const calm = !plat && isLow(g.cat); // en traversée, la voie est rétrécie au droit du passage (refuge ou avancées)
-      T(h.s, 0, plat ? 'plateau' : 'passage', `${plat ? 'Plateau traversant' : 'Passage piéton protégé'}${width > 7 ? ' + refuge ≥ 2,00 m (traversée > 7 m)' : calm ? ' + avancées de trottoir' : ''} + éclairage dédié — ${lbl}`, plat ? 'F1.09, F1.10' : calm ? 'F1.10, F1.14' : 'F1.10', plat ? 'SHOULD' : 'MUST', { trg: h.id, sign: 'C20a', ...(calm ? { calm: true } : {}) });
+      const plat = !art && g.v <= 50 && (h.type === 'marche' || h.type === 'sante');
+      const calm = !plat && (isLow(g.cat) || art); // en traversée, la voie est rétrécie au droit du passage (refuge ou avancées)
+      T(h.s, 0, plat ? 'plateau' : 'passage', `${plat ? 'Plateau traversant' : 'Passage piéton protégé'}${width > 7 || art ? ' + refuge ≥ 2,00 m' : calm ? ' + avancées de trottoir' : ''} + éclairage dédié — ${lbl}`, plat ? 'F1.09, F1.10' : calm ? 'F1.10, F1.14' : 'F1.10', plat ? 'SHOULD' : 'MUST', { trg: h.id, sign: 'C20a', ...(calm ? { calm: true } : {}) });
     }
     for (const m of Ty.must) if (!/plateau traversant au droit|passage piéton \+|^passage protégé$/i.test(m)) T(h.s, 0, 'prescr', m, Ty.fiches, 'MUST', { trg: h.id, list: true });
     for (const m of Ty.should) T(h.s, 0, 'prescr', m, Ty.fiches, 'SHOULD', { trg: h.id, list: true });
@@ -466,9 +476,9 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
       // en cat. E (30 km/h) la traversée est surélevée : elle sert aussi de dispositif de modération (un ouvrage au lieu de deux)
       if (isE(g.cat)) T(s, 0, 'plateau', `Passage piéton surélevé (plateau traversant)${width > 7 ? ' + refuge ≥ 2,00 m' : ''} + éclairage dédié (espacement ≤ ${o.spacing} m)`, width > 7 ? 'F1.09, F1.10, AD 1.2' : 'F1.09, AD 1.2', 'MUST', { sign: 'C20a' });
       // en cat. D, le refuge ou les avancées de trottoir rétrécissent la voie : la traversée modère aussi la vitesse (pas de chicane en plus)
-      else T(s, 0, 'passage', `Passage piéton protégé${width > 7 ? ' + refuge ≥ 2,00 m' : ' + avancées de trottoir'} (voie rétrécie à 3,00–3,25 m) + éclairage dédié (espacement ≤ ${o.spacing} m)`, width > 7 ? 'F1.10, F1.14, AD 1.2' : 'F1.10, F1.14, AD 1.2', 'MUST', { sign: 'C20a', calm: true });
+      else T(s, 0, 'passage', `Passage piéton protégé${width > 7 || art ? ' + refuge ≥ 2,00 m' : ' + avancées de trottoir'} (voie rétrécie à 3,00–3,25 m) + éclairage dédié (espacement ≤ ${o.spacing} m)`, width > 7 ? 'F1.10, F1.14, AD 1.2' : 'F1.10, F1.14, AD 1.2', 'MUST', { sign: 'C20a', calm: true });
     }
-    T((g.s0 + g.s1) / 2, 0, 'lineaire', `Sur ${pk(g.s0)} – ${pk(g.s1)} : trottoirs continus des deux côtés ${isE(g.cat) ? '≥ 2,50 m (PMR)' : '2,50 m (1,50 m minimum)'}, bateaux aux traversées, éclairage continu, dépassement interdit (ligne continue)`, 'F1.11, C3.2.2', 'MUST', { s0: g.s0, s1: g.s1 });
+    T((g.s0 + g.s1) / 2, 0, 'lineaire', `Sur ${pk(g.s0)} – ${pk(g.s1)} : trottoirs continus des deux côtés ${isE(g.cat) ? '≥ 2,50 m (PMR)' : '2,50 m (1,50 m minimum)'}, bateaux aux traversées, éclairage continu, dépassement interdit (ligne continue)${art ? ', terre-plein ou barrière centrale contre les traversées sauvages aux abords des générateurs' : ''}`, 'F1.11, C3.2.2', 'MUST', { s0: g.s0, s1: g.s1 });
   }
   treat.sort((a, b) => a.s - b.s);
   // ------------------------------------------------ V85 géométrique et cohérence vitesse-géométrie
@@ -484,6 +494,12 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
     if (isLow(g.cat) && vmax > g.v + 10) {
       add('hi', `${where} (${g.v} km/h, V85 ${Math.round(vmax)})`);
       // dispositifs physiques espacés de physE (cat. E) ou physD (cat. D, seulement là où la V85 locale est trop forte)
+      if (art) { // artère : contrôle automatisé au lieu de dispositifs physiques, un par 2 km environ sur les sections ≥ 800 m
+        if (g.len < 800) continue;
+        const n = Math.max(1, Math.floor(g.len / 2000));
+        for (let k = 1; k <= n; k++) { const s = g.s0 + (g.len * k) / (n + 1); if (!treat.some((q) => q.code === 'radar' && Math.abs(q.s - s) < 1000)) T(s, 0, 'radar', `Contrôle automatisé de la vitesse (radar fixe, ou radar tronçon sur section longue) + panneau d'annonce : V85 géométrique ${Math.round(vAt(s))} km/h pour ${g.v} km/h`, 'C1.5', 'SHOULD'); }
+        continue;
+      }
       const E = isE(g.cat), step = E ? o.physE : o.physD, n = Math.floor(g.len / step);
       for (let k = 1; k <= n; k++) {
         const s = g.s0 + (g.len * k) / (n + 1);
@@ -496,7 +512,8 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
   }
   for (const t of trans) if (t.gate) { const v = vAt(t.s); if (v > 70) add('gate', `${pk(t.s)} (${Math.round(v)} km/h)`); }
   const list = (a) => (a.length > 5 ? `${a.slice(0, 5).join(' ; ')} et ${a.length - 5} autre(s)` : a.join(' ; '));
-  if (grp.hi) checks.push({ lvl: 'warn', msg: `${ax.name} — vitesse-cible non crédible sans modération physique sur ${grp.hi.length} section(s) : ${list(grp.hi)}. Plateaux / chicanes proposés (F1.09, F1.14).` });
+  if (grp.hi) checks.push({ lvl: 'warn', msg: `${ax.name} — vitesse-cible non crédible sans modération physique sur ${grp.hi.length} section(s) : ${list(grp.hi)}. ${art ? 'Artère : traversées à feux, refuges, rétrécissements par marquage et contrôle automatisé proposés.' : 'Plateaux / chicanes proposés (F1.09, F1.14).'}` });
+  if (art) checks.push({ lvl: 'info', msg: `${ax.name} — artère à fort trafic : ni dos d'âne, ni plateau, ni chicane sur la chaussée principale (seuil de pratique : décret français n° 94-447, > 3 000 véh/j, > 300 PL/j ou ligne de transport collectif) ; vitesse plancher 50 km/h, piétons séparés (trottoirs, barrières directrices), traversées à feux aux grands générateurs.` });
   if (grp.vc) checks.push({ lvl: 'info', msg: `${ax.name} — V85 géométrique au-dessus de la VC (C1.5) sur ${grp.vc.length} section(s) : ${list(grp.vc)}. Contrôle des vitesses ou reprise du tracé.` });
   if (grp.curve) checks.push({ lvl: 'warn', msg: `${ax.name} — courbe(s) nettement sous la vitesse-cible : ${list(grp.curve)}. Signalisation de virage, balisage ; à éviter en approche d'un déclencheur.` });
   if (grp.gate) checks.push({ lvl: 'info', msg: `${ax.name} — portail(s) abordé(s) à plus de 70 km/h : ${list(grp.gate)}. Le portail doit ramener la V85 à ≤ 55 km/h (F1.12) ; V85 à mesurer après mise en service (F1.13).` });
@@ -531,13 +548,13 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
   const rows = [];
   for (const g of segs) {
     const trigs = g.hits.map((h) => `${UVR_TYPES[h.type].label.split(' /')[0]}${h.name ? ` « ${h.name} »` : ''} PK ${pk(h.s)}`);
-    const IN = new Set(['passage', 'plateau', 'chicane', 'cloture', 'rappel30', 'lineaire']);
-    const disp = [...new Set(treat.filter((q) => IN.has(q.code) && q.s > g.s0 + 1 && q.s < g.s1 - 1 && (q.lvl === 'MUST' || q.code === 'chicane' || q.code === 'plateau')).map((q) => q.code))].map((c) => CODE_LBL[c] || c);
+    const IN = new Set(['passage', 'plateau', 'chicane', 'cloture', 'rappel30', 'lineaire', 'feux', 'radar']);
+    const disp = [...new Set(treat.filter((q) => IN.has(q.code) && q.s > g.s0 + 1 && q.s < g.s1 - 1 && (q.lvl === 'MUST' || q.code === 'chicane' || q.code === 'plateau' || q.code === 'radar')).map((q) => q.code))].map((c) => CODE_LBL[c] || c);
     rows.push({ s0: g.s0, s1: g.s1, cat: CATS[g.cat].r4l ? CATS[g.cat].short : g.cat, vt: `${g.v} km/h`, vc: `${g.vc} km/h`, trig: trigs.join(' ; ') || 'Aucun', disp: disp.join(', ') || (g.cat === baseCat ? 'Profil standard de la catégorie (F1.01)' : '—') });
   }
   for (const t of trans) rows.push({ s0: t.from, s1: t.to, cat: `Transition ${t.dir === 1 ? `${t.catH}→${t.catL}` : `${t.catL}←${t.catH}`}`, vt: `${t.vh}→${t.vl} km/h`, vc: '—', trig: '—', disp: t.ix ? 'Présignalisation, limitation 50, bandes rugueuses, carrefour aménagé (giratoire / plateau)' : t.gate ? 'Annonce 250 m, bandes rugueuses 150/100/50 m, rétrécissement 150 m, portail, plateau +50 m (F1.12, F1.13, F1.15)' : t.vl <= 30 ? 'Entrée de zone 30, plateau, chicane (F1.17, F1.14)' : 'Limitation et marquage' , trans: true });
   rows.sort((a, b) => a.s0 - b.s0 || (a.trans ? 1 : -1));
-  return { key: ax.key, name: ax.name, len: ax.len, ref: o.ref, baseCat, V0, width, hits, trav, segs, trans, treat, removed, v85, vv, rows, checks };
+  return { key: ax.key, name: ax.name, len: ax.len, ref: o.ref, baseCat, V0, width, arterial: art, hits, trav, segs, trans, treat, removed, v85, vv, rows, checks };
 }
 export const treatKey = (q) => `${q.code}:${q.dir}:${q.trg || ''}:${Math.round(q.s0key ?? q.s)}`;
 const parseKey = (k) => { const m = /^([a-z0-9]+):(-?\d+):([^:]*):(-?\d+(?:\.\d+)?)$/.exec(k || ''); return m ? { code: m[1], dir: +m[2], trg: m[3], s: +m[4] } : null; };
@@ -551,10 +568,12 @@ export const MANUAL = {
   zone30: { name: 'Entrée de zone 30', fiche: 'F1.17', label: () => 'Entrée de zone 30', sign: () => 'B30' },
   limite: { name: 'Limitation de vitesse', fiche: 'C1.5', label: (v) => `Limitation ${v || 50} km/h`, sign: (v) => `B14-${v || 50}` },
   annonce: { name: 'Panneau d\'annonce', fiche: 'F1.13', label: () => 'Panneau d\'annonce de zone de modération', sign: () => 'ANN' },
+  feux: { name: 'Traversée à feux', fiche: 'F1.10', label: () => 'Traversée gérée par feux (bouton poussoir) + refuge central ≥ 2,00 m', sign: () => 'C20a' },
+  radar: { name: 'Contrôle automatisé', fiche: 'C1.5', label: () => 'Contrôle automatisé de la vitesse (radar) + panneau d\'annonce', sign: () => null },
   ecole: { name: 'Panneau « enfants »', fiche: 'F1.17', label: () => 'Signalisation de danger « enfants »', sign: () => 'A13a' },
 };
 export const SIGN_CHOICES = [['', '(aucun)'], ['B14-30', 'Limitation 30'], ['B14-50', 'Limitation 50'], ['B14-60', 'Limitation 60'], ['B14-70', 'Limitation 70'], ['B14-80', 'Limitation 80'], ['B30', 'Zone 30'], ['B51', 'Fin de zone 30'], ['EB10', 'Entrée d\'agglomération'], ['EB20', 'Sortie d\'agglomération'], ['A13a', 'Enfants'], ['C20a', 'Passage piéton'], ['ANN', 'Annonce « Ralentir »']];
-export const CODE_LBL = { annonce: 'annonce', bandes: 'bandes rugueuses', retrec: 'rétrécissement', portail: 'portail d\'entrée', zone30: 'zone 30', plateau: 'plateaux traversants', sortie: 'séquence de sortie', chicane: 'chicane', limite: 'limitation', passage: 'passages piétons protégés', lineaire: 'trottoirs, éclairage continu, dépassement interdit', cloture: 'clôture directrice', rappel30: 'rappels zone 30', prescr: 'prescriptions UVR' };
+export const CODE_LBL = { annonce: 'annonce', bandes: 'bandes rugueuses', retrec: 'rétrécissement', portail: 'portail d\'entrée', zone30: 'zone 30', plateau: 'plateaux traversants', sortie: 'séquence de sortie', chicane: 'chicane', limite: 'limitation', passage: 'passages piétons protégés', lineaire: 'trottoirs, éclairage continu, dépassement interdit', cloture: 'clôture directrice', rappel30: 'rappels zone 30', prescr: 'prescriptions UVR', feux: 'traversées à feux', radar: 'contrôle automatisé', pmv: '30 km/h aux heures scolaires' };
 
 // ------------------------------------------------------------------ exports
 export function rowsCsv(results) {
@@ -600,7 +619,7 @@ export function speedSvg(r, { width = 1000, s0 = 0, s1 = r.len } = {}) {
   for (const s of r.segs) if (s.s1 > s0 && s.s0 < s1) { const xa = X(Math.max(s0, s.s0)), xb = X(Math.min(s1, s.s1)); g += `<rect x="${xa.toFixed(1)}" y="${bandY}" width="${Math.max(0, xb - xa).toFixed(1)}" height="${bandH}" fill="${CATS[s.cat].color}"/>`; const lb = CATS[s.cat].r4l ? CATS[s.cat].short : s.cat; if (xb - xa > Math.max(14, lb.length * 5.6)) g += `<text x="${((xa + xb) / 2).toFixed(1)}" y="${bandY + 11.5}" text-anchor="middle" fill="#fff" font-weight="700">${lb}</text>`; }
   // bandeau des aménagements (symboles)
   g += `<text x="6" y="${trY + 10}" fill="#334155">Am.</text>`;
-  const sym = { portail: ['▮', '#7c2d12'], plateau: ['▬', '#b45309'], bandes: ['≡', '#92400e'], annonce: ['▲', '#dc2626'], retrec: ['◇', '#9a3412'], zone30: ['30', '#dc2626'], chicane: ['S', '#a16207'], passage: ['‖', '#0f766e'], sortie: ['◁', '#64748b'], limite: ['○', '#dc2626'], rappel30: ['30', '#ef4444'] };
+  const sym = { feux: ['F', '#15803d'], radar: ['R', '#1d4ed8'], portail: ['▮', '#7c2d12'], plateau: ['▬', '#b45309'], bandes: ['≡', '#92400e'], annonce: ['▲', '#dc2626'], retrec: ['◇', '#9a3412'], zone30: ['30', '#dc2626'], chicane: ['S', '#a16207'], passage: ['‖', '#0f766e'], sortie: ['◁', '#64748b'], limite: ['○', '#dc2626'], rappel30: ['30', '#ef4444'] };
   const lanes = [[], [], []];
   for (const q of r.treat) {
     if (!sym[q.code] || !inR(q.s)) continue;
@@ -623,7 +642,7 @@ export function speedSvg(r, { width = 1000, s0 = 0, s1 = r.len } = {}) {
   if (types.length) { sec('Déclencheurs UVR'); for (const k of types) it(14, (x, y) => `<circle cx="${x + 7}" cy="${y - 4}" r="7" fill="${UVR_TYPES[k].color}"/><text x="${x + 7}" y="${y - 1}" text-anchor="middle" fill="#fff" font-size="7.5" font-weight="700">${UVR_TYPES[k].short}</text>`, UVR_TYPES[k].label.split(' /')[0]); }
   const cats = [...new Set(r.segs.map((s) => s.cat))];
   sec('Catégories (bandeau « Cat. »)'); for (const c of cats) it(16, (x, y) => `<rect x="${x}" y="${y - 9}" width="16" height="10" fill="${CATS[c].color}"/>`, CATS[c].r4l ? CATS[c].label.replace('R4L — ', '') : `${c} — ${CATS[c].label.replace(/^[A-E] — /, '')} (${CATS[c].vt} km/h)`);
-  const SYML = { annonce: 'panneau d\'annonce / présignalisation', bandes: 'bandes rugueuses', retrec: 'rétrécissement de voie + panneau 60', portail: 'portail d\'entrée (gateway)', zone30: 'entrée de zone 30', rappel30: 'rappel zone 30', plateau: 'plateau traversant', chicane: 'chicane / rétrécissement', passage: 'passage piéton protégé', limite: 'limitation de vitesse', sortie: 'sortie de zone (séquence inverse)' };
+  const SYML = { feux: 'traversée à feux + refuge', radar: 'contrôle automatisé (radar)', annonce: 'panneau d\'annonce / présignalisation', bandes: 'bandes rugueuses', retrec: 'rétrécissement de voie + panneau 60', portail: 'portail d\'entrée (gateway)', zone30: 'entrée de zone 30', rappel30: 'rappel zone 30', plateau: 'plateau traversant', chicane: 'chicane / rétrécissement', passage: 'passage piéton protégé', limite: 'limitation de vitesse', sortie: 'sortie de zone (séquence inverse)' };
   const codes = Object.keys(SYML).filter((c) => r.treat.some((q) => q.code === c && inR(q.s)));
   if (codes.length) {
     sec('Aménagements (bandeau « Am. »)');

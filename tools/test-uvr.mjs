@@ -111,5 +111,19 @@ const qp = overpassPoiQL(bb), qb = overpassBldQL([[18.08, -15.98], [18.10, -15.9
 ok(/timeout:60/.test(qp) && !/building/.test(qp) && !/around/.test(qp) && /amenity/.test(qp) && /landuse/.test(qp), 'requête légère sans bâtiments ni « around »');
 ok(/way\["building"\]\(around:120,/.test(qb) && /out ids center/.test(qb), 'requête bâtiments séparée');
 
+// artère à fort trafic : ni plateau ni chicane, traversées à feux, vitesse plancher 50 km/h
+{
+  const L = 8000, axA = straight(L), trg = [];
+  for (let s = 300, n = 0; s < 6000; s += 250, n++) trg.push({ id: 'a' + n, type: ['ecole', 'marche', 'tc', 'culte'][n % 4], name: 'G' + n, x: s, y: n % 2 ? 40 : -40 });
+  const A = analyzeAxis(axA, { baseCat: 'B', trav: [{ s0: 0, s1: 6500 }], triggers: trg, arterial: true }, {});
+  const N = analyzeAxis(axA, { baseCat: 'B', trav: [{ s0: 0, s1: 6500 }], triggers: trg }, {});
+  const c = (R, k) => R.treat.filter((q) => q.code === k).length;
+  ok(c(A, 'plateau') === 0 && c(A, 'chicane') === 0 && c(A, 'zone30') === 0, 'artère : aucun plateau, chicane ni zone 30');
+  ok(c(N, 'plateau') > 0, 'axe ordinaire : plateaux proposés');
+  ok(A.segs.every((g) => g.v >= 50), 'artère : vitesse plancher 50 km/h');
+  ok(c(A, 'feux') === trg.filter((t) => t.type !== 'tc' && t.type !== 'culte').length, 'artère : traversée à feux aux écoles et marchés');
+  ok(c(A, 'radar') >= 1 && A.checks.some((q) => /94-447/.test(q.msg)), 'artère : contrôle automatisé et rappel du seuil');
+}
+
 if (fail) { console.error(`${fail} échec(s)`); process.exit(1); }
 console.log('Tous les tests UVR passent.');
