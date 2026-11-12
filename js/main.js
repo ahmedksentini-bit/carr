@@ -4757,10 +4757,13 @@ function plPopBack() { const home = $('#plGraphHome'); if (home && $('#plGraph')
 // la face), ◀ OH / OH ▶ pour passer d'un ouvrage à l'autre par PK croissant, impression à l'échelle.
 function ohCadres() { return (S.cadres || []).filter((g) => !g.err && g.K && g.K.type !== 'poutres' && g.c && g.ax).sort((a, b) => (a.sX ?? a.s) - (b.sX ?? b.s)); }
 function ohCur() { return ohCadres().find((g) => g.c.id === S.ohId) || null; }
-function ohData(g) {
-  const K = g.K, inv = g.inv, A = S.axpl?.get(g.ax.key), zR = A?.defined ? A.PL.zAt(g.s) : null;
+// Sens de la coupe : la route monte vers les PK croissants sur le plan, donc son côté gauche est à gauche de la feuille ;
+// la coupe est vue dans ce sens (face gauche de la feuille = côté gauche de la route, longueur Lg).
+function ohData(g0) {
+  const flip = !!g0.K?.leftP, g = flip ? { ...g0, d: G.neg(g0.d) } : g0, K = flip ? { ...g0.K, Lm: g0.K.Lp, Lp: g0.K.Lm } : g0.K;
+  const inv = g.inv, A = S.axpl?.get(g.ax.key), zR = A?.defined ? A.PL.zAt(g.s) : null;
   let zL, zRt, upLeft = true;
-  if (inv) { upLeft = inv.down === 1; zL = upLeft ? inv.zam : inv.zav; zRt = upLeft ? inv.zav : inv.zam; }
+  if (inv) { const leftIdx = flip ? 1 : 0; upLeft = leftIdx === 1 - inv.down; zL = upLeft ? inv.zam : inv.zav; zRt = upLeft ? inv.zav : inv.zam; }
   else if (zR != null) zL = zRt = zR - K.Hr - K.et - K.H;
   else return null;
   let cs = null;
@@ -4796,7 +4799,7 @@ function ohLen(face, dl) {
   ohEdit((g, c, K) => {
     if (c.Lg == null && c.Ld == null) { c.Lg = K.Lg; c.Ld = K.Ld; }
     delete c.L;
-    const f = (face === 'L') === !!K.leftP ? 'Ld' : 'Lg'; // face gauche du dessin = côté −d de l'ouvrage
+    const f = face === 'L' ? 'Lg' : 'Ld'; // face gauche de la feuille = côté gauche de la route
     c[f] = Math.max(K.W / 2, Math.round((+c[f] + dl) * 100) / 100);
   });
 }

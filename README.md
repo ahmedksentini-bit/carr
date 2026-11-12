@@ -223,7 +223,8 @@ ou sur un fond topographique DXF.
 - **Coupe longitudinale d'un ouvrage** (`js/ohcoupe.js`, comme la planche de BVTrace) : clic droit sur un ouvrage du
   plan → Propriétés (fiche), **Coupe longitudinale…**, Déplacer (l'ouvrage suit le curseur le long de son axe porteur,
   posé au clic), Supprimer. La coupe s'ouvre en grand : feuille paysage A4 / A3 / A2, vue en plan en haut (ouvrage à
-  l'horizontale, route du bas vers le haut, amont et aval, sens d'écoulement), coupe le long de l'ouvrage en bas à la
+  l'horizontale, route du bas vers le haut dans le sens des PK, son côté gauche à gauche de la feuille — la coupe est
+  vue dans le sens de l'axe, amont et aval du bon côté —, sens d'écoulement), coupe le long de l'ouvrage en bas à la
   même échelle (H = V, ajustée ou 1/100 à 1/500) : terrain naturel du MNT le long de l'ouvrage, ligne projet de la
   route (profil en travers au droit de l'ouvrage, biais pris en compte) et remblai, corps de l'ouvrage (radier,
   ouverture, traverse, murs de tête), fils d'eau cotés aux deux faces et au droit de l'axe, pente, cote de chaussée,
