@@ -263,7 +263,12 @@ ou sur un fond topographique DXF.
   même échelle (H = V, ajustée ou 1/100 à 1/500) : terrain naturel du MNT le long de l'ouvrage, ligne projet de la
   route (profil en travers au droit de l'ouvrage, biais pris en compte) et remblai, corps de l'ouvrage (radier,
   ouverture, traverse, murs de tête), fils d'eau cotés aux deux faces et au droit de l'axe, pente, cote de chaussée,
-  remblai sur traverse, PHE amont si l'hydraulique est calculée, longueurs de part et d'autre de l'axe. En plan (et
+  remblai sur traverse, PHE amont si l'hydraulique est calculée, longueurs de part et d'autre de l'axe. Cadre
+  **« Conditions hydrauliques »** (comme BVTrace) : débit, pente du radier tirée des fils d'eau de la coupe (celle que
+  reçoit le calcul : recaler un fil d'eau relance l'hydrologie) et pente critique → régime torrentiel ou fluvial dans
+  l'ouvrage (Froude), yn, yc, remplissage ; amont : contrôle (entrée / aval), régime d'entrée, HW, HW/D, plan d'eau,
+  revanche ; aval : sortie libre / partiellement noyée / noyée, hauteur et plan d'eau aval, vitesse de sortie (> 3 m/s :
+  protection). Ouvrage non relié à un bassin : motif affiché. En plan (et
   au tracé combiné), le **talus est coupé entre les murs en aile** de chaque tête de cadre ou de PIPO, devant le mur de
   tête, et raccordé aux extrémités extérieures des murs (corde entre leurs extrémités dessinée en bord de talus). Boutons de
   face : fil d'eau ±1 / ±10 cm (les cotes deviennent saisies ; « Fils d'eau automatiques » y revient), longueur de la
