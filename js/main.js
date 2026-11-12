@@ -5702,6 +5702,30 @@ function hyBinHtml(h, sel) {
     + inp('ig', 'Ig', 'm/km', sel.c.m?.igMPerKm > 0 ? `${fmt(sel.c.m.igMPerKm, 1)} (MNT)` : v.igMPerKm > 0 ? `${fmt(v.igMPerKm, 1)} (déduit)` : '', 'Indice de pente global ; vide : valeur mesurée sur le MNT', 1)
     + '</div>';
 }
+// Fond satellite des cartes de la note (Esri World Imagery) : tuiles Web Mercator couvrant la boîte bb (repère du
+// projet), niveau choisi pour ≈ 1 pixel de tuile par pixel de carte (k px/m), 80 tuiles au plus ; coins des tuiles
+// ramenés dans le repère du projet. Projet non géoréférencé : aucun fond.
+function noteTiles(bb, k) {
+  if (!S.crs?.geo) return [];
+  const cs = [[bb.x0, bb.y0], [bb.x1, bb.y0], [bb.x0, bb.y1], [bb.x1, bb.y1]].map(([x, y]) => S.crs.toLL(x, y));
+  if (!cs.every((q) => Number.isFinite(q.lat) && Number.isFinite(q.lon))) return [];
+  const lat = cs.reduce((t, q) => t + q.lat, 0) / 4, mpp = 1 / Math.max(1e-9, k);
+  const lon2t = (lon, n) => ((lon + 180) / 360) * n, lat2t = (la, n) => { const r = (la * Math.PI) / 180; return ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n; };
+  const t2lon = (x, n) => (x / n) * 360 - 180, t2lat = (y, n) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n))) * 180) / Math.PI;
+  let z = Math.max(3, Math.min(18, Math.round(Math.log2((156543.034 * Math.cos((lat * Math.PI) / 180)) / mpp))));
+  let x0, x1, y0, y1, n;
+  for (;; z--) {
+    n = 2 ** z;
+    x0 = Math.floor(Math.min(...cs.map((q) => lon2t(q.lon, n)))); x1 = Math.floor(Math.max(...cs.map((q) => lon2t(q.lon, n))));
+    y0 = Math.floor(Math.min(...cs.map((q) => lat2t(q.lat, n)))); y1 = Math.floor(Math.max(...cs.map((q) => lat2t(q.lat, n))));
+    if ((x1 - x0 + 1) * (y1 - y0 + 1) <= 80 || z <= 3) break;
+  }
+  const out = [], W = (tx, ty) => S.crs.fromLL(t2lon(tx, n), t2lat(ty, n));
+  for (let ty = Math.max(0, y0); ty <= Math.min(n - 1, y1); ty++) for (let tx = x0; tx <= x1; tx++) {
+    out.push({ href: PROVIDERS.esri.url(z, ((tx % n) + n) % n, ty), nw: W(tx, ty), ne: W(tx + 1, ty), sw: W(tx, ty + 1) });
+  }
+  return out;
+}
 // Position (lon, lat) des bassins pour les cartes FAO 54 : moyenne des exutoires, sinon centre du projet géoréférencé.
 function hyLL() {
   const h = hyCfg(), ll = (h.res?.crossings || []).filter((c) => Number.isFinite(c.lon) && Number.isFinite(c.lat));
@@ -6026,7 +6050,7 @@ function hyNoteHtml(HR) {
   const axPts = (key) => { const a = hyAxes().find((q) => q.key === key); if (!a) return []; const n = Math.min(3000, Math.max(20, Math.ceil(a.len / 8))); return [{ name: a.name, pts: Array.from({ length: n + 1 }, (_, i) => a.at((a.len * i) / n).p) }]; };
   const fig = (svg, cap) => (svg ? `<figure class="fig">${svg}<figcaption>${esc(cap)}</figcaption></figure>` : '');
   const keys = [...new Set(HR.list.map((o) => o.c.key))], LL = hyLL();
-  let maps = fig(overviewMapSvg(HR.list.map((o) => o.c), keys.flatMap(axPts)), `Carte d'ensemble — ${HR.list.length} bassin(s) versant(s) et axes du projet`);
+  let maps = fig(overviewMapSvg(HR.list.map((o) => o.c), keys.flatMap(axPts), { tiles: noteTiles }), `Carte d'ensemble — ${HR.list.length} bassin(s) versant(s) et axes du projet`);
   if (!tn && LL) for (const k of ['pan', 'p10']) maps += fig(isohyetMapSvg(k, LL.lon, LL.lat, isohyetValueAt(k, LL.lon, LL.lat)), `Position du projet (${fmt(LL.lat, 3)}° N ; ${fmt(LL.lon, 3)}°) sur la carte d'isohyètes du bulletin FAO 54 — ${k === 'pan' ? 'Pan' : 'P10'} retenu : ${h.hyp[k + 'Src'] || `${fmt(h.hyp[k], 0)} mm (saisi)`}`);
   const ouvHtml = (o) => {
     const rr = o.rr; if (!rr || !(o.Q > 0)) return '';
@@ -6042,7 +6066,7 @@ function hyNoteHtml(HR) {
       + fig(hds5Svg(o.cv, rr), 'Abaque du contrôle à l\'entrée (FHWA HDS-5) : toutes les configurations d\'entrée de la forme, retracées par les équations du calcul avec la section retenue — la configuration retenue en trait plein, le point calculé en rouge.')
       + fig(bceomSvg(rr.bceom), 'Abaque BCEOM de niveau amont (contre-épreuve) : toutes les courbes de la figure, la courbe de la tête retenue en trait plein, le point lu en rouge.');
   };
-  const basins = HR.list.map((o) => `<h2>${esc(o.c.id)} — ${esc(o.c.traceName)}, PK ${fmt(o.c.pk, 0)} · S = ${fmt(o.c.totalKm2, 3)} km²</h2>${fig(basinMapSvg(o.c, axPts(o.c.key), { others: HR.list.filter((q) => q !== o).map((q) => q.c) }), `Bassin ${o.c.id} : contour, écoulement principal et exutoire au droit du tracé`)}${hyDetailHtml(o.r.values?.detail, true)}${ouvHtml(o)}`
+  const basins = HR.list.map((o) => `<h2>${esc(o.c.id)} — ${esc(o.c.traceName)}, PK ${fmt(o.c.pk, 0)} · S = ${fmt(o.c.totalKm2, 3)} km²</h2>${fig(basinMapSvg(o.c, axPts(o.c.key), { others: HR.list.filter((q) => q !== o).map((q) => q.c), tiles: noteTiles }), `Bassin ${o.c.id} : contour, écoulement principal et exutoire au droit du tracé`)}${hyDetailHtml(o.r.values?.detail, true)}${ouvHtml(o)}`
     + `<p><b>Débit propre retenu :</b> ${o.Qp > 0 ? `${fmt(o.Qp, 2)} m³/s (${esc(o.r.retained?.method || '')})` : '—'}${o.up?.length ? ` · <b>bassins amont</b> ${esc(o.up.join(', '))} → ${o.r.cumulative?.Q != null ? `${fmt(o.r.cumulative.Q, 2)} m³/s` : esc(o.r.cumulative?.error || '—')}` : ''} · <b>débit de dimensionnement :</b> ${o.Q > 0 ? `${fmt(o.Q, 2)} m³/s` : '—'}</p>`).join('');
   const title = `Note de calcul hydrologique et hydraulique des ouvrages — ${S.prj.name || 'projet'}`;
   return `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${css}</style></head><body><div class="bar"><button onclick="document.querySelectorAll('details').forEach(d=>d.open=true);print()">Imprimer / PDF</button> <button onclick="document.querySelectorAll('details').forEach(d=>d.open=!d.open)">Plier / déplier</button></div>

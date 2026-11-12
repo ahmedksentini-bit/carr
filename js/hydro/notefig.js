@@ -102,42 +102,61 @@ function frame(bb, w, h, pad = 24) {
   const ox = pad + (w - 2 * pad - (bb.x1 - bb.x0) * k) / 2, oy = pad + (h - 2 * pad - (bb.y1 - bb.y0) * k) / 2;
   return { k, X: (x) => ox + (x - bb.x0) * k, Y: (y) => h - (oy + (y - bb.y0) * k) };
 }
-function scaleBar(k, w, h) {
+// Fond satellite : tuiles fournies par l'appelant (Web Mercator reprojetées, coins dans le repère du projet) ; chaque tuile
+// posée par une transformation affine sur trois coins, comme le fond de plan de l'application.
+function tileImages(tiles, bb, F, w, h) {
+  if (typeof tiles !== 'function') return '';
+  let list = []; try { list = tiles(bb, F.k) || []; } catch { return ''; }
+  if (!list.length) return '';
+  let s = '<g class="sat">';
+  for (const t of list) {
+    const a = (F.X(t.ne.x) - F.X(t.nw.x)) / 256, b = (F.Y(t.ne.y) - F.Y(t.nw.y)) / 256, c = (F.X(t.sw.x) - F.X(t.nw.x)) / 256, d = (F.Y(t.sw.y) - F.Y(t.nw.y)) / 256;
+    if (![a, b, c, d].every(Number.isFinite)) continue;
+    s += `<image href="${E(t.href)}" x="-0.3" y="-0.3" width="256.6" height="256.6" preserveAspectRatio="none" transform="matrix(${a.toFixed(5)} ${b.toFixed(5)} ${c.toFixed(5)} ${d.toFixed(5)} ${F.X(t.nw.x).toFixed(2)} ${F.Y(t.nw.y).toFixed(2)})"/>`;
+  }
+  return s + '</g>';
+}
+function scaleBar(k, w, h, onImg = false) {
   const target = (w * 0.22) / k, step = [1, 2, 5].flatMap((m) => [m, m * 10, m * 100, m * 1000, m * 10000]).sort((a, b) => a - b).filter((v) => v <= target).pop() || 1, px = step * k;
-  return `<g font-size="10" fill="#1e293b"><rect x="14" y="${h - 22}" width="${px}" height="5" fill="#1e293b"/><rect x="${14 + px / 2}" y="${h - 22}" width="${px / 2}" height="5" fill="#fff" stroke="#1e293b" stroke-width="0.6"/><text x="${14 + px + 5}" y="${h - 16}">${step >= 1000 ? `${nf(step / 1000, 0)} km` : `${nf(step, 0)} m`}</text></g>`
+  return `<g font-size="10" fill="#1e293b">${onImg ? `<rect x="8" y="${h - 28}" width="${px + 60}" height="18" rx="3" fill="#fff" fill-opacity="0.85"/><rect x="${w - 38}" y="10" width="28" height="44" rx="3" fill="#fff" fill-opacity="0.85"/>` : ''}<rect x="14" y="${h - 22}" width="${px}" height="5" fill="#1e293b"/><rect x="${14 + px / 2}" y="${h - 22}" width="${px / 2}" height="5" fill="#fff" stroke="#1e293b" stroke-width="0.6"/><text x="${14 + px + 5}" y="${h - 16}">${step >= 1000 ? `${nf(step / 1000, 0)} km` : `${nf(step, 0)} m`}</text></g>`
     + `<g transform="translate(${w - 24} 30)"><path d="M0,-14L6,6L0,1L-6,6Z" fill="#1e293b"/><text y="18" font-size="10" text-anchor="middle" fill="#1e293b">N</text></g>`;
 }
 const pl = (pts, F) => pts.map((p, i) => `${i ? 'L' : 'M'}${F.X(p.x).toFixed(1)},${F.Y(p.y).toFixed(1)}`).join('');
 
 /** Carte d'un bassin : contour, écoulement principal, axe porteur, exutoire. axes : [{ name, pts:[{x,y}] }]. */
-export function basinMapSvg(c, axes = [], { w = 680, h = 420, others = [] } = {}) {
+export function basinMapSvg(c, axes = [], { w = 680, h = 420, others = [], tiles = null } = {}) {
   const rings = c.ring || [], pts = rings.flat();
   if (!pts.length) return '';
   const bb = { x0: Math.min(...pts.map((p) => p.x)), y0: Math.min(...pts.map((p) => p.y)), x1: Math.max(...pts.map((p) => p.x)), y1: Math.max(...pts.map((p) => p.y)) };
   const padW = Math.max(bb.x1 - bb.x0, bb.y1 - bb.y0) * 0.08; bb.x0 -= padW; bb.x1 += padW; bb.y0 -= padW; bb.y1 += padW;
   const F = frame(bb, w, h), id = `bm${++UID}`;
   let s = `<svg class="carte" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg" font-family="Arial,sans-serif"><defs><clipPath id="${id}"><rect width="${w}" height="${h}"/></clipPath></defs><rect width="${w}" height="${h}" fill="#ffffff" stroke="#cbd5e1"/><g clip-path="url(#${id})">`;
-  for (const o of others) for (const r of o.ring || []) s += `<path d="${pl(r, F)}Z" fill="none" stroke="#94a3b8" stroke-width="0.8" stroke-dasharray="4 3"/>`; // bassins voisins
-  s += `<path d="${rings.map((r) => pl(r, F) + 'Z').join('')}" fill="rgba(56,189,248,0.18)" stroke="#0369a1" stroke-width="1.6" fill-rule="evenodd"/>`;
-  if (c.m?.stream?.length > 1) s += `<path d="${pl(c.m.stream, F)}" fill="none" stroke="#2563eb" stroke-width="1.8"/>`;
+  const sat = tileImages(tiles, bb, F, w, h); s += sat;
+  for (const o of others) for (const r of o.ring || []) s += `<path d="${pl(r, F)}Z" fill="none" stroke="${sat ? '#e2e8f0' : '#94a3b8'}" stroke-width="0.8" stroke-dasharray="4 3"/>`; // bassins voisins
+  s += `<path d="${rings.map((r) => pl(r, F) + 'Z').join('')}" fill="${sat ? 'rgba(56,189,248,0.22)' : 'rgba(56,189,248,0.18)'}" stroke="${sat ? '#facc15' : '#0369a1'}" stroke-width="${sat ? 2.2 : 1.6}" fill-rule="evenodd"/>`;
+  if (c.m?.stream?.length > 1) s += `<path d="${pl(c.m.stream, F)}" fill="none" stroke="${sat ? '#38bdf8' : '#2563eb'}" stroke-width="2"/>`;
   for (const a of axes) if (a.pts?.length > 1) s += `<path d="${pl(a.pts, F)}" fill="none" stroke="#dc2626" stroke-width="2"/>`;
-  s += `<circle cx="${F.X(c.x)}" cy="${F.Y(c.y)}" r="4.5" fill="#dc2626" stroke="#fff" stroke-width="1.2"/><text x="${F.X(c.x) + 7}" y="${F.Y(c.y) - 6}" font-size="11" font-weight="bold" fill="#0f172a">${E(c.id)} — PK ${nf(c.pk, 0)}</text>`;
-  s += '</g>' + scaleBar(F.k, w, h);
-  s += `<g font-size="10" fill="#1e293b" transform="translate(14 16)"><rect width="12" height="8" fill="rgba(56,189,248,0.18)" stroke="#0369a1"/><text x="16" y="8">bassin versant (${nf(c.totalKm2, 3)} km²)</text><path d="M150,4h16" stroke="#2563eb" stroke-width="1.8"/><text x="170" y="8">écoulement principal</text><path d="M290,4h16" stroke="#dc2626" stroke-width="2"/><text x="310" y="8">tracé</text></g>`;
+  s += `<circle cx="${F.X(c.x)}" cy="${F.Y(c.y)}" r="4.5" fill="#dc2626" stroke="#fff" stroke-width="1.2"/><text x="${F.X(c.x) + 7}" y="${F.Y(c.y) - 6}" font-size="11" font-weight="bold" fill="#0f172a" stroke="#fff" stroke-width="3" paint-order="stroke">${E(c.id)} — PK ${nf(c.pk, 0)}</text>`;
+  s += '</g>' + scaleBar(F.k, w, h, !!sat);
+  s += `<g font-size="10" fill="#1e293b" transform="translate(10 10)"><rect width="390" height="16" rx="3" fill="#fff" fill-opacity="0.85"/><g transform="translate(4 4)"><rect width="12" height="8" fill="rgba(56,189,248,0.22)" stroke="${sat ? '#facc15' : '#0369a1'}"/><text x="16" y="8">bassin versant (${nf(c.totalKm2, 3)} km²)</text><path d="M150,4h16" stroke="${sat ? '#38bdf8' : '#2563eb'}" stroke-width="2"/><text x="170" y="8">écoulement principal</text><path d="M290,4h16" stroke="#dc2626" stroke-width="2"/><text x="310" y="8">tracé</text></g></g>`;
+  if (sat) s += `<text x="${w - 6}" y="${h - 5}" font-size="8" text-anchor="end" fill="#fff" stroke="#000" stroke-width="2" paint-order="stroke">Imagerie © Esri, Maxar, Earthstar Geographics</text>`;
   return s + '</svg>';
 }
 
 /** Carte d'ensemble : tous les bassins numérotés et les axes. */
-export function overviewMapSvg(crossings, axes = [], { w = 900, h = 560 } = {}) {
+export function overviewMapSvg(crossings, axes = [], { w = 900, h = 560, tiles = null } = {}) {
   const pts = [...crossings.flatMap((c) => (c.ring || []).flat()), ...axes.flatMap((a) => a.pts || [])];
   if (!pts.length) return '';
   const bb = { x0: Math.min(...pts.map((p) => p.x)), y0: Math.min(...pts.map((p) => p.y)), x1: Math.max(...pts.map((p) => p.x)), y1: Math.max(...pts.map((p) => p.y)) };
   const F = frame(bb, w, h, 30), pal = ['#38bdf8', '#a3e635', '#fbbf24', '#f472b6', '#a78bfa', '#34d399', '#fb923c', '#60a5fa'];
-  let s = `<svg class="carte" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg" font-family="Arial,sans-serif"><rect width="${w}" height="${h}" fill="#f8fafc" stroke="#cbd5e1"/>`;
+  const id = `om${++UID}`;
+  let s = `<svg class="carte" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg" font-family="Arial,sans-serif"><defs><clipPath id="${id}"><rect width="${w}" height="${h}"/></clipPath></defs><rect width="${w}" height="${h}" fill="#f8fafc" stroke="#cbd5e1"/><g clip-path="url(#${id})">`;
+  const sat = tileImages(tiles, { x0: bb.x0 - (bb.x1 - bb.x0) * 0.1, y0: bb.y0 - (bb.y1 - bb.y0) * 0.1, x1: bb.x1 + (bb.x1 - bb.x0) * 0.1, y1: bb.y1 + (bb.y1 - bb.y0) * 0.1 }, F, w, h); s += sat;
   crossings.forEach((c, i) => { if ((c.ring || []).length) s += `<path d="${c.ring.map((r) => pl(r, F) + 'Z').join('')}" fill="${pal[i % pal.length]}" fill-opacity="0.35" stroke="#1e293b" stroke-width="0.7" fill-rule="evenodd"/>`; });
   for (const a of axes) if (a.pts?.length > 1) s += `<path d="${pl(a.pts, F)}" fill="none" stroke="#dc2626" stroke-width="2"/>`;
   for (const c of crossings) s += `<circle cx="${F.X(c.x)}" cy="${F.Y(c.y)}" r="3.2" fill="#dc2626"/><text x="${F.X(c.x) + 5}" y="${F.Y(c.y) - 5}" font-size="10" font-weight="bold" fill="#0f172a" stroke="#fff" stroke-width="2.5" paint-order="stroke">${E(c.id)}</text>`;
-  return s + scaleBar(F.k, w, h) + '</svg>';
+  s += '</g>' + (sat ? `<text x="${w - 6}" y="${h - 5}" font-size="8" text-anchor="end" fill="#fff" stroke="#000" stroke-width="2" paint-order="stroke">Imagerie © Esri, Maxar, Earthstar Geographics</text>` : '');
+  return s + scaleBar(F.k, w, h, !!sat) + '</svg>';
 }
 
 /** Carte d'isohyètes FAO 54 (kind : 'pan' | 'p10') avec la position du projet et la valeur lue. */
