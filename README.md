@@ -213,7 +213,7 @@ ou sur un fond topographique DXF.
   dénivelée projet − TN de chaque profil est écrite à la verticale au-dessus de la ligne rouge (vert : remblai, + ;
   orange : déblai, −). Sur le plan, par-dessus le projet : talus (barbules, entrées en terre), aménagements de l'onglet
   Vitesses / UVR (bandes de catégorie, plateaux, passages, bandes rugueuses, portails… avec leurs désignations) et
-  signalisation verticale (mât, panneau et code : B14-50, C20a, AB25…).
+  signalisation verticale (mât, **miniature vectorielle du panneau** et code : B14-50, C20a, AB25…).
   Ouvrages (cadres, PIPO, buses) : sur le plan, fiche à côté de l'ouvrage — désignation, n × B × H (ou n × buse Ø),
   PK, biais (gr), longueur, fil d'eau amont → aval (pente) et **fil d'eau au droit de l'axe** ; sur le profil en long,
   **coupe de l'ouvrage** au droit de l'axe (largeurs le long de l'axe divisées par le sinus du biais, hauteurs à
