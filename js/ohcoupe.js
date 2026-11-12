@@ -209,6 +209,30 @@ export function ohSheet(o) {
     svg += `<line x1="${xx.toFixed(2)}" y1="${c0}" x2="${xx.toFixed(2)}" y2="${c0 + cartH}" stroke="#9ca3af" stroke-width="0.1"/>`;
     svg += vtc(xx, 0, f2(x)) + vtc(xx, 1, t == null ? '—' : f2(t)) + vtc(xx, 2, fe == null ? '—' : f2(fe)) + vtc(xx, 3, zp2 == null ? '—' : f2(zp2));
   }
+  // Conditions hydrauliques (comme la fenêtre Hydraulique de BVTrace) : débit, pente du radier (celle des fils d'eau
+  // de cette coupe, transmise au calcul) et pente critique → régime dans l'ouvrage ; amont : contrôle, régime d'entrée,
+  // HW, plan d'eau, revanche ; aval : état de la sortie, hauteur et plan d'eau aval, vitesse.
+  {
+    const r = o.hyd?.rr, bw = 104, lines = [];
+    if (r) {
+      const tor = r.criticalSlopePct > 0 ? r.slope * 100 > r.criticalSlopePct + 1e-6 : null;
+      const reg = { unsubmerged: 'entrée non submergée', transition: 'entrée en transition', submerged: 'entrée submergée' }[r.inletRegime] || '';
+      const out = { free: 'sortie libre', partial: 'sortie partiellement noyée', submerged: 'sortie noyée' }[r.outletCondition] || '';
+      const D = r.cellHeight || K.H;
+      lines.push([`Q${o.hyd.T ? o.hyd.T : ''} = ${f2(o.hyd.Q)} m³/s${r.cells > 1 ? ` (${f2(r.dischargePerCell)} m³/s par alvéole)` : ''}`, true]);
+      lines.push([`Pente du radier ${f2(r.slope * 100)} % — pente critique ${f2(r.criticalSlopePct)} % → régime ${tor == null ? '—' : tor ? 'TORRENTIEL' : 'FLUVIAL'} dans l'ouvrage (Fr ${f2(r.froude)})`, true, tor === false ? '#b45309' : '#166534']);
+      lines.push([`yn ${f2(r.normalDepth)} m · yc ${f2(r.criticalDepth)} m · remplissage ${f2(r.fillRatioPct, 0)} %`]);
+      lines.push([`AMONT : contrôle ${r.control === 'inlet' ? 'à l\'entrée' : 'par l\'aval (sortie)'} · ${reg} · HW ${f2(r.headwater)} m (HW/D ${f2(r.headwater / D)})`, true]);
+      lines.push([`plan d'eau amont ${f2(r.upstreamWaterElev)} m${Number.isFinite(r.freeboard) ? ` · revanche ${f2(r.freeboard)} m${r.freeboard < (o.hyd.minFb ?? 0.5) - 1e-6 ? ` < ${f2(o.hyd.minFb ?? 0.5)} m` : ''}` : ''}`, false, Number.isFinite(r.freeboard) && r.freeboard < (o.hyd.minFb ?? 0.5) - 1e-6 ? '#dc2626' : null]);
+      lines.push([`AVAL : ${out} · hauteur aval ${f2(r.tailwaterDepth)} m · plan d'eau ${f2(r.downstreamWaterElev)} m`, true]);
+      const v = r.velocities?.outlet ?? r.velocities?.full ?? r.fullVelocity;
+      if (Number.isFinite(v)) lines.push([`vitesse de sortie ${f2(v)} m/s${v > 3 ? ' — > 3 m/s : protection aval (enrochements)' : ''}`, false, v > 3 ? '#dc2626' : null]);
+    } else lines.push([o.hydNote || 'conditions hydrauliques non calculées', false, '#6b7280']);
+    const lh = 3, bh = 6 + lines.length * lh, bx = inner.x + inner.w - bw - 3, by = planR.y + planR.h - bh - 2;
+    svg += `<rect x="${bx}" y="${by}" width="${bw}" height="${bh}" fill="#fff" fill-opacity="0.93" stroke="#0369a1" stroke-width="0.3"/>`;
+    svg += txt(bx + 2, by + 3.6, 'CONDITIONS HYDRAULIQUES', 2.4, { w: 'bold', c: '#0369a1' });
+    lines.forEach(([t, b, c], i) => { svg += txt(bx + 2, by + 6.6 + i * lh, t, 1.95, { w: b ? 'bold' : 'normal', c: c || '#111827' }); });
+  }
   svg += '</svg>';
   return { svg, scale, paper: [PW, PH] };
 }
