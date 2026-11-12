@@ -1921,6 +1921,7 @@ function plusPos(e) {
 
 function drawOverlay(ctx, v, T) {
   try { drawEmprise(ctx, v); } catch (e) { console.error(e); }
+  try { UV?.overlay(ctx, v); } catch (e) { console.error(e); }
   if (S.D?.O) {
     const [x, y] = v.w2s(S.D.O.x, S.D.O.y);
     ctx.strokeStyle = S.prj.center.auto ? T.L.AXE.stroke : T.sel; ctx.lineWidth = 1.6; ctx.setLineDash([]);
@@ -3211,6 +3212,8 @@ function bindCanvas() {
       S.drag = { kind: 'pan', px, py, moved: false }; cv.style.cursor = 'grabbing'; return;
     }
     if (e.button === 2) {
+      if (S.uvrMove) { UV?.cancelMove(); return; }
+      if (S.tool === 'select') { const h = UV?.hit(px, py); if (h) { UV.menu(h, e.clientX, e.clientY); return; } }
       if (S.tool === 'axis') finishAxis();
       else if (S.tool === 'bvcut') bvFinishCut();
       else if (S.tool === 'measure') { S.meas = []; viewer.invalidate(); }
@@ -3218,6 +3221,7 @@ function bindCanvas() {
       return;
     }
     if (e.button !== 0) return;
+    if (S.uvrMove) { UV?.drop(); return; } // pose de l'aménagement déplacé
     const w = pickPoint(px, py);
     if (S.tool === 'axis') { S.draft.push(w); setPrompt(); }
     else if (S.tool === 'center') placeCenterAt(w);
@@ -3308,7 +3312,9 @@ function onMove(px, py) {
     }
   }
   else if (d?.kind === 'center') { S.prj.center = { auto: false, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
+  else if (!d && S.uvrMove) { if (UV?.moveTo(w)) viewer.invalidate(); $('#cv').style.cursor = 'move'; }
   else if (!d && S.tool === 'select') {
+    if (UV?.hover(px, py)) viewer.invalidate();
     const h = hitAxis(px, py);
     if (h !== S.hover) S.hover = h;
     const hh = hitHandle(px, py), el = hh ? null : hitElement(px, py);
@@ -3368,7 +3374,7 @@ function bindKeys() {
     if (typing) return;
     if ($('#dlgHelp').open) return;
     switch (e.key) {
-      case 'Escape': if (S.ttr) { S.ttr = null; toast(t('Raccordement annulé.')); return; } if (S.pop) { closePop(); return; } cancelTool(); return;
+      case 'Escape': if (UV?.cancelMove()) return; if (S.ttr) { S.ttr = null; toast(t('Raccordement annulé.')); return; } if (S.pop) { closePop(); return; } cancelTool(); return;
       case 'Enter': if (S.tool === 'axis') finishAxis(); else if (S.tool === 'bvcut') { e.preventDefault(); bvFinishCut(); } return; // sans preventDefault, l'appui atteindrait le premier bouton de la fiche rouverte
       case 'Backspace': if (undoPoint()) e.preventDefault(); return;
       case 'Delete': if (S.pop) { popDelete(); return; } if (S.sel >= 0) deleteBranch(S.sel); return;

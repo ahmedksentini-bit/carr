@@ -576,3 +576,10 @@ ul.ouvr-items li.info { color: var(--muted); }
 
 /* bloc affiché seulement dans la fenêtre flottante (le même réglage est déjà en tête de l'onglet) */
 #tab-anneau .pop-only { display: none; }
+/* Menu contextuel des aménagements UVR (clic droit sur le plan) */
+.ctxmenu { position: fixed; z-index: 60; min-width: 170px; background: var(--panel); border: 1px solid var(--line2); border-radius: 8px; padding: 4px; box-shadow: 0 6px 20px rgba(0,0,0,.45); display: flex; flex-direction: column; }
+.ctxmenu[hidden] { display: none; }
+.ctxmenu .ttl { font-size: 11px; opacity: .7; padding: 4px 8px 6px; border-bottom: 1px solid var(--line); margin-bottom: 3px; }
+.ctxmenu button { background: transparent; border: 0; text-align: left; padding: 6px 10px; border-radius: 5px; }
+.ctxmenu button:hover { background: var(--panel2); }
+.ctxmenu button.danger { color: #f87171; }
