@@ -5063,8 +5063,8 @@ function renderPTT(c, list) {
   libSel.innerHTML = (S.prj.ptt?.profiles || []).map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('') || '<option value="">(vide)</option>';
   if (keep && findProfile(S.prj, keep)) libSel.value = keep;
   $('#pttRanges').innerHTML = (A.ranges || []).length
-    ? '<thead><tr><th>s début (m)</th><th>s fin (m)</th><th>gauche</th><th>droite</th><th></th></tr></thead><tbody>' + A.ranges.map((r, i) => `<tr><td><input data-rg="${i}" data-k="s0" inputmode="decimal" value="${fmt(r.s0, 1)}"></td><td><input data-rg="${i}" data-k="s1" inputmode="decimal" value="${fmt(r.s1, 1)}"></td>`
-      + `<td><select data-rg="${i}" data-k="left">${pttOptions(ok(r.left))}</select></td><td><select data-rg="${i}" data-k="right">${pttOptions(ok(r.right))}</select></td><td><button data-rgdel="${i}" title="Supprimer la plage">✕</button></td></tr>`).join('') + '</tbody>'
+    ? '<thead><tr><th>s début (m)</th><th>s fin (m)</th><th>gauche</th><th>droite</th><th></th></tr></thead><tbody>' + A.ranges.map((r, i) => `<tr><td><input data-rg="${i}" data-rk="s0" inputmode="decimal" value="${fmt(r.s0, 1)}"></td><td><input data-rg="${i}" data-rk="s1" inputmode="decimal" value="${fmt(r.s1, 1)}"></td>`
+      + `<td><select data-rg="${i}" data-rk="left">${pttOptions(ok(r.left))}</select></td><td><select data-rg="${i}" data-rk="right">${pttOptions(ok(r.right))}</select></td><td><button data-rgdel="${i}" title="Supprimer la plage">✕</button></td></tr>`).join('') + '</tbody>'
     : '<tbody><tr><td class="note">Aucune plage : les demi-profils ci-dessus valent sur tout l\'axe.</td></tr></tbody>';
 }
 // Ouvre l'éditeur sur le demi-profil du côté sd (1 gauche, −1 droite) de l'axe : profil de la bibliothèque (modifié en
@@ -5184,8 +5184,10 @@ function bindPTT() {
   $('#pttRanges').addEventListener('change', (e) => {
     const el = e.target.closest('[data-rg]'); if (!el) return;
     const r = pttAxis(key()).ranges[+el.dataset.rg]; if (!r) return;
-    if (el.dataset.k === 's0' || el.dataset.k === 's1') { const v = parseFloat(String(el.value).replace(',', '.')); if (!isFinite(v)) { toast('Abscisse invalide.', 'warn'); refreshPT(); return; } r[el.dataset.k] = v; }
-    else r[el.dataset.k] = el.value;
+    // data-rk (et non data-k) : les champs data-k sont des chemins du projet, resynchronisés à chaque mise à jour
+    const k = el.dataset.rk;
+    if (k === 's0' || k === 's1') { const v = parseFloat(String(el.value).replace(',', '.')); if (!isFinite(v)) { toast('Abscisse invalide.', 'warn'); refreshPT(); return; } r[k] = v; }
+    else if (k === 'left' || k === 'right') r[k] = el.value;
     update();
   });
   $('#pttRanges').addEventListener('click', (e) => { const b = e.target.closest('[data-rgdel]'); if (b) { pttAxis(key()).ranges.splice(+b.dataset.rgdel, 1); update(); } });
