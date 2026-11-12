@@ -17,6 +17,10 @@ ou sur un fond topographique DXF.
 - **Onglet Projet** : ce qui vaut pour tout le projet — nom, contenu (axes du tracé, carrefours, bretelles, avec liens
   vers leurs onglets), système de coordonnées, fond de plan, fond DXF, calques KMZ, affichage. La liste des carrefours,
   le type et le contexte (interurbain / urbain) du carrefour actif sont en tête de l'onglet **Carrefours plans**.
+- **Onglet Contrôles** : chaque contrôle localisable porte son **PK et son axe** (lus dans le contrôle, dans le message —
+  « 1+234 », « s = 123 m », « PI 3 », sommet — ou par projection du point en cause sur l'axe le plus proche) ; un clic
+  cadre le plan sur le point (ou sur l'axe entier pour un contrôle d'ensemble, sur l'ouvrage nommé, sur le centre du
+  carrefour à défaut) et le marque d'un repère rouge clignotant.
 - **Onglet Tracé** (deuxième onglet) : axes de la voie principale (autoroute ICTAAL ou route non autoroutière,
   catégorie de conception, vitesse, profil en travers, PK origine) et des voies secondaires — dessin, import KMZ / KML,
   tableau des sommets (X, Y, R, clothoïdes, rayon appliqué), raccordement aux carrefours et croisements. L'onglet

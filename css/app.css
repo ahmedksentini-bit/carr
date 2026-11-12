@@ -583,3 +583,4 @@ ul.ouvr-items li.info { color: var(--muted); }
 .ctxmenu button { background: transparent; border: 0; text-align: left; padding: 6px 10px; border-radius: 5px; }
 .ctxmenu button:hover { background: var(--panel2); }
 .ctxmenu button.danger { color: #f87171; }
+.checks .pk { display: inline-block; font: 600 11px var(--mono); color: #93c5fd; background: rgba(59,130,246,.14); border: 1px solid rgba(59,130,246,.35); border-radius: 4px; padding: 0 5px; margin-right: 6px; white-space: nowrap; }
