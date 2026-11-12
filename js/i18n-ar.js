@@ -727,6 +727,7 @@ export const AR = {
   // Fenêtre d'aide
   'INFRA-KSR — aide': 'INFRA-KSR — مساعدة',
   'Tracé': 'المسار',
+  'Carrefours plans': 'المفترقات المستوية',
   ': choisissez le contexte (interurbain / urbain), le système de coordonnées et le fond (satellite, ou DXF topo dans le même système).': ': اختر السياق (خارج العمران / حضري)، ونظام الإحداثيات، والخلفية (صور القمر الصناعي، أو DXF طبوغرافي في النظام نفسه).',
   'Axe': 'المحور',
   ': dessinez l\'axe de chaque branche en cliquant de l\'extérieur vers le carrefour.': ': ارسم محور كل فرع بالنقر من الخارج نحو المفترق.',

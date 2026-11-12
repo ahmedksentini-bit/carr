@@ -3554,7 +3554,7 @@ function syncCtxUI() {
     ? 'Valeurs par défaut et contrôles : SETRA, Aménagement des carrefours interurbains (ACI, 1998).'
     : 'Valeurs par défaut et contrôles : CERTU, Guide des carrefours urbains (1999) / fiche Giratoires urbains ; mini-giratoires (1997).';
   $('#ringGuide').innerHTML = '<h4>Rappels du guide</h4><ul>' + GUIDE_NOTES[plan ? 'plan_' + S.prj.context : S.prj.context].map((t) => `<li>${esc(t)}</li>`).join('') + '</ul>';
-  $('#tabRingBtn').textContent = plan ? 'Carrefour' : 'Anneau';
+  // onglet « Carrefours plans » : anneau du giratoire ou carrefour en T / X (libellé fixe)
   $('#ringPane').hidden = plan;
   $('#planPane').hidden = !plan;
   $$('#deversFields [data-for], #capFields [data-for], #visFields [data-for]').forEach((el) => (el.hidden = (el.dataset.for === 'plan') !== plan));
@@ -3802,7 +3802,7 @@ function renderBranchForm() {
       <h4>Entrée</h4>
       ${fld('le', 'Largeur d\'entrée le', 'm', { branch: true, title: 'Mesurée du bord de l\'îlot au bord extérieur, au droit de l\'anneau' })}
       ${fld('Re', 'Rayon d\'entrée Re', 'm', { branch: true })}
-      ${nextBr ? `<label class="chk" title="Re de cette branche et Rs de la branche suivante (sens de l'anneau) remplacés par un seul arc tangent aux deux bords, de préférence tangent à la rive de l'anneau (au moins le rayon unique mini de l'onglet Anneau)"><input type="checkbox" data-bk="fuseNext"> Rayon unique avec la sortie de ${esc(nextBr.name)}</label>` : ''}
+      ${nextBr ? `<label class="chk" title="Re de cette branche et Rs de la branche suivante (sens de l'anneau) remplacés par un seul arc tangent aux deux bords, de préférence tangent à la rive de l'anneau (au moins le rayon unique mini de l'onglet Carrefours plans)"><input type="checkbox" data-bk="fuseNext"> Rayon unique avec la sortie de ${esc(nextBr.name)}</label>` : ''}
       ${b.fusePhi != null ? `<div class="row"><span class="note">Point de contact du rayon unique sur l'anneau placé à la poignée (losange plein).</span><button id="btnFuseAuto">Contact automatique</button></div>` : nextBr ? '<p class="note">Rayon unique : son point de contact sur l\'anneau (losange bleu) se déplace à la souris ; deux arcs tangents à l\'anneau en ce point remplacent alors le rayon unique.</p>' : ''}
       <h4>Sortie</h4>
       ${fld('ls', 'Largeur de sortie ls', 'm', { branch: true })}
@@ -4513,7 +4513,7 @@ function refreshPLRing(c) {
     for (const sg of segs) if (Math.abs(sg.g) > RING_PL_LIMITS.gMax + 1e-9) checks.push({ lvl: 'warn', msg: `Anneau : déclivité de ${fmt(Math.abs(sg.g) * 100, 2)} % entre s = ${fmt(sg.s0, 1)} et ${fmt(sg.s1, 1)} m — ${RING_PL_LIMITS.label}.` });
   }
   $('#plChecks').innerHTML = (checks.length ? '<ul class="checks">' + checks.map((q) => `<li class="${q.lvl}"><span class="ic">${{ err: '✖', warn: '!', info: 'i', ok: '✔' }[q.lvl] || 'i'}</span><span>${esc(q.msg)}</span></li>`).join('') + '</ul>' : '')
-    + `<p class="note">Axe sur la rive intérieure peinte (longueur ${fmt(L, 2)} m), origine au nord du centre, abscisse dans le sens de circulation. ${defined ? 'La rive intérieure suit cette ligne rouge ; le dévers de l\'anneau (onglet Anneau) est appliqué vers l\'extérieur ; zC et la déclivité du site ne s\'appliquent plus à l\'anneau.' : ''} Limites : ${esc(RING_PL_LIMITS.label)}.</p>`;
+    + `<p class="note">Axe sur la rive intérieure peinte (longueur ${fmt(L, 2)} m), origine au nord du centre, abscisse dans le sens de circulation. ${defined ? 'La rive intérieure suit cette ligne rouge ; le dévers de l\'anneau (onglet Carrefours plans) est appliqué vers l\'extérieur ; zC et la déclivité du site ne s\'appliquent plus à l\'anneau.' : ''} Limites : ${esc(RING_PL_LIMITS.label)}.</p>`;
   const step = parseNum($('#plStep').value) || 10;
   const rows = []; for (let sv = 0; sv <= L + 1e-9; sv += step) rows.push(sv); if (L - rows[rows.length - 1] > 0.01) rows.push(L);
   $('#plStations').innerHTML = '<thead><tr><th>s (m)</th><th>X</th><th>Y</th><th>z TN</th><th>z projet</th><th>projet − TN</th><th>pente</th></tr></thead><tbody>' +
