@@ -433,65 +433,64 @@ export function buildEchangeur(prj, D) {
     P({ k: 'path', L: 'AXE', segs: pathD, role: 'principale' });
     const sLab = Math.min(sB, sA + 30);
     text('COTATION', G.pathPointAt(path, sLab), `${H.name} — ${isRoute ? `route ${H.median > 0 ? '2×' : ''}${H.lanes * (H.median > 0 ? 1 : 2)} voie(s)` : `${H.cat}, 2×${H.lanes} voies`}`, ang(pathTangentAt(path, sLab)), 'center', TH * 1.2);
-    // PK / PR tous les 100 m.
+    // Cotations de l'axe, perpendiculaires à l'axe (lues de l'axe vers l'extérieur), en jaune, sans chevauchement :
+    // chaque étiquette est rattachée à une abscisse et à un côté ; sur un même côté, les abscisses trop proches sont
+    // écartées symétriquement (un trait de rappel rejoint alors l'axe au point coté).
+    const W = E2 + H.berme, LBL = [], YEL = '#facc15';
+    const lab = (st, side, txt, h, tick = false) => LBL.push({ s0: st, s: st, side, txt, h, tick });
+    // PK / PR tous les 100 m (côté gauche)
     for (let st = 0; st <= sEnd + 1e-6; st += 100) {
       if (st < sA - 1e-6 || st > sB + 1e-6) continue;
-      const p = G.pathPointAt(path, st), tg = pathTangentAt(path, st), n = rot90(tg);
-      P({ k: 'path', L: 'COTATION', segs: [G.L(add(p, mul(n, -1)), add(p, mul(n, 1)))] });
-      text('COTATION', add(p, mul(n, E2 + H.berme + 2.5)), `${isRoute ? 'PR' : 'PK'} ${fmt((H.pk0 + st) / 1000, 3)}`, ang(tg), 'center', TH * 0.8);
+      const p = G.pathPointAt(path, st);
+      lab(st, 1, `${isRoute ? 'PR' : 'PK'} ${fmt((H.pk0 + st) / 1000, 3)}`, TH * 0.8, true);
       pt(`${H.name} · ${isRoute ? 'PR' : 'PK'} ${fmt((H.pk0 + st) / 1000, 3)}`, p);
     }
-    // Cotation des courbes de l'axe : rayon, développement, angle au centre, tangente ; repères TC / CT en travers.
-    const W = E2 + H.berme;
+    // Courbes de l'axe : rayon, développement, angle au centre, tangente (côté extérieur) ; repères TC / CT / TS / ST.
     let sArc = 0;
     path.forEach((sg, j) => {
       const Ls = G.segLen(sg);
       if (sArc + Ls < sA + 1e-6 || sArc > sB - 1e-6) { sArc += Ls; return; } // hors de la partie dessinée
       if (sg.t === 'A') {
-        const sw = G.sweep(sg), sgn = sg.ccw ? 1 : -1, T = sg.r * Math.tan(sw / 2);
-        const lbl = `R ${fmt(sg.r)} m · Lc ${fmt(Ls)} m · Δ ${fmtA(sw)} · T ${fmt(T)} m`, hL = TH * 1.6;
-        // Étiquette au milieu de l'arc, déplacée le long de l'arc si elle tombe sur l'autre axe (croisement).
-        const others = roads.filter((o) => o !== key).map((o) => axisPaths[o]).filter(Boolean);
-        const clear = (f) => {
-          const a = sg.sa + sgn * sw * f, q = add(sg.c, mul(G.unit(a), sg.r + W + 3));
-          return others.every((op) => { const pr = pathProject(op, q); return !pr || dist(pr.p, q) > 0.35 * lbl.length * hL + 25; });
-        };
-        const f = [0.5, 0.3, 0.7, 0.15, 0.85, 0.05, 0.95].find(clear), need = 0.35 * lbl.length * hL + 30;
-        if (f != null) { const am = sg.sa + sgn * sw * f; text('COTATION', add(sg.c, mul(G.unit(am), sg.r + W + 3)), lbl, am + (sgn * Math.PI) / 2, 'center', hL); }
-        else { // arc court au droit du croisement : étiquette reportée sur l'alignement qui suit (ou précède), rappelée par une ligne
-          const ends = [[sg.ea, 1], [sg.sa, -1]].map(([a, dir]) => {
-            const P0 = add(sg.c, mul(G.unit(a), sg.r + W + 3)), tg = mul(G.unit(a + (sgn * Math.PI) / 2), dir);
-            return { P0, q: add(P0, mul(tg, need)), th: a + (sgn * Math.PI) / 2 };
-          });
-          const e = ends.find(({ q }) => others.every((op) => { const pr = pathProject(op, q); return !pr || dist(pr.p, q) > need - 25; })) || ends[0];
-          text('COTATION', e.q, lbl, e.th, 'center', hL);
-          P({ k: 'path', L: 'COTATION', segs: [G.L(e.P0, add(e.P0, mul(sub(e.q, e.P0), 1 - (0.35 * lbl.length * hL + 2) / need)))] });
-        }
+        const sw = G.sweep(sg), out = sg.ccw ? -1 : 1, T = sg.r * Math.tan(sw / 2); // extérieur : à droite d'un virage à gauche
+        lab(sArc + Ls / 2, out, `R ${fmt(sg.r)} m · Lc ${fmt(Ls)} m · Δ ${fmtA(sw)} · T ${fmt(T)} m`, TH * 1.2);
         const cIn = path[j - 1]?.clo != null, cOut = path[j + 1]?.clo != null;
         for (const [nm, a, st] of [[cIn ? 'SC' : 'TC', sg.sa, sArc], [cOut ? 'CS' : 'CT', sg.ea, sArc + Ls]]) {
-          const v = G.unit(a);
-          P({ k: 'path', L: 'COTATION', segs: [G.L(add(sg.c, mul(v, sg.r - W - 1)), add(sg.c, mul(v, sg.r + W + 1)))] });
-          text('COTATION', add(sg.c, mul(v, sg.r + W + 2.5)), `${nm}${j}`, a, 'center', TH * 0.8);
+          if (!(cIn && nm === 'SC') && !(cOut && nm === 'CS')) lab(st, out, `${nm}${j}`, TH * 0.8, true);
           pt(`${H.name} · ${nm}${j} (${isRoute ? 'PR' : 'PK'} ${fmt((H.pk0 + st) / 1000, 3)}, R ${fmt(sg.r)} m)`, G.polar(sg.c, sg.r, a));
         }
         pt(`${H.name} · centre de la courbe ${j} (R ${fmt(sg.r)} m)`, sg.c);
       } else if (sg.clo != null) { // clothoïde : repère TS / ST à l'extrémité droite, paramètre au milieu
-        const e = al.elems[sg.clo], first = path[j - 1]?.clo !== sg.clo, last = path[j + 1]?.clo !== sg.clo;
-        const th = ang(sub(sg.b, sg.a)), n = rot90(unit(th));
+        const e = al.elems[sg.clo], first = path[j - 1]?.clo !== sg.clo, last = path[j + 1]?.clo !== sg.clo, out = e.sg > 0 ? -1 : 1;
         if ((first && !e.out) || (last && e.out)) {
-          const q = first ? sg.a : sg.b, nm = first ? 'TS' : 'ST';
-          P({ k: 'path', L: 'COTATION', segs: [G.L(add(q, mul(n, -W - 1)), add(q, mul(n, W + 1)))] });
-          text('COTATION', add(q, mul(n, W + 2.5)), `${nm}${j}`, th + Math.PI / 2, 'center', TH * 0.8);
-          pt(`${H.name} · ${nm}${j} (${isRoute ? 'PR' : 'PK'} ${fmt((H.pk0 + (first ? sArc : sArc + Ls)) / 1000, 3)}, clothoïde A ${fmt(e.A, 0)} m)`, q);
+          const st = first ? sArc : sArc + Ls, nm = first ? 'TS' : 'ST';
+          lab(st, out, `${nm}${j}`, TH * 0.8, true);
+          pt(`${H.name} · ${nm}${j} (${isRoute ? 'PR' : 'PK'} ${fmt((H.pk0 + st) / 1000, 3)}, clothoïde A ${fmt(e.A, 0)} m)`, first ? sg.a : sg.b);
         }
-        const mid = Math.floor(e.len / 2), u = sArc - e.s0;
-        if (u <= mid && u + Ls > mid) text('COTATION', add(G.segAt(sg, 0.5), mul(n, (e.sg > 0 ? -1 : 1) * (W + 3))), `clothoïde A ${fmt(e.A, 0)} m · L ${fmt(e.len, 1)} m`, th, 'center', TH * 1.2);
-      } else if (Ls > 20) {
-        const m = G.segAt(sg, 0.5), th = ang(sub(sg.b, sg.a)), n = rot90(unit(th));
-        text('COTATION', add(m, mul(n, W + 3)), `alignement ${fmt(Ls)} m`, th, 'center', TH * 0.9);
-      }
+        const mid = e.len / 2, u = sArc - e.s0;
+        if (u <= mid && u + Ls > mid) lab(e.s0 + mid, out, `clothoïde A ${fmt(e.A, 0)} m · L ${fmt(e.len, 1)} m`, TH * 1.0);
+      } else if (Ls > 20) lab(sArc + Ls / 2, 1, `alignement ${fmt(Ls)} m`, TH * 0.9);
       sArc += Ls;
     });
+    for (const side of [1, -1]) { // écartement des étiquettes d'un même côté (au moins 1,4 hauteur de texte)
+      const L = LBL.filter((q) => q.side === side).sort((a, b) => a.s0 - b.s0);
+      for (let it = 0; it < 60; it++) {
+        let moved = false;
+        for (let i = 1; i < L.length; i++) {
+          const gap = 0.7 * (L[i].h + L[i - 1].h), d = L[i].s - L[i - 1].s;
+          if (d < gap - 1e-6) { const m = (gap - d) / 2; L[i - 1].s -= m; L[i].s += m; moved = true; }
+        }
+        if (!moved) break;
+      }
+    }
+    for (const q of LBL) {
+      const sc = Math.max(0, Math.min(sEnd, q.s)), p = G.pathPointAt(path, sc), n = mul(rot90(pathTangentAt(path, sc)), q.side);
+      const p0 = G.pathPointAt(path, Math.max(0, Math.min(sEnd, q.s0))), n0 = mul(rot90(pathTangentAt(path, Math.max(0, Math.min(sEnd, q.s0)))), q.side);
+      if (q.tick) P({ k: 'path', L: 'COTATION', segs: [G.L(add(p0, mul(n0, -W - 1)), add(p0, mul(n0, W + 1)))], color: YEL });
+      const a0 = add(p0, mul(n0, W + 1)), a1 = add(p, mul(n, W + 2));
+      if (dist(a0, a1) > 0.3 * q.h) P({ k: 'path', L: 'COTATION', segs: [G.L(a0, a1)], color: YEL, wm: 0.1 }); // trait de rappel
+      const rot = ang(n), up = upright(rot), flip = Math.abs(G.normAng(up - rot)) > 1;
+      P({ k: 'text', L: 'COTATION', p: add(p, mul(n, W + 2.3)), s: q.txt, rot: up, align: flip ? 'right' : 'left', h: q.h, color: YEL });
+    }
     if (sA < 1e-6) pt(`${H.name} · origine`, G.pathPointAt(path, 0));
     if (sB > sEnd - 1e-6) pt(`${H.name} · fin`, G.pathPointAt(path, sEnd));
     return road;

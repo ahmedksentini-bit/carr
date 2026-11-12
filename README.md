@@ -270,7 +270,12 @@ ou sur un fond topographique DXF.
   relève au besoin le rayon des boucles pour garder Z ≥ 0 sur chaque chaussée. **Cotations** des courbes de l'autoroute et
   de la route transversale (R, développement Lc, angle au centre Δ dans l'unité choisie, tangente T, repères TC / CT avec
   PK / PR, centres dans la liste des points ; longueur des alignements) et des arcs des bretelles (R, Ri, A, dévers,
-  surlargeur, Lc, Δ) ; l'étiquette d'une courbe d'axe est déplacée hors du croisement.
+  surlargeur, Lc, Δ). Les cotations des axes (PK / PR, courbes, clothoïdes A et L, alignements, repères TC / CT /
+  TS / ST) sont **perpendiculaires à l'axe**, en jaune, lues de l'axe vers l'extérieur (côté extérieur des courbes) ;
+  sur un même côté, les étiquettes trop proches sont écartées et reliées au point coté par un trait de rappel.
+  Sélection (clic à quelques pixels de l'axe) : droite, raccordement (sur son arc) et **chaque clothoïde** (entrée /
+  sortie) avec ses propriétés — A, L, rayon au raccord, angle τ, abscisses et PK de début et de fin, coordonnées — et
+  les champs R et L du raccordement.
 - **Plusieurs carrefours** par projet (giratoires et carrefours plans nommés, onglet Projet) : tous sont dessinés et
   exportés ; les onglets portent sur le carrefour actif, qu'on choisit dans la liste ou d'un clic sur le plan.
 - **Plusieurs échangeurs** le long de l'autoroute : une voie secondaire par échangeur (liste « Voies secondaires »,
