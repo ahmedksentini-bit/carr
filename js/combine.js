@@ -5,7 +5,7 @@
 // et droit). Les feuilles se recouvrent d'un intervalle de profils. Tout est vectoriel (SVG en millimètres papier) :
 // la page HTML produite s'imprime en PDF à l'échelle exacte.
 import * as G from './geom.js';
-import { plElements, lowCombined } from './pl.js';
+import { plElements, lowCombined, planElements } from './pl.js';
 import { signSVG } from './signicons.js';
 
 export const PAPERS = { A4: [297, 210], A3: [420, 297], A2: [594, 420], A1: [841, 594], A0: [1189, 841] };
@@ -233,12 +233,16 @@ function planBand(o) {
     out += txt(n0.x, n0.y, String(q.num), 1.8, { a: 'start', c: '#1d4ed8', w: 'bold', rot, halo: true });
     out += txt(n1.x, n1.y, fmtPk(o.pk0 + q.s).replace(/,00$/, ''), 1.5, { a: 'start', c: '#1d4ed8', rot, halo: true });
   }
-  const tick = [10, 20, 25, 50, 100, 200, 500, 1000, 2000].find((v) => v * k >= 18) || 5000;
-  for (let s = Math.ceil((o.pk0 + s0) / tick) * tick - o.pk0; s <= s1 + 1e-6; s += tick) {
-    if (s < -1e-6) continue;
-    const { p, t } = ax.at(s), m = G.rot90(t), a = T(G.add(p, G.mul(m, 2 / k))), b = T(G.sub(p, G.mul(m, 2 / k))), c = T(G.sub(p, G.mul(m, 3.2 / k)));
-    out += `<line x1="${a.x.toFixed(2)}" y1="${a.y.toFixed(2)}" x2="${b.x.toFixed(2)}" y2="${b.y.toFixed(2)}" stroke="#c00" stroke-width="0.3"/>`;
-    out += txt(c.x, c.y, `PK ${fmtPk(o.pk0 + s).replace(/,00$/, '')}`, 1.9, { a: 'middle', c: '#b91c1c', rot: upright(-(Math.atan2(t.y, t.x) - phi) * 180 / Math.PI), halo: true });
+  // pas de repères kilométriques rouges en plus : les profils en travers portent déjà leur numéro et leur PK
+  // (repères gardés seulement sans aucun profil sur la feuille)
+  if (!o.st.some((q) => q.s >= s0 - 1e-6 && q.s <= s1 + 1e-6)) {
+    const tick = [10, 20, 25, 50, 100, 200, 500, 1000, 2000].find((v) => v * k >= 18) || 5000;
+    for (let s = Math.ceil((o.pk0 + s0) / tick) * tick - o.pk0; s <= s1 + 1e-6; s += tick) {
+      if (s < -1e-6) continue;
+      const { p, t } = ax.at(s), m = G.rot90(t), a = T(G.add(p, G.mul(m, 2 / k))), b = T(G.sub(p, G.mul(m, 2 / k))), c = T(G.sub(p, G.mul(m, 3.2 / k)));
+      out += `<line x1="${a.x.toFixed(2)}" y1="${a.y.toFixed(2)}" x2="${b.x.toFixed(2)}" y2="${b.y.toFixed(2)}" stroke="#c00" stroke-width="0.3"/>`;
+      out += txt(c.x, c.y, `PK ${fmtPk(o.pk0 + s).replace(/,00$/, '')}`, 1.9, { a: 'middle', c: '#b91c1c', rot: upright(-(Math.atan2(t.y, t.x) - phi) * 180 / Math.PI), halo: true });
+    }
   }
   // ouvrages
   for (const q of o.ohs || []) {
@@ -393,7 +397,7 @@ function segsD(segs, T, k) {
 const CART = [
   { key: 'num', label: 'N° PROFIL', h: 5 }, { key: 'dp', label: 'DISTANCES PARTIELLES', h: 9 }, { key: 'pk', label: 'PK (ABSCISSES)', h: 9 },
   { key: 'tn', label: 'COTES TN', h: 9 }, { key: 'zp', label: 'COTES PROJET', h: 9 }, { key: 'el', label: 'DÉCLIVITÉS / RAYONS', h: 6 },
-  { key: 'len', label: 'LONGUEURS / DÉNIVELÉES', h: 5 }, { key: 'dl', label: 'DÉVERS GAUCHE (%)', h: 8 }, { key: 'dr', label: 'DÉVERS DROIT (%)', h: 8 },
+  { key: 'len', label: 'LONGUEURS / DÉNIVELÉES', h: 5 }, { key: 'ax', label: 'TRACÉ EN PLAN', h: 8 }, { key: 'dl', label: 'DÉVERS GAUCHE (%)', h: 8 }, { key: 'dr', label: 'DÉVERS DROIT (%)', h: 8 },
 ];
 
 function profileBand(o) {
@@ -469,21 +473,14 @@ function profileBand(o) {
   for (const q of vis) { const z = tn(q.s) ?? zp(q.s); if (z == null) continue; out += `<line x1="${X(q.s).toFixed(2)}" y1="${Y(q.s, z).toFixed(2)}" x2="${X(q.s).toFixed(2)}" y2="${plot.y + plot.h}" stroke="#9ca3af" stroke-width="0.12"/>`; }
   const line = (fz) => { let d = '', prev = null; for (const s of smp) { const z = fz(s); if (z == null) { prev = null; continue; } const zo = zoneAt(s); d += `${prev && prev === zo ? 'L' : 'M'}${P(X(s), Y(s, z))}`; prev = zo; } return d; };
   out += `<path d="${line(tn)}" fill="none" stroke="#5c4f44" stroke-width="0.3"/>`;
+  // emprises des textes déjà posés (mm) : les étiquettes suivantes les évitent
+  const used = [], mks = [], hits = (b) => used.some((u) => b.x0 < u.x1 && b.x1 > u.x0 && b.y0 < u.y1 && b.y1 > u.y0);
   if (PL) {
     out += `<path d="${line(zp)}" fill="none" stroke="#cd1c24" stroke-width="0.5"/>`;
     // points caractéristiques : sommets (PI) avec les tangentes prolongées, points de tangence des raccordements,
     // point haut / bas ; repère, PK et cote écrits à la verticale au-dessus de la ligne rouge
     const inS = (v) => v >= s0 - 1e-6 && v <= s1 + 1e-6;
-    const mark = (sv, z, lab, sym) => {
-      const x = X(sv), y = Y(sv, z), yt = Math.max(plot.y + 1.5, y - 14);
-      let m = `<line x1="${x.toFixed(2)}" y1="${(y - 1).toFixed(2)}" x2="${x.toFixed(2)}" y2="${yt.toFixed(2)}" stroke="#cd1c24" stroke-width="0.1"/>`;
-      m += sym === 'pi' ? `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="0.6" fill="#fff" stroke="#cd1c24" stroke-width="0.2"/>`
-        : sym === 'top' ? `<path d="M${P(x - 0.7, y + 0.6)}L${P(x + 0.7, y + 0.6)}L${P(x, y - 0.6)}Z" fill="#cd1c24"/>`
-        : `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="0.4" fill="#cd1c24"/>`;
-      const t = `${lab} · PK ${fmtPk(o.pk0 + sv).replace(/,00$/, '')} · z ${f2(z)}`;
-      m += `<text x="${(x - 0.4).toFixed(2)}" y="${(yt + 0.3).toFixed(2)}" font-size="1.5" fill="#b91c1c" text-anchor="end" transform="rotate(-90 ${(x - 0.4).toFixed(2)} ${(yt + 0.3).toFixed(2)})" stroke="#fff" stroke-width="0.35" paint-order="stroke">${esc(t)}</text>`;
-      return m;
-    };
+    const mark = (sv, z, lab, sym) => { mks.push({ sv, z, lab, sym }); return ''; };
     (PL.nodes || []).forEach((nd, i) => {
       if (!inS(nd.s)) return;
       const c = (PL.curves || []).find((q) => Math.abs(q.s - nd.s) < 1e-6);
@@ -497,15 +494,27 @@ function profileBand(o) {
       const sm = (c.sA + c.sB) / 2;
       if (sm >= s0 && sm <= s1) out += txt(X(sm), plot.y + plot.h - 4, `R ${f2(c.R, 0)} ${c.type === 'convexe' ? 'saillant' : 'rentrant'}`, 1.9, { a: 'middle', c: '#b91c1c', halo: true });
     }
-  }
-  if (PL) for (const q of vis) { // dénivelée projet − TN de chaque profil, écrite à la verticale au-dessus de la ligne rouge
-    const z = zp(q.s), t = tn(q.s); if (z == null || t == null) continue;
-    const d = z - t, x = X(q.s) + 0.75, y = Math.max(plot.y + 6, Y(q.s, z) - 1.2);
-    out += `<text x="${x.toFixed(2)}" y="${y.toFixed(2)}" font-size="1.5" fill="${d >= 0 ? '#15803d' : '#b45309'}" transform="rotate(-90 ${x.toFixed(2)} ${y.toFixed(2)})" stroke="#fff" stroke-width="0.35" paint-order="stroke">${d >= 0 ? '+' : '−'}${f2(Math.abs(d))}</text>`;
+    // points caractéristiques : écrits à la verticale AU-DESSUS de la ligne rouge (le texte part du trait et monte,
+    // il ne la traverse plus) ; points voisins (TE et point haut d'un raccordement court…) écartés en éventail d'au
+    // moins 1,9 mm, chacun relié à son point par un petit trait coudé ; sans place au-dessus, le texte passe dessous
+    mks.sort((a, b) => a.sv - b.sv);
+    let xPrev = -Infinity;
+    for (const m of mks) {
+      const x = X(m.sv), y = Y(m.sv, m.z), xt = Math.max(x, xPrev + 1.9); xPrev = xt;
+      const t = `${m.lab} · PK ${fmtPk(o.pk0 + m.sv).replace(/,00$/, '')} · z ${f2(m.z)}`, len = t.length * 1.5 * 0.55;
+      const up = y - 3 - len >= plot.y + 1, y0 = up ? y - 3 : y + 3;
+      out += `<path d="M${P(x, y + (up ? -0.7 : 0.7))}L${P(xt, y0 + (up ? 0.6 : -0.6))}" fill="none" stroke="#cd1c24" stroke-width="0.1"/>`;
+      out += m.sym === 'pi' ? `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="0.6" fill="#fff" stroke="#cd1c24" stroke-width="0.2"/>`
+        : m.sym === 'top' ? `<path d="M${P(x - 0.7, y + 0.6)}L${P(x + 0.7, y + 0.6)}L${P(x, y - 0.6)}Z" fill="#cd1c24"/>`
+        : `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="0.4" fill="#cd1c24"/>`;
+      const tx = xt + 0.5;
+      out += `<text x="${tx.toFixed(2)}" y="${y0.toFixed(2)}" font-size="1.5" fill="#b91c1c" text-anchor="${up ? 'start' : 'end'}" transform="rotate(-90 ${tx.toFixed(2)} ${y0.toFixed(2)})" stroke="#fff" stroke-width="0.35" paint-order="stroke">${esc(t)}</text>`;
+      used.push({ x0: xt - 1.2, x1: xt + 0.8, y0: up ? y0 - len : y0, y1: up ? y0 : y0 + len });
+    }
   }
   for (const q of o.ohs || []) { // ponts : tablier, culées et piles (portés) ; passage supérieur au-dessus (franchi)
     if (!(q.kind === 'deck' || q.kind === 'over') || !(q.sb >= s0 && q.sa <= s1)) continue;
-    out += bridgeSvg(q, { X, Y, zp, tn, k, kz, P, plot });
+    out += bridgeSvg(q, { X, Y, zp, tn, k, kz, P, plot, used });
   }
   for (const q of o.ohs || []) { // ouvrages : coupe au droit de l'axe (cadre, PIPO, buse), désignation au-dessus
     if (q.s < s0 || q.s > s1 || q.kind === 'deck' || q.kind === 'over') continue;
@@ -538,6 +547,7 @@ function profileBand(o) {
       sec += `<path d="M${P(x - 0.8, yB - 1.2)}L${P(x + 0.8, yB - 1.2)}L${P(x, yB)}Z" fill="#1d4ed8"/>`;
       sec += `<line x1="${x.toFixed(2)}" y1="${yB.toFixed(2)}" x2="${(xb + 1.5).toFixed(2)}" y2="${yB.toFixed(2)}" stroke="#1d4ed8" stroke-width="0.12"/>`;
       sec += txt(xb + 1.8, yB + 0.6, `FE axe ${f2(zB)}`, 1.8, { c: '#1d4ed8', w: 'bold', halo: true });
+      used.push({ x0: xb + 1.8, x1: xb + 1.8 + (7 + f2(zB).length) * 1.8 * 0.58, y0: yB - 1.6, y1: yB + 1 });
       if (yB > plot.y + plot.h - 1) sec += txt(x + 1, plot.y + plot.h - 1.5, `↓ FE axe ${f2(zB)} sous le cadre`, 1.7, { c: '#1d4ed8', w: 'bold', halo: true });
       sec += `<line x1="${x.toFixed(2)}" y1="${(y + 0.6).toFixed(2)}" x2="${x.toFixed(2)}" y2="${(yT - 0.3).toFixed(2)}" stroke="#1d4ed8" stroke-width="0.12" stroke-dasharray="0.8 0.5"/>`;
       if (dzmm > 0.5) { // rupture : double zigzag sur le trait de rappel, décalage en mètres
@@ -547,9 +557,30 @@ function profileBand(o) {
       }
       out += sec;
     } else out += `<line x1="${x.toFixed(2)}" y1="${(y + 1).toFixed(2)}" x2="${x.toFixed(2)}" y2="${(plot.y + plot.h).toFixed(2)}" stroke="#1d4ed8" stroke-width="0.3"/>`;
-    out += txt(x, Math.max(plot.y + 7, y - 8.6), q.name, 2, { a: 'middle', c: '#1d4ed8', w: 'bold', halo: true });
-    if (q.label) out += txt(x, Math.max(plot.y + 9.6, y - 6), `${q.label}${q.ang != null && Math.abs(q.ang - 100) > 0.05 ? ` · biais ${f2(q.ang, 1)} gr` : ''}`, 1.7, { a: 'middle', c: '#1d4ed8', halo: true });
-    if (q.zB != null) out += txt(x, Math.max(plot.y + 12, y - 3.4), `PK ${fmtPk(o.pk0 + q.s).replace(/,00$/, '')} · FE ${f2(q.zB)}${q.L ? ` · L ${f2(q.L)} m` : ''}`, 1.6, { a: 'middle', c: '#1d4ed8', halo: true });
+    // désignation (3 lignes) : au-dessus de la ligne rouge si la place est libre, sinon à droite puis à gauche de la
+    // coupe, sinon plus haut — jamais sur les points caractéristiques déjà écrits
+    const L3 = [[q.name, 2, 'bold'], [q.label ? `${q.label}${q.ang != null && Math.abs(q.ang - 100) > 0.05 ? ` · biais ${f2(q.ang, 1)} gr` : ''}` : '', 1.7], [q.zB != null ? `PK ${fmtPk(o.pk0 + q.s).replace(/,00$/, '')} · FE ${f2(q.zB)}${q.L ? ` · L ${f2(q.L)} m` : ''}` : '', 1.6]].filter((l) => l[0]);
+    const bw = Math.max(...L3.map(([t, h]) => t.length * h * 0.55)) + 0.6, bh = L3.length * 2.6;
+    const sec = q.zB != null && q.B > 0 && q.sinP > 0 ? (() => { const W = (q.n * q.B + (q.n - 1) * q.ei + 2 * q.ep) / q.sinP; return { xa: X(q.s - W / 2), xb: X(q.s + W / 2), yT: Y(q.s, q.zB + q.H + q.et) }; })() : { xa: x - 1, xb: x + 1, yT: y + 2 };
+    const yTop = Math.max(plot.y + 2.5, y - 2 - bh);
+    const cands = [{ a: 'middle', cx: x, y0: yTop }, { a: 'start', cx: sec.xb + 1.6, y0: Math.max(yTop, sec.yT + 0.5) }, { a: 'end', cx: sec.xa - 1.6, y0: Math.max(yTop, sec.yT + 0.5) }];
+    for (let k = 1; k <= 6; k++) cands.push({ a: 'middle', cx: x, y0: Math.max(plot.y + 2.5, yTop - k * 3) });
+    const yMid = (sec.yT + Y(q.s, q.zB ?? z)) / 2 - bh / 2, yBot = Y(q.s, (q.zB ?? z) - (q.kind === 'pipo' ? 0 : q.er || 0)) + 1.5;
+    for (const yy of [yMid, yBot]) if (yy + bh < plot.y + plot.h - 1) cands.push({ a: 'start', cx: sec.xb + 1.6, y0: yy }, { a: 'end', cx: sec.xa - 1.6, y0: yy }, { a: 'middle', cx: x, y0: yy });
+    const box = (c) => ({ x0: c.a === 'middle' ? c.cx - bw / 2 : c.a === 'start' ? c.cx : c.cx - bw, x1: c.a === 'middle' ? c.cx + bw / 2 : c.a === 'start' ? c.cx + bw : c.cx, y0: c.y0, y1: c.y0 + bh });
+    // première place libre ; à défaut, celle qui recouvre le moins les textes déjà posés (et reste dans le cadre)
+    const over = (b) => used.reduce((t, u) => t + Math.max(0, Math.min(b.x1, u.x1) - Math.max(b.x0, u.x0)) * Math.max(0, Math.min(b.y1, u.y1) - Math.max(b.y0, u.y0)), 0) + (b.y0 < plot.y || b.y1 > plot.y + plot.h || b.x0 < plot.x || b.x1 > plot.x + plot.w ? 1e6 : 0);
+    const pick = cands.find((c) => !hits(box(c)) && over(box(c)) < 1) || cands.reduce((m, c) => (over(box(c)) < over(box(m)) ? c : m), cands[0]);
+    used.push(box(pick));
+    L3.forEach(([t, h, w], i) => { out += txt(pick.cx, pick.y0 + 2.1 + i * 2.6, t, h, { a: pick.a, c: '#1d4ed8', w: w || 'normal', halo: true }); });
+  }
+  if (PL) for (const q of vis) { // dénivelée projet − TN de chaque profil, à la verticale au-dessus de la ligne rouge (omise
+    // si elle tomberait sur un point caractéristique ou la désignation d'un ouvrage : la cote figure au cartouche)
+    const z = zp(q.s), t = tn(q.s); if (z == null || t == null) continue;
+    const d = z - t, x = X(q.s) + 0.75, y = Math.max(plot.y + 6, Y(q.s, z) - 1.2), v = `${d >= 0 ? '+' : '−'}${f2(Math.abs(d))}`, b = { x0: x - 1.3, x1: x + 0.3, y0: y - v.length * 0.85, y1: y };
+    if (hits(b)) continue;
+    used.push(b);
+    out += `<text x="${x.toFixed(2)}" y="${y.toFixed(2)}" font-size="1.5" fill="${d >= 0 ? '#15803d' : '#b45309'}" transform="rotate(-90 ${x.toFixed(2)} ${y.toFixed(2)})" stroke="#fff" stroke-width="0.35" paint-order="stroke">${v}</text>`;
   }
   out += '</g>';
   // échelle des hauteurs dans la colonne de gauche (première zone)
@@ -565,11 +596,11 @@ function profileBand(o) {
 // Pont sur le profil en long. Porté (deck) : tablier entre les abouts, dessus = ligne rouge, épaisseur h (poutres +
 // hourdis) ; culées (mur de front et semelle) et piles (fût et semelle) descendues jusqu'au terrain naturel. Franchi
 // (over) : tablier du passage supérieur à la cote de la voie portée, piles posées sur la plate-forme, tirant d'air.
-function bridgeSvg(q, { X, Y, zp, tn, k, kz, P, plot }) {
+function bridgeSvg(q, { X, Y, zp, tn, k, kz, P, plot, used = [] }) {
   const col = '#1d4ed8', fillC = '#dbe6fb';
   let out = '';
   const n = Math.max(2, Math.ceil((q.sb - q.sa) / 2)), ss = Array.from({ length: n + 1 }, (_, i) => q.sa + ((q.sb - q.sa) * i) / n);
-  const lbl = (x, y, lines) => { lines.forEach(([t, h, w], i) => { if (t) out += txt(x, Math.max(plot.y + 4 + i * 2.5, y - (lines.length - i) * 2.5), t, h, { a: 'middle', c: col, w: w || 'normal', halo: true }); }); };
+  const lbl = (x, y, lines) => { lines.forEach(([t, h, w], i) => { if (!t) return; const yy = Math.max(plot.y + 4 + i * 2.5, y - (lines.length - i) * 2.5), bw = t.length * h * 0.55; used.push({ x0: x - bw / 2, x1: x + bw / 2, y0: yy - h, y1: yy + 0.4 }); out += txt(x, yy, t, h, { a: 'middle', c: col, w: w || 'normal', halo: true }); }); };
   if (q.kind === 'deck') {
     const top = ss.map((s) => zp(s)), ok = top.every((v) => v != null);
     if (!ok) return '';
@@ -621,7 +652,7 @@ function cartouche(o, rows, y0, X, vis, zp, tn) {
   for (const q of vis) if (!keep.length || X(q.s) - X(keep[keep.length - 1].s) >= 2.6) keep.push(q);
   if (vis.length && keep[keep.length - 1] !== vis[vis.length - 1]) { if (keep.length > 1) keep.pop(); keep.push(vis[vis.length - 1]); }
   const vt = (x, j, v) => { const r = rows[j], yb = tops[j] + r.h - 0.8, fs = Math.min(1.7, (r.h - 1.2) / Math.max(4, String(v).length * 0.56)); return `<text x="${(x + 0.7).toFixed(2)}" y="${yb.toFixed(2)}" font-size="${fs.toFixed(2)}" transform="rotate(-90 ${(x + 0.7).toFixed(2)} ${yb.toFixed(2)})">${esc(v)}</text>`; };
-  const skipRows = new Set([row('el'), row('len')]);
+  const skipRows = new Set([row('el'), row('len'), row('ax')]);
   keep.forEach((q, i) => {
     const x = X(q.s);
     rows.forEach((r, j) => { if (!skipRows.has(j) && j !== row('dp')) out += `<line x1="${x.toFixed(2)}" y1="${tops[j]}" x2="${x.toFixed(2)}" y2="${tops[j] + r.h}" stroke="#9ca3af" stroke-width="0.12"/>`; });
@@ -640,6 +671,27 @@ function cartouche(o, rows, y0, X, vis, zp, tn) {
     for (let s = s0; s <= s1 + 1e-9; s += dS * 2) { const d = o.devAt(s); if (d && Number.isFinite(d.l) && Number.isFinite(d.r)) dev.push({ s, l: d.l, r: d.r }); }
     const jl = row('dl'), jr = row('dr'), yA = tops[jl], yB = tops[jr] + rows[jr].h;
     for (const [a, b] of lowCombined(dev, (sv) => PL.gradeAt(sv))) out += `<rect x="${X(a).toFixed(2)}" y="${yA.toFixed(2)}" width="${Math.max(0.4, X(b) - X(a)).toFixed(2)}" height="${(yB - yA).toFixed(2)}" fill="rgba(239,68,68,0.25)" stroke="rgba(220,38,38,0.6)" stroke-width="0.1"/>`;
+  }
+  // tracé en plan : diagramme des alignements et courbes (droites sur l'axe médian, arcs en palier — vers le haut à
+  // gauche, vers le bas à droite —, clothoïdes en rampe), R / A / longueurs du côté libre, filets aux limites
+  const jx = row('ax');
+  if (jx >= 0) {
+    const t = tops[jx], h = rows[jx].h, yM = t + h / 2, dd = h * 0.27, els = planElements(o.ax?.al?.elems);
+    const lvl = (e, u) => yM - (e.kind === 'L' ? 0 : e.kind === 'A' ? e.sg * dd : e.sg * dd * (e.out ? 1 - u : u));
+    let d = '';
+    for (const e of els) {
+      const A = Math.max(s0, e.s0), B = Math.min(s1, e.s1); if (!(B > A + 1e-6)) continue;
+      const xa = X(A), xb = X(B), ua = (A - e.s0) / (e.s1 - e.s0), ub = (B - e.s0) / (e.s1 - e.s0);
+      d += `M${xa.toFixed(2)},${lvl(e, ua).toFixed(2)}L${xb.toFixed(2)},${lvl(e, ub).toFixed(2)}`;
+      if (e.s0 >= s0 - 1e-6) out += `<line x1="${xa.toFixed(2)}" y1="${t}" x2="${xa.toFixed(2)}" y2="${t + h}" stroke="#000" stroke-width="0.12"/>`;
+      const len = `L = ${f2(e.s1 - e.s0)}`, w = xb - xa, fs = Math.min(1.7, h * 0.24);
+      const lab = e.kind === 'L' ? `droite · ${len}` : e.kind === 'A' ? `R = ${f2(e.R, 0)} ${e.sg > 0 ? 'gauche' : 'droite'} · ${len}` : `A = ${f2(e.A, 0)} · ${len}`;
+      const sh = e.kind === 'L' ? len : e.kind === 'A' ? `R ${f2(e.R, 0)}` : `A ${f2(e.A, 0)}`;
+      const tx = w >= lab.length * fs * 0.56 ? lab : w >= sh.length * fs * 0.58 ? sh : '';
+      const yT = e.kind === 'L' || e.sg > 0 ? yM + fs * 1.15 : yM - fs * 0.45;
+      if (tx) out += txt((xa + xb) / 2, yT, tx, fs, { a: 'middle', c: e.kind === 'A' ? '#0d47a1' : e.kind === 'C' ? '#047857' : '#000', w: e.kind === 'A' ? 'bold' : 'normal' });
+    }
+    if (d) out += `<path d="${d}" fill="none" stroke="#000" stroke-width="0.3" stroke-linejoin="round"/>`;
   }
   // éléments du profil : déclivités (segments) et raccordements (paraboles), cellules fusionnées
   if (PL) {

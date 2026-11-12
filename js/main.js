@@ -19,7 +19,7 @@ import { combinedSheets, combinedHtml } from './combine.js';
 import { ohSheet } from './ohcoupe.js';
 import { upright, toGon, spanSupports } from './common.js';
 import { ptParams, crossSection, crossSections, ptChartSVG, ptBigSVG, ptDXF, crossSectionFrom, mainPlatform } from './pt.js';
-import { plParams, plBuild, plStations, plTerrainLine, plDXF, plChecks, axisLength, axisPointAt, PL_LIMITS, plStrips, lowCombined } from './pl.js';
+import { plParams, plBuild, plStations, plTerrainLine, plDXF, plChecks, axisLength, axisPointAt, PL_LIMITS, plStrips, lowCombined, planElements as plPlanEls } from './pl.js';
 import { createPlEditor } from './pleditor.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
@@ -4607,7 +4607,7 @@ function refreshPLAxis(c) {
   $('#plChart').hidden = false;
   plEditor().render({
     key, name: ax.name, PL, defined: A.defined, tn: tnLine, pis, nodeInfo: infoE, sMin: 0, sEnd: ax.len, pk0: pkOrigin(S.prj, key),
-    stations: plCartStations(key, ax, PL), overlay: ov.draw, zExtra: ov.z, plan: plPlanBand(ax), devers: plDeversBand(ax),
+    stations: plCartStations(key, ax, PL), overlay: ov.draw, zExtra: ov.z, planEls: plPlanEls(ax.al?.elems), devers: plDeversBand(ax),
     limits: lim, defaultR: lim.Rconv, endFixed: tEnd ? { s: tEnd.s, z: tEnd.z } : null, startFixed: tSt ? { s: tSt.s, z: tSt.z } : null,
     note: A.defined ? '' : `Aucune ligne rouge sur ${ax.name} : outil « Point » (clic) ou « Draft TN… »${A.tied.length ? ' — extrémités calées sur les chaussées hôtes' : ''}.`,
     // extrémité calée (carrefour, chaussée hôte) : libérée sur demande, elle devient un point saisi ; « Recaler » revient au calage
@@ -4672,6 +4672,11 @@ function plDeversBand(ax) {
     return [...ss].sort((a, b) => a - b).map((s) => { const d = axisPlatform(S.prj, S.D, ax, T, s, 0, TP).dev; return { s, l: (d.left ?? -d.d) * 100, r: (d.right ?? -d.d) * 100 }; });
   } catch (e) { console.error(e); return null; }
 }
+// Clé d'ouvrage (fiche) d'un élément du profil en long ; cut : la coupe longitudinale existe (cadre, PIPO, buse).
+function ohKey(key, name, cut = false) {
+  if (!key || key === 'c:undefined') return {};
+  return { oh: String(key), cut, tip: `${name || ouvrName(key)} — clic droit : ${cut ? 'coupe longitudinale' : 'fiche de l\'ouvrage'}` };
+}
 // Ouvrages sur le profil en long d'un axe : passages supérieurs (tablier sous la voie portée, appuis, gabarit au-dessus
 // de l'autoroute), gabarit et intrados vus depuis l'autoroute, cadres et buses sous la chaussée de l'axe.
 function plAxisOverlay(key, ax, PL) {
@@ -4684,23 +4689,24 @@ function plAxisOverlay(key, ax, PL) {
     const bad = q.lvl === 'err', o = q.okey ? (S.ouvr?.list || []).find((x) => x.key === q.okey) : null, lowName = S.axpl?.get(q.lower)?.name || q.lower;
     if (q.lower === key && q.rLow[1] >= q.rLow[0]) {
       const [s0, s1] = q.rLow;
-      items.push({ t: 'gab', s0, s1, z0: q.zLowMax, z1: q.zLowMax + q.gab, bad, label: `${q.ouvr} · TA ${fmt(q.ta, 2)} m` });
-      items.push({ t: 'deck', s0, s1, z0: q.crit.zInt, z1: q.crit.zInt + q.h, bad });
+      const oh = ohKey(q.okey, q.ouvr);
+      items.push({ t: 'gab', s0, s1, z0: q.zLowMax, z1: q.zLowMax + q.gab, bad, label: `${q.ouvr} · TA ${fmt(q.ta, 2)} m`, ...oh });
+      items.push({ t: 'deck', s0, s1, z0: q.crit.zInt, z1: q.crit.zInt + q.h, bad, ...oh });
       zs.push(q.zLowMax + q.gab, q.crit.zInt + q.h);
     }
     if (q.uppers.includes(key)) {
       const [a, b] = q.rUp[key] || [];
       if (!(b >= a)) continue;
-      const sk = `${q.okey || q.ouvr}`;
+      const sk = `${q.okey || q.ouvr}`, oh = ohKey(q.okey, q.ouvr);
       if (!spans.has(sk)) {
         spans.add(sk);
         const sC = o ? ax.project(o.P)?.s : null;
         if (o?.supRel?.length && sC != null) {
           const ds = o.supRel.map((r) => r.d), s0 = sC + Math.min(...ds) - (o.about || 0.5), s1 = sC + Math.max(...ds) + (o.about || 0.5);
-          items.push({ t: 'span', s0: Math.max(0, s0), s1: Math.min(ax.len, s1), h: q.h, sup: o.supRel.map((r) => ({ kind: r.kind, s: sC + r.d })).filter((r) => r.s >= 0 && r.s <= ax.len), zH: q.zLowMax, bad, label: `${q.ouvr} · ${o.spans.map((v) => fmt(v, 1)).join(' + ')} m · TA ${fmt(q.ta, 2)} m` });
-        } else items.push({ t: 'span', s0: Math.max(0, a - 2), s1: Math.min(ax.len, b + 2), h: q.h, sup: [], zH: q.zLowMax, bad, label: `${q.ouvr}${q.generic ? ' (non implanté)' : ''} · TA ${fmt(q.ta, 2)} m` });
+          items.push({ t: 'span', s0: Math.max(0, s0), s1: Math.min(ax.len, s1), h: q.h, sup: o.supRel.map((r) => ({ kind: r.kind, s: sC + r.d })).filter((r) => r.s >= 0 && r.s <= ax.len), zH: q.zLowMax, bad, label: `${q.ouvr} · ${o.spans.map((v) => fmt(v, 1)).join(' + ')} m · TA ${fmt(q.ta, 2)} m`, ...oh });
+        } else items.push({ t: 'span', s0: Math.max(0, a - 2), s1: Math.min(ax.len, b + 2), h: q.h, sup: [], zH: q.zLowMax, bad, label: `${q.ouvr}${q.generic ? ' (non implanté)' : ''} · TA ${fmt(q.ta, 2)} m`, ...oh });
       }
-      items.push({ t: 'gab', s0: a, s1: b, z0: q.zLowMax, z1: q.zLowMax + q.gab, bad, label: lowName });
+      items.push({ t: 'gab', s0: a, s1: b, z0: q.zLowMax, z1: q.zLowMax + q.gab, bad, label: lowName, ...ohKey(q.okey, q.ouvr) });
       zs.push(q.zLowMax);
     }
   }
@@ -4710,31 +4716,32 @@ function plAxisOverlay(key, ax, PL) {
   for (const sp of S.ospans || []) {
     if (sp.key !== key || (S.clear || []).some((q) => q.okey === sp.okey && (q.lower === key || q.uppers.includes(key)))) continue;
     const others = (S.ospans || []).filter((q) => q.okey === sp.okey && q.upper !== sp.upper).map((q) => q.key), miss = [...new Set([...(pdef(key) ? [] : [key]), ...others.filter((k) => !pdef(k))])].map((k) => S.axpl?.get(k)?.name || k);
-    const note = miss.length ? ` — tirant d'air : profil en long de ${miss.join(', ')} à définir` : '';
+    const note = miss.length ? ` — tirant d'air : profil en long de ${miss.join(', ')} à définir` : '', oh = ohKey(sp.okey, sp.name);
     const o = (S.ouvr?.list || []).find((q) => q.key === sp.okey), sC = o?.P ? ax.project(o.P)?.s : null;
     if (sp.upper && pdef(key)) {
       if (o?.supRel?.length && sp.carried && sC != null) {
         const ds = o.supRel.map((r) => r.d);
-        items.push({ t: 'span', s0: Math.max(0, sC + Math.min(...ds) - (o.about || 0.5)), s1: Math.min(ax.len, sC + Math.max(...ds) + (o.about || 0.5)), h: sp.h, sup: o.supRel.map((r) => ({ kind: r.kind, s: sC + r.d })).filter((r) => r.s >= 0 && r.s <= ax.len), zH: null, label: `${sp.name} · ${o.spans.map((v) => fmt(v, 1)).join(' + ')} m${note}` });
-      } else items.push({ t: 'span', s0: sp.s0, s1: sp.s1, h: sp.h, sup: [], zH: null, label: `${sp.name}${note}` });
-    } else items.push({ t: 'mark', s0: sp.s0, s1: sp.s1, label: `${sp.name} (${sp.upper ? 'voie portée' : 'voie franchie'})${note}` });
+        items.push({ t: 'span', s0: Math.max(0, sC + Math.min(...ds) - (o.about || 0.5)), s1: Math.min(ax.len, sC + Math.max(...ds) + (o.about || 0.5)), h: sp.h, sup: o.supRel.map((r) => ({ kind: r.kind, s: sC + r.d })).filter((r) => r.s >= 0 && r.s <= ax.len), zH: null, label: `${sp.name} · ${o.spans.map((v) => fmt(v, 1)).join(' + ')} m${note}`, ...oh });
+      } else items.push({ t: 'span', s0: sp.s0, s1: sp.s1, h: sp.h, sup: [], zH: null, label: `${sp.name}${note}`, ...oh });
+    } else items.push({ t: 'mark', s0: sp.s0, s1: sp.s1, label: `${sp.name} (${sp.upper ? 'voie portée' : 'voie franchie'})${note}`, ...oh });
   }
   for (const g of S.cadres || []) {
     if (g.err || g.ax?.key !== key || !g.K) continue;
     if (g.K.type === 'poutres') { // pont à poutres porté par cet axe : tablier sous le profil, appuis
       const K = g.K, { sup } = poutresSupports(g);
-      items.push({ t: 'span', s0: sup[0].s - K.about, s1: sup[sup.length - 1].s + K.about, h: K.h + 0.08, sup: sup.map((A) => ({ kind: A.kind, s: A.s })), label: `${g.name} · pont à poutres ${K.spans.map((v) => fmt(v, 1)).join(' + ')} m` });
+      items.push({ t: 'span', s0: sup[0].s - K.about, s1: sup[sup.length - 1].s + K.about, h: K.h + 0.08, sup: sup.map((A) => ({ kind: A.kind, s: A.s })), label: `${g.name} · pont à poutres ${K.spans.map((v) => fmt(v, 1)).join(' + ')} m`, ...ohKey(`c:${g.c?.id}`, g.name) });
       continue;
     }
     // radier au droit de l'axe : cotes fil d'eau de l'ouvrage (saisies ou automatiques), sinon tiré de la chaussée
     const K = g.K, zR = PL.zAt(g.s), zB = g.inv ? g.inv.zAx : zR - K.Hr - K.et - K.H, zI = zB + K.H, zT = zI + K.et, hw = K.W / 2 / K.sinP;
     const cov = ohCover(g, zB);
-    items.push({ t: 'cad', s: g.s, hw, zT, zI, zB, zF: zB - (K.type === 'pipo' ? 0 : K.er), K, cov, label: `${g.name} · ${K.type === 'buse' ? `buse Ø ${fmt(K.B, 2)}` : `${K.n > 1 ? `${K.n} × ` : ''}${fmt(K.B, 2)} × ${fmt(K.H, 2)}`} · fil d'eau ${g.inv ? `${fmt(g.inv.zam, 2)} → ${fmt(g.inv.zav, 2)} (${fmt(g.inv.J * 100, 2)} %)` : fmt(zB, 2)}` });
+    items.push({ t: 'cad', s: g.s, hw, zT, zI, zB, zF: zB - (K.type === 'pipo' ? 0 : K.er), K, cov, label: `${g.name} · ${K.type === 'buse' ? `buse Ø ${fmt(K.B, 2)}` : `${K.n > 1 ? `${K.n} × ` : ''}${fmt(K.B, 2)} × ${fmt(K.H, 2)}`} · fil d'eau ${g.inv ? `${fmt(g.inv.zam, 2)} → ${fmt(g.inv.zav, 2)} (${fmt(g.inv.J * 100, 2)} %)` : fmt(zB, 2)}`, ...ohKey(`c:${g.c?.id}`, g.name, true) });
     zs.push(zB - K.er);
   }
   const draw = ({ X, Y, vis, m, ph }) => {
-    let o = '';
+    let all = '';
     for (const it of items) {
+      let o = '';
       if (it.t === 'mark') {
         const y0 = m.t, y1 = m.t + (ph || 200);
         o += `<rect class="pl-oamark" x="${X(it.s0)}" y="${y0}" width="${Math.max(3, X(it.s1) - X(it.s0))}" height="${Math.max(10, y1 - y0)}"/>`;
@@ -4767,9 +4774,14 @@ function plAxisOverlay(key, ax, PL) {
           o += `<line class="pl-cov" x1="${X(it.s)}" x2="${X(it.s)}" y1="${vis(it.zT)}" y2="${vis(c.zAtAxis)}"/>`;
           o += `<text class="pl-cov-t${bad ? ' bad' : low ? ' warn' : ''}" x="${X(it.s)}" y="${yT}" text-anchor="middle">remblai sur traverse min ${fmt(c.min, 2)} · max ${fmt(c.max, 2)} m${bad ? ' — traverse au-dessus de la chaussée' : low ? ` — sous le remblai prévu (${fmt(c.need, 2)} m)` : ''}</text>`;
         }
+        // zone de saisie élargie (un petit ouvrage ne fait que quelques pixels à l'échelle du profil)
+        const xa = Math.min(x0, x1) - 6, w = Math.max(14, Math.abs(x1 - x0) + 12), ya = vis(it.zT) - 6;
+        o = `<rect class="pl-ohhit" x="${xa.toFixed(1)}" y="${ya.toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(14, vis(it.zF) - ya + 6).toFixed(1)}"/>` + o;
       }
+      // survol : surbrillance de l'ouvrage ; clic droit : coupe longitudinale (cadres, PIPO, buses) ou fiche
+      all += it.oh ? `<g class="pl-oh" data-oh="${esc(it.oh)}" data-ohcut="${it.cut ? 1 : 0}" data-ohtip="${esc(it.tip)}">${o}</g>` : o;
     }
-    return o;
+    return all;
   };
   return { draw: items.length ? draw : null, z: zs };
 }
@@ -4817,6 +4829,12 @@ function plEditor() {
     },
     commit: () => commitHistory(),
     undo, redo, toast,
+    // clic droit sur un ouvrage du profil en long : coupe longitudinale au premier plan (cadres, PIPO, buses), sinon fiche
+    ohMenu(key, cut) {
+      const cid = key.startsWith('c:') ? key.slice(2) : null;
+      if (cut && cid && ohCadres().some((g) => g.c.id === cid)) { ohOpen(cid); return; }
+      S.osel = key; $('#ouvrEdit').dataset.key = ''; showTab('ouvrages'); update({ commit: false });
+    },
   });
   return S.plEd;
 }

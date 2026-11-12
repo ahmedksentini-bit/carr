@@ -133,18 +133,25 @@ export function plChecks(PL, context, sEnd) {
 // --------------------------------------------------------------------------- Graphique SVG
 // tnLine : [[s, z]] ; stations : plStations ; PL : plBuild ; opts : { w, h, ve (0 = auto), sel (PI sélectionné) }.
 // ------------------------------------------------------------------ cartouche (repris de BVTrace)
-// Lignes du cartouche du profil en long de BVTrace (map.html, renderFullRoadProfile / #trace-cart) : N° profil,
-// distance partielle (cotée entre deux profils), distance cumulée, cote TN, cote projet, puis deux lignes à cellules
-// fusionnées sur l'emprise de chaque élément : alignements droits (i, L) et raccordements paraboliques (R, L, i → i).
+// Lignes du cartouche du profil en long (BVTrace, CombinedEditorCanvas.DrawProfileCartouche) : N° profil, distance
+// partielle (cotée entre deux profils), distance cumulée, cote TN, cote projet, puis UNE ligne d'éléments du profil où
+// déclivités et raccordements paraboliques se suivent bout à bout (cellules fusionnées sur l'emprise de chaque élément),
+// et UNE ligne du tracé en plan (droites, clothoïdes, arcs — diagramme des alignements et courbes) quand l'axe en a.
 export const CART_ROWS = [
   { key: 'num', label: 'N° profil', h: 20 },
   { key: 'dp', label: 'Dist. partielle (m)', h: 34 },
   { key: 'dc', label: 'Dist. cumulée (m)', h: 40 },
   { key: 'z', label: 'Cote TN (m)', h: 40 },
   { key: 'zp', label: 'Cote projet (m)', h: 40 },
-  { key: 'seg', label: 'Alignements droits', lines: ['Alignements', 'droits'], h: 24 },
-  { key: 'para', label: 'Raccordements paraboliques', lines: ['Raccordements', 'paraboliques'], h: 24 },
+  { key: 'el', label: 'Déclivités / raccordements', lines: ['Déclivités /', 'raccordements'], h: 30 },
+  { key: 'ax', label: 'Tracé en plan', lines: ['Tracé en plan', '(axe)'], h: 34 },
 ];
+const cartRows = (plan) => (plan ? CART_ROWS : CART_ROWS.filter((r) => r.key !== 'ax'));
+// Éléments du tracé en plan d'un axe (alignement exact : droites L, clothoïdes C, arcs A) : abscisses, rayon, paramètre
+// A, sens (sg > 0 : virage à gauche, repère x vers l'est, y vers le nord).
+export function planElements(elems) {
+  return (elems || []).filter((e) => e.len > 1e-6).map((e) => ({ s0: e.s0, s1: e.s0 + e.len, kind: e.kind, R: e.R || 0, A: e.A || 0, sg: Math.sign(e.sg || 0), out: !!e.out }));
+}
 // Éléments du profil : alignements droits (parties rectilignes entre raccordements) et raccordements paraboliques.
 export function plElements(PL, sEnd = PL.sEnd) {
   const lines = [], paras = [], cs = PL.curves || [];
@@ -156,16 +163,17 @@ export function plElements(PL, sEnd = PL.sEnd) {
   for (const c of cs) paras.push({ s0: c.sA, s1: c.sB, R: c.R, g1: c.g1, g2: c.g2, type: c.type });
   return { lines, paras };
 }
-export const cartH = () => CART_ROWS.reduce((t, r) => t + r.h, 0);
+export const cartH = (plan = false) => cartRows(plan).reduce((t, r) => t + r.h, 0);
 // Cartouche SVG (fond clair, comme BVTrace) entre y0 et y0 + cartH() ; colonne des intitulés dans la marge gauche.
 // stations : [{ num, s, z (TN ou null) }] ; valeurs écrites à la verticale, stations trop serrées éclaircies.
 // clip : identifiant d'un clipPath limitant les stations et cellules à la zone de dessin (éditeur zoomé) ;
 // noRed : aucun profil projet (cote projet et éléments laissés vides) ; sMin : abscisse de début.
-export function plCartSVG(PL, stations, { X, m, w, y0, sMax, sMin = 0, clip = null, noRed = false }) {
-  const x0 = 2, x1 = w - 2, H = cartH(), tops = [];
-  let y = y0; for (const r of CART_ROWS) { tops.push(y); y += r.h; }
+// planEls : éléments du tracé en plan (planElements) — ligne « Tracé en plan » ajoutée sous les éléments du profil.
+export function plCartSVG(PL, stations, { X, m, w, y0, sMax, sMin = 0, clip = null, noRed = false, planEls = null }) {
+  const ROWS = cartRows(!!planEls?.length), x0 = 2, x1 = w - 2, H = cartH(!!planEls?.length), tops = [];
+  let y = y0; for (const r of ROWS) { tops.push(y); y += r.h; }
   let o = `<rect class="pc-bg" x="${x0}" y="${y0}" width="${x1 - x0}" height="${H}"/>`;
-  CART_ROWS.forEach((r, i) => {
+  ROWS.forEach((r, i) => {
     const t = tops[i], cy = t + r.h / 2;
     if (i) o += `<line class="pc-rl" x1="${x0}" y1="${t}" x2="${x1}" y2="${t}"/>`;
     o += r.lines ? `<text class="pc-lb" x="6" y="${cy - 2}"><tspan x="6">${r.lines[0]}</tspan><tspan x="6" dy="10">${r.lines[1]}</tspan></text>` : `<text class="pc-lb" x="6" y="${cy + 3.5}">${r.label}</text>`;
@@ -186,20 +194,55 @@ export function plCartSVG(PL, stations, { X, m, w, y0, sMax, sMin = 0, clip = nu
     o += vtxt(x + 3.5, tops[3], CART_ROWS[3], q.z == null || !Number.isFinite(q.z) ? '—' : fmt(q.z, 2));
     o += vtxt(x + 3.5, tops[4], CART_ROWS[4], noRed ? '—' : fmt(zp, 2));
   });
+  const jAx = ROWS.findIndex((r) => r.key === 'ax');
+  if (jAx >= 0) o += planRowSVG(planEls, { X, t: tops[jAx], h: ROWS[jAx].h, sMin, sMax });
   if (noRed) { if (clip) o += '</g>'; o += `<rect class="pc-fr" x="${x0}" y="${y0}" width="${x1 - x0}" height="${H}"/>`; return { svg: o, keep }; }
-  // cellules fusionnées sur l'emprise des éléments
-  const { lines, paras } = plElements(PL, sMax);
-  const cell = (t, r, a, b, label, cls) => {
+  // éléments du profil sur une seule ligne : déclivités et raccordements bout à bout, cellules fusionnées sur leur emprise
+  const { lines, paras } = plElements(PL, sMax), t = tops[5], rh = ROWS[5].h;
+  const cell = (a, b, l1, l2, cls, tip, sym = '') => {
     const A = Math.max(sMin, a), B = Math.min(sMax, b); if (!(B > A + 1e-6)) return '';
-    const xa = X(A), xb = X(B), wd = xb - xa, fs = Math.max(6.5, Math.min(9, wd / Math.max(8, label.length * 0.58)));
-    return `<g><rect class="pc-${cls}" x="${xa.toFixed(1)}" y="${t + 1}" width="${wd.toFixed(1)}" height="${r.h - 2}"/><text class="pc-${cls}-t" x="${((xa + xb) / 2).toFixed(1)}" y="${(t + r.h * 0.66).toFixed(1)}" text-anchor="middle" font-size="${fs.toFixed(1)}">${wd >= 28 ? label : ''}</text><title>${label}</title></g>`;
+    const xa = X(A), xb = X(B), wd = xb - xa, xm = ((xa + xb) / 2).toFixed(1), fs = Math.max(6.5, Math.min(9, wd / Math.max(6, Math.max(l1.length, l2.length) * 0.58)));
+    const one = wd >= 26 && wd < Math.max(l1.length, l2.length) * 4.6; // cellule étroite : première ligne seule
+    return `<g><rect class="pc-${cls}" x="${xa.toFixed(1)}" y="${t + 1}" width="${wd.toFixed(1)}" height="${rh - 2}"/>${sym}`
+      + (wd >= 26 ? `<text class="pc-${cls}-t" x="${xm}" y="${(t + (one ? rh * 0.62 : rh * 0.42)).toFixed(1)}" text-anchor="middle" font-size="${fs.toFixed(1)}">${l1}</text>` : '')
+      + (wd >= 26 && !one ? `<text class="pc-${cls}-l" x="${xm}" y="${(t + rh * 0.84).toFixed(1)}" text-anchor="middle" font-size="${fs.toFixed(1)}">${l2}</text>` : '')
+      + `<title>${tip}</title></g>`;
   };
   const pc = (v) => `${v >= 0 ? '+' : '−'}${fmt(Math.abs(v) * 100, 2)}`;
-  for (const l of lines) o += cell(tops[5], CART_ROWS[5], l.s0, l.s1, `i = ${pc(l.g)} % · L = ${fmt(l.s1 - l.s0, 2)} m`, 'seg');
-  for (const c of paras) o += cell(tops[6], CART_ROWS[6], c.s0, c.s1, `R = ${fmt(c.R, 0)} m · L = ${fmt(c.s1 - c.s0, 2)} m · i ${pc(c.g1)} → ${pc(c.g2)} %`, 'para');
+  for (const l of lines) { const L = `L = ${fmt(l.s1 - l.s0, 2)} m`, i = `i = ${pc(l.g)} %`; o += cell(l.s0, l.s1, i, L, 'seg', `Déclivité ${i} · ${L}`); }
+  for (const c of paras) {
+    const A = Math.max(sMin, c.s0), B = Math.min(sMax, c.s1), xa = X(A), xb = X(B), up = c.type === 'convexe';
+    const sym = xb - xa > 10 ? `<path class="pc-para-s" d="M${(xa + 2).toFixed(1)},${(t + (up ? rh - 3 : 3)).toFixed(1)}Q${((xa + xb) / 2).toFixed(1)},${(t + (up ? 2 - rh * 0.35 : rh + rh * 0.35)).toFixed(1)} ${(xb - 2).toFixed(1)},${(t + (up ? rh - 3 : 3)).toFixed(1)}"/>` : '';
+    const R = `R = ${fmt(c.R, 0)} ${up ? 'saillant' : 'rentrant'}`, L = `L = ${fmt(c.s1 - c.s0, 2)} m`;
+    o += cell(c.s0, c.s1, R, L, 'para', `Raccordement ${R} m · ${L} · i ${pc(c.g1)} → ${pc(c.g2)} %`, sym);
+  }
   if (clip) o += '</g>';
   o += `<rect class="pc-fr" x="${x0}" y="${y0}" width="${x1 - x0}" height="${H}"/>`;
   return { svg: o, keep };
+}
+
+// Ligne « Tracé en plan » : diagramme des alignements et courbes (convention des profils en long routiers) — droites
+// sur l'axe médian de la ligne, arcs en palier décalé vers le haut (virage à gauche) ou le bas (à droite), clothoïdes
+// en rampe entre les deux ; R, A et longueurs écrits du côté libre. Filets verticaux aux limites d'éléments.
+export function planRowSVG(els, { X, t, h, sMin, sMax }) {
+  if (!els?.length) return '';
+  const yM = t + h / 2, d = h * 0.27, lvl = (e, u) => yM - (e.kind === 'L' ? 0 : e.kind === 'A' ? e.sg * d : e.sg * d * (e.out ? 1 - u : u));
+  let o = '', path = '';
+  for (const e of els) {
+    const A = Math.max(sMin, e.s0), B = Math.min(sMax, e.s1); if (!(B > A + 1e-6)) continue;
+    const xa = X(A), xb = X(B), ua = (A - e.s0) / (e.s1 - e.s0), ub = (B - e.s0) / (e.s1 - e.s0), ya = lvl(e, ua), yb = lvl(e, ub);
+    path += `M${xa.toFixed(1)},${ya.toFixed(1)}L${xb.toFixed(1)},${yb.toFixed(1)}`;
+    if (e.s0 >= sMin - 1e-6) o += `<line class="pc-axb" x1="${xa.toFixed(1)}" y1="${t + 2}" x2="${xa.toFixed(1)}" y2="${t + h - 2}"/>`;
+    const wd = xb - xa, len = `L = ${fmt(e.s1 - e.s0, 2)}`, xm = ((xa + xb) / 2).toFixed(1);
+    const lab = e.kind === 'L' ? `droite · ${len}` : e.kind === 'A' ? `R = ${fmt(e.R, 0)} ${e.sg > 0 ? 'gauche' : 'droite'} · ${len}` : `A = ${fmt(e.A, 0)} · ${len}`;
+    const short = e.kind === 'L' ? len : e.kind === 'A' ? `R ${fmt(e.R, 0)}` : `A ${fmt(e.A, 0)}`;
+    const txt = wd >= lab.length * 4.4 ? lab : wd >= short.length * 4.6 ? short : '';
+    // côté libre : sous le trait pour une droite et un virage à gauche, au-dessus pour un virage à droite
+    const below = e.kind === 'L' || e.sg > 0, yT = e.kind === 'L' ? yM + 9.5 : below ? yM + 4 : yM - 1;
+    if (txt) o += `<text class="pc-ax-t${e.kind === 'L' ? '' : e.kind === 'A' ? ' arc' : ' clo'}" x="${xm}" y="${yT.toFixed(1)}" text-anchor="middle">${txt}</text>`;
+    o += `<rect class="pc-axhit" x="${xa.toFixed(1)}" y="${t}" width="${Math.max(1, wd).toFixed(1)}" height="${h}"><title>${{ L: 'Droite', A: `Arc de cercle — virage à ${e.sg > 0 ? 'gauche' : 'droite'}`, C: `Clothoïde ${e.out ? 'de sortie' : 'd\'entrée'}` }[e.kind]} · ${e.kind === 'A' ? `R = ${fmt(e.R, 0)} m · ` : e.kind === 'C' ? `A = ${fmt(e.A, 0)} · R = ${fmt(e.R, 0)} m · ` : ''}${len} m · s ${fmt(e.s0, 2)} → ${fmt(e.s1, 2)}</title></rect>`;
+  }
+  return `<g class="pc-ax">${o}<path class="pc-ax-l" d="${path}"/></g>`;
 }
 
 // opts : ve (exagération verticale z / s ; 0 = auto), h (hauteur imposée), zExtra (cotes à inclure dans le cadre),
@@ -350,12 +393,12 @@ export function plDXF(PL, tnLine, stations, title, ve = 5) {
   w.line('GIRA_PL_CARTOUCHE', { x: s0, y: yPC }, { x: sMax, y: yPC });
   w.text('GIRA_PL_CARTOUCHE', { x: xL + 2, y: yPC + 1 }, Ht, 0, `PC ${fmt(zPC, 2)}`);
   // lignes du cartouche (hauteurs en unités papier)
-  const RH = [8, 14, 16, 16, 16, 10, 10], tops = [];
+  const RH = [8, 14, 16, 16, 16, 12], tops = [];
   let y = yPC; for (const h of RH) { tops.push(y); y -= h; }
   const yB = y;
   for (const t of [...tops, yB]) w.line('GIRA_PL_CARTOUCHE', { x: xL, y: t }, { x: sMax, y: t });
   for (const x of [xL, s0, sMax]) w.line('GIRA_PL_CARTOUCHE', { x, y: yPC }, { x, y: yB });
-  CART_ROWS.forEach((r, i) => w.text('GIRA_PL_CARTOUCHE', { x: xL + 2, y: tops[i] - RH[i] / 2 - Ht / 2 }, Ht * 0.9, 0, r.label));
+  CART_ROWS.slice(0, RH.length).forEach((r, i) => w.text('GIRA_PL_CARTOUCHE', { x: xL + 2, y: tops[i] - RH[i] / 2 - Ht / 2 }, Ht * 0.9, 0, r.label));
   // stations (au moins 4 unités entre deux filets)
   const keep = [];
   for (const q of stations) if (!keep.length || q.s - keep[keep.length - 1].s >= 4) keep.push(q);
@@ -370,8 +413,10 @@ export function plDXF(PL, tnLine, stations, title, ve = 5) {
     w.text('GIRA_PL_COTES', { x: q.s + Ht / 2 + 0.3, y: tops[4] - RH[4] + 1 }, Ht * 0.9, 90, fmt(zP, 2));
   });
   const { lines, paras } = plElements(PL, sMax), pc = (v) => `${v >= 0 ? '+' : '-'}${fmt(Math.abs(v) * 100, 2)}`;
-  for (const l of lines) { w.line('GIRA_PL_CARTOUCHE', { x: l.s0, y: tops[5] }, { x: l.s0, y: tops[6] }); w.line('GIRA_PL_CARTOUCHE', { x: l.s1, y: tops[5] }, { x: l.s1, y: tops[6] }); w.text('GIRA_PL_COTES', { x: (l.s0 + l.s1) / 2, y: tops[5] - RH[5] / 2 - Ht / 2 }, Ht * 0.9, 0, `i = ${pc(l.g)} % L = ${fmt(l.s1 - l.s0, 2)} m`, 'center'); }
-  for (const c of paras) { w.line('GIRA_PL_CARTOUCHE', { x: c.s0, y: tops[6] }, { x: c.s0, y: yB }); w.line('GIRA_PL_CARTOUCHE', { x: c.s1, y: tops[6] }, { x: c.s1, y: yB }); w.text('GIRA_PL_COTES', { x: (c.s0 + c.s1) / 2, y: tops[6] - RH[6] / 2 - Ht / 2 }, Ht * 0.9, 0, `R = ${fmt(c.R, 0)} m L = ${fmt(c.s1 - c.s0, 2)} m`, 'center'); }
+  // éléments du profil sur une seule rangée : déclivités et raccordements bout à bout (cellules fusionnées)
+  const elCell = (a, b, l1, l2) => { for (const x of [a, b]) w.line('GIRA_PL_CARTOUCHE', { x, y: tops[5] }, { x, y: yB }); w.text('GIRA_PL_COTES', { x: (a + b) / 2, y: tops[5] - RH[5] * 0.4 }, Ht * 0.9, 0, l1, 'center'); w.text('GIRA_PL_COTES', { x: (a + b) / 2, y: tops[5] - RH[5] * 0.85 }, Ht * 0.9, 0, l2, 'center'); };
+  for (const l of lines) elCell(l.s0, l.s1, `i = ${pc(l.g)} %`, `L = ${fmt(l.s1 - l.s0, 2)} m`);
+  for (const c of paras) elCell(c.s0, c.s1, `R = ${fmt(c.R, 0)} ${c.type === 'convexe' ? 'saillant' : 'rentrant'}`, `L = ${fmt(c.s1 - c.s0, 2)} m`);
   w.text('GIRA_PL_COTES', { x: xL, y: Y(Math.max(...PL.nodes.map((q) => q.z), ...tnLine.map((q) => q[1]))) + 12 }, Ht * 1.6, 0, `${title} — H 1/1000 · V 1/${Math.round(1000 / ve)} (exagération × ${ve})`);
   return w.toString();
 }

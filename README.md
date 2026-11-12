@@ -209,8 +209,12 @@ ou sur un fond topographique DXF.
   la principale) sur l'axe ; terrain naturel du MNT le long de l'axe projet (alignement, raccordement, axe saisi),
   déblai / remblai, pentes, stations (TN, projet, écart, pente) en CSV, export DXF du profil (exagération verticale).
   **Éditeur interactif** (`js/pleditor.js`, ergonomie de BVTrace) : le TN est tracé d'emblée avec son cartouche
-  (N° profil, distances, cotes TN et projet, alignements, raccordements) et, pour les axes de l'échangeur, les bandeaux
-  du tracé en plan et des dévers ; outils à gauche — Sélection (glisser un point, glisser le fond), Point (clic,
+  (N° profil, distances, cotes TN et projet, puis **une seule ligne d'éléments du profil** — déclivités et
+  raccordements paraboliques bout à bout, comme BVTrace — et, pour les axes de l'échangeur, **une ligne « Tracé en
+  plan »** : diagramme des alignements et courbes, droites sur l'axe médian, arcs en palier vers le haut à gauche / vers
+  le bas à droite avec R, clothoïdes en rampe avec A, longueurs) et le bandeau des dévers. **Ouvrages** : survolés, ils
+  passent en surbrillance (désignation dans la lecture au survol) ; **clic droit → coupe longitudinale** de l'ouvrage
+  au premier plan (cadres, PIPO, buses), fiche de l'ouvrage pour les ponts et passages supérieurs ; outils à gauche — Sélection (glisser un point, glisser le fond), Point (clic,
   accroché au TN ou à la ligne rouge, rayon ajusté à la place disponible), Pente (depuis un point : pente et longueur ;
   ou pente imposée à un segment), Rayon, Supprimer, S / Z, Draft TN (écart au TN, rampe / pente maximales, rayons
   saillant / rentrant, espacement : simplification Ramer-Douglas-Peucker, pentes bornées, rayons ajustés, extrémités
@@ -232,7 +236,12 @@ ou sur un fond topographique DXF.
   **Tracé combiné** (`js/combine.js`) : feuilles plan + profil en long + cartouche à l'échelle. Les points du MNT et leur
   altitude sont dessinés sur le plan par-dessus le projet (plus lisibles quand le TN vient du SRTM, sans autre fond) ; la
   dénivelée projet − TN de chaque profil est écrite à la verticale au-dessus de la ligne rouge (vert : remblai, + ;
-  orange : déblai, −). Sur le plan, par-dessus le projet : talus (barbules, entrées en terre), aménagements de l'onglet
+  orange : déblai, −). Points caractéristiques (PI, TE / TS, point haut / bas) écrits à la verticale au-dessus de la
+  ligne rouge, écartés en éventail quand ils sont voisins ; désignations d'ouvrages placées là où elles ne recouvrent
+  ni ces points ni les autres étiquettes (au-dessus, à côté puis sous la coupe) ; une dénivelée qui tomberait sur une
+  étiquette est omise (elle reste lisible au cartouche). Cartouche : déclivités / rayons et longueurs sur une seule
+  rangée d'éléments, rangée **« TRACÉ EN PLAN »** (droites, arcs R gauche / droite, clothoïdes A). Sur le plan, seuls
+  les profils en travers portent un PK (plus de repères kilométriques rouges en double). Sur le plan, par-dessus le projet : talus (barbules, entrées en terre), aménagements de l'onglet
   Vitesses / UVR (bandes de catégorie, plateaux, passages, bandes rugueuses, portails… avec leurs désignations) et
   signalisation verticale (mât, **miniature vectorielle du panneau** et code : B14-50, C20a, AB25…).
   **Axes longs** (20 km et plus) : les primitives du projet sont découpées une fois en tronçons à boîte englobante

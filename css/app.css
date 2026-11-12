@@ -350,6 +350,13 @@ td.pict svg { display: block; }
 .plsvg .pc-seg-t { fill: #9b1c1c; font-weight: 600; }
 .plsvg .pc-para { fill: rgba(21,101,192,0.14); stroke: #0d47a1; stroke-width: 0.8; }
 .plsvg .pc-para-t { fill: #0d47a1; font-weight: 600; }
+.plsvg .pc-seg-l { fill: #9b1c1c; } .plsvg .pc-para-l { fill: #0d47a1; }
+.plsvg .pc-para-s { fill: none; stroke: #0d47a1; stroke-width: 0.9; opacity: .55; }
+.plsvg .pc-ax-l { fill: none; stroke: #111; stroke-width: 1.6; stroke-linejoin: round; }
+.plsvg .pc-axb { stroke: #6b7280; stroke-width: 0.6; stroke-dasharray: 2 2; }
+.plsvg .pc-ax-t { fill: #111; font-size: 8.5px; font-family: var(--mono); }
+.plsvg .pc-ax-t.arc { fill: #0d47a1; font-weight: 600; } .plsvg .pc-ax-t.clo { fill: #047857; }
+.plsvg .pc-axhit { fill: transparent; }
 .plsvg .pc-rap { stroke: #9ca3af; stroke-width: 0.7; stroke-dasharray: 2 2; }
 #plTable input { width: 76px; font-family: var(--mono); text-align: right; }
 #plTable td.act button { padding: 1px 7px; }
@@ -683,3 +690,15 @@ dialog.dlg-big #hyBigBody { flex: 1; overflow: auto; padding: 10px 14px; }
 .plsvg .pl-cov-t { fill: #facc15; font-size: 10.5px; font-weight: 600; paint-order: stroke; stroke: #0b1220; stroke-width: 3px; }
 .plsvg .pl-cov-t.warn { fill: #fb923c; }
 .plsvg .pl-cov-t.bad { fill: #f87171; }
+
+/* Profil en long : ouvrages survolables (surbrillance, clic droit → coupe longitudinale ou fiche) */
+.plsvg .pl-ohhit { fill: transparent; pointer-events: all; }
+.plsvg .pl-oh { cursor: context-menu; }
+.plsvg .pl-oh .pl-gab, .plsvg .pl-oh .pl-deck, .plsvg .pl-oh .pl-oamark { pointer-events: all; }
+.plsvg .pl-oh.hot .pl-cad, .plsvg .pl-oh.hot .pl-deck, .plsvg .pl-oh.hot .pl-gab, .plsvg .pl-oh.hot .pl-oamark { stroke: #fbbf24; stroke-width: 2.5; stroke-dasharray: none; filter: drop-shadow(0 0 4px rgba(251,191,36,.9)); }
+.plsvg .pl-oh.hot .pl-cad { fill: rgba(251,191,36,.45); }
+.plsvg .pl-oh.hot .pl-cadi { fill: rgba(56,189,248,.7); }
+.plsvg .pl-oh.hot .pl-sup { stroke: #fbbf24; }
+.plsvg .pl-oh.hot .pl-ohhit { fill: rgba(251,191,36,.10); stroke: #fbbf24; stroke-width: 1; stroke-dasharray: 3 2; }
+.plsvg .pl-oh.hot .pl-ovl { fill: #fde68a; font-weight: 700; }
+.ple-svg .ple-hov { pointer-events: none; } /* curseur, accroche, aperçu : jamais cible du pointeur (survol des ouvrages) */
