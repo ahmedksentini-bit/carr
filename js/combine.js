@@ -403,8 +403,16 @@ function profileBand(o) {
   // ouvrages (cadres, buses) : leur coupe doit tenir dans le cadre avec la ligne rouge (fond du radier compris)
   const ohZ = (o.ohs || []).filter((q) => q.zB != null && q.B > 0 && q.sinP > 0 && q.s >= s0 && q.s <= s1).map((q) => {
     const W = (q.n * q.B + (q.n - 1) * q.ei + 2 * q.ep) / q.sinP;
-    return { a: q.s - W / 2 - 1, b: q.s + W / 2 + 1, z: q.zB - (q.kind === 'pipo' ? 0 : q.er) - 0.3 };
+    // alt : réserve sous la ligne rouge pour une coupe remontée (ouvrage trop profond pour le cadre)
+    return { a: q.s - W / 2 - 1, b: q.s + W / 2 + 1, z: q.zB - (q.kind === 'pipo' ? 0 : q.er) - 0.3, hs: q.H + (q.et || 0) + (q.kind === 'pipo' ? 0 : q.er || 0) + 0.8 };
   });
+  // ponts portés par l'axe (fond du tablier, appuis jusqu'au TN) et passages supérieurs (dessus du tablier)
+  for (const q of o.ohs || []) {
+    if (!(q.sb >= s0 && q.sa <= s1)) continue;
+    const zm = zp((q.sa + q.sb) / 2);
+    if (q.kind === 'deck' && zm != null) ohZ.push({ a: q.sa - 1, b: q.sb + 1, z: zm - q.h - 0.5 });
+    if (q.kind === 'over' && q.zTop != null) ohZ.push({ a: q.sa - 1, b: q.sb + 1, z: q.zTop + 0.3 });
+  }
   for (const c of ohZ) smp.push(c.a, (c.a + c.b) / 2, c.b);
   smp.sort((a, b) => a - b);
   // plans de comparaison : zones où TN et projet tiennent dans la hauteur du cadre
@@ -414,7 +422,10 @@ function profileBand(o) {
     // la ligne rouge prime : un TN trop éloigné d'elle pour tenir dans le cadre est simplement rogné
     let zs = [tn(s), zp(s)].filter((v) => v != null);
     if (zs.length === 2 && Math.abs(zs[0] - zs[1]) > cap * 0.8) zs = [zs[1]];
-    for (const c of ohZ) if (s >= c.a && s <= c.b && (zp(s) == null || zp(s) - c.z < cap * 0.9)) zs.push(c.z);
+    for (const c of ohZ) if (s >= c.a && s <= c.b) {
+      if (zp(s) == null || Math.abs(zp(s) - c.z) < cap * 0.9) zs.push(c.z);
+      else if (c.hs) zs.push(zp(s) - Math.min(c.hs + 0.6, cap * 0.85));
+    }
     if (!zs.length) continue;
     const lo = Math.min(...zs), hi = Math.max(...zs);
     if (!zn) { zn = { s, lo, hi }; continue; }
@@ -480,34 +491,49 @@ function profileBand(o) {
     const d = z - t, x = X(q.s) + 0.75, y = Math.max(plot.y + 6, Y(q.s, z) - 1.2);
     out += `<text x="${x.toFixed(2)}" y="${y.toFixed(2)}" font-size="1.5" fill="${d >= 0 ? '#15803d' : '#b45309'}" transform="rotate(-90 ${x.toFixed(2)} ${y.toFixed(2)})" stroke="#fff" stroke-width="0.35" paint-order="stroke">${d >= 0 ? '+' : '−'}${f2(Math.abs(d))}</text>`;
   }
+  for (const q of o.ohs || []) { // ponts : tablier, culées et piles (portés) ; passage supérieur au-dessus (franchi)
+    if (!(q.kind === 'deck' || q.kind === 'over') || !(q.sb >= s0 && q.sa <= s1)) continue;
+    out += bridgeSvg(q, { X, Y, zp, tn, k, kz, P, plot });
+  }
   for (const q of o.ohs || []) { // ouvrages : coupe au droit de l'axe (cadre, PIPO, buse), désignation au-dessus
-    if (q.s < s0 || q.s > s1) continue;
+    if (q.s < s0 || q.s > s1 || q.kind === 'deck' || q.kind === 'over') continue;
     const z = zp(q.s) ?? tn(q.s); if (z == null) continue;
     const y = Y(q.s, z), x = X(q.s);
     if (q.zB != null && q.B > 0 && q.sinP > 0) {
       // largeurs le long de l'axe (biais : ÷ sin ψ), hauteurs à l'échelle des hauteurs
       const sp = q.sinP, W = (q.n * q.B + (q.n - 1) * q.ei + 2 * q.ep) / sp, sa = q.s - W / 2, zB = q.zB, zF = zB - (q.kind === 'pipo' ? 0 : q.er), zT = zB + q.H + q.et;
-      const xa = X(sa), xb = X(sa + W), yF = Y(q.s, zF), yT = Y(q.s, zT);
+      const xa = X(sa), xb = X(sa + W), yF0 = Y(q.s, zF);
+      // ouvrage trop profond pour tenir sous la ligne rouge dans la hauteur du cadre : coupe dessinée remontée d'un
+      // décalage dz (rupture d'échelle signalée par un double zigzag et la cote réelle), jamais réduite à un trait
+      const dzmm = yF0 > plot.y + plot.h - 1.5 ? Math.min(yF0 - (plot.y + plot.h - 1.5), Math.max(0, Y(q.s, zT) - (y + 4))) : 0, Ys = (zz) => Y(q.s, zz) - dzmm;
+      const yF = Ys(zF), yT = Ys(zT);
+      let sec = '';
       if (q.kind === 'buse') {
         for (let i = 0; i < q.n; i++) {
-          const sc = sa + (q.ep + q.B / 2 + i * (q.B + q.ei)) / sp, cx = X(sc), cy = Y(q.s, zB + q.B / 2);
-          out += `<ellipse cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" rx="${(((q.B / 2 + q.ep) / sp) * k).toFixed(2)}" ry="${((q.B / 2 + q.ep) * kz).toFixed(2)}" fill="#dbe6fb" stroke="#1d4ed8" stroke-width="0.25"/>`;
-          out += `<ellipse cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" rx="${((q.B / 2 / sp) * k).toFixed(2)}" ry="${((q.B / 2) * kz).toFixed(2)}" fill="#fff" stroke="#1d4ed8" stroke-width="0.2"/>`;
+          const sc = sa + (q.ep + q.B / 2 + i * (q.B + q.ei)) / sp, cx = X(sc), cy = Ys(zB + q.B / 2);
+          sec += `<ellipse cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" rx="${(((q.B / 2 + q.ep) / sp) * k).toFixed(2)}" ry="${((q.B / 2 + q.ep) * kz).toFixed(2)}" fill="#dbe6fb" stroke="#1d4ed8" stroke-width="0.25"/>`;
+          sec += `<ellipse cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" rx="${((q.B / 2 / sp) * k).toFixed(2)}" ry="${((q.B / 2) * kz).toFixed(2)}" fill="#fff" stroke="#1d4ed8" stroke-width="0.2"/>`;
         }
       } else {
-        out += `<rect x="${xa.toFixed(2)}" y="${yT.toFixed(2)}" width="${(xb - xa).toFixed(2)}" height="${(yF - yT).toFixed(2)}" fill="#dbe6fb" stroke="#1d4ed8" stroke-width="0.25"/>`;
+        sec += `<rect x="${xa.toFixed(2)}" y="${yT.toFixed(2)}" width="${(xb - xa).toFixed(2)}" height="${(yF - yT).toFixed(2)}" fill="#dbe6fb" stroke="#1d4ed8" stroke-width="0.25"/>`;
         for (let i = 0; i < q.n; i++) {
           const c0 = sa + (q.ep + i * (q.B + q.ei)) / sp;
-          out += `<rect x="${X(c0).toFixed(2)}" y="${Y(q.s, zB + q.H).toFixed(2)}" width="${((q.B / sp) * k).toFixed(2)}" height="${(q.H * kz).toFixed(2)}" fill="#fff" stroke="#1d4ed8" stroke-width="0.2"/>`;
+          sec += `<rect x="${X(c0).toFixed(2)}" y="${Ys(zB + q.H).toFixed(2)}" width="${((q.B / sp) * k).toFixed(2)}" height="${(q.H * kz).toFixed(2)}" fill="#fff" stroke="#1d4ed8" stroke-width="0.2"/>`;
         }
       }
       // fil d'eau au droit de l'axe : repère et cote
-      const yB = Y(q.s, zB);
-      out += `<path d="M${P(x - 0.8, yB - 1.2)}L${P(x + 0.8, yB - 1.2)}L${P(x, yB)}Z" fill="#1d4ed8"/>`;
-      out += `<line x1="${x.toFixed(2)}" y1="${yB.toFixed(2)}" x2="${(xb + 1.5).toFixed(2)}" y2="${yB.toFixed(2)}" stroke="#1d4ed8" stroke-width="0.12"/>`;
-      out += txt(xb + 1.8, yB + 0.6, `FE axe ${f2(zB)}`, 1.8, { c: '#1d4ed8', w: 'bold', halo: true });
-      if (yB > plot.y + plot.h - 1) out += txt(x + 1, plot.y + plot.h - 1.5, `↓ FE axe ${f2(zB)} sous le cadre`, 1.7, { c: '#1d4ed8', w: 'bold', halo: true });
-      out += `<line x1="${x.toFixed(2)}" y1="${(y + 0.6).toFixed(2)}" x2="${x.toFixed(2)}" y2="${(yT - 0.3).toFixed(2)}" stroke="#1d4ed8" stroke-width="0.12" stroke-dasharray="0.8 0.5"/>`;
+      const yB = Ys(zB);
+      sec += `<path d="M${P(x - 0.8, yB - 1.2)}L${P(x + 0.8, yB - 1.2)}L${P(x, yB)}Z" fill="#1d4ed8"/>`;
+      sec += `<line x1="${x.toFixed(2)}" y1="${yB.toFixed(2)}" x2="${(xb + 1.5).toFixed(2)}" y2="${yB.toFixed(2)}" stroke="#1d4ed8" stroke-width="0.12"/>`;
+      sec += txt(xb + 1.8, yB + 0.6, `FE axe ${f2(zB)}`, 1.8, { c: '#1d4ed8', w: 'bold', halo: true });
+      if (yB > plot.y + plot.h - 1) sec += txt(x + 1, plot.y + plot.h - 1.5, `↓ FE axe ${f2(zB)} sous le cadre`, 1.7, { c: '#1d4ed8', w: 'bold', halo: true });
+      sec += `<line x1="${x.toFixed(2)}" y1="${(y + 0.6).toFixed(2)}" x2="${x.toFixed(2)}" y2="${(yT - 0.3).toFixed(2)}" stroke="#1d4ed8" stroke-width="0.12" stroke-dasharray="0.8 0.5"/>`;
+      if (dzmm > 0.5) { // rupture : double zigzag sur le trait de rappel, décalage en mètres
+        const ym = (y + yT) / 2, z = (yy) => `M${P(x - 2.2, yy + 0.5)}L${P(x - 0.7, yy + 0.5)}L${P(x - 0.2, yy - 0.6)}L${P(x + 0.3, yy + 0.6)}L${P(x + 0.8, yy - 0.5)}L${P(x + 2.2, yy - 0.5)}`;
+        sec += `<path d="${z(ym - 0.7)}${z(ym + 0.7)}" fill="none" stroke="#1d4ed8" stroke-width="0.2"/>`;
+        sec += txt(x - 2.6, ym + 0.6, `coupe remontée de ${f2(dzmm / (Y(q.s, 0) - Y(q.s, 1)))} m`, 1.5, { a: 'end', c: '#1d4ed8', halo: true });
+      }
+      out += sec;
     } else out += `<line x1="${x.toFixed(2)}" y1="${(y + 1).toFixed(2)}" x2="${x.toFixed(2)}" y2="${(plot.y + plot.h).toFixed(2)}" stroke="#1d4ed8" stroke-width="0.3"/>`;
     out += txt(x, Math.max(plot.y + 7, y - 8.6), q.name, 2, { a: 'middle', c: '#1d4ed8', w: 'bold', halo: true });
     if (q.label) out += txt(x, Math.max(plot.y + 9.6, y - 6), `${q.label}${q.ang != null && Math.abs(q.ang - 100) > 0.05 ? ` · biais ${f2(q.ang, 1)} gr` : ''}`, 1.7, { a: 'middle', c: '#1d4ed8', halo: true });
@@ -521,6 +547,50 @@ function profileBand(o) {
   }
   // cartouche
   out += cartouche(o, rows, cartY, X, vis, zp, tn);
+  return out;
+}
+
+// Pont sur le profil en long. Porté (deck) : tablier entre les abouts, dessus = ligne rouge, épaisseur h (poutres +
+// hourdis) ; culées (mur de front et semelle) et piles (fût et semelle) descendues jusqu'au terrain naturel. Franchi
+// (over) : tablier du passage supérieur à la cote de la voie portée, piles posées sur la plate-forme, tirant d'air.
+function bridgeSvg(q, { X, Y, zp, tn, k, kz, P, plot }) {
+  const col = '#1d4ed8', fillC = '#dbe6fb';
+  let out = '';
+  const n = Math.max(2, Math.ceil((q.sb - q.sa) / 2)), ss = Array.from({ length: n + 1 }, (_, i) => q.sa + ((q.sb - q.sa) * i) / n);
+  const lbl = (x, y, lines) => { lines.forEach(([t, h, w], i) => { if (t) out += txt(x, Math.max(plot.y + 4 + i * 2.5, y - (lines.length - i) * 2.5), t, h, { a: 'middle', c: col, w: w || 'normal', halo: true }); }); };
+  if (q.kind === 'deck') {
+    const top = ss.map((s) => zp(s)), ok = top.every((v) => v != null);
+    if (!ok) return '';
+    const up = ss.map((s, i) => `${i ? 'L' : 'M'}${P(X(s), Y(s, top[i]))}`).join(''), lo = ss.slice().reverse().map((s, i) => `L${P(X(s), Y(s, top[n - i] - q.h))}`).join('');
+    out += `<path d="${up}${lo}Z" fill="${fillC}" stroke="${col}" stroke-width="0.25"/>`;
+    for (const a of q.sup) {
+      const zt = zp(a.s); if (zt == null) continue;
+      const zb = zt - q.h, zg = tn(a.s), zf = zg != null ? Math.min(zg, zb - 0.5) - 1 : zb - 4;
+      const w = a.kind === 'culee' ? 1.2 : 0.8, ws = a.kind === 'culee' ? 3 : 2.5, hs = 0.8;
+      out += `<rect x="${X(a.s - w / 2).toFixed(2)}" y="${Y(a.s, zb).toFixed(2)}" width="${(w * k).toFixed(2)}" height="${((zb - zf - hs) * kz).toFixed(2)}" fill="${fillC}" stroke="${col}" stroke-width="0.2"/>`;
+      out += `<rect x="${X(a.s - ws / 2).toFixed(2)}" y="${Y(a.s, zf + hs).toFixed(2)}" width="${(ws * k).toFixed(2)}" height="${(hs * kz).toFixed(2)}" fill="${fillC}" stroke="${col}" stroke-width="0.2"/>`;
+      out += `<path d="M${P(X(a.s) - 0.6, Y(a.s, zb) + 0.6)}h1.2" stroke="#111" stroke-width="0.35"/>`; // appareils d'appui
+    }
+    const xm = X((q.sa + q.sb) / 2), ym = Y((q.sa + q.sb) / 2, zp((q.sa + q.sb) / 2));
+    lbl(xm, ym - 1, [[q.name, 2, 'bold'], [q.label, 1.7], [`L ${f2(q.sb - q.sa)} m · h ${f2(q.h)} m`, 1.6]]);
+    return out;
+  }
+  // passage supérieur
+  if (q.zTop == null) {
+    out += `<rect x="${X(q.sa).toFixed(2)}" y="${plot.y + 1}" width="${((q.sb - q.sa) * k).toFixed(2)}" height="2" fill="${fillC}" stroke="${col}" stroke-width="0.2"/>`;
+    lbl(X(q.s), plot.y + 9, [[q.name, 2, 'bold'], [`${q.label} (profil de la voie portée à définir)`, 1.6]]);
+    return out;
+  }
+  const xa = X(q.sa), xb = X(q.sb), yT = Y(q.s, q.zTop), yB = Y(q.s, q.zTop - q.h);
+  out += `<rect x="${xa.toFixed(2)}" y="${yT.toFixed(2)}" width="${(xb - xa).toFixed(2)}" height="${(yB - yT).toFixed(2)}" fill="${fillC}" stroke="${col}" stroke-width="0.25"/>`;
+  for (const a of q.sup) { const zr = zp(a.s); if (zr == null) continue; out += `<rect x="${X(a.s - 0.4).toFixed(2)}" y="${yB.toFixed(2)}" width="${(0.8 * k).toFixed(2)}" height="${Math.max(0, Y(a.s, zr) - yB).toFixed(2)}" fill="${fillC}" stroke="${col}" stroke-width="0.2"/>`; }
+  const zr = zp(q.s);
+  if (zr != null) {
+    const ta = q.zTop - q.h - zr, x = X(q.s) + 0.8;
+    out += `<path d="M${P(x, yB)}V${Y(q.s, zr).toFixed(2)}" stroke="${col}" stroke-width="0.15" marker-start="none"/><path d="M${P(x - 0.5, yB + 0.8)}L${P(x, yB)}L${P(x + 0.5, yB + 0.8)}M${P(x - 0.5, Y(q.s, zr) - 0.8)}L${P(x, Y(q.s, zr))}L${P(x + 0.5, Y(q.s, zr) - 0.8)}" fill="none" stroke="${col}" stroke-width="0.15"/>`;
+    out += txt(x + 0.8, (yB + Y(q.s, zr)) / 2 + 0.6, `TA ${f2(ta)} m`, 1.7, { c: col, w: 'bold', halo: true });
+  }
+  lbl(X(q.s), yT - 0.6, [[q.name, 2, 'bold'], [q.label, 1.7], [`dessus ${f2(q.zTop)} · h ${f2(q.h)} m`, 1.6]]);
   return out;
 }
 

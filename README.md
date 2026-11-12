@@ -224,7 +224,12 @@ ou sur un fond topographique DXF.
   PK, biais (gr), longueur, fil d'eau amont → aval (pente) et **fil d'eau au droit de l'axe** ; sur le profil en long,
   **coupe de l'ouvrage** au droit de l'axe (largeurs le long de l'axe divisées par le sinus du biais, hauteurs à
   l'échelle des hauteurs : radier, piédroits, traverse, ouvertures ; buses en ellipses), repère et cote « FE axe » ; le
-  plan de comparaison est choisi pour que la coupe tienne dans le cadre avec la ligne rouge.
+  plan de comparaison est choisi pour que la coupe tienne dans le cadre avec la ligne rouge ; un ouvrage trop profond
+  pour tenir sous la ligne rouge est dessiné **remonté** (double zigzag sur le trait de rappel, « coupe remontée de
+  x m », cote FE réelle), jamais réduit à un trait. **Ponts** : pont à poutres porté par l'axe et passage supérieur de
+  l'onglet Ouvrages sur sa voie portée — tablier sous la ligne rouge (épaisseur poutres + hourdis), culées et piles
+  avec semelles descendues jusqu'au TN, appareils d'appui ; sur la voie franchie, tablier du passage supérieur à la
+  cote de la voie portée, piles sur la plate-forme et tirant d'air coté.
   **Aquaplaning** : sur le bandeau des dévers de l'éditeur et sur les rangées « Dévers » du cartouche du tracé combiné,
   un rectangle rouge transparent marque les tronçons où la pente combinée √(i² + d²) est inférieure à 0,5 % d'un côté
   au moins (dévers interpolé, déclivité de la ligne rouge) : rotation du dévers sur une ligne rouge trop plate.
