@@ -214,6 +214,12 @@ ou sur un fond topographique DXF.
   orange : déblai, −). Sur le plan, par-dessus le projet : talus (barbules, entrées en terre), aménagements de l'onglet
   Vitesses / UVR (bandes de catégorie, plateaux, passages, bandes rugueuses, portails… avec leurs désignations) et
   signalisation verticale (mât, **miniature vectorielle du panneau** et code : B14-50, C20a, AB25…).
+  **Axes longs** (20 km et plus) : les primitives du projet sont découpées une fois en tronçons à boîte englobante
+  (bordures, marquages, hachures) et les grands aplats (chaussée, TPC) discrétisés puis découpés à l'emprise de chaque
+  feuille (Sutherland–Hodgman) ; seule la part qui touche la feuille est écrite (axe de 22,7 km : 70 feuilles A3 en
+  6 s, 26 Mo, au lieu d'un blocage). Sans profils implantés, le cartouche suit un pas régulier lisible à l'échelle
+  (≥ 15 mm : 20 m au 1/1000), et le recouvrement des feuilles vaut ce pas. La fenêtre s'ouvre tout de suite avec un
+  message d'attente.
   Ouvrages (cadres, PIPO, buses) : sur le plan, fiche à côté de l'ouvrage — désignation, n × B × H (ou n × buse Ø),
   PK, biais (gr), longueur, fil d'eau amont → aval (pente) et **fil d'eau au droit de l'axe** ; sur le profil en long,
   **coupe de l'ouvrage** au droit de l'axe (largeurs le long de l'axe divisées par le sinus du biais, hauteurs à
@@ -590,6 +596,10 @@ ou sur un fond topographique DXF.
   d'autre du centre et y arrive par deux branches ; les extrémités libres des bretelles voisines (losange,
   demi-échangeur à extrémités libres) sont prolongées dans leur alignement final jusqu'à l'anneau, où elles dessinent
   leur branche (raccourcie, 15 m au moins, si l'alignement final est trop court pour y couper la bretelle).
+  Même chose sur la voie principale de type route. Voie principale encore de type **autoroute** (type par défaut, par
+  exemple axe importé d'un KMZ) sans aucune bretelle d'échangeur : y poser un carrefour la fait passer en route non
+  autoroutière (AU70 en contexte urbain, artère 110 si elle a un TPC, sinon R1), profil en travers figé à l'identique
+  (voies, BAU / BDD, TPC, berme), puis elle est coupée ; une autoroute qui porte des bretelles reste refusée (alerte).
 - **Cadres PICF et portiques PIPO** (onglet Ouvrages, **+ PICF / PIPO**, un clic sur l'axe de la voie portée) : nombre
   de cellules, ouverture, hauteur intérieure, remblai sur traverse, biais (gr), longueur (automatique : plate-forme +
   talus 3/2 jusqu'à la traverse, divisée par le sinus du biais), épaisseurs (automatiques e ≈ 0,15 + B/20), murs en aile.

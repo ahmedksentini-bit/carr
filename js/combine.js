@@ -56,7 +56,7 @@ export function combinedSheets(o) {
     if (pr.k === 'path') for (const sg of pr.segs) { add(sg.a); add(sg.b); } else add(pr.p);
     return { pr, x0, y0, x1, y1 };
   });
-  o = { ...o, tnC };
+  o = { ...o, tnC, pix: prepPrims(o.prims) };
   for (let i = 0; i < n; i++) {
     const s0 = Math.min(i * step, Math.max(0, len - C)), s1 = Math.min(len, s0 + C);
     svgs.push(sheet({ ...o, PW, PH, k, kz, zScale, inner, titleH, labelW, planR, profR, plotX0, plotW, C, overlap, st, dxf, i, n, s0, s1 }));
@@ -176,7 +176,16 @@ function planBand(o) {
     out += lab;
   }
   // projet dessiné
-  for (const L of LAYERS) for (const pr of o.prims || []) if (pr.L === L) out += primSvg(pr, STY[L], T, k, phi);
+  // (morceaux précalculés : seuls ceux qui touchent la feuille sont écrits ; grands aplats découpés à l'emprise)
+  const bbc = { x0: bb.x0 - 5, y0: bb.y0 - 5, x1: bb.x1 + 5, y1: bb.y1 + 5 };
+  for (const L of LAYERS) for (const q of o.pix.get(L) || []) {
+    if (!inBB(q)) continue;
+    if (!q.rings) { out += primSvg(q.pr, STY[L], T, k, phi); continue; }
+    const col = q.pr.color || STY[L].fill; if (!col) continue;
+    let d = '';
+    for (const r of q.rings) { const c = clipRing(r, bbc); if (c.length < 3) continue; c.forEach((pt, j) => { const t = T(pt); d += `${j ? 'L' : 'M'}${P(t.x, t.y)}`; }); d += 'Z'; }
+    if (d) out += `<path d="${d}" fill="${col}" fill-rule="${q.pr.rule || 'evenodd'}" stroke="none"/>`;
+  }
   // points du terrain naturel (semis du MNT) et leur altitude, par-dessus le projet (un MNT SRTM n'a pas d'autre fond) ;
   // étiquettes sans chevauchement (grille de 7 × 2,5 mm)
   if (o.tnPts?.length) {
@@ -241,6 +250,78 @@ function planBand(o) {
   for (let j = 0; j < 4; j++) out += `<rect x="${(bx + (j * Ls * k) / 4).toFixed(2)}" y="${by}" width="${((Ls * k) / 4).toFixed(2)}" height="1.2" fill="${j % 2 ? '#fff' : '#000'}" stroke="#000" stroke-width="0.15"/>`;
   out += txt(bx, by + 4, '0', 1.8, { a: 'middle' }) + txt(bx + Ls * k, by + 4, `${Ls} m`, 1.8, { a: 'middle' }) + txt(cx, by + 7.5, `Plan 1/${o.scale}`, 2, { a: 'middle', w: 'bold' });
   return out;
+}
+
+// Primitives du projet → morceaux avec boîte englobante, rangés par calque, calculés une fois pour toutes les feuilles.
+// Un axe de 20 km porte des bordures, marquages et aplats de chaussée d'un seul tenant (des milliers de segments) :
+// sans découpage, chaque feuille réécrivait tout le projet (chaîne de plusieurs centaines de Mo, « Invalid string
+// length »). Chemins et hachures sont coupés en tronçons ; les grands aplats sont discrétisés puis découpés à
+// l'emprise de chaque feuille (Sutherland–Hodgman, la parité pair-impair des anneaux est conservée).
+const CHUNK = 48;
+function segPts(g) {
+  if (g.t === 'L') return [g.a, g.b];
+  if (g.t === 'C') return [{ x: g.c.x - g.r, y: g.c.y - g.r }, { x: g.c.x + g.r, y: g.c.y + g.r }];
+  return [0, 0.25, 0.5, 0.75, 1].map((t) => G.segAt(g, t));
+}
+function boxOf(pts, pad = 0) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const q of pts) { if (!q || !Number.isFinite(q.x) || !Number.isFinite(q.y)) continue; if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.y < y0) y0 = q.y; if (q.y > y1) y1 = q.y; }
+  return { x0: x0 - pad, y0: y0 - pad, x1: x1 + pad, y1: y1 + pad };
+}
+function ringPts(segs) {
+  const pts = [];
+  for (const g of segs) {
+    if (g.t === 'L') { pts.push(g.a); continue; }
+    if (g.t === 'C') { for (let i = 0; i < 48; i++) { const a = (i / 48) * 2 * Math.PI; pts.push({ x: g.c.x + g.r * Math.cos(a), y: g.c.y + g.r * Math.sin(a) }); } continue; }
+    const n = Math.max(2, Math.min(200, Math.ceil(G.sweep(g) / 0.04), Math.ceil((g.r * G.sweep(g)) / 0.5)));
+    for (let i = 0; i < n; i++) pts.push(G.segAt(g, i / n));
+  }
+  return pts;
+}
+function prepPrims(prims) {
+  const out = new Map(), push = (L, q) => { if (!out.has(L)) out.set(L, []); out.get(L).push(q); };
+  for (const pr of prims || []) {
+    if (!STY[pr.L]) continue;
+    if (pr.k === 'path' && pr.segs?.length) {
+      const segs = pr.segs;
+      if (segs.length <= CHUNK) { push(pr.L, { pr, ...boxOf(segs.flatMap(segPts), 1) }); continue; }
+      for (let i = 0; i < segs.length; i += CHUNK) {
+        const part = segs.slice(i, i + CHUNK);
+        if (pr.closed && i + CHUNK >= segs.length) {
+          const a = segs[0], e = segs[segs.length - 1];
+          if (a.t !== 'C' && e.t !== 'C') { const pa = G.segStart(a), pe = G.segEnd(e); if (G.dist(pa, pe) > 1e-6) part.push(G.L(pe, pa)); }
+        }
+        push(pr.L, { pr: { ...pr, segs: part, closed: false }, ...boxOf(part.flatMap(segPts), 1) });
+      }
+    } else if (pr.k === 'hatch' && pr.lines?.length) {
+      for (let i = 0; i < pr.lines.length; i += CHUNK) { const part = pr.lines.slice(i, i + CHUNK); push(pr.L, { pr: { ...pr, lines: part }, ...boxOf(part.flat(), 1) }); }
+    } else if (pr.k === 'fill' && pr.rings?.length) {
+      const n = pr.rings.reduce((t, r) => t + r.length, 0);
+      if (n <= 200) push(pr.L, { pr, ...boxOf(pr.rings.flat().flatMap(segPts), 1) });
+      else { const rings = pr.rings.map(ringPts); push(pr.L, { pr, rings, ...boxOf(rings.flat(), 1) }); }
+    } else if (pr.k === 'circle' && pr.c) push(pr.L, { pr, ...boxOf([pr.c], (pr.r || 0) + 1) });
+    else if ((pr.k === 'text' || pr.k === 'sign') && pr.p) push(pr.L, { pr, ...boxOf([pr.p], 30) });
+  }
+  return out;
+}
+// Découpe d'un anneau (polygone quelconque) par un rectangle aligné (Sutherland–Hodgman).
+function clipRing(pts, b) {
+  const edges = [[(p) => p.x >= b.x0, (p, q) => ({ x: b.x0, y: p.y + ((q.y - p.y) * (b.x0 - p.x)) / (q.x - p.x) })],
+    [(p) => p.x <= b.x1, (p, q) => ({ x: b.x1, y: p.y + ((q.y - p.y) * (b.x1 - p.x)) / (q.x - p.x) })],
+    [(p) => p.y >= b.y0, (p, q) => ({ x: p.x + ((q.x - p.x) * (b.y0 - p.y)) / (q.y - p.y), y: b.y0 })],
+    [(p) => p.y <= b.y1, (p, q) => ({ x: p.x + ((q.x - p.x) * (b.y1 - p.y)) / (q.y - p.y), y: b.y1 })]];
+  let r = pts;
+  for (const [inside, cut] of edges) {
+    if (!r.length) break;
+    const o = [];
+    for (let i = 0; i < r.length; i++) {
+      const p = r[i], q = r[(i + 1) % r.length], ip = inside(p), iq = inside(q);
+      if (ip) o.push(p);
+      if (ip !== iq) o.push(cut(p, q));
+    }
+    r = o;
+  }
+  return r;
 }
 
 // Primitive du projet (repère monde) → SVG papier.
