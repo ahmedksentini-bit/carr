@@ -1,5 +1,5 @@
 // Tests du module UVR / plan de gestion des vitesses (js/uvr.js) — node tools/test-uvr.mjs
-import { analyzeAxis, detectBuilt, classifyOsm, classifyName, parseOverpass, v85FromRadius, v85Profile, rowsCsv, speedSvg, overpassQL, overpassBBoxOf, overpassPoiQL, overpassBldQL } from '../js/uvr.js';
+import { analyzeAxis, detectBuilt, classifyOsm, classifyName, parseOverpass, v85FromRadius, v85Profile, rowsCsv, speedSvg, overpassQL, overpassBBoxOf, overpassPoiQL, overpassBldQL, dedupTriggers } from '../js/uvr.js';
 
 let fail = 0;
 const ok = (c, m) => { if (!c) { fail++; console.error('✖', m); } else console.log('✔', m); };
@@ -123,6 +123,27 @@ ok(/way\["building"\]\(around:120,/.test(qb) && /out ids center/.test(qb), 'requ
   ok(A.segs.every((g) => g.v >= 50), 'artère : vitesse plancher 50 km/h');
   ok(c(A, 'feux') === trg.filter((t) => t.type !== 'tc' && t.type !== 'culte').length, 'artère : traversée à feux aux écoles et marchés');
   ok(c(A, 'radar') >= 1 && A.checks.some((q) => /94-447/.test(q.msg)), 'artère : contrôle automatisé et rappel du seuil');
+}
+
+// doublons : même générateur décrit plusieurs fois, ouvrages proposés à quelques mètres
+{
+  const P = parseOverpass({ elements: [
+    { type: 'node', id: 1, lat: 18.1, lon: -15.98, tags: { amenity: 'place_of_worship' } },
+    { type: 'way', id: 2, center: { lat: 18.1003, lon: -15.9802 }, tags: { amenity: 'place_of_worship', name: 'Mosquée A' } },
+    { type: 'node', id: 3, lat: 18.1006, lon: -15.9799, tags: { amenity: 'place_of_worship' } },
+    { type: 'node', id: 4, lat: 18.1, lon: -15.97, tags: { amenity: 'place_of_worship' } },
+  ] });
+  ok(P.triggers.length === 2 && P.triggers[0].name === 'Mosquée A', 'OSM : générateur répété à moins de 100 m fusionné, nom conservé');
+  ok(dedupTriggers([{ type: 'ecole', lat: 18.1, lon: -15.98 }], 100, [{ type: 'ecole', lat: 18.1004, lon: -15.98 }]).length === 0, 'OSM : doublon d\'un déclencheur déjà présent ignoré');
+  const L = 3000, axD = straight(L), trg = [];
+  for (let k = 0; k < 4; k++) trg.push({ id: 'd' + k, type: 'culte', name: k ? '' : 'M', x: 1000 + k * 20, y: 30 });
+  trg.push({ id: 'e1', type: 'sante', name: 'CS', x: 1005, y: -30 });
+  const R = analyzeAxis(axD, { baseCat: 'B', trav: [{ s0: 500, s1: 2500 }], triggers: trg }, {});
+  ok(R.hits.filter((h) => h.type === 'culte').length === 1, 'analyse : 4 lieux de culte à 20 m d\'écart → 1 déclencheur');
+  const X = R.treat.filter((q) => ['passage', 'plateau', 'feux'].includes(q.code)).map((q) => q.s);
+  ok(X.every((s, i) => !i || s - X[i - 1] >= 40), 'aucune traversée à moins de 40 m d\'une autre');
+  const B = R.treat.filter((q) => !q.list && q.s0 == null);
+  ok(B.every((q, i) => !B.some((p, j) => j !== i && p.code === q.code && p.dir === q.dir && Math.abs(p.s - q.s) < 10)), 'aucun ouvrage identique à moins de 10 m');
 }
 
 if (fail) { console.error(`${fail} échec(s)`); process.exit(1); }

@@ -3,7 +3,7 @@
 // tracés, tableau des résultats, dessin sur le plan, note imprimable). Sources des déclencheurs : OpenStreetMap
 // (Overpass), calques KMZ / KML du projet (nom du repère ou de son dossier), saisie sur le plan.
 import { registerIcon } from './signicons.js';
-import { MANUAL, SIGN_CHOICES, REFS, M1_BASES, R4L_BASES, UVR_TYPES, TYPE_KEYS, CATS, uvrOpts, defaultUvrOpts, baseCatOf, analyzeAxis, detectBuilt, overpassBBoxOf, overpassPoiQL, overpassBldQL, parseOverpass, classifyName, BUILT_RE, speedSvg, rowsCsv, treatCsv, fmtPK, V0_PROFILES } from './uvr.js';
+import { MANUAL, SIGN_CHOICES, REFS, M1_BASES, R4L_BASES, UVR_TYPES, TYPE_KEYS, CATS, uvrOpts, defaultUvrOpts, baseCatOf, analyzeAxis, detectBuilt, dedupTriggers, overpassBBoxOf, overpassPoiQL, overpassBldQL, parseOverpass, classifyName, BUILT_RE, speedSvg, rowsCsv, treatCsv, fmtPK, V0_PROFILES } from './uvr.js';
 
 const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
 
@@ -150,7 +150,7 @@ export function initUvr(api) {
     const failed = [], bldFailed = [], step = 80;
     let bldKo = 0;
     const take = (P) => {
-      for (const t of P.triggers) if (!u.trg.some((q) => q.osm && q.osm === t.osm)) { u.trg.push({ id: uid(), src: 'OSM', on: true, ...t }); nT++; }
+      for (const t of dedupTriggers(P.triggers.filter((t) => !u.trg.some((q) => q.osm && q.osm === t.osm)), 100, u.trg.filter((q) => q.on !== false))) { u.trg.push({ id: uid(), src: 'OSM', on: true, ...t }); nT++; }
       for (const b of P.built) if (!u.built.polys.some((q) => q.ring[0][0] === b.ring[0][0] && q.ring[0][1] === b.ring[0][1])) { u.built.polys.push({ ...b, src: 'OSM' }); nP++; }
       const seen = new Set(u.built.bld.map((q) => q.join(',')));
       for (const b of P.bld) { const k2 = b.join(','); if (!seen.has(k2)) { seen.add(k2); u.built.bld.push(b); nB++; } }

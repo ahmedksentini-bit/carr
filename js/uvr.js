@@ -79,6 +79,7 @@ export function defaultUvrOpts() {
     travGap: 150, // trous de bâti fusionnés pour former une traversée (m)
     bldMin: 4, // bâtiments (OSM) dans la fenêtre de ±50 m × 80 m pour qu'un point de l'axe soit « bâti »
     spacing: 200, // espacement maximal des traversées piétonnes en cat. D / E (AD 1.2)
+    dupR: 100, // rayon de fusion des déclencheurs identiques (même type) décrits plusieurs fois (m)
     physE: 150, // espacement des dispositifs physiques (plateaux, traversées surélevées) en cat. E / 30 km/h (m)
     physD: 250, // espacement des chicanes / rétrécissements en cat. D, là où la V85 géométrique dépasse la vitesse-cible + 10 (m)
     v0: 'auto', // profil V85 : auto | 120 | 102 | 92
@@ -93,7 +94,7 @@ export function uvrOpts(o) {
   const d = defaultUvrOpts(), r = { ...d, ...(o || {}) };
   r.types = Object.fromEntries(TYPE_KEYS.map((k) => [k, { ...d.types[k], ...(o?.types?.[k] || {}) }]));
   if (r.ref !== 'R4L') r.ref = 'M1';
-  for (const k of ['R', 'travMin', 'gapMin', 'travGap', 'bldMin', 'spacing', 'juncL', 'physE', 'physD']) if (!(+r[k] > 0)) r[k] = d[k]; else r[k] = +r[k];
+  for (const k of ['R', 'travMin', 'gapMin', 'travGap', 'bldMin', 'spacing', 'juncL', 'physE', 'physD', 'dupR']) if (!(+r[k] > 0)) r[k] = d[k]; else r[k] = +r[k];
   return r;
 }
 // Catégorie de base d'un axe (rase campagne) : autoroute → A ; route à chaussées séparées → B ; sinon B.
@@ -179,13 +180,19 @@ export function parseOverpass(json) {
     if (seen.has(id)) continue; seen.add(id);
     triggers.push({ type, name: tags.name || tags['name:fr'] || tags['name:ar'] || '', lon: +c.lon.toFixed(6), lat: +c.lat.toFixed(6), osm: id });
   }
-  // un arrêt TC décrit par plusieurs objets (quai + poteau) à moins de 30 m : un seul déclencheur
-  const out = [];
-  for (const t of triggers) {
-    if (t.type === 'tc' && out.some((q) => q.type === 'tc' && llDist(q, t) < 30)) continue;
-    out.push(t);
-  }
+  // un même générateur décrit par plusieurs objets OSM (nœud, bâtiment, enceinte ; quai + poteau d'arrêt) : même type à
+  // moins de 100 m → un seul déclencheur, de préférence celui qui porte un nom
+  const out = dedupTriggers(triggers, 100);
   return { triggers: out, built, bld };
+}
+export function dedupTriggers(list, R = 100, base = []) {
+  const out = [];
+  for (const t of list) {
+    const q = [...base, ...out].find((p) => p.type === t.type && p.lat != null && llDist(p, t) < R);
+    if (!q) { out.push(t); continue; }
+    if (!q.name && t.name) q.name = t.name;
+  }
+  return out;
 }
 const avg = (ring, i) => +(ring.reduce((s, p) => s + p[i], 0) / ring.length).toFixed(6);
 const llDist = (a, b) => { const k = Math.cos(((a.lat + b.lat) / 2) * Math.PI / 180); return Math.hypot((a.lon - b.lon) * k, a.lat - b.lat) * 111320; };
@@ -345,6 +352,14 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
     if (h) hits.push({ ...h, id: t.id, type: t.type, name: t.name || '', src: t.src || '', x: t.x, y: t.y });
   }
   hits.sort((a, b) => a.s - b.s);
+  // un même générateur décrit plusieurs fois (nœud + bâtiment + enceinte dans OSM, ou saisi deux fois) : même type à moins
+  // de dupR mètres → un seul déclencheur, qui garde le premier nom renseigné
+  for (let i = hits.length - 1; i > 0; i--) {
+    const h = hits[i], j = hits.findIndex((p, k) => k < i && p.type === h.type && Math.abs(p.s - h.s) < o.dupR && Math.hypot((p.x ?? 0) - (h.x ?? 0), (p.y ?? 0) - (h.y ?? 0)) < o.dupR);
+    if (j < 0) continue;
+    const p = hits[j]; if (!p.name && h.name) p.name = h.name;
+    (p.dups = p.dups || []).push(h.id); hits.splice(i, 1);
+  }
   // vitesse-cible au pas ds
   const V = smp.map((q) => {
     let v = base.vt, why = [];
@@ -519,6 +534,27 @@ export function analyzeAxis(ax, input = {}, opts = {}) {
   if (grp.gate) checks.push({ lvl: 'info', msg: `${ax.name} — portail(s) abordé(s) à plus de 70 km/h : ${list(grp.gate)}. Le portail doit ramener la V85 à ≤ 55 km/h (F1.12) ; V85 à mesurer après mise en service (F1.13).` });
   if (!hits.length && !trav.length) checks.push({ lvl: 'info', msg: `${ax.name} : aucun déclencheur UVR à moins de ${o.R} m — profil standard de la catégorie ${baseCat} (AD 1.2).` });
   { const ec = hits.filter((h) => h.type === 'ecole' && !(input.trav || []).length && !o.types.ecole.rural).map((h) => pk(h.s)); if (ec.length) checks.push({ lvl: 'warn', msg: `${ax.name} — école(s) hors traversée sans zone 30 : PK ${list(ec)}. F1.17 impose une zone 30 aménagée pour toute école déclencheur.` }); }
+  // ------------------------------------------------ dédoublonnage des aménagements
+  // plusieurs règles (déclencheur, espacement des traversées, modération, transitions) peuvent proposer le même ouvrage
+  // à quelques mètres : on n'en garde qu'un. Les traversées (passage, plateau traversant, feux) forment une seule famille.
+  {
+    const CROSS = { feux: 3, plateau: 2, passage: 1 }, MIN = { bandes: 10, annonce: 30, limite: 30, sortie: 30, retrec: 30, chicane: 50, cloture: 50, rappel30: 50, pmv: 100, portail: 50, zone30: 30, radar: 1000 };
+    const rank = (q) => (CROSS[q.code] || 0) * 10 + (q.lvl === 'MUST' ? 2 : 0) + (q.trg ? 1 : 0);
+    const keep = [];
+    for (const q of [...treat].sort((a, b) => a.s - b.s)) {
+      if (q.list || q.s0 != null) { keep.push(q); continue; }
+      if (CROSS[q.code]) {
+        const k = keep.findIndex((p) => CROSS[p.code] && Math.abs(p.s - q.s) < 40);
+        if (k < 0) keep.push(q);
+        else if (rank(q) > rank(keep[k])) keep[k] = { ...q, trg: q.trg || keep[k].trg }; // la traversée la plus complète l'emporte
+        continue;
+      }
+      const d = MIN[q.code] ?? 20;
+      if (keep.some((p) => p.code === q.code && (p.dir === q.dir || !p.dir || !q.dir) && Math.abs(p.s - q.s) < d)) continue;
+      keep.push(q);
+    }
+    treat.length = 0; treat.push(...keep);
+  }
   // ------------------------------------------------ retouches de l'utilisateur (input.edits)
   // Chaque aménagement proposé a une clé « code:sens:déclencheur:PK » ; une retouche s'applique à l'aménagement de même
   // code, sens et déclencheur dont le PK est à moins de 15 m de celui de la clé (le tracé peut avoir un peu bougé).
