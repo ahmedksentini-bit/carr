@@ -669,3 +669,12 @@ table.dv-click tbody tr[data-dvs]:hover { background: rgba(37, 99, 235, .15); }
 .cieh-pick .cieh-g { margin: 6px 0; display: flex; flex-direction: column; gap: 2px; }
 .cieh-pick .cieh-g label.chk { font-weight: normal; }
 .ok-txt { color: #4ade80; font-size: 11px; }
+
+/* Hydrologie en grand */
+dialog.dlg-big #hyBigBody { flex: 1; overflow: auto; padding: 10px 14px; }
+#hyBigBody .tablewrap { max-height: none; overflow: visible; }
+#hyBigBody table.pts { font-size: 13px; width: 100%; }
+#hyBigBody table.pts td, #hyBigBody table.pts th { padding: 5px 8px; white-space: nowrap; }
+#hyBigBody #hyDetail { margin-top: 14px; border-top: 1px solid var(--line2); padding-top: 8px; }
+#hyBigBody #hyDetail dl { display: grid; grid-template-columns: minmax(180px, 22%) 1fr; gap: 4px 14px; }
+#hyBigBody #hyDetail dd { margin: 0; }
