@@ -599,3 +599,5 @@ ul.ouvr-items li.info { color: var(--muted); }
 .ctxmenu .ctxsep { border-top: 1px solid var(--line); margin: 4px 0; }
 .ctxmenu .ctxlbl { font-size: 11px; opacity: .7; padding: 2px 8px; }
 .ctxmenu .ctxopt { display: flex; gap: 6px; align-items: center; padding: 3px 10px; font-size: 12.5px; cursor: pointer; }
+.pl-aqua { fill: rgba(239,68,68,.28); stroke: rgba(239,68,68,.6); stroke-width: .6; }
+.pl-aqua-t { fill: #f87171; }

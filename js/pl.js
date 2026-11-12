@@ -295,11 +295,32 @@ export function plStrips(opts, { X, m, w, h, sMax, stripH }) {
     out += `<rect class="pl-band" x="${x0}" y="${top}" width="${x1 - x0}" height="${bot - top}"/>`;
     for (const v of [-7, -2.5, 0, 2.5, 7]) out += `<line class="${v ? 'pl-bg' : 'pl-b0'}" x1="${x0}" y1="${Yd(v)}" x2="${x1}" y2="${Yd(v)}"/><text class="pl-bt" x="${x0 - 4}" y="${Yd(v) + 3}" text-anchor="end">${v > 0 ? '+' : v < 0 ? '−' : ''}${fmt(Math.abs(v), v % 1 ? 1 : 0)}</text>`;
     const path = (f) => opts.devers.map((q, i) => `${i ? 'L' : 'M'}${X(q.s).toFixed(1)},${Yd(f(q)).toFixed(1)}`).join('');
+    // zones d'aquaplaning : pente combinée √(i² + d²) < 0,5 % sur l'un des côtés (écoulement de l'eau insuffisant)
+    for (const [a, b] of lowCombined(opts.devers, opts.grade)) out += `<rect class="pl-aqua" x="${X(a).toFixed(1)}" y="${top}" width="${Math.max(1.5, X(b) - X(a)).toFixed(1)}" height="${bot - top}"><title>Pente combinée &lt; 0,5 % de ${fmt(a, 1)} à ${fmt(b, 1)} m : risque d'aquaplaning</title></rect>`;
     out += `<path class="pl-dvl" d="${path((q) => q.l)}"/><path class="pl-dvr" d="${path((q) => q.r)}"/>`;
-    out += `<text class="pl-bt" x="${x1 - 2}" y="${top + 10}" text-anchor="end"><tspan class="pl-dvl-t">— gauche</tspan>  <tspan class="pl-dvr-t">— droite</tspan>  (% vers l'extérieur ; −2,5 = toit)</text>`;
+    out += `<text class="pl-bt" x="${x1 - 2}" y="${top + 10}" text-anchor="end"><tspan class="pl-dvl-t">— gauche</tspan>  <tspan class="pl-dvr-t">— droite</tspan>  (% vers l'extérieur ; −2,5 = toit)${opts.grade ? '  <tspan class="pl-aqua-t">▮ pente combinée &lt; 0,5 %</tspan>' : ''}</text>`;
     out += `<text class="pl-bl" x="${x0 + 3}" y="${top + 10}">dévers</text>`;
   }
   return out;
+}
+// Intervalles [s0, s1] où la pente combinée √(i² + d²) est inférieure à lim (0,5 %) d'un côté au moins : dévers
+// interpolé linéairement entre les échantillons [{ s, l, r }] (%), déclivité grade(s) (fraction) de la ligne rouge.
+export function lowCombined(dev, grade, lim = 0.005) {
+  const out = [];
+  if (!dev?.length || !grade) return out;
+  let cur = null;
+  const push = (s, bad) => { if (bad) { if (cur) cur[1] = s; else cur = [s, s]; } else if (cur) { out.push(cur); cur = null; } };
+  for (let i = 0; i < dev.length; i++) {
+    const a = dev[i], b = dev[i + 1], n = b ? Math.max(1, Math.ceil((b.s - a.s) / 0.5)) : 1;
+    for (let k = 0; k < n; k++) {
+      const f = k / n, s = b ? a.s + (b.s - a.s) * f : a.s, l = b ? a.l + (b.l - a.l) * f : a.l, r = b ? a.r + (b.r - a.r) * f : a.r, g = grade(s);
+      if (!Number.isFinite(g)) { push(s, false); continue; }
+      const c = Math.min(Math.hypot(g, (l || 0) / 100), Math.hypot(g, (r || 0) / 100));
+      push(s, c < lim);
+    }
+  }
+  if (cur) out.push(cur);
+  return out.filter(([a, b]) => b - a > 0.05);
 }
 function niceStep(v) { const p = 10 ** Math.floor(Math.log10(Math.max(1e-9, v))), r = v / p; return (r < 1.5 ? 1 : r < 3.5 ? 2 : r < 7.5 ? 5 : 10) * p; }
 

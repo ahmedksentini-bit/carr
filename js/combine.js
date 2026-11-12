@@ -5,7 +5,7 @@
 // et droit). Les feuilles se recouvrent d'un intervalle de profils. Tout est vectoriel (SVG en millimètres papier) :
 // la page HTML produite s'imprime en PDF à l'échelle exacte.
 import * as G from './geom.js';
-import { plElements } from './pl.js';
+import { plElements, lowCombined } from './pl.js';
 
 export const PAPERS = { A4: [297, 210], A3: [420, 297], A2: [594, 420], A1: [841, 594], A0: [1189, 841] };
 const f2 = (v, d = 2) => (v == null || !Number.isFinite(+v) ? '—' : (+v).toFixed(d).replace('.', ',').replace('-', '−'));
@@ -455,6 +455,13 @@ function cartouche(o, rows, y0, X, vis, zp, tn) {
     out += vt(x, row('dl'), dv && Number.isFinite(dv.l) ? sgn(dv.l) : '—');
     out += vt(x, row('dr'), dv && Number.isFinite(dv.r) ? sgn(dv.r) : '—');
   });
+  // zones d'aquaplaning sur les rangées des dévers : pente combinée √(i² + d²) < 0,5 % d'un côté au moins
+  if (PL && o.devAt) {
+    const dev = [], dS = Math.max(0.5, (s1 - s0) / 600);
+    for (let s = s0; s <= s1 + 1e-9; s += dS * 2) { const d = o.devAt(s); if (d && Number.isFinite(d.l) && Number.isFinite(d.r)) dev.push({ s, l: d.l, r: d.r }); }
+    const jl = row('dl'), jr = row('dr'), yA = tops[jl], yB = tops[jr] + rows[jr].h;
+    for (const [a, b] of lowCombined(dev, (sv) => PL.gradeAt(sv))) out += `<rect x="${X(a).toFixed(2)}" y="${yA.toFixed(2)}" width="${Math.max(0.4, X(b) - X(a)).toFixed(2)}" height="${(yB - yA).toFixed(2)}" fill="rgba(239,68,68,0.25)" stroke="rgba(220,38,38,0.6)" stroke-width="0.1"/>`;
+  }
   // éléments du profil : déclivités (segments) et raccordements (paraboles), cellules fusionnées
   if (PL) {
     const { lines, paras } = plElements(PL, o.ax.len), je = row('el'), jl = row('len');

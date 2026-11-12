@@ -217,6 +217,9 @@ ou sur un fond topographique DXF.
   **coupe de l'ouvrage** au droit de l'axe (largeurs le long de l'axe divisées par le sinus du biais, hauteurs à
   l'échelle des hauteurs : radier, piédroits, traverse, ouvertures ; buses en ellipses), repère et cote « FE axe » ; le
   plan de comparaison est choisi pour que la coupe tienne dans le cadre avec la ligne rouge.
+  **Aquaplaning** : sur le bandeau des dévers de l'éditeur et sur les rangées « Dévers » du cartouche du tracé combiné,
+  un rectangle rouge transparent marque les tronçons où la pente combinée √(i² + d²) est inférieure à 0,5 % d'un côté
+  au moins (dévers interpolé, déclivité de la ligne rouge) : rotation du dévers sur une ligne rouge trop plate.
   La ligne rouge remplace la pente constante de la branche dans le modèle altimétrique (dévers, points d'implantation).
   Contrôles : chevauchement des raccordements, pente maximale et rayons minimaux (ARP catégorie R80 par défaut, valeurs
   urbaines usuelles — à confirmer selon la catégorie ; l'autoroute et les voies secondaires suivent leur catégorie de
