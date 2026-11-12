@@ -135,6 +135,18 @@ function planBand(o) {
   let out = `<rect x="${planR.x}" y="${planR.y}" width="${planR.w}" height="${planR.h}" fill="none" stroke="#000" stroke-width="0.35"/>`;
   out += `<line x1="${plotX0}" y1="${planR.y}" x2="${plotX0}" y2="${planR.y + planR.h}" stroke="#000" stroke-width="0.25"/>`;
   out += `<g clip-path="url(#cp${o.i})">`;
+  // fond satellite (option) : tuiles Web Mercator reprojetées (coins dans le repère du projet), posées par une
+  // transformation affine sur trois coins ; résolution visée ≈ 6 px par mm de papier (≈ 150 dpi)
+  if (typeof o.tiles === 'function') {
+    let list = []; try { list = o.tiles(bb, k * 6) || []; } catch { list = []; }
+    for (const t of list) {
+      const a = T(t.nw), b = T(t.ne), c = T(t.sw);
+      const m = [(b.x - a.x) / 256, (b.y - a.y) / 256, (c.x - a.x) / 256, (c.y - a.y) / 256, a.x, a.y];
+      if (!m.every(Number.isFinite)) continue;
+      out += `<image href="${t.href}" x="-0.3" y="-0.3" width="256.6" height="256.6" preserveAspectRatio="none" transform="matrix(${m.map((v) => v.toFixed(5)).join(' ')})"/>`;
+    }
+    if (list.length) out += txt(plotX0 + plotW - 1, planR.y + planR.h - 1, 'Imagerie © Esri, Maxar, Earthstar Geographics', 1.6, { a: 'end', c: '#fff', halo: false });
+  }
   // fond topographique
   if (o.dxf) {
     let h = '';
