@@ -44,7 +44,7 @@ header.top { display: flex; align-items: center; gap: 14px; padding: 0 12px; bac
 
 /* ---------- Corps */
 /* panneau des onglets à gauche, barre d'outils du plan collée au plan, plan à droite */
-main.app { display: grid; grid-template-columns: 452px 46px minmax(0, 1fr); min-height: 0; }
+main.app { display: grid; grid-template-columns: var(--panelW, 452px) 46px minmax(0, 1fr); min-height: 0; }
 main.app > .panel { grid-column: 1; grid-row: 1; }
 main.app > .tools { grid-column: 2; grid-row: 1; }
 main.app > .stage { grid-column: 3; grid-row: 1; }
@@ -78,7 +78,12 @@ main.app > .stage { grid-column: 3; grid-row: 1; }
 .toast.err { border-left-color: var(--err); }
 
 /* ---------- Panneau */
-.panel { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.panel { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; position: relative; }
+/* poignée de largeur du panneau (glisser ; double-clic : largeur par défaut) */
+.panel-grip { position: absolute; top: 0; bottom: 0; right: -4px; width: 8px; cursor: col-resize; z-index: 8; touch-action: none; }
+.panel-grip:hover, .panel-grip.on { background: linear-gradient(90deg, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px); }
+main.app.full-tab .panel-grip { display: none; }
+html[dir=rtl] .panel-grip { right: auto; left: -4px; }
 /* Onglets : barre de menu en haut, sur toute la largeur (sous l'en-tête), une ligne sur un écran large */
 nav.topnav { background: var(--panel); border-bottom: 1px solid var(--line); padding: 0 8px; min-width: 0; }
 .tabs { display: flex; flex-wrap: wrap; flex: none; }
@@ -259,7 +264,7 @@ dialog li { margin: 4px 0; }
 header.top { min-width: 0; overflow-x: auto; scrollbar-width: none; }
 @media (max-width: 1100px) {
   .brand .sub { display: none; }
-  main.app { grid-template-columns: 390px 46px minmax(0, 1fr); }
+  main.app { grid-template-columns: var(--panelW, 390px) 46px minmax(0, 1fr); }
   #stLL, .prompt { display: none; }
 }
 @media (max-width: 760px) {
@@ -365,8 +370,8 @@ td.pict svg { display: block; }
 .plsvg .pc-fr { fill: none; stroke: #8c98a4; stroke-width: 0.9; }
 .plsvg .pc-rl { stroke: #8c98a4; stroke-width: 0.9; }
 .plsvg .pc-st { stroke: #888; stroke-width: 0.6; }
-.plsvg .pc-lb { fill: #222; font-size: 9.5px; font-weight: 600; }
-.plsvg .pc-v, .plsvg .pc-n { fill: #111; font-size: 9px; font-family: var(--mono); }
+.plsvg .pc-lb { fill: #222; font-size: 11.5px; font-weight: 600; }
+.plsvg .pc-v, .plsvg .pc-n { fill: #111; font-size: 11px; font-family: var(--mono); }
 .plsvg .pc-seg { fill: rgba(198,40,40,0.14); stroke: #9b1c1c; stroke-width: 0.8; }
 .plsvg .pc-seg-t { fill: #9b1c1c; font-weight: 600; }
 .plsvg .pc-para { fill: rgba(21,101,192,0.14); stroke: #0d47a1; stroke-width: 0.8; }
@@ -375,7 +380,7 @@ td.pict svg { display: block; }
 .plsvg .pc-para-s { fill: none; stroke: #0d47a1; stroke-width: 0.9; opacity: .55; }
 .plsvg .pc-ax-l { fill: none; stroke: #111; stroke-width: 1.6; stroke-linejoin: round; }
 .plsvg .pc-axb { stroke: #6b7280; stroke-width: 0.6; stroke-dasharray: 2 2; }
-.plsvg .pc-ax-t { fill: #111; font-size: 8.5px; font-family: var(--mono); }
+.plsvg .pc-ax-t { fill: #111; font-size: 10.5px; font-family: var(--mono); }
 .plsvg .pc-ax-t.arc { fill: #0d47a1; font-weight: 600; } .plsvg .pc-ax-t.clo { fill: #047857; }
 .plsvg .pc-axhit { fill: transparent; }
 .plsvg .pc-rap { stroke: #9ca3af; stroke-width: 0.7; stroke-dasharray: 2 2; }
@@ -723,3 +728,17 @@ dialog.dlg-big #hyBigBody { flex: 1; overflow: auto; padding: 10px 14px; }
 .plsvg .pl-oh.hot .pl-ohhit { fill: rgba(251,191,36,.10); stroke: #fbbf24; stroke-width: 1; stroke-dasharray: 3 2; }
 .plsvg .pl-oh.hot .pl-ovl { fill: #fde68a; font-weight: 700; }
 .ple-svg .ple-hov { pointer-events: none; } /* curseur, accroche, aperçu : jamais cible du pointeur (survol des ouvrages) */
+
+/* Champs alignés dans tous les onglets (et la fenêtre d'un élément) : libellé à gauche, champ calé à droite, unité dans
+   une colonne fixe — un champ par ligne, les saisies forment une colonne verticale quelle que soit la longueur du libellé */
+.tab .fld, #elPop .fld { width: 100%; }
+.tab .row > .fld, #elPop .row > .fld { flex: 1 1 100%; }
+.tab .fld .lb, #elPop .fld .lb, .tab .row .fld .lb, #elPop .row .fld .lb { flex: 1 1 auto; min-width: 0; }
+.tab .fld input[type=text], #elPop .fld input[type=text] { width: 110px; flex: none; }
+.tab .fld input[data-type=text], #elPop .fld input[data-type=text] { width: 200px; }
+.tab .fld select, #elPop .fld select { width: 200px; max-width: 60%; flex: none; }
+.tab .fld .un, #elPop .fld .un { flex: none; width: 34px; min-width: 34px; }
+.tab .fld:not(:has(.un))::after, #elPop .fld:not(:has(.un))::after { content: ''; flex: none; width: 34px; }
+.tab .fld.wide select, .tab .fld.wide input, #elPop .fld.wide select, #elPop .fld.wide input { flex: none; }
+.tab .row > .fw, #elPop .row > .fw { flex: 1 1 100%; }
+.tab .fw .fld, #elPop .fw .fld { width: 100%; }

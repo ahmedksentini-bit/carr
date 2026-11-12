@@ -138,13 +138,13 @@ export function plChecks(PL, context, sEnd) {
 // déclivités et raccordements paraboliques se suivent bout à bout (cellules fusionnées sur l'emprise de chaque élément),
 // et UNE ligne du tracé en plan (droites, clothoïdes, arcs — diagramme des alignements et courbes) quand l'axe en a.
 export const CART_ROWS = [
-  { key: 'num', label: 'N° profil', h: 20 },
-  { key: 'dp', label: 'Dist. partielle (m)', h: 34 },
-  { key: 'dc', label: 'Dist. cumulée (m)', h: 40 },
-  { key: 'z', label: 'Cote TN (m)', h: 40 },
-  { key: 'zp', label: 'Cote projet (m)', h: 40 },
-  { key: 'el', label: 'Déclivités / raccordements', lines: ['Déclivités /', 'raccordements'], h: 30 },
-  { key: 'ax', label: 'Tracé en plan', lines: ['Tracé en plan', '(axe)'], h: 34 },
+  { key: 'num', label: 'N° profil', h: 24 },
+  { key: 'dp', label: 'Dist. partielle (m)', h: 42 },
+  { key: 'dc', label: 'Dist. cumulée (m)', h: 52 },
+  { key: 'z', label: 'Cote TN (m)', h: 50 },
+  { key: 'zp', label: 'Cote projet (m)', h: 50 },
+  { key: 'el', label: 'Déclivités / raccordements', lines: ['Déclivités /', 'raccordements'], h: 36 },
+  { key: 'ax', label: 'Tracé en plan', lines: ['Tracé en plan', '(axe)'], h: 40 },
 ];
 const cartRows = (plan) => (plan ? CART_ROWS : CART_ROWS.filter((r) => r.key !== 'ax'));
 // Éléments du tracé en plan d'un axe (alignement exact : droites L, clothoïdes C, arcs A) : abscisses, rayon, paramètre
@@ -176,19 +176,20 @@ export function plCartSVG(PL, stations, { X, m, w, y0, sMax, sMin = 0, clip = nu
   ROWS.forEach((r, i) => {
     const t = tops[i], cy = t + r.h / 2;
     if (i) o += `<line class="pc-rl" x1="${x0}" y1="${t}" x2="${x1}" y2="${t}"/>`;
-    o += r.lines ? `<text class="pc-lb" x="6" y="${cy - 2}"><tspan x="6">${r.lines[0]}</tspan><tspan x="6" dy="10">${r.lines[1]}</tspan></text>` : `<text class="pc-lb" x="6" y="${cy + 3.5}">${r.label}</text>`;
+    o += r.lines ? `<text class="pc-lb" x="6" y="${cy - 3}"><tspan x="6">${r.lines[0]}</tspan><tspan x="6" dy="13">${r.lines[1]}</tspan></text>` : `<text class="pc-lb" x="6" y="${cy + 4}">${r.label}</text>`;
   });
   o += `<line class="pc-rl" x1="${m.l}" y1="${y0}" x2="${m.l}" y2="${y0 + H}"/>`;
   if (clip) o += `<g clip-path="url(#${clip})">`;
   // stations retenues : au moins 12 px entre deux filets (valeurs verticales)
   const vis = stations.filter((q) => q.s >= sMin - 1e-6 && q.s <= sMax + 1e-6), keep = [];
-  for (const q of vis) if (!keep.length || X(q.s) - X(keep[keep.length - 1].s) >= 12) keep.push(q);
-  if (vis.length && keep[keep.length - 1] !== vis[vis.length - 1]) { const L = vis[vis.length - 1]; if (keep.length > 1 && X(L.s) - X(keep[keep.length - 1].s) < 12) keep.pop(); keep.push(L); }
+  for (const q of vis) if (!keep.length || X(q.s) - X(keep[keep.length - 1].s) >= 15) keep.push(q);
+  if (vis.length && keep[keep.length - 1] !== vis[vis.length - 1]) { const L = vis[vis.length - 1]; if (keep.length > 1 && X(L.s) - X(keep[keep.length - 1].s) < 15) keep.pop(); keep.push(L); }
   const yStn = tops[5], vtxt = (x, t, r, v) => `<text class="pc-v" x="${x.toFixed(1)}" y="${(t + r.h - 3).toFixed(1)}" transform="rotate(-90 ${x.toFixed(1)} ${(t + r.h - 3).toFixed(1)})">${v}</text>`;
+  let xNum = -Infinity; // numéros de profil écrits seulement s'ils ne chevauchent pas le précédent
   keep.forEach((q, k) => {
     const x = X(q.s), zp = PL.zAt(q.s);
     o += `<line class="pc-st" x1="${x.toFixed(1)}" y1="${y0}" x2="${x.toFixed(1)}" y2="${yStn}"/>`;
-    o += `<text class="pc-n" x="${(x + 3).toFixed(1)}" y="${tops[0] + 14}">${q.num}</text>`;
+    if (x + 3 >= xNum) { o += `<text class="pc-n" x="${(x + 3).toFixed(1)}" y="${tops[0] + 16}">${q.num}</text>`; xNum = x + 3 + String(q.num).length * 6.8 + 4; }
     if (k) { const xp = X(keep[k - 1].s); o += vtxt((xp + x) / 2 + 3, tops[1], CART_ROWS[1], fmt(q.s - keep[k - 1].s, 2)); }
     o += vtxt(x + 3.5, tops[2], CART_ROWS[2], fmt(q.s, 2));
     o += vtxt(x + 3.5, tops[3], CART_ROWS[3], q.z == null || !Number.isFinite(q.z) ? '—' : fmt(q.z, 2));
@@ -201,8 +202,8 @@ export function plCartSVG(PL, stations, { X, m, w, y0, sMax, sMin = 0, clip = nu
   const { lines, paras } = plElements(PL, sMax), t = tops[5], rh = ROWS[5].h;
   const cell = (a, b, l1, l2, cls, tip, sym = '') => {
     const A = Math.max(sMin, a), B = Math.min(sMax, b); if (!(B > A + 1e-6)) return '';
-    const xa = X(A), xb = X(B), wd = xb - xa, xm = ((xa + xb) / 2).toFixed(1), fs = Math.max(6.5, Math.min(9, wd / Math.max(6, Math.max(l1.length, l2.length) * 0.58)));
-    const one = wd >= 26 && wd < Math.max(l1.length, l2.length) * 4.6; // cellule étroite : première ligne seule
+    const xa = X(A), xb = X(B), wd = xb - xa, xm = ((xa + xb) / 2).toFixed(1), fs = Math.max(8, Math.min(11.5, wd / Math.max(6, Math.max(l1.length, l2.length) * 0.58)));
+    const one = wd >= 26 && wd < Math.max(l1.length, l2.length) * 5.8; // cellule étroite : première ligne seule
     return `<g><rect class="pc-${cls}" x="${xa.toFixed(1)}" y="${t + 1}" width="${wd.toFixed(1)}" height="${rh - 2}"/>${sym}`
       + (wd >= 26 ? `<text class="pc-${cls}-t" x="${xm}" y="${(t + (one ? rh * 0.62 : rh * 0.42)).toFixed(1)}" text-anchor="middle" font-size="${fs.toFixed(1)}">${l1}</text>` : '')
       + (wd >= 26 && !one ? `<text class="pc-${cls}-l" x="${xm}" y="${(t + rh * 0.84).toFixed(1)}" text-anchor="middle" font-size="${fs.toFixed(1)}">${l2}</text>` : '')
@@ -236,9 +237,9 @@ export function planRowSVG(els, { X, t, h, sMin, sMax }) {
     const wd = xb - xa, len = `L = ${fmt(e.s1 - e.s0, 2)}`, xm = ((xa + xb) / 2).toFixed(1);
     const lab = e.kind === 'L' ? `droite · ${len}` : e.kind === 'A' ? `R = ${fmt(e.R, 0)} ${e.sg > 0 ? 'gauche' : 'droite'} · ${len}` : `A = ${fmt(e.A, 0)} · ${len}`;
     const short = e.kind === 'L' ? len : e.kind === 'A' ? `R ${fmt(e.R, 0)}` : `A ${fmt(e.A, 0)}`;
-    const txt = wd >= lab.length * 4.4 ? lab : wd >= short.length * 4.6 ? short : '';
+    const txt = wd >= lab.length * 6 ? lab : wd >= short.length * 6.2 ? short : '';
     // côté libre : sous le trait pour une droite et un virage à gauche, au-dessus pour un virage à droite
-    const below = e.kind === 'L' || e.sg > 0, yT = e.kind === 'L' ? yM + 9.5 : below ? yM + 4 : yM - 1;
+    const below = e.kind === 'L' || e.sg > 0, yT = e.kind === 'L' ? yM + 12 : below ? yM + 5 : yM - 1.5;
     if (txt) o += `<text class="pc-ax-t${e.kind === 'L' ? '' : e.kind === 'A' ? ' arc' : ' clo'}" x="${xm}" y="${yT.toFixed(1)}" text-anchor="middle">${txt}</text>`;
     o += `<rect class="pc-axhit" x="${xa.toFixed(1)}" y="${t}" width="${Math.max(1, wd).toFixed(1)}" height="${h}"><title>${{ L: 'Droite', A: `Arc de cercle — virage à ${e.sg > 0 ? 'gauche' : 'droite'}`, C: `Clothoïde ${e.out ? 'de sortie' : 'd\'entrée'}` }[e.kind]} · ${e.kind === 'A' ? `R = ${fmt(e.R, 0)} m · ` : e.kind === 'C' ? `A = ${fmt(e.A, 0)} · R = ${fmt(e.R, 0)} m · ` : ''}${len} m · s ${fmt(e.s0, 2)} → ${fmt(e.s1, 2)}</title></rect>`;
   }
