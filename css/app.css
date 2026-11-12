@@ -751,13 +751,6 @@ html.ui-light {
   --ok: #2e7d32; --warn: #a15c00; --err: #c0392b; --info: #1565c0; --c1: #1e6fd0; --c2: #e67e22;
   color-scheme: light;
 }
-html.ui-light header.top { background: #2c3e50; border-bottom-color: #22303d; color: #fff; }
-html.ui-light header.top button { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.22); color: #fff; }
-html.ui-light header.top button:hover { border-color: #fff; }
-html.ui-light header.top button.primary { background: #4a90e2; border-color: #4a90e2; color: #fff; }
-html.ui-light header.top .brand .sub, html.ui-light header.top .dim { color: #c5d0db; }
-html.ui-light header.top .prj-name { color: #fff; }
-html.ui-light header.top .sep { background: rgba(255,255,255,.25); }
 html.ui-light input, html.ui-light select, html.ui-light textarea { background: #ffffff; color: var(--text); }
 html.ui-light .tip { background: rgba(255,255,255,.95); color: var(--text); }
 html.ui-light .toast { background: #ffffff; color: var(--text); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
@@ -785,3 +778,19 @@ html.ui-light .plsvg .pl-dvl { stroke: #0369a1; } html.ui-light .plsvg .pl-dvr {
 html.ui-light .plsvg .pl-dvl-t { fill: #0369a1; } html.ui-light .plsvg .pl-dvr-t { fill: #c2410c; }
 html.ui-light .plsvg .pl-bg { stroke: #94a3b8; }
 html.ui-light .pl-aqua-t { fill: #b91c1c; }
+
+/* Bandeau supérieur aux couleurs de KSR (www.ksr-infra.org) dans les deux thèmes : noir-bleu #0c1016, filet jaune
+   #e6b800, texte crème #f4f1ea, jaune vif #ffd000 au survol et pour l'action principale, logo KSR et lien du site */
+header.top, html.ui-light header.top { background: #0c1016; border-bottom: 2px solid #e6b800; color: #f4f1ea; }
+header.top .brand b { letter-spacing: .14em; color: #f4f1ea; }
+header.top .brand .sub { color: #b8b3a8; }
+header.top .ksr-logo { display: flex; } header.top .ksr-logo img { width: 32px; height: 32px; border-radius: 6px; object-fit: cover; display: block; }
+header.top .ksr-link { color: #ffd000; font-size: 12px; text-decoration: none; white-space: nowrap; margin-left: 4px; }
+header.top .ksr-link:hover { text-decoration: underline; }
+header.top button, html.ui-light header.top button { background: transparent; border-color: rgba(236,231,220,.28); color: #ece7dc; }
+header.top button:hover, html.ui-light header.top button:hover { border-color: #ffd000; color: #ffd000; }
+header.top button.primary, html.ui-light header.top button.primary { background: #ffd000; border-color: #ffd000; color: #111; font-weight: 700; }
+header.top button.primary:hover { background: #e6b800; border-color: #e6b800; color: #111; }
+header.top .prj-name, html.ui-light header.top .prj-name { color: #f4f1ea; }
+header.top .sep, html.ui-light header.top .sep { background: rgba(236,231,220,.25); }
+@media (max-width: 1180px) { header.top .ksr-link { display: none; } }
