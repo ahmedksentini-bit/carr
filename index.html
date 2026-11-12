@@ -121,6 +121,31 @@
     </div>
   </header>
 
+  <nav class="topnav" aria-label="Onglets">
+    <div class="tabs" role="tablist">
+      <button data-tab="projet" class="on">Projet</button>
+      <button data-tab="trace" title="Axes de la voie principale et des voies secondaires">Tracé</button>
+      <button data-tab="terrain">Terrain</button>
+      <button data-tab="devers">Dévers</button>
+      <button data-tab="pl">Profil long</button>
+      <button data-tab="pt">Profils travers</button>
+      <button data-tab="implantation">Implantation</button>
+      <button data-tab="anneau" id="tabRingBtn">Carrefours plans</button>
+      <button data-tab="branches">Branches</button>
+      <button data-tab="profil">Profil</button>
+      <button data-tab="psgr" title="Passage souterrain à gabarit réduit sous un carrefour">PSGR</button>
+      <button data-tab="visibilite">Visibilité</button>
+      <button data-tab="controles">Contrôles <span id="chkBadge" class="badge"></span></button>
+      <button data-tab="capacite">Capacité</button>
+      <button data-tab="echangeur">Échangeur</button>
+      <button data-tab="ouvrages">Ouvrages</button>
+      <button data-tab="signalisation">Signalisation</button>
+      <button data-tab="hydro">Hydrologie</button>
+      <button data-tab="uvr" title="Déclencheurs UVR et plan de gestion des vitesses (Guide M1 ESCWA/UNRSF)">Vitesses / UVR</button>
+      <button data-tab="chaussee" title="Bureau de calcul des chaussées (chaussee.ksr-infra.org) : Burmister, dimensionnement, catalogues, rétrocalcul, renforcement, notes de calcul">Chaussées</button>
+    </div>
+  </nav>
+
   <main class="app">
     <nav class="tools" aria-label="Outils">
       <button data-tool="select" title="Sélection / modification (S)"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.5L10 19z"/></svg></button>
@@ -171,28 +196,6 @@
     </section>
 
     <aside class="panel">
-      <div class="tabs" role="tablist">
-        <button data-tab="projet" class="on">Projet</button>
-        <button data-tab="trace" title="Axes de la voie principale et des voies secondaires">Tracé</button>
-        <button data-tab="terrain">Terrain</button>
-        <button data-tab="devers">Dévers</button>
-        <button data-tab="pl">Profil long</button>
-        <button data-tab="pt">Profils travers</button>
-        <button data-tab="implantation">Implantation</button>
-        <button data-tab="anneau" id="tabRingBtn">Carrefours plans</button>
-        <button data-tab="branches">Branches</button>
-        <button data-tab="profil">Profil</button>
-        <button data-tab="psgr" title="Passage souterrain à gabarit réduit sous un carrefour">PSGR</button>
-        <button data-tab="visibilite">Visibilité</button>
-        <button data-tab="controles">Contrôles <span id="chkBadge" class="badge"></span></button>
-        <button data-tab="capacite">Capacité</button>
-        <button data-tab="echangeur">Échangeur</button>
-        <button data-tab="ouvrages">Ouvrages</button>
-        <button data-tab="signalisation">Signalisation</button>
-        <button data-tab="hydro">Hydrologie</button>
-        <button data-tab="uvr" title="Déclencheurs UVR et plan de gestion des vitesses (Guide M1 ESCWA/UNRSF)">Vitesses / UVR</button>
-        <button data-tab="chaussee" title="Bureau de calcul des chaussées (chaussee.ksr-infra.org) : Burmister, dimensionnement, catalogues, rétrocalcul, renforcement, notes de calcul">Chaussées</button>
-      </div>
 
       <div class="tab" id="tab-chaussee" hidden>
         <div class="ch-bar"><span>Bureau de calcul des chaussées — même menu et mêmes modules que <a href="https://chaussee.ksr-infra.org/bureau.html" target="_blank" rel="noopener">chaussee.ksr-infra.org</a> ; ses données sont enregistrées avec le projet INFRA-KSR.</span>
