@@ -532,8 +532,9 @@ ou sur un fond topographique DXF.
     cartes FAO 54 », source affichée ; une saisie prime. Ancres du bulletin (14° N, 0°) : P10 85,2 mm (86), Pan 513 mm
     (≈ 500) — verrouillées par `tools/test-hydrology.mjs` ;
     **note de calcul hydrologique et hydraulique** (`js/hydro/notefig.js`, comme les notes de BVTrace) : carte
-    d'ensemble des bassins et des axes, position du projet sur les cartes d'isohyètes Pan et P10 (FAO 54), carte de
-    chaque bassin (contour, écoulement principal, tracé, exutoire, échelle, nord), puis par ouvrage le tableau
+    d'ensemble des bassins et des axes **sur fond satellite** (Esri World Imagery, tuiles reprojetées dans le système
+    du projet ; projet non géoréférencé : fond blanc), position du projet sur les cartes d'isohyètes Pan et P10 (FAO 54), carte de
+    chaque bassin sur fond satellite (contour, écoulement principal, tracé, exutoire, échelle, nord), puis par ouvrage le tableau
     hydraulique (régime d'entrée, contrôle gouvernant, HW, hauteurs normale et critique, Froude, vitesse, revanche,
     contre-épreuve BCEOM) et les abaques dessinés — HDS-5 (toutes les configurations d'entrée de la forme, retracées
     par les équations du calcul avec la section retenue) et BCEOM (toutes les courbes de la figure) : courbe retenue en
