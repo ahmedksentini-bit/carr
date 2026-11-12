@@ -593,3 +593,9 @@ ul.ouvr-items li.info { color: var(--muted); }
 .ctxmenu button:hover { background: var(--panel2); }
 .ctxmenu button.danger { color: #f87171; }
 .checks .pk { display: inline-block; font: 600 11px var(--mono); color: #93c5fd; background: rgba(59,130,246,.14); border: 1px solid rgba(59,130,246,.35); border-radius: 4px; padding: 0 5px; margin-right: 6px; white-space: nowrap; }
+.ctxmenu .ctxrow { display: flex; gap: 4px; padding: 3px 4px; }
+.ctxmenu .ctxrow input { flex: 1; min-width: 0; font: 12px var(--mono); padding: 3px 5px; }
+.ctxmenu .ctxrow button { padding: 3px 8px; background: var(--panel2); border: 1px solid var(--line2); }
+.ctxmenu .ctxsep { border-top: 1px solid var(--line); margin: 4px 0; }
+.ctxmenu .ctxlbl { font-size: 11px; opacity: .7; padding: 2px 8px; }
+.ctxmenu .ctxopt { display: flex; gap: 6px; align-items: center; padding: 3px 10px; font-size: 12.5px; cursor: pointer; }
