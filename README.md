@@ -526,6 +526,18 @@ ou sur un fond topographique DXF.
     il vient de l'abaque pente × couverture végétale (BVTrace, hydrologie-tunisie). Le détail du bassin liste les débits
     Orstom et CIEH par régression, la médiane et le motif des régressions non calculées (donnée manquante) ;
     bouton **⤢ Agrandir** des résultats : tableau des bassins et détail du bassin choisi en plein écran ;
+    **Pan et P10 lus sur les cartes FAO 54** (figures 3 et 4, isohyètes relevées par BVTrace, `js/hydro/isohyet.js`) :
+    interpolation entre les deux isohyètes encadrantes à la position des bassins, refus motivé hors du faisceau (jamais
+    d'extrapolation) ; remplis d'office quand ils sont vides ou aux valeurs par défaut, bouton « Lire Pan et P10 sur les
+    cartes FAO 54 », source affichée ; une saisie prime. Ancres du bulletin (14° N, 0°) : P10 85,2 mm (86), Pan 513 mm
+    (≈ 500) — verrouillées par `tools/test-hydrology.mjs` ;
+    **note de calcul hydrologique et hydraulique** (`js/hydro/notefig.js`, comme les notes de BVTrace) : carte
+    d'ensemble des bassins et des axes, position du projet sur les cartes d'isohyètes Pan et P10 (FAO 54), carte de
+    chaque bassin (contour, écoulement principal, tracé, exutoire, échelle, nord), puis par ouvrage le tableau
+    hydraulique (régime d'entrée, contrôle gouvernant, HW, hauteurs normale et critique, Froude, vitesse, revanche,
+    contre-épreuve BCEOM) et les abaques dessinés — HDS-5 (toutes les configurations d'entrée de la forme, retracées
+    par les équations du calcul avec la section retenue) et BCEOM (toutes les courbes de la figure) : courbe retenue en
+    trait plein, les autres en pointillé gris étiqueté, point lu en rouge avec ses graduations ;
   - **fiche du bassin** (clic sur un bassin du plan, ou « Fiche complète » du tableau) : propriétés physiques
     (surface, périmètre, Gravelius, rectangle équivalent, plus long chemin, pentes brute / équivalente / retenue, Ig,
     altitudes, H5 / H95), courbe hypsométrique, profil de l'écoulement principal, temps de concentration, débits par

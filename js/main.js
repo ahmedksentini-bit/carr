@@ -33,8 +33,10 @@ import { delineate } from './hydro/watershed.js';
 import { splitCells, mergeCells, basinOf } from './hydro/basinedit.js';
 import { createWorldCover } from './hydro/worldcover.js';
 import { openMontanaMap, initMontanaMap } from './montanamap.js';
+import { isohyetValueAt } from './hydro/isohyet.js';
 import { computeAll as hydroComputeAll, defaultHypotheses, listMontanaStations, TC_FORMULAS, FRANCOU_RODIER_REGIONS, suggestCiehRegressions, listCiehRegressions, OPTION_LISTS, resolveMontanaStation, montanaAfricaIdf, KR10_GEOLOGY_CATEGORIES } from './hydro/hydrology.js';
-import { sizeCulvert, culvertHydraulics, inletsForShape, defaultInletFor, slopeAboveCritical } from './hydro/culvert.js';
+import { sizeCulvert, culvertHydraulics, inletsForShape, defaultInletFor, slopeAboveCritical, controlLabel, chartLabel } from './hydro/culvert.js';
+import { hds5Svg, bceomSvg, basinMapSvg, overviewMapSvg, isohyetMapSvg } from './hydro/notefig.js';
 import { DCAT, planChecks, platformChecks, catText, designCatOf, clothoidNeed, superPct } from './roadcat.js';
 import { isVsa } from './vsa.js';
 import { ringFrames } from './ringshape.js';
@@ -5617,20 +5619,24 @@ function computeHydro() {
     // bornée à 0,5 – 5 %) sur la demi-longueur ; la pente du radier qui en résulte entre dans le calcul hydraulique.
     const bridge = lg?.K?.type === 'poutres';
     const inv = lg?.K && !bridge ? cadreInverts(lg, { flowDir: c.flowDir, fb: hyInverts(c, null, lg.K.L, zt) }) || hyInverts(c, null, lg.K.L, zt) : hyInverts(c, null, L, zt); // pont à poutres placé : pas de calcul de dalot (revanche sous poutres sur la ligne d'eau du lit)
+    let cvPar = null, cvSec = null; // section et paramètres hydrauliques retenus (figures de la note de calcul)
     if (Q > 0 && lg?.K && !bridge) { // ouvrage déjà placé (éventuellement modifié par l'utilisateur) : vérification de sa section
       const K = lg.K, section = K.type === 'buse' ? { shape: 'circular', diameter: K.B, cells: K.n } : { shape: 'box', width: K.B, height: K.H, cells: K.n };
       const params = { length: K.L, StricklerK: h.hyd.StricklerK, inlet: K.inlet ?? h.hyd.inlet, ...(inv ? { upstreamInvert: inv.zam, slope: Math.max(1e-4, inv.J) } : {}), ...(zr != null && inv ? { roadLevel: zr, minFreeboard: h.hyd.minFreeboard, maxHeadwater: Math.max(0.5, zr - h.hyd.minFreeboard - inv.zam) } : {}) };
+      cvPar = params; cvSec = section;
       try { verif = culvertHydraulics(section, Q, params); } catch (e) { verif = { warnings: [e.message] }; }
     }
     if (Q > 0 && !verif && !bridge) {
       const params = { length: L, StricklerK: h.hyd.StricklerK, ...(h.hyd.inlet ? { inlet: h.hyd.inlet } : {}), ...(inv ? { upstreamInvert: inv.zam, slope: Math.max(1e-4, inv.J) } : {}), ...(zr != null && inv ? { roadLevel: zr, minFreeboard: h.hyd.minFreeboard } : {}) };
+      cvPar = params;
       try { sz = sizeCulvert(Q, { shape: h.hyd.shape, maxHeadwaterRatio: h.hyd.maxHeadwaterRatio, ...(zr != null && inv ? { maxHeadwater: Math.max(0.5, zr - h.hyd.minFreeboard - inv.zam) } : {}) }, params); } catch (e) { sz = { error: e.message }; }
     }
     let ret = sz?.retained, rr = ret?.result;
+    if (!cvSec && ret) cvSec = h.hyd.shape === 'circular' ? { shape: 'circular', diameter: ret.diameter, cells: ret.cells } : { shape: 'box', width: ret.width, height: ret.height, cells: ret.cells };
     if (verif) { const K = lg.K; ret = { cells: K.n, width: K.B, height: K.H, diameter: K.type === 'buse' ? K.B : undefined }; rr = verif; biais = K.ang; }
     if (bridge) biais = lg.K.ang;
     const size = bridge ? `${lg.name || ''} pont à poutres ${lg.K.spans.map((v) => fmt(v, 1)).join(' + ')}`.trim() : verif ? `${lg.name || ''} ${lg.K.type === 'buse' ? `${lg.K.n > 1 ? `${lg.K.n} × ` : ''}Ø ${fmt(lg.K.B, 2)}` : `${lg.K.n > 1 ? `${lg.K.n} × ` : ''}${fmt(lg.K.B, 2)} × ${fmt(lg.K.H, 2)}`}`.trim() : ret ? (h.hyd.shape === 'circular' ? `${ret.cells > 1 ? `${ret.cells} × ` : ''}Ø ${fmt(ret.width ?? ret.diameter ?? ret.section?.diameter, 2)}` : `${ret.cells > 1 ? `${ret.cells} × ` : ''}${fmt(ret.width, 2)} × ${fmt(ret.height, 2)}`) : null;
-    const o = { c, r, Q, Qp, linked, lg, verif: !!verif, ok: rr ? !(rr.headwaterOk === false) && (rr.valid !== false) && !((rr.velocities?.outlet ?? rr.velocities?.full ?? 0) > 3.0001) && !(rr.freeboard != null && rr.freeboard < h.hyd.minFreeboard - 1e-6) : null, up: basins[i].upstreamUids, T: r.values?.returnPeriod ?? hyp.returnPeriod, biais, L, zr, zt, inv, sz, ret, rr, size, hw: rr?.headwater, v: rr?.velocities?.outlet ?? rr?.velocities?.full ?? null };
+    const o = { c, r, Q, Qp, linked, lg, verif: !!verif, ok: rr ? !(rr.headwaterOk === false) && (rr.valid !== false) && !((rr.velocities?.outlet ?? rr.velocities?.full ?? 0) > 3.0001) && !(rr.freeboard != null && rr.freeboard < h.hyd.minFreeboard - 1e-6) : null, up: basins[i].upstreamUids, T: r.values?.returnPeriod ?? hyp.returnPeriod, biais, L, zr, zt, inv, sz, ret, rr, size, hw: rr?.headwater, v: rr?.velocities?.outlet ?? rr?.velocities?.full ?? null, cv: cvSec && cvPar ? { section: cvSec, params: { ...cvPar, inlet: rr?.inlet?.key ?? cvPar.inlet } } : null };
     o.invChecks = invertChecks(lg?.name || c.id, inv, rr);
     if (lg) lg.inv = inv;
     out.list.push(o); out.byId[c.id] = o;
@@ -5669,6 +5675,8 @@ function hyHypHtml(h, stations, opt) {
     const afr = listMontanaStations().afrique, ma = hy.montanaAfrica, idf = ma ? montanaAfricaIdf(ma) : null;
     out += '<h4>Pluie</h4>' +
       `<div class="row">${num('pan', 'Pluie annuelle moyenne Pan', 'mm', '', 'régressions CIEH, zone Orstom (limite 850 mm), abattement')}${num('p10', 'Pluie journalière décennale P10', 'mm')}${num('p100', 'Pluie journalière centennale P100', 'mm')}</div>` +
+      `<div class="row"><button data-isoread="1" title="Pan (figure 3) et P10 (figure 4) du bulletin FAO 54 lus à la position des bassins : interpolation entre les deux isohyètes encadrantes (relevé de BVTrace) ; refus hors du faisceau d'isohyètes">Lire Pan et P10 sur les cartes FAO 54</button></div>` +
+      (hy.panSrc || hy.p10Src ? `<p class="note">${[hy.panSrc ? `Pan : ${esc(hy.panSrc)}` : '', hy.p10Src ? `P10 : ${esc(hy.p10Src)}` : ''].filter(Boolean).join(' — ')}. Les figures sont au 1/20 000 000 : elles situent le bassin dans une bande d'isohyètes ; une valeur locale mesurée prime (saisie).</p>` : '') +
       `<div class="row"><label class="fld"><span class="lb">IDF : station Montana CIEH</span><select data-hy="montanaAfrica">${opt('', 'aucune — a, b saisis', ma?.station ?? '')}${afr.map((q) => opt(q.key, q.key, ma?.station ?? '')).join('')}</select></label><button data-mtmap="afrique" title="Carte des stations Montana CIEH (Afrique de l'Ouest et centrale) avec le projet et ses bassins">🗺 Carte des stations</button>` +
       (ma ? `<label class="fld"><span class="lb">Plage</span><select data-hy="montanaAfricaRange">${(afr.find((q) => q.key === ma.station)?.ranges || []).map((r, i) => opt(i, r.label, ma.range ?? 0)).join('')}</select></label>` : '') +
       `<label class="fld"><span class="lb">a (mm/h)</span><input data-hy="idfA" type="text" inputmode="decimal" value="${idf?.ok ? esc(fmt(idf.a, 3)) : v(hy.idfA || '')}"${idf?.ok ? ' disabled' : ''}></label><label class="fld"><span class="lb">b</span><input data-hy="idfB" type="text" inputmode="decimal" value="${idf?.ok ? esc(fmt(idf.b, 3)) : v(hy.idfB || '')}"${idf?.ok ? ' disabled' : ''}></label></div>` +
@@ -5693,6 +5701,30 @@ function hyBinHtml(h, sel) {
     + inp('dd', 'Densité de drainage Dd', 'km/km²', 'si la régression l\'exige', 'Régressions CIEH qui font intervenir Dd')
     + inp('ig', 'Ig', 'm/km', sel.c.m?.igMPerKm > 0 ? `${fmt(sel.c.m.igMPerKm, 1)} (MNT)` : v.igMPerKm > 0 ? `${fmt(v.igMPerKm, 1)} (déduit)` : '', 'Indice de pente global ; vide : valeur mesurée sur le MNT', 1)
     + '</div>';
+}
+// Position (lon, lat) des bassins pour les cartes FAO 54 : moyenne des exutoires, sinon centre du projet géoréférencé.
+function hyLL() {
+  const h = hyCfg(), ll = (h.res?.crossings || []).filter((c) => Number.isFinite(c.lon) && Number.isFinite(c.lat));
+  if (ll.length) return { lon: ll.reduce((t, c) => t + c.lon, 0) / ll.length, lat: ll.reduce((t, c) => t + c.lat, 0) / ll.length };
+  const bb = designBBox(); if (!bb || !S.crs.geo) return null;
+  const q = S.crs.toLL((bb.x0 + bb.x1) / 2, (bb.y0 + bb.y1) / 2); return { lon: q.lon, lat: q.lat };
+}
+// Pan et P10 lus sur les cartes d'isohyètes du bulletin FAO 54 (figures 3 et 4) ; only : ne remplit que les champs vides.
+function hyReadIsohyets({ only = false, quiet = false } = {}) {
+  const LL = hyLL(), h = hyCfg(), hy = h.hyp; // hyCfg() remplace h.hyp : position d'abord, hypothèses ensuite
+  if (!LL) { if (!quiet) toast('Cartes FAO 54 : position inconnue — projet non géoréférencé ou bassins non délimités.', 'warn'); return false; }
+  const got = [], miss = [];
+  for (const [k, lb] of [['pan', 'Pan'], ['p10', 'P10']]) {
+    if (only && hy[k] > 0 && hy[k] !== defaultHypotheses('fao54')[k]) continue; // saisie de l'utilisateur : gardée
+    const r = isohyetValueAt(k, LL.lon, LL.lat);
+    if (!r.ok) { miss.push(`${lb} : ${r.reason}`); continue; }
+    const v = Math.round(r.value);
+    hy[k] = v; hy[k + 'Src'] = `${fmt(v, 0)} mm lu sur la carte FAO 54 (${k === 'pan' ? 'figure 3' : 'figure 4'}, entre les isohyètes ${fmt(r.low, 0)} et ${fmt(r.high, 0)} mm, à ${fmt(LL.lat, 3)}° ; ${fmt(LL.lon, 3)}°)`;
+    got.push(`${lb} = ${fmt(v, 0)} mm (entre ${fmt(r.low, 0)} et ${fmt(r.high, 0)})`);
+  }
+  if (got.length) { S.hySig = null; update(); }
+  if (!quiet || got.length) { if (got.length) toast(`Cartes FAO 54 : ${got.join(' ; ')}${miss.length ? ` — ${miss.join(' ; ')}` : ''}.`, miss.length ? 'warn' : 'info'); else if (!quiet) toast(`Cartes FAO 54 : ${miss.join(' ; ') || 'Pan et P10 déjà saisis'}.`, 'warn'); }
+  return got.length > 0;
 }
 // Régressions CIEH (tableau 11 du bulletin FAO 54) : cases à cocher par découpage, régressions proposées d'après Pan et
 // la longitude du projet marquées ; aucune cochée = les proposées sont appliquées (computeHydro).
@@ -5789,6 +5821,9 @@ function renderHydro() {
   const hy = h.hyp, tn = hy.methodSet !== 'fao54';
   const LL = (() => { const c = h.res?.crossings?.[0]; if (c?.lat != null) return { lat: c.lat, lon: c.lon }; const bb = designBBox(); return bb && S.crs.geo ? (() => { const q = S.crs.toLL((bb.x0 + bb.x1) / 2, (bb.y0 + bb.y1) / 2); return { lat: q.lat, lon: q.lon }; })() : null; })();
   const stations = listMontanaStations().tunisie.map((st) => ({ ...st, d: LL ? Math.hypot((st.lat - LL.lat) * 111, (st.lon - LL.lon) * 111 * Math.cos((LL.lat * Math.PI) / 180)) : null })).sort((a, b) => (a.d ?? 0) - (b.d ?? 0) || a.name.localeCompare(b.name));
+  // FAO 54 : Pan et P10 vides déduits des cartes d'isohyètes du bulletin (une fois ; la saisie prime ensuite)
+  const dF = defaultHypotheses('fao54'), isDef = (k) => !(hy[k] > 0) || (hy[k] === dF[k] && !hy[k + 'Src']);
+  if (!tn && (isDef('pan') || isDef('p10')) && !h.isoAsked && hyLL()) { h.isoAsked = true; setTimeout(() => hyReadIsohyets({ only: true, quiet: true }), 0); }
   // station Montana : la plus proche du projet par défaut (projet géoréférencé)
   if (tn && hy.montanaStationCode == null && !h.montanaAsked && LL && stations[0]?.d != null) { hy.montanaStationCode = stations[0].code; h.montanaAsked = true; S.hySig = null; }
   const hsig = JSON.stringify([hy, h.hyd, stations.length ? stations[0].code : '']);
@@ -5983,16 +6018,37 @@ function hyNoteHtml(HR) {
   table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:2px 6px;border-bottom:1px solid #e3e7ee;vertical-align:top}th{font-weight:500;color:#5b6478}.mono,.hy-f,.hy-calc{font-family:ui-monospace,Consolas,monospace}
   details{border:1px solid #e3e7ee;border-radius:6px;margin:4px 0;padding:4px 8px;break-inside:avoid}summary{display:flex;justify-content:space-between;gap:12px;font-weight:600;cursor:pointer}.st-nc summary,.st-excl summary{color:#8a93a3}.on summary{color:#0369a1}
   .hy-f{background:#f3f6fa;padding:4px 6px;margin:4px 0;border-radius:4px}.hy-calc{padding:2px 6px;border-left:3px solid #0369a1;margin:4px 0}.hy-notes{color:#9a5b00;margin:4px 0 0 14px;padding:0}.muted{color:#8a93a3;font-weight:400}.note{color:#5b6478}
-  .bar{position:sticky;top:0;background:#fff;padding:6px 0;border-bottom:1px solid #e3e7ee}button{font:inherit;padding:4px 12px}@media print{.bar{display:none}details>summary{list-style:none}}`;
+  .fig{margin:10px 0;break-inside:avoid}.fig svg{max-width:100%;height:auto;display:block}.fig figcaption{color:#5b6478;font-size:11px;margin-top:3px}.bar{position:sticky;top:0;background:#fff;padding:6px 0;border-bottom:1px solid #e3e7ee}button{font:inherit;padding:4px 12px}@media print{.bar{display:none}details>summary{list-style:none}}`;
   const hypRows = [['Jeu de méthodes', tn ? 'Tunisie' : 'FAO 54 (CIEH, Orstom)'], ['Période de retour', `${HR.list[0]?.T ?? '—'} ans`], ['Pan / P10 / P100', `${fmt(h.hyp.pan, 0)} / ${fmt(h.hyp.p10, 0)} / ${fmt(h.hyp.p100, 0)} mm`], ...(tn ? [['P0', `${fmt(h.hyp.p0, 0)} mm`]] : []), ['tc retenu (IDF)', h.hyp.tcFormula || 'Kirpich']];
   const sum = `<table><thead><tr><th>BV</th><th>Axe</th><th>PK</th><th>S km²</th><th>tc min</th><th>i mm/h</th>${tn ? '' : ''}<th>Débits par méthode (m³/s)</th><th>Q propre</th><th>Q retenu</th></tr></thead><tbody>${HR.list.map((o) => { const v = o.r.values || {}; const qs = (v.detail || []).filter((s) => s.group === 'Débits' && s.result).map((s) => `${s.title.split(' — ')[0].replace('CIEH', 'CIEH').replace('Méthode ', '')} ${s.result.v}`).join(' · '); return `<tr><td>${esc(o.c.id)}</td><td>${esc(o.c.traceName)}</td><td class="mono">${fmt(o.c.pk, 0)}</td><td class="mono">${fmt(o.c.totalKm2, 3)}</td><td class="mono">${v.tcRetained ? fmt(v.tcRetained.minutes, 1) : '—'}</td><td class="mono">${v.intensityMmH != null ? fmt(v.intensityMmH, 2) : '—'}</td><td>${esc(qs || '—')}</td><td class="mono">${o.Qp > 0 ? fmt(o.Qp, 2) : '—'}</td><td class="mono"><b>${o.Q > 0 ? fmt(o.Q, 2) : '—'}</b></td></tr>`; }).join('')}</tbody></table>`;
-  const basins = HR.list.map((o) => `<h2>${esc(o.c.id)} — ${esc(o.c.traceName)}, PK ${fmt(o.c.pk, 0)} · S = ${fmt(o.c.totalKm2, 3)} km²</h2>${hyDetailHtml(o.r.values?.detail, true)}`
+  // cartes et figures (comme les notes de BVTrace) : carte d'ensemble, cartes d'isohyètes FAO 54, carte de chaque
+  // bassin, abaques HDS-5 et BCEOM de l'ouvrage (planche entière, courbe retenue en couleur, point lu)
+  const axPts = (key) => { const a = hyAxes().find((q) => q.key === key); if (!a) return []; const n = Math.min(3000, Math.max(20, Math.ceil(a.len / 8))); return [{ name: a.name, pts: Array.from({ length: n + 1 }, (_, i) => a.at((a.len * i) / n).p) }]; };
+  const fig = (svg, cap) => (svg ? `<figure class="fig">${svg}<figcaption>${esc(cap)}</figcaption></figure>` : '');
+  const keys = [...new Set(HR.list.map((o) => o.c.key))], LL = hyLL();
+  let maps = fig(overviewMapSvg(HR.list.map((o) => o.c), keys.flatMap(axPts)), `Carte d'ensemble — ${HR.list.length} bassin(s) versant(s) et axes du projet`);
+  if (!tn && LL) for (const k of ['pan', 'p10']) maps += fig(isohyetMapSvg(k, LL.lon, LL.lat, isohyetValueAt(k, LL.lon, LL.lat)), `Position du projet (${fmt(LL.lat, 3)}° N ; ${fmt(LL.lon, 3)}°) sur la carte d'isohyètes du bulletin FAO 54 — ${k === 'pan' ? 'Pan' : 'P10'} retenu : ${h.hyp[k + 'Src'] || `${fmt(h.hyp[k], 0)} mm (saisi)`}`);
+  const ouvHtml = (o) => {
+    const rr = o.rr; if (!rr || !(o.Q > 0)) return '';
+    const sec = o.cv?.section, D = sec ? (sec.shape === 'circular' ? sec.diameter : sec.height) : null;
+    const rows = [['Ouvrage', o.size ? `${o.size} m${o.verif ? ' (placé, vérification)' : ' (proposé)'}` : '—'], ['Débit de projet', `${fmt(o.Q, 2)} m³/s${sec?.cells > 1 ? ` — ${fmt(rr.dischargePerCell, 2)} m³/s par alvéole` : ''}`],
+      ['Longueur, pente du radier', `${fmt(rr.length, 1)} m, ${fmt((rr.slope || 0) * 100, 2)} %`], ['Tête d\'entrée (HDS-5)', rr.inlet ? chartLabel(rr.inlet) : '—'],
+      ['Régime d\'entrée', `${rr.inletRegime === 'unsubmerged' ? 'non submergé' : rr.inletRegime === 'submerged' ? 'submergé' : 'transition'} — X = ${fmt(rr.inletX, 3)}, HW/D = ${fmt(rr.inletRatio, 3)}`],
+      ['Contrôle gouvernant', `${controlLabel(rr.control)} — HW = ${fmt(rr.headwater, 3)} m${D ? ` (HW/D = ${fmt(rr.headwater / D, 2)})` : ''}, Z eau amont = ${fmt(rr.upstreamWaterElev, 2)} m`],
+      ['Hauteurs normale / critique', `${fmt(rr.normalDepth, 3)} / ${fmt(rr.criticalDepth, 3)} m — Froude ${fmt(rr.froude, 2)}, pente critique ${fmt(rr.criticalSlopePct, 2)} %`],
+      ['Vitesse', `${fmt(o.v, 2)} m/s${o.v > 3 ? ' — > 3 m/s : protection aval' : ''}`], ['Revanche', Number.isFinite(rr.freeboard) ? `${fmt(rr.freeboard, 2)} m (minimum ${fmt(h.hyd.minFreeboard, 2)} m)` : 'chaussée à définir (profil en long)'],
+      ...(rr.bceom ? [['Contre-épreuve BCEOM', `figure ${rr.bceom.figure}, Q* = ${fmt(rr.bceom.qStar, 4)}, H1* = ${fmt(rr.bceom.h1Star, 3)} → H1 = ${fmt(rr.bceom.headwater, 3)} m`]] : [])];
+    return `<h3>Ouvrage hydraulique</h3><table>${rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>`
+      + fig(hds5Svg(o.cv, rr), 'Abaque du contrôle à l\'entrée (FHWA HDS-5) : toutes les configurations d\'entrée de la forme, retracées par les équations du calcul avec la section retenue — la configuration retenue en trait plein, le point calculé en rouge.')
+      + fig(bceomSvg(rr.bceom), 'Abaque BCEOM de niveau amont (contre-épreuve) : toutes les courbes de la figure, la courbe de la tête retenue en trait plein, le point lu en rouge.');
+  };
+  const basins = HR.list.map((o) => `<h2>${esc(o.c.id)} — ${esc(o.c.traceName)}, PK ${fmt(o.c.pk, 0)} · S = ${fmt(o.c.totalKm2, 3)} km²</h2>${fig(basinMapSvg(o.c, axPts(o.c.key), { others: HR.list.filter((q) => q !== o).map((q) => q.c) }), `Bassin ${o.c.id} : contour, écoulement principal et exutoire au droit du tracé`)}${hyDetailHtml(o.r.values?.detail, true)}${ouvHtml(o)}`
     + `<p><b>Débit propre retenu :</b> ${o.Qp > 0 ? `${fmt(o.Qp, 2)} m³/s (${esc(o.r.retained?.method || '')})` : '—'}${o.up?.length ? ` · <b>bassins amont</b> ${esc(o.up.join(', '))} → ${o.r.cumulative?.Q != null ? `${fmt(o.r.cumulative.Q, 2)} m³/s` : esc(o.r.cumulative?.error || '—')}` : ''} · <b>débit de dimensionnement :</b> ${o.Q > 0 ? `${fmt(o.Q, 2)} m³/s` : '—'}</p>`).join('');
-  const title = `Note de calcul hydrologique — ${S.prj.name || 'projet'}`;
+  const title = `Note de calcul hydrologique et hydraulique des ouvrages — ${S.prj.name || 'projet'}`;
   return `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${css}</style></head><body><div class="bar"><button onclick="document.querySelectorAll('details').forEach(d=>d.open=true);print()">Imprimer / PDF</button> <button onclick="document.querySelectorAll('details').forEach(d=>d.open=!d.open)">Plier / déplier</button></div>
   <h1>${esc(title)}</h1><p class="note">${new Date().toLocaleDateString('fr-FR')} · ${HR.list.length} bassin(s) · ${esc(h.res?.dem || '')}</p>
   <table>${hypRows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>
-  <h5>Récapitulatif</h5>${sum}${basins}</body></html>`;
+  <h5>Récapitulatif</h5>${sum}${maps ? `<h2>Cartes</h2>${maps}` : ''}${basins}</body></html>`;
 }
 const bvRow = (k, v) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`;
 const bvTab = (rows) => `<table class="bv-kv"><tbody>${rows.filter(Boolean).join('')}</tbody></table>`;
@@ -6260,6 +6316,7 @@ function bindHydro() {
       hySet(['hyp', 'ciehRegressionIds'], sg.map((q) => q.no)); toast(`Régressions proposées : n° ${sg.map((q) => q.no).join(', ')}.`);
     }
     if (e.target.closest('[data-ciehclear]')) hySet(['hyp', 'ciehRegressionIds'], []);
+    if (e.target.closest('[data-isoread]')) hyReadIsohyets();
     const mb = e.target.closest('[data-mtmap]'); if (mb) openMontana(mb.dataset.mtmap);
   });
   initMontanaMap();
@@ -6288,6 +6345,7 @@ function bindHydro() {
     if (k === 'montanaAfricaRange') { if (h.hyp.montanaAfrica) h.hyp.montanaAfrica = { ...h.hyp.montanaAfrica, range: +v }; hySet(['hyp', '_'], null); return; }
     if (k === 'orstomZoneSel') { h.hyp.orstomZoneAuto = v === 'auto'; if (v !== 'auto') h.hyp.orstomZone = v; hySet(['hyp', '_'], null); return; }
     if (k === 'kr10Geology' && !v) v = null;
+    if (k === 'pan' || k === 'p10') delete hyCfg().hyp[k + 'Src']; // saisie : la valeur n'est plus celle de la carte
     hySet(['hyp', k], v);
   });
   $('#hyHyd').addEventListener('change', (e) => { const kd = e.target.dataset.hyd; if (!kd) return; hySet(['hyd', kd], ['shape', 'inlet'].includes(kd) ? (kd === 'inlet' && /^\d+$/.test(e.target.value) ? +e.target.value : e.target.value) : parseNum(e.target.value)); });
