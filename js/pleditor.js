@@ -188,7 +188,7 @@ export function createPlEditor(host, hooks) {
     const ctx = st.ctx, G = st.geo, box = $('.ple-cart svg'), stripH = (ctx.plan ? 34 : 0) + (ctx.devers?.length ? 84 : 0), H = cartH() + 4 + stripH;
     box.setAttribute('width', G.W); box.setAttribute('height', H); box.setAttribute('viewBox', `0 0 ${G.W} ${H}`);
     const C = plCartSVG(ctx.PL, ctx.stations || [], { X: G.X, m: { l: M.l }, w: G.W, y0: 1, sMax: Math.min(st.view.s1, Math.max(ctx.sEnd, ctx.PL.sEnd)), sMin: Math.max(st.view.s0, ctx.sMin), clip: 'ple-cclip', noRed: !ctx.defined });
-    const sv = stripH ? plStrips({ plan: ctx.plan, devers: ctx.devers }, { X: G.X, m: { l: M.l, r: M.r }, w: G.W, h: H, sMax: st.view.s1, stripH }) : '';
+    const sv = stripH ? plStrips({ plan: ctx.plan, devers: ctx.devers, grade: ctx.defined ? (sv) => (sv >= ctx.PL.nodes[0].s && sv <= ctx.PL.sEnd ? ctx.PL.gradeAt(sv) : NaN) : null }, { X: G.X, m: { l: M.l, r: M.r }, w: G.W, h: H, sMax: st.view.s1, stripH }) : '';
     // libellés des bandeaux (dans la colonne de gauche, hors de la zone défilante)
     const labels = (sv.match(/<text [^>]*x="([\d.]+)"[^>]*>[^<]*(?:<tspan[^>]*>[^<]*<\/tspan>[^<]*)*<\/text>/g) || []).filter((t) => +t.match(/x="([\d.]+)"/)[1] < M.l).join('');
     const strips = stripH ? `<g clip-path="url(#ple-cclip)">${sv}</g>${labels}` : '';
