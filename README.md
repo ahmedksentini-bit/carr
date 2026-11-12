@@ -229,9 +229,26 @@ ou sur un fond topographique DXF.
   ouverture, traverse, murs de tête), fils d'eau cotés aux deux faces et au droit de l'axe, pente, cote de chaussée,
   remblai sur traverse, PHE amont si l'hydraulique est calculée, longueurs de part et d'autre de l'axe. Boutons de
   face : fil d'eau ±1 / ±10 cm (les cotes deviennent saisies ; « Fils d'eau automatiques » y revient), longueur de la
-  face (±10 cm, ±1 m, ±5 m) ; ◀ OH / OH ▶ par PK ; Imprimer (page à l'échelle exacte).
-- **Profil en travers en grand** : onglet Profils travers, « ⤢ Ouvrir le profil en travers en grand » ; dessin à la
-  taille de la fenêtre, ◀ ▶ ou flèches du clavier pour passer d'un profil à l'autre.
+  face (±10 cm, ±1 m, ±5 m) ; ◀ OH / OH ▶ par PK ; Imprimer (page à l'échelle exacte). Le plan montre aussi les talus
+  (barbules, entrées en terre) ; la coupe montre la **ligne d'eau** du calcul hydraulique de l'ouvrage (onglet
+  Hydrologie) : plan d'eau amont à la PHE, hauteur à l'entrée, hauteur normale, hauteur à la sortie, plan d'eau aval,
+  avec Q, yn, yc, vitesse de sortie et contrôle (entrée / sortie). Le tracé combiné dessine aussi les talus.
+- **Profil en travers en grand** : onglet Profils travers, « ⤢ Ouvrir le profil en travers en grand » ; **même échelle
+  en distances et en cotes** (sans exagération), cadré sur la plate-forme et les entrées en terre, plan de comparaison
+  et **cartouche** (distances à l'axe, cotes TN, cotes projet, écart projet − TN aux points de la ligne projet et aux
+  EET, écrits à la verticale) ; ◀ ▶ ou flèches du clavier pour passer d'un profil à l'autre.
+- **Catalogue de demi-profils types** (`js/ptcatalog.js`, 624 demi-profils ; onglet Profils travers, « Catalogue de
+  profils types… ») : urbain — chaussée bidirectionnelle (voie 3,00 / 3,25 / 3,50, stationnement sans / longitudinal
+  2,00 / en bataille 5,00, caniveau sans / CS2 / CC2, bordure T1 / T2 / T3 / T4, trottoir 2,50 ou 1,50) et 2 × 2 voies
+  avec TPC (au niveau revêtu au dévers, surélevé entre bordures T2, creux déversé vers un caniveau CC2 central) ; rural
+  — bidirectionnelle (BDD 0,25 + accotement 1,75, BDD 0,50 + accotement 2,00, accotement revêtu 2,00, BAU 2,50 ;
+  berme sans / 0,75 / 1,00 ; fossé en déblai) et chaussées séparées 2 × 2 / 2 × 3 (TPC au niveau, surélevé, creux
+  avec CC2, engazonné 5,00 ; BDG 0,50 / 1,00 ; BAU 2,50 / 3,00 ou BDD + accotement ; berme ; fossé). Filtres par
+  critère, recherche, aperçu ; « + bibliothèque », « gauche », « droite », « les deux côtés » (affectation à l'axe
+  courant). Bordures et caniveaux : profils NF P 98-340/CN (T1 12 × 20, T2 15 × 25, T3 17 × 28, T4 20 × 30 cm ; CS2
+  25 × 13, CC2 50 × 14), vues de pose usuelles T1 10, T2 14, T3 16, T4 18 cm (à adapter) ; trottoir 2 % vers la
+  chaussée, talus 3/2 en remblai et 1/1 en déblai, couches de chaussée par défaut. Chaque profil importé reste éditable
+  point par point.
   La ligne rouge remplace la pente constante de la branche dans le modèle altimétrique (dévers, points d'implantation).
   Contrôles : chevauchement des raccordements, pente maximale et rayons minimaux (ARP catégorie R80 par défaut, valeurs
   urbaines usuelles — à confirmer selon la catégorie ; l'autoroute et les voies secondaires suivent leur catégorie de

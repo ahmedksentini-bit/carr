@@ -616,3 +616,19 @@ ul.ouvr-items li.info { color: var(--muted); }
 #ohMain { flex: 1; min-width: 0; overflow: auto; background: #6b7280; display: flex; align-items: flex-start; justify-content: center; padding: 10px; }
 #ohMain svg.sheet { background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.4); width: 100%; height: auto; max-width: 1400px; }
 .dlg-head select { font-size: 12px; }
+/* Catalogue de demi-profils types */
+#catBody { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 8px 14px; gap: 8px; }
+.cat-filters { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: flex-end; }
+.cat-filters .fld select, .cat-filters .fld input { min-width: 120px; }
+.cat-list { flex: 1; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); gap: 6px; align-content: start; }
+.cat-item { display: grid; grid-template-columns: 228px 1fr; grid-template-rows: auto auto; gap: 2px 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+.cat-item.in { border-color: #22c55e; }
+.cat-svg { grid-row: span 2; background: #0d1014; border-radius: 4px; }
+.cat-svg .cat-pl { fill: none; stroke: #f87171; stroke-width: 1.4; } .cat-svg .cat-ax { stroke: #fbbf24; stroke-dasharray: 3 2; } .cat-svg circle { fill: #38bdf8; }
+.cat-nm { font-size: 12px; line-height: 1.35; } .cat-in { color: #22c55e; font-size: 11px; }
+.cat-act { display: flex; gap: 4px; flex-wrap: wrap; } .cat-act button { padding: 2px 7px; font-size: 11.5px; }
+.ptbig .pt-cell { fill: none; stroke: var(--line2); stroke-width: 1; }
+.ptbig .pt-rl { fill: #cbd5e1; font: 600 11.5px system-ui, sans-serif; }
+.ptbig .pt-sep { stroke: var(--line2); }
+.ptbig .pt-v { fill: #e5e7eb; font: 11px var(--mono); }
+.ptbig .pt-rap { stroke: #64748b; stroke-width: .7; stroke-dasharray: 2 3; }

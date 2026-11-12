@@ -59,13 +59,15 @@ export function ohSheet(o) {
   const R = Math.hypot(plotW, planR.h) / k / 2 + 5;
   // primitive retenue si sa boîte englobante touche le carré de demi-côté R autour de l'ouvrage
   const near = (pr) => {
+    if (pr.k === 'hatch') return pr.lines.some(([a, b]) => Math.max(a.x, b.x) >= g.p.x - R && Math.min(a.x, b.x) <= g.p.x + R && Math.max(a.y, b.y) >= g.p.y - R && Math.min(a.y, b.y) <= g.p.y + R);
     const pts = pr.k === 'path' ? pr.segs.flatMap((sg) => [sg.a, sg.b, sg.c].filter(Boolean)) : pr.k === 'fill' ? pr.rings.flatMap((r) => r.flatMap((sg) => [sg.a, sg.b, sg.c].filter(Boolean))) : pr.p ? [pr.p] : pr.c ? [pr.c] : [];
     if (!pts.length) return false;
     let xa = Infinity, ya = Infinity, xb = -Infinity, yb = -Infinity;
     for (const q of pts) { if (q.x < xa) xa = q.x; if (q.x > xb) xb = q.x; if (q.y < ya) ya = q.y; if (q.y > yb) yb = q.y; }
     return !(xb < g.p.x - R || xa > g.p.x + R || yb < g.p.y - R || ya > g.p.y + R);
   };
-  for (const L of LAYERS) for (const pr of o.prims || []) if (pr.L === L && near(pr)) svg += primSvg(pr, STY[L], T, k);
+  const inBox = ([a, b]) => Math.max(a.x, b.x) >= g.p.x - R && Math.min(a.x, b.x) <= g.p.x + R && Math.max(a.y, b.y) >= g.p.y - R && Math.min(a.y, b.y) <= g.p.y + R;
+  for (const L of LAYERS) for (const pr of o.prims || []) if (pr.L === L && near(pr)) svg += primSvg(pr.k === 'hatch' ? { ...pr, lines: pr.lines.filter(inBox) } : pr, STY[L], T, k);
   // axe de l'ouvrage, faces, sens d'écoulement
   const A = T(G.add(g.p, G.mul(g.d, x0))), B = T(G.add(g.p, G.mul(g.d, x1)));
   svg += `<line x1="${A.x.toFixed(2)}" y1="${A.y.toFixed(2)}" x2="${B.x.toFixed(2)}" y2="${B.y.toFixed(2)}" stroke="#1d4ed8" stroke-width="0.2" stroke-dasharray="4 1 1 1"/>`;
@@ -124,6 +126,33 @@ export function ohSheet(o) {
   if (zAxR != null) svg += txt(X(0) + 1, Y(zAxR) - 1.2, `chaussée ${f2(zAxR)}`, 2, { c: '#b91c1c', w: 'bold', halo: true });
   svg += txt(X(0) + 1, Y(zfe(0)) + 3, `FE axe ${f2(zfe(0))}`, 2, { c: '#1d4ed8', w: 'bold', halo: true });
   if (zAxR != null) { const hr = zAxR - top(0); svg += txt(X(0) - 1, (Y(zAxR) + Y(top(0))) / 2 + 0.7, `remblai sur traverse ${f2(hr)} m`, 1.9, { a: 'end', c: hr < 0 ? '#dc2626' : '#374151', halo: true }); }
+  // ligne d'eau du calcul hydraulique : plan d'eau amont (PHE), hauteur à l'entrée, hauteur normale dans l'ouvrage,
+  // hauteur à la sortie, plan d'eau aval
+  const hy = o.hyd;
+  if (hy && o.phe != null && Number.isFinite(o.phe)) {
+    const xUp = o.upLeft ? -Lm : Lp, xDn = o.upLeft ? Lp : -Lm, sgn = o.upLeft ? 1 : -1, zUp = zfe(xUp), zDn = zfe(xDn), Hin = H;
+    const ok = (v) => Number.isFinite(v) && v > 0;
+    const yIn = Math.min(Hin, ok(hy.yIn) ? hy.yIn : ok(hy.yc) ? hy.yc : Hin), yOut = Math.min(Hin, ok(hy.yOut) ? hy.yOut : ok(hy.yn) ? hy.yn : yIn);
+    const pts = [{ x: xUp - sgn * ext * 0.9, z: o.phe }, { x: xUp, z: o.phe }, { x: xUp, z: zUp + yIn }];
+    if (ok(hy.yn) && hy.yn < Hin) pts.push({ x: xUp + sgn * (Lm + Lp) * 0.35, z: zfe(xUp + sgn * (Lm + Lp) * 0.35) + Math.min(Hin, hy.yn) });
+    pts.push({ x: xDn, z: zDn + yOut });
+    const zTw = Number.isFinite(hy.twElev) && hy.twElev > zDn - 5 ? Math.max(zDn, hy.twElev) : zDn + (ok(hy.twDepth) ? hy.twDepth : 0);
+    pts.push({ x: xDn, z: zTw }, { x: xDn + sgn * ext * 0.9, z: zTw });
+    const bed = (x) => (sgn * (x - xUp) < 0 ? Math.min(zUp, o.tnAt(x) ?? zUp) : sgn * (x - xDn) > 0 ? Math.min(zDn, o.tnAt(x) ?? zDn) : zfe(x));
+    const top = pts.map((q, i) => `${i ? 'L' : 'M'}${P(X(q.x), Y(q.z))}`).join('');
+    const xs = pts.map((q) => q.x), bot = []; for (let i = 0; i <= 40; i++) { const x = xs[xs.length - 1] + ((xs[0] - xs[xs.length - 1]) * i) / 40; bot.push(`L${P(X(x), Y(bed(x)))}`); }
+    svg += `<path d="${top}${bot.join('')}Z" fill="rgba(56,189,248,0.25)" stroke="none"/><path d="${top}" fill="none" stroke="#0284c7" stroke-width="0.35"/>`;
+    const lab = [];
+    if (hy.Q > 0) lab.push(`Q = ${f2(hy.Q)} m³/s`);
+    if (ok(hy.yIn)) lab.push(`y entrée ${f2(hy.yIn)} m`);
+    if (ok(hy.yn)) lab.push(`yn ${f2(hy.yn)} m`);
+    if (ok(hy.yc)) lab.push(`yc ${f2(hy.yc)} m`);
+    if (ok(hy.yOut)) lab.push(`y sortie ${f2(hy.yOut)} m`);
+    if (hy.v > 0) lab.push(`V sortie ${f2(hy.v)} m/s`);
+    if (hy.control) lab.push(`contrôle ${hy.control === 'inlet' ? 'à l\'entrée' : 'à la sortie'}`);
+    svg += txt(X((Lp - Lm) / 2), Y(zfe((Lp - Lm) / 2)) + 5.5, lab.join(' · '), 1.9, { a: 'middle', c: '#0369a1', halo: true });
+    svg += txt(X(xDn + sgn * ext * 0.45), Y(zTw) - 1, `aval ${f2(zTw)}`, 1.9, { a: 'middle', c: '#0284c7', halo: true });
+  }
   if (o.phe != null && Number.isFinite(o.phe)) {
     const xu = o.upLeft ? -Lm - ext * 0.9 : Lp + ext * 0.1, xv = o.upLeft ? -Lm : Lp + ext * 0.9, yP = Y(o.phe);
     svg += `<line x1="${X(xu).toFixed(2)}" y1="${yP.toFixed(2)}" x2="${X(xv).toFixed(2)}" y2="${yP.toFixed(2)}" stroke="#0284c7" stroke-width="0.35"/>`;

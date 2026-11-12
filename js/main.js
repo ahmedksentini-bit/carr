@@ -17,7 +17,7 @@ import { planElements, profileElements, tabulation, tablesCsv, pkOrigin } from '
 import { combinedSheets, combinedHtml } from './combine.js';
 import { ohSheet } from './ohcoupe.js';
 import { upright, toGon } from './common.js';
-import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF, crossSectionFrom, mainPlatform } from './pt.js';
+import { ptParams, crossSection, crossSections, ptChartSVG, ptBigSVG, ptDXF, crossSectionFrom, mainPlatform } from './pt.js';
 import { plParams, plBuild, plStations, plTerrainLine, plDXF, plChecks, axisLength, axisPointAt, PL_LIMITS } from './pl.js';
 import { createPlEditor } from './pleditor.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
@@ -44,7 +44,8 @@ import { ringPlBuild } from './devers.js';
 import { chausseeOverlaps } from './overlap.js';
 import { empriseObstacles, empriseCheck, empriseMessages } from './emprise.js';
 import { nearestOnDxf, tieSection, tieLanes, tieAxis, tieKeepAxis } from './tiein.js';
-import { autoProfile, newProfile, cloneProfile, findProfile } from './ptype.js';
+import { autoProfile, newProfile, cloneProfile, findProfile, halfSection } from './ptype.js';
+import { catalog as ptCatalog } from './ptcatalog.js';
 import { openTypeEditor } from './pttedit.js';
 import { talusPrims, rowFromSection, radialTalus, earthworkIndex } from './talus.js';
 import { analyse, SITES } from './capacity.js';
@@ -4766,7 +4767,7 @@ function ohData(g) {
   if (A?.defined && !g.ax.key.startsWith('b:')) try { cs = axisSections(S.prj, S.D, g.ax, A, [{ s: g.s, name: '' }], S.tn?.tin || null).list[0] || null; } catch (e) { console.error(e); }
   const tin = S.tn?.tin, tnAt = (x) => { if (!tin) return null; const q = G.add(g.p, G.mul(g.d, x)); return tinZ(tin, q.x, q.y); };
   const hy = (S.hyRes?.list || []).find((o) => o.lg?.c?.id === g.c.id);
-  return { name: g.name, K, g, zLeft: zL, zRight: zRt, upLeft, zR, cs, tnAt, prims: S.D?.prims || [], pk: pkOrigin(S.prj, g.ax.key) + g.s, axisName: g.ax.name, phe: hy?.rr?.upstreamWaterElev ?? null, project: S.prj.name, src: inv?.src || 'radier tiré de la chaussée' };
+  return { name: g.name, K, g, zLeft: zL, zRight: zRt, upLeft, zR, cs, tnAt, prims: [...(S.D?.prims || []), ...(S.talus?.prims || [])], pk: pkOrigin(S.prj, g.ax.key) + g.s, axisName: g.ax.name, phe: hy?.rr?.upstreamWaterElev ?? null, hyd: hy?.rr ? { Q: hy.Q, yIn: hy.rr.profileEntranceDepth, yOut: hy.rr.profileOutletDepth, yn: hy.rr.normalDepth, yc: hy.rr.criticalDepth, twElev: hy.rr.downstreamWaterElev, twDepth: hy.rr.tailwaterDepth, control: hy.rr.control, v: hy.v } : null, project: S.prj.name, src: inv?.src || 'radier tiré de la chaussée' };
 }
 function ohRender() {
   const dlg = $('#dlgOH'); if (!dlg?.open) return;
@@ -4885,7 +4886,7 @@ function bindPL() {
     try {
       R = combinedSheets({
         ax, PL, pk0: pkOrigin(S.prj, key), tnAt: (s) => (tin ? tinZ(tin, ax.at(s).p.x, ax.at(s).p.y) : null),
-        stations: plCartStations(key, ax, A.PL), devAt, ohs, prims: [...(S.D?.prims || []), ...(S.Do || []).flatMap((d) => d.D?.prims || [])],
+        stations: plCartStations(key, ax, A.PL), devAt, ohs, prims: [...(S.D?.prims || []), ...(S.Do || []).flatMap((d) => d.D?.prims || []), ...(S.talus?.prims || [])],
         dxf: S.dxf, tnPts: Array.isArray(S.prj.tn?.pts) ? S.prj.tn.pts : [], tnSrc: S.prj.tn?.source || '', tnPrims: combinedContours(), format, scale, zScale: zs > 0 ? zs : Math.max(1, Math.round(scale / 10)), title: ax.name, project: S.prj.name,
       });
     } catch (e) { console.error(e); toast('Tracé combiné : ' + e.message, 'err'); return; }
@@ -4966,7 +4967,7 @@ function ptList() {
 function ptChartOpts() {
   const ve = +($('#ptVe').value || 0), dlg = $('#dlgPT');
   if (!dlg?.open) return { ve };
-  const b = $('#ptPopBody'), w = Math.max(600, b.clientWidth - 30), h = Math.max(300, b.clientHeight - 70);
+  const b = $('#ptPopBody'), w = Math.max(600, b.clientWidth - 30), h = Math.max(380, b.clientHeight - 80);
   return { ve, w, h };
 }
 function ptPopTitle(cs) { const t = $('#ptPopTtl'); if (t) t.textContent = cs ? `Profil en travers — ${cs.name ? `${cs.name} · ` : ''}s = ${fmt(cs.s, 2)} m${cs.zAxe != null ? ` · z axe ${fmt(cs.zAxe, 3)}` : ''}` : 'Profil en travers'; }
@@ -5005,7 +5006,7 @@ function refreshPT() {
   if (st.dataset.sig !== ssig) { st.dataset.sig = ssig; st.innerHTML = list.map((c, i) => `<option value="${i}">s = ${fmt(c.s, 1)} m</option>`).join(''); }
   st.value = String(S.ptSt);
   const cs = list[S.ptSt];
-  $('#ptChart').innerHTML = cs ? ptChartSVG(cs, ptChartOpts()) : '';
+  $('#ptChart').innerHTML = cs ? ($('#dlgPT')?.open ? ptBigSVG(cs, ptChartOpts()) : ptChartSVG(cs, ptChartOpts())) : '';
   ptPopTitle(cs);
   const last = list[list.length - 1];
   $('#ptTable').innerHTML = '<thead><tr><th>s (m)</th><th>z axe</th><th>z TN</th><th>déblai m²</th><th>remblai m²</th><th>V déblai m³</th><th>V remblai m³</th></tr></thead><tbody>' +
@@ -5030,7 +5031,7 @@ function refreshPTAxis(c) {
   if (st.dataset.sig !== ssig) { st.dataset.sig = ssig; st.innerHTML = list.map((q, i) => `<option value="${i}">${esc(q.name)} — s = ${fmt(q.s, 1)} m</option>`).join(''); }
   st.value = String(S.ptSt);
   const cs = list[S.ptSt];
-  $('#ptChart').innerHTML = cs ? ptChartSVG(cs, ptChartOpts()) : '';
+  $('#ptChart').innerHTML = cs ? ($('#dlgPT')?.open ? ptBigSVG(cs, ptChartOpts()) : ptChartSVG(cs, ptChartOpts())) : '';
   ptPopTitle(cs);
   $('#ptTable').innerHTML = '<thead><tr><th>Profil</th><th>s (m)</th><th>z axe</th><th>z TN</th><th>dévers</th><th>déblai m²</th><th>remblai m²</th><th>V déblai m³</th><th>V remblai m³</th></tr></thead><tbody>' +
     list.map((q, i) => `<tr class="${i === S.ptSt ? 'on' : ''}" data-pts="${i}"><td>${esc(q.name)}</td><td class="mono">${fmt(q.s, 1)}</td><td class="mono">${fmt(q.zAxe)}</td><td class="mono">${q.zTN == null ? '—' : fmt(q.zTN)}</td><td class="mono" title="pentes transversales gauche / droite (positives : montent vers l'extérieur)">${devTxt(q.dev)}</td>` +
@@ -5088,7 +5089,79 @@ function pttUses(id) {
   }
   return out;
 }
+// ------------------------------------------------------------------ catalogue de demi-profils types (ptcatalog.js)
+const CAT_F = [
+  ['ctx', 'Contexte', (q) => q.ctx, { urbain: 'urbain', rural: 'rural (interurbain)' }],
+  ['axe', 'Chaussée', (q) => q.axe, { bidirectionnelle: 'bidirectionnelle (axe au milieu)', TPC: 'séparée (axe au milieu du TPC)' }],
+  ['tpc', 'TPC', (q) => q.tags.tpc, { sans: 'sans', niveau: 'au niveau, revêtu (au dévers)', bordure: 'surélevé entre bordures', creux: 'creux déversé + caniveau CC2', engazonne: 'engazonné' }],
+  ['voies', 'Voies', (q) => q.tags.voies, null],
+  ['park', 'Stationnement', (q) => q.tags.park, { sans: 'sans', long: 'longitudinal 2,00', bataille: 'en bataille 5,00' }],
+  ['gut', 'Caniveau', (q) => q.tags.gut, { sans: 'sans', CS2: 'CS2 (simple pente)', CC2: 'CC2 (double pente)' }],
+  ['curb', 'Bordure', (q) => q.tags.curb, null],
+  ['trot', 'Trottoir', (q) => q.tags.trot, null],
+  ['bord', 'Bord de chaussée', (q) => q.tags.bord, { bdd25: 'BDD 0,25 + accotement 1,75', bdd50: 'BDD 0,50 + accotement 2,00', accrev: 'accotement revêtu 2,00', bau25: 'BAU 2,50', bau30: 'BAU 3,00' }],
+  ['bdg', 'BDG', (q) => q.tags.bdg, null],
+  ['berme', 'Berme', (q) => q.tags.berme, null],
+  ['fosse', 'Fossé en déblai', (q) => q.tags.fosse, null],
+];
+let CAT = null;
+function catOpen() {
+  CAT = CAT || ptCatalog();
+  S.catF = S.catF || {};
+  const dlg = $('#dlgCat'); if (!dlg.open) dlg.showModal();
+  catRender();
+}
+function catRender() {
+  const F = S.catF, sel = CAT.filter((q) => CAT_F.every(([k, , get]) => !F[k] || get(q) === F[k]) && (!F.txt || q.name.toLowerCase().includes(F.txt.toLowerCase())));
+  // filtres : valeurs présentes dans la sélection courante des autres filtres
+  $('#catFilters').innerHTML = `<label class="fld"><span class="lb">Recherche</span><input id="catTxt" type="text" value="${esc(F.txt || '')}" placeholder="ex. T2, CS2, BAU…"></label>` + CAT_F.map(([k, lb, get, names]) => {
+    const pool = CAT.filter((q) => CAT_F.every(([k2, , g2]) => k2 === k || !F[k2] || g2(q) === F[k2]));
+    const vals = [...new Set(pool.map(get).filter((v) => v != null))].sort();
+    if (!vals.length) return '';
+    return `<label class="fld"><span class="lb">${esc(lb)}</span><select data-catf="${k}"><option value="">tous</option>${vals.map((v) => `<option value="${esc(v)}"${F[k] === v ? ' selected' : ''}>${esc(names?.[v] || v)}</option>`).join('')}</select></label>`;
+  }).join('') + `<span class="note">${sel.length} demi-profil(s) sur ${CAT.length}</span>`;
+  const key = $('#pttBox').hidden ? null : $('#pttBox').dataset.key, axName = key ? (S.axpl?.get(key)?.name || key) : '';
+  const lib = pttLib().profiles, have = new Set(lib.map((p) => p.cat).filter(Boolean));
+  const shown = sel.slice(0, 150);
+  $('#catTtl').textContent = `Catalogue de demi-profils types${axName ? ` — axe ${axName}` : ''}`;
+  $('#catList').innerHTML = shown.map((q) => `<div class="cat-item${have.has(q.key) ? ' in' : ''}" data-cat="${esc(q.key)}"><div class="cat-svg">${catPreview(q)}</div><div class="cat-nm">${esc(q.name)}${have.has(q.key) ? ' <span class="cat-in">dans la bibliothèque</span>' : ''}</div><div class="cat-act">`
+    + `<button data-ca="lib" title="Ajouter à la bibliothèque du projet">+ bibliothèque</button>${key ? '<button data-ca="L" title="Ajouter et affecter au côté gauche de l\'axe">gauche</button><button data-ca="R" title="Ajouter et affecter au côté droit de l\'axe">droite</button><button data-ca="LR" class="primary" title="Ajouter et affecter aux deux côtés de l\'axe">les deux côtés</button>' : ''}</div></div>`).join('')
+    + (sel.length > shown.length ? `<p class="note">… et ${sel.length - shown.length} autres : affinez les filtres.</p>` : '');
+}
+// Aperçu du demi-profil (plate-forme seule, dévers 2,5 %, cotes × 4)
+function catPreview(q) {
+  q._svg = q._svg || (() => {
+    try {
+      const P = q.make(), H = halfSection(P, null, { devers: -0.025, xmax: 40 }), L = H.proj.filter((r) => r.m !== 'tn');
+      if (L.length < 2) return '';
+      const xs = L.map((r) => r.x), zs = L.map((r) => r.z), x1 = Math.max(...xs), z0 = Math.min(...zs), z1 = Math.max(...zs), W = 220, Hh = 46, k = (W - 8) / Math.max(1, x1), kz = k * 4;
+      const Y = (z) => Hh / 2 + 6 - (z - (z0 + z1) / 2) * kz;
+      const d = L.map((r, i) => `${i ? 'L' : 'M'}${(4 + r.x * k).toFixed(1)},${Y(r.z).toFixed(1)}`).join('');
+      const marks = L.filter((r) => /BORDURE|CANIVEAU|TPC/.test(r.zone || '')).map((r) => `<circle cx="${(4 + r.x * k).toFixed(1)}" cy="${Y(r.z).toFixed(1)}" r="1.4"/>`).join('');
+      return `<svg viewBox="0 0 ${W} ${Hh}" width="${W}" height="${Hh}"><line x1="4" y1="2" x2="4" y2="${Hh - 2}" class="cat-ax"/><path d="${d}" class="cat-pl"/>${marks}</svg>`;
+    } catch (e) { console.error(e); return ''; }
+  })();
+  return q._svg;
+}
+function catImport(key, side) {
+  const q = CAT.find((x) => x.key === key); if (!q) return;
+  const L = pttLib();
+  let P = L.profiles.find((p) => p.cat === key);
+  if (!P) { P = { ...q.make(), id: Math.random().toString(36).slice(2, 10), cat: key }; L.profiles.push(P); }
+  const axKey = $('#pttBox').hidden ? null : $('#pttBox').dataset.key;
+  if (axKey && side) { const A = pttAxis(axKey); if (side.includes('L')) A.left = P.id; if (side.includes('R')) A.right = P.id; }
+  update(); catRender();
+  toast(`« ${P.name} » ${side && axKey ? `affecté ${side === 'LR' ? 'aux deux côtés' : side === 'L' ? 'au côté gauche' : 'au côté droit'} de l'axe` : 'ajouté à la bibliothèque'}.`);
+}
+function bindCat() {
+  $('#pttCat').addEventListener('click', catOpen);
+  $('#catClose').addEventListener('click', () => $('#dlgCat').close());
+  $('#catFilters').addEventListener('change', (e) => { const k = e.target.dataset.catf; if (k) { S.catF[k] = e.target.value || undefined; catRender(); } });
+  $('#catFilters').addEventListener('input', (e) => { if (e.target.id === 'catTxt') { S.catF.txt = e.target.value; clearTimeout(S.catT); S.catT = setTimeout(() => { catRender(); const i = $('#catTxt'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); } });
+  $('#catList').addEventListener('click', (e) => { const b = e.target.closest('button[data-ca]'), it = e.target.closest('[data-cat]'); if (b && it) catImport(it.dataset.cat, b.dataset.ca === 'lib' ? null : b.dataset.ca); });
+}
 function bindPTT() {
+  bindCat();
   const key = () => $('#pttBox').dataset.key;
   $('#pttL').addEventListener('change', (e) => { pttAxis(key()).left = e.target.value; update(); });
   $('#pttR').addEventListener('change', (e) => { pttAxis(key()).right = e.target.value; update(); });
