@@ -4763,7 +4763,16 @@ function bindPL() {
     const { ax, A, key } = ac, PL = A.defined ? A.PL : null, tin = S.tn?.tin || null;
     let T = null, TP = null; try { T = axisType(S.prj, S.D, key); TP = typeParams(S.prj); } catch { /* sans profil type */ }
     const devAt = (s) => { if (!T) return null; try { const pf = axisPlatform(S.prj, S.D, ax, T, s, PL ? PL.zAt(s) : 0, TP); return { l: pf.dev.left * 100, r: pf.dev.right * 100 }; } catch { return null; } };
-    const ohs = (S.cadres || []).filter((g) => g.ax?.key === key && !g.err && g.c).map((g) => ({ name: g.name, s: +g.c.s || 0, label: g.K ? (g.K.type === 'poutres' ? `${g.K.spans.map((v) => fmt(v, 1)).join(' + ')} m` : `${g.K.n > 1 ? `${g.K.n} × ` : ''}${fmt(g.K.B, 2)} × ${fmt(g.K.H, 2)}`) : '' }));
+    // ouvrages portés par l'axe : dimensions, biais, longueur, cotes fil d'eau (radier au droit de l'axe : saisi ou
+    // automatique, sinon tiré de la chaussée)
+    const ohs = (S.cadres || []).filter((g) => g.ax?.key === key && !g.err && g.c).map((g) => {
+      const K = g.K, s = +g.c.s || 0;
+      if (!K) return { name: g.name, s, label: '' };
+      if (K.type === 'poutres') return { name: g.name, s, kind: 'poutres', label: `${K.spans.map((v) => fmt(v, 1)).join(' + ')} m`, ang: K.ang, L: K.L };
+      const zR = PL ? PL.zAt(s) : null, zB = g.inv ? g.inv.zAx : zR != null ? zR - K.Hr - K.et - K.H : null;
+      const dims = K.type === 'buse' ? `${K.n > 1 ? `${K.n} × ` : ''}buse Ø ${fmt(K.B, 2)}` : `${K.n > 1 ? `${K.n} × ` : ''}${fmt(K.B, 2)} × ${fmt(K.H, 2)}`;
+      return { name: g.name, s, kind: K.type, label: dims, n: K.n, B: K.B, H: K.H, ep: K.ep, et: K.et, ei: K.ei, er: K.er, sinP: K.sinP, ang: K.ang, L: K.L, zB, zam: g.inv?.zam ?? null, zav: g.inv?.zav ?? null, J: g.inv?.J ?? null };
+    });
     const scale = +$('#plCbScale').value || 1000, zs = +$('#plCbZ').value || 0, format = $('#plCbFmt').value || 'A3';
     let R;
     try {

@@ -220,7 +220,13 @@ function planBand(o) {
   for (const q of o.ohs || []) {
     if (q.s < s0 || q.s > s1) continue;
     const { p, t } = ax.at(q.s), m = G.rot90(t), c = T(G.add(p, G.mul(m, half + 2 / k)));
-    out += txt(c.x, c.y, q.name, 2, { a: 'middle', c: '#1d4ed8', w: 'bold', halo: true });
+    // fiche de l'ouvrage : désignation, dimensions, PK, biais, longueur, cotes fil d'eau (empilées vers le haut)
+    const lines = [[q.name, 2, 'bold'], [q.label, 1.7]];
+    lines.push([`PK ${fmtPk(o.pk0 + q.s).replace(/,00$/, '')} · biais ${f2(q.ang ?? 100, 1)} gr${q.L ? ` · L ${f2(q.L)} m` : ''}`, 1.6]);
+    if (q.zam != null && q.zav != null) lines.push([`FE amont ${f2(q.zam)} → aval ${f2(q.zav)} (${f2((q.J || 0) * 100)} %)`, 1.6]);
+    if (q.zB != null) lines.push([`FE axe ${f2(q.zB)}`, 1.7, 'bold']);
+    let y = c.y - (lines.length - 1) * 2.3;
+    for (const [s, h, w] of lines) { if (s) out += txt(c.x, y, s, h, { a: 'middle', c: '#1d4ed8', w: w || 'normal', halo: true }); y += 2.3; }
   }
   out += '</g>';
   // colonne de gauche : nord, échelle graphique, légende
@@ -297,6 +303,12 @@ function profileBand(o) {
   for (let s = s0; s <= s1 + 1e-9; s += dS) smp.push(s);
   if (smp[smp.length - 1] < s1 - 1e-6) smp.push(s1);
   for (const q of vis) smp.push(q.s);
+  // ouvrages (cadres, buses) : leur coupe doit tenir dans le cadre avec la ligne rouge (fond du radier compris)
+  const ohZ = (o.ohs || []).filter((q) => q.zB != null && q.B > 0 && q.sinP > 0 && q.s >= s0 && q.s <= s1).map((q) => {
+    const W = (q.n * q.B + (q.n - 1) * q.ei + 2 * q.ep) / q.sinP;
+    return { a: q.s - W / 2 - 1, b: q.s + W / 2 + 1, z: q.zB - (q.kind === 'pipo' ? 0 : q.er) - 0.3 };
+  });
+  for (const c of ohZ) smp.push(c.a, (c.a + c.b) / 2, c.b);
   smp.sort((a, b) => a - b);
   // plans de comparaison : zones où TN et projet tiennent dans la hauteur du cadre
   const cap = plot.h / kz, zones = [];
@@ -305,6 +317,7 @@ function profileBand(o) {
     // la ligne rouge prime : un TN trop éloigné d'elle pour tenir dans le cadre est simplement rogné
     let zs = [tn(s), zp(s)].filter((v) => v != null);
     if (zs.length === 2 && Math.abs(zs[0] - zs[1]) > cap * 0.8) zs = [zs[1]];
+    for (const c of ohZ) if (s >= c.a && s <= c.b && (zp(s) == null || zp(s) - c.z < cap * 0.9)) zs.push(c.z);
     if (!zs.length) continue;
     const lo = Math.min(...zs), hi = Math.max(...zs);
     if (!zn) { zn = { s, lo, hi }; continue; }
@@ -370,13 +383,38 @@ function profileBand(o) {
     const d = z - t, x = X(q.s) + 0.75, y = Math.max(plot.y + 6, Y(q.s, z) - 1.2);
     out += `<text x="${x.toFixed(2)}" y="${y.toFixed(2)}" font-size="1.5" fill="${d >= 0 ? '#15803d' : '#b45309'}" transform="rotate(-90 ${x.toFixed(2)} ${y.toFixed(2)})" stroke="#fff" stroke-width="0.35" paint-order="stroke">${d >= 0 ? '+' : '−'}${f2(Math.abs(d))}</text>`;
   }
-  for (const q of o.ohs || []) { // ouvrages : repère sous la ligne rouge, désignation au-dessus
+  for (const q of o.ohs || []) { // ouvrages : coupe au droit de l'axe (cadre, PIPO, buse), désignation au-dessus
     if (q.s < s0 || q.s > s1) continue;
     const z = zp(q.s) ?? tn(q.s); if (z == null) continue;
     const y = Y(q.s, z), x = X(q.s);
-    out += `<line x1="${x.toFixed(2)}" y1="${(y + 1).toFixed(2)}" x2="${x.toFixed(2)}" y2="${(plot.y + plot.h).toFixed(2)}" stroke="#1d4ed8" stroke-width="0.3"/>`;
-    out += txt(x, Math.max(plot.y + 7, y - 6), q.name, 2, { a: 'middle', c: '#1d4ed8', w: 'bold', halo: true });
-    if (q.label) out += txt(x, Math.max(plot.y + 9.6, y - 3.4), q.label, 1.7, { a: 'middle', c: '#1d4ed8', halo: true });
+    if (q.zB != null && q.B > 0 && q.sinP > 0) {
+      // largeurs le long de l'axe (biais : ÷ sin ψ), hauteurs à l'échelle des hauteurs
+      const sp = q.sinP, W = (q.n * q.B + (q.n - 1) * q.ei + 2 * q.ep) / sp, sa = q.s - W / 2, zB = q.zB, zF = zB - (q.kind === 'pipo' ? 0 : q.er), zT = zB + q.H + q.et;
+      const xa = X(sa), xb = X(sa + W), yF = Y(q.s, zF), yT = Y(q.s, zT);
+      if (q.kind === 'buse') {
+        for (let i = 0; i < q.n; i++) {
+          const sc = sa + (q.ep + q.B / 2 + i * (q.B + q.ei)) / sp, cx = X(sc), cy = Y(q.s, zB + q.B / 2);
+          out += `<ellipse cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" rx="${(((q.B / 2 + q.ep) / sp) * k).toFixed(2)}" ry="${((q.B / 2 + q.ep) * kz).toFixed(2)}" fill="#dbe6fb" stroke="#1d4ed8" stroke-width="0.25"/>`;
+          out += `<ellipse cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" rx="${((q.B / 2 / sp) * k).toFixed(2)}" ry="${((q.B / 2) * kz).toFixed(2)}" fill="#fff" stroke="#1d4ed8" stroke-width="0.2"/>`;
+        }
+      } else {
+        out += `<rect x="${xa.toFixed(2)}" y="${yT.toFixed(2)}" width="${(xb - xa).toFixed(2)}" height="${(yF - yT).toFixed(2)}" fill="#dbe6fb" stroke="#1d4ed8" stroke-width="0.25"/>`;
+        for (let i = 0; i < q.n; i++) {
+          const c0 = sa + (q.ep + i * (q.B + q.ei)) / sp;
+          out += `<rect x="${X(c0).toFixed(2)}" y="${Y(q.s, zB + q.H).toFixed(2)}" width="${((q.B / sp) * k).toFixed(2)}" height="${(q.H * kz).toFixed(2)}" fill="#fff" stroke="#1d4ed8" stroke-width="0.2"/>`;
+        }
+      }
+      // fil d'eau au droit de l'axe : repère et cote
+      const yB = Y(q.s, zB);
+      out += `<path d="M${P(x - 0.8, yB - 1.2)}L${P(x + 0.8, yB - 1.2)}L${P(x, yB)}Z" fill="#1d4ed8"/>`;
+      out += `<line x1="${x.toFixed(2)}" y1="${yB.toFixed(2)}" x2="${(xb + 1.5).toFixed(2)}" y2="${yB.toFixed(2)}" stroke="#1d4ed8" stroke-width="0.12"/>`;
+      out += txt(xb + 1.8, yB + 0.6, `FE axe ${f2(zB)}`, 1.8, { c: '#1d4ed8', w: 'bold', halo: true });
+      if (yB > plot.y + plot.h - 1) out += txt(x + 1, plot.y + plot.h - 1.5, `↓ FE axe ${f2(zB)} sous le cadre`, 1.7, { c: '#1d4ed8', w: 'bold', halo: true });
+      out += `<line x1="${x.toFixed(2)}" y1="${(y + 0.6).toFixed(2)}" x2="${x.toFixed(2)}" y2="${(yT - 0.3).toFixed(2)}" stroke="#1d4ed8" stroke-width="0.12" stroke-dasharray="0.8 0.5"/>`;
+    } else out += `<line x1="${x.toFixed(2)}" y1="${(y + 1).toFixed(2)}" x2="${x.toFixed(2)}" y2="${(plot.y + plot.h).toFixed(2)}" stroke="#1d4ed8" stroke-width="0.3"/>`;
+    out += txt(x, Math.max(plot.y + 7, y - 8.6), q.name, 2, { a: 'middle', c: '#1d4ed8', w: 'bold', halo: true });
+    if (q.label) out += txt(x, Math.max(plot.y + 9.6, y - 6), `${q.label}${q.ang != null && Math.abs(q.ang - 100) > 0.05 ? ` · biais ${f2(q.ang, 1)} gr` : ''}`, 1.7, { a: 'middle', c: '#1d4ed8', halo: true });
+    if (q.zB != null) out += txt(x, Math.max(plot.y + 12, y - 3.4), `PK ${fmtPk(o.pk0 + q.s).replace(/,00$/, '')} · FE ${f2(q.zB)}${q.L ? ` · L ${f2(q.L)} m` : ''}`, 1.6, { a: 'middle', c: '#1d4ed8', halo: true });
   }
   out += '</g>';
   // échelle des hauteurs dans la colonne de gauche (première zone)
