@@ -226,6 +226,63 @@ export function ptChartSVG(cs, opts = {}) {
   out += `<text class="al" x="${m.l}" y="12">axe z ${fmt(cs.zAxe)}${cs.zTN != null ? ` · TN ${fmt(cs.zTN)}` : ''} · déblai ${fmt(cs.cut, 2)} m² · remblai ${fmt(cs.fill, 2)} m²</text></svg>`;
   return out;
 }
+// Profil en travers en grand : même échelle en distances et en cotes (pas d'exagération), cadré sur la plate-forme et les
+// entrées en terre, plan de comparaison et cartouche (distances à l'axe, cotes TN, cotes projet, écarts) aux points
+// caractéristiques de la ligne projet et aux EET, valeurs écrites à la verticale.
+export function ptBigSVG(cs, opts = {}) {
+  const w = opts.w || 1200, h = opts.h || 700, m = { l: 150, r: 20, t: 30 };
+  const ends = [cs.endL, cs.endR].filter(Boolean);
+  const ys = [...cs.proj.map((q) => q.y), ...ends.map((e) => e.y)];
+  const yA = Math.min(...ys) - 3, yB = Math.max(...ys) + 3;
+  const tnIn = cs.tn.filter((q) => q.z != null && q.y >= yA && q.y <= yB);
+  const zs = [...cs.proj.map((q) => q.z), ...(cs.arase || []).map((q) => q.z), ...tnIn.map((q) => q.z)];
+  const zPC = Math.floor(Math.min(...zs) - 1), zTop = Math.max(...zs) + 0.8;
+  const rowH = 58, rows = [['Distances à l\'axe (m)', 'd'], ['Cotes TN', 'tn'], ['Cotes projet', 'zp'], ['Écart projet − TN', 'dz']], cartH = rows.length * rowH;
+  const plotW = w - m.l - m.r, plotH = h - m.t - cartH - 12, k = Math.min(plotW / (yB - yA), plotH / (zTop - zPC));
+  const X = (y) => m.l + (y - yA) * k + (plotW - (yB - yA) * k) / 2, yBase = m.t + plotH, Y = (z) => yBase - (z - zPC) * k;
+  const P = (y, z) => `${X(y).toFixed(1)},${Y(z).toFixed(1)}`;
+  let out = `<svg viewBox="0 0 ${w} ${h}" class="plsvg ptbig">`;
+  const g = niceStep(Math.max((yB - yA) / 12, 0.5));
+  for (let y = Math.ceil(yA / g) * g; y <= yB; y += g) out += `<line class="gl" x1="${X(y).toFixed(1)}" y1="${m.t}" x2="${X(y).toFixed(1)}" y2="${yBase}"/>`;
+  for (let z = zPC; z <= zTop; z += g) out += `<line class="gl" x1="${X(yA).toFixed(1)}" y1="${Y(z).toFixed(1)}" x2="${X(yB).toFixed(1)}" y2="${Y(z).toFixed(1)}"/><text class="tk" x="${(X(yA) - 6).toFixed(1)}" y="${(Y(z) + 4).toFixed(1)}" text-anchor="end">${fmt(z, g < 1 ? 1 : 0)}</text>`;
+  const zP = (y) => { for (let i = 0; i + 1 < cs.proj.length; i++) { const a = cs.proj[i], b = cs.proj[i + 1]; if (y >= a.y - 1e-9 && y <= b.y + 1e-9) return b.y - a.y < 1e-9 ? Math.max(a.z, b.z) : a.z + ((y - a.y) / (b.y - a.y)) * (b.z - a.z); } return null; };
+  if (tnIn.length > 1) {
+    let fill = '', cut = '';
+    const y0 = cs.proj[0].y, y1 = cs.proj[cs.proj.length - 1].y;
+    for (let y = y0; y < y1 - 1e-9; y += 0.1) {
+      const ya = y, yb = Math.min(y1, y + 0.1), pa = zP(ya), pb = zP(yb), ta = tnAt(cs.tn, ya), tb = tnAt(cs.tn, yb);
+      if (pa == null || pb == null || ta == null || tb == null) continue;
+      const poly = `M${P(ya, ta)}L${P(yb, tb)}L${P(yb, pb)}L${P(ya, pa)}Z`;
+      if ((pa + pb) / 2 >= (ta + tb) / 2) fill += poly; else cut += poly;
+    }
+    out += `<path class="pl-fill" d="${fill}"/><path class="pl-cut" d="${cut}"/>`;
+    out += `<path class="pl-tn" d="${tnIn.map((q, i) => `${i ? 'L' : 'M'}${P(q.y, q.z)}`).join('')}"/>`;
+  }
+  if (cs.arase?.length > 1) out += `<path class="pl-arase" d="${cs.arase.map((q, i) => `${i ? 'L' : 'M'}${P(q.y, q.z)}`).join('')}"/>`;
+  out += `<path class="pl-red" d="${cs.proj.map((q, i) => `${i ? 'L' : 'M'}${P(q.y, q.z)}`).join('')}"/>`;
+  out += `<line class="pl-tg" x1="${X(0).toFixed(1)}" y1="${m.t}" x2="${X(0).toFixed(1)}" y2="${yBase}"/>`;
+  for (const e of ends) if (e.br) out += `<circle class="pl-eet" cx="${X(e.y).toFixed(1)}" cy="${Y(e.z).toFixed(1)}" r="3.5"/>`;
+  // libellés des bandes au milieu de chaque bande, sans chevauchement
+  { let last = -Infinity; const P2 = cs.platform;
+    for (let i = 1; i < P2.length; i++) { const q = P2[i], a = P2[i - 1]; if (!q.label || !/^(voie|berme|trottoir|îlot|tpc|bau|bdd|bdg|stationnement|accotement|cc|cs)/i.test(q.label)) continue;
+      const xm = (X(a.y) + X(q.y)) / 2, wpx = q.label.length * 6; if (Math.abs(X(q.y) - X(a.y)) < 20 || xm - wpx / 2 < last + 4) continue;
+      out += `<text class="pl-lb" x="${xm.toFixed(1)}" y="${(Y((a.z + q.z) / 2) - 8).toFixed(1)}" text-anchor="middle" font-size="11">${q.label}</text>`; last = xm + wpx / 2; } }
+  out += `<line x1="${X(yA).toFixed(1)}" y1="${yBase}" x2="${X(yB).toFixed(1)}" y2="${yBase}" class="ax"/><text class="al" x="${(X(yA) + 4).toFixed(1)}" y="${yBase - 5}">PC ${fmt(zPC, 2)}</text>`;
+  const c0 = yBase + 12, xL = 8, xR = w - m.r;
+  rows.forEach(([lb], i) => { const y = c0 + i * rowH; out += `<rect x="${xL}" y="${y}" width="${xR - xL}" height="${rowH}" class="pt-cell"/><text class="pt-rl" x="${xL + 6}" y="${y + rowH / 2 + 4}">${lb}</text>`; });
+  out += `<line x1="${m.l - 6}" y1="${c0}" x2="${m.l - 6}" y2="${c0 + cartH}" class="pt-sep"/>`;
+  const pts = [...cs.proj.map((q) => ({ y: q.y, z: q.z })), ...ends.map((e) => ({ y: e.y, z: e.z }))].sort((a, b) => a.y - b.y);
+  const keep = [];
+  for (const q of pts) if (!keep.length || X(q.y) - X(keep[keep.length - 1].y) >= 14) keep.push(q); else if (Math.abs(q.y) < 1e-6) keep[keep.length - 1] = q;
+  const vt = (x, i, v) => { const yb = c0 + (i + 1) * rowH - 5; return `<text class="pt-v" x="${(x + 4).toFixed(1)}" y="${yb.toFixed(1)}" transform="rotate(-90 ${(x + 4).toFixed(1)} ${yb.toFixed(1)})">${v}</text>`; };
+  for (const q of keep) {
+    const x = X(q.y), t = tnAt(cs.tn, q.y);
+    out += `<line class="pt-rap" x1="${x.toFixed(1)}" y1="${Y(q.z).toFixed(1)}" x2="${x.toFixed(1)}" y2="${(c0 + cartH).toFixed(1)}"/>`;
+    out += vt(x, 0, fmt(q.y, 2)) + vt(x, 1, t == null ? '—' : fmt(t, 2)) + vt(x, 2, fmt(q.z, 2)) + vt(x, 3, t == null ? '—' : `${q.z - t >= 0 ? '+' : '−'}${fmt(Math.abs(q.z - t), 2)}`);
+  }
+  out += `<text class="pf-note" x="${xR}" y="18" text-anchor="end">${cs.name ? `${cs.name} · ` : ''}s = ${fmt(cs.s, 2)} m · axe z ${fmt(cs.zAxe, 3)}${cs.zTN != null ? ` · TN ${fmt(cs.zTN, 2)}` : ''} · déblai ${fmt(cs.cut, 2)} m² · remblai ${fmt(cs.fill, 2)} m² · même échelle en distances et en cotes</text></svg>`;
+  return out;
+}
 function niceStep(v) { const p = 10 ** Math.floor(Math.log10(Math.max(1e-9, v))), r = v / p; return (r < 1.5 ? 1 : r < 3.5 ? 2 : r < 7.5 ? 5 : 10) * p; }
 
 // --------------------------------------------------------------------------- DXF : toutes les coupes en planches

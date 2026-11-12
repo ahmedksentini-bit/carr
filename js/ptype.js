@@ -48,12 +48,14 @@ export function newPoint(q = {}) {
 export function consFromBands(bands, o = {}) {
   const points = [], project = [], arase = [];
   const add = (q) => { const r = newPoint(q); points.push(r); return r; };
-  const o0 = add({ m: 'origine', code: 'Axe', zone: 'AXE' });
+  const o0 = add({ m: 'origine', code: 'Axe', zone: 'AXE', z: num(o.z0) });
   project.push(o0.id);
   let par = o0;
   const ends = [o0];
   for (const b of bands) {
-    par = add({ parent: par.id, m: 'dxpente', dx: b.w, p: b.mode === 'devers' ? 0 : num(b.p), src: b.mode === 'devers' ? 'devers' : 'fixe', code: b.code, zone: b.zone || '' });
+    // bande à pente (dévers de la chaussée ou pente fixe) ou décrochement ΔX / ΔZ (face de bordure : dz ≠ 0)
+    par = b.dz != null ? add({ parent: par.id, m: 'dxdz', dx: num(b.w), dz: num(b.dz), code: b.code, zone: b.zone || '' })
+      : add({ parent: par.id, m: 'dxpente', dx: b.w, p: b.mode === 'devers' ? 0 : num(b.p), src: b.mode === 'devers' ? 'devers' : 'fixe', code: b.code, zone: b.zone || '' });
     project.push(par.id); ends.push(par);
   }
   const depth = num(o.depth);

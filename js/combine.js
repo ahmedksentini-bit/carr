@@ -18,7 +18,7 @@ const sgn = (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${f2(Math.abs(v))}`;
 const STY = {
   CHAUSSEE: { fill: '#dedfe2' }, TROTTOIR: { fill: '#ece7dc', stroke: '#666', w: 0.15 },
   ILOT_CENTRAL: { fill: '#d5e8cc', stroke: '#222', w: 0.25 }, ILOT_SEP: { fill: '#d5e8cc', stroke: '#222', w: 0.25 },
-  TALUS: { stroke: '#8b6f47', w: 0.12 }, LIMITE: { stroke: '#666', w: 0.13 }, ACCOTEMENT: { stroke: '#666', w: 0.13, dash: [1.5, 1] },
+  TALUS: { stroke: '#8b6f47', w: 0.12 }, EET: { stroke: '#8b6f47', w: 0.2, dash: [1.2, 0.6] }, LIMITE: { stroke: '#666', w: 0.13 }, ACCOTEMENT: { stroke: '#666', w: 0.13, dash: [1.5, 1] },
   BORDURE: { stroke: '#111', w: 0.32 }, MARQUAGE: { stroke: '#333', w: 0.15 }, RETENUE: { stroke: '#444', w: 0.25 },
   OUVRAGE: { stroke: '#1d4ed8', w: 0.3, fill: '#dbe6fb' }, AXE: { stroke: '#b91c1c', w: 0.15, dash: [6, 1, 1, 1] },
 };
