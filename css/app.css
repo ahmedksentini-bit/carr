@@ -742,3 +742,46 @@ dialog.dlg-big #hyBigBody { flex: 1; overflow: auto; padding: 10px 14px; }
 .tab .fld.wide select, .tab .fld.wide input, #elPop .fld.wide select, #elPop .fld.wide input { flex: none; }
 .tab .row > .fw, #elPop .row > .fw { flex: 1 1 100%; }
 .tab .fw .fld, #elPop .fw .fld { width: 100%; }
+
+/* ================================================================ Thème clair (défaut), à la manière de BVTrace :
+   panneaux gris clair, bordures grises, texte ardoise, bleu d'action ; plan sur fond gris clair (THEMES.light) */
+html.ui-light {
+  --bg: #e9ecef; --panel: #f7f8fa; --panel2: #eef1f4; --line: #cfd4da; --line2: #b9c1ca;
+  --text: #1f2933; --muted: #5b6672; --accent: #1e6fd0; --accent-ink: #ffffff;
+  --ok: #2e7d32; --warn: #a15c00; --err: #c0392b; --info: #1565c0; --c1: #1e6fd0; --c2: #e67e22;
+  color-scheme: light;
+}
+html.ui-light header.top { background: #2c3e50; border-bottom-color: #22303d; color: #fff; }
+html.ui-light header.top button { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.22); color: #fff; }
+html.ui-light header.top button:hover { border-color: #fff; }
+html.ui-light header.top button.primary { background: #4a90e2; border-color: #4a90e2; color: #fff; }
+html.ui-light header.top .brand .sub, html.ui-light header.top .dim { color: #c5d0db; }
+html.ui-light header.top .prj-name { color: #fff; }
+html.ui-light header.top .sep { background: rgba(255,255,255,.25); }
+html.ui-light input, html.ui-light select, html.ui-light textarea { background: #ffffff; color: var(--text); }
+html.ui-light .tip { background: rgba(255,255,255,.95); color: var(--text); }
+html.ui-light .toast { background: #ffffff; color: var(--text); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+html.ui-light .fld .lb { color: var(--text); }
+html.ui-light .seg button.on, html.ui-light .blist li.on { background: #dbe9fb; }
+html.ui-light .tools button.on svg circle { fill: #fff; }
+html.ui-light .plsvg .pl-lb, html.ui-light .plsvg .pl-ovl { fill: #1f2933; }
+html.ui-light .plsvg .pl-cad { fill: rgba(100,116,139,0.35); stroke: #475569; }
+html.ui-light .plsvg .pl-deck { fill: rgba(100,116,139,0.35); stroke: #64748b; }
+html.ui-light .plsvg .pl-sup { stroke: #64748b; }
+html.ui-light .plsvg .pl-cov-t { fill: #a16207; stroke: #fff; }
+html.ui-light .plsvg .pl-cov-t.warn { fill: #c2410c; } html.ui-light .plsvg .pl-cov-t.bad { fill: #b91c1c; }
+html.ui-light .ple-svg .tk, html.ui-light .ple-svg .ple-ax, html.ui-light .ple-svg .ple-ve { fill: #5b6672; }
+html.ui-light .ple-svg .ple-node text { fill: #1f2933; }
+html.ui-light .ple-svg .ple-lr { fill: #92400e; } html.ui-light .ple-svg .ple-ls { fill: #b91c1c; }
+html.ui-light .ple-svg .ple-tgp text { fill: #92400e; }
+html.ui-light .ple-svg .ple-cut { fill: rgba(239,68,68,.35); } html.ui-light .ple-svg .ple-fill { fill: rgba(234,179,8,.35); }
+html.ui-light .ptbig .pt-rl { fill: #334155; } html.ui-light .ptbig .pt-v { fill: #1f2933; }
+html.ui-light .cat-svg { background: #ffffff; }
+html.ui-light dialog { background: var(--panel); color: var(--text); }
+html.ui-light dialog::backdrop { background: rgba(30,40,50,.35); }
+html.ui-light .checks .pk { color: #1e40af; background: #e0ebfb; border-color: #a9c4ee; }
+html.ui-light .checks .ic { color: #fff; }
+html.ui-light .plsvg .pl-dvl { stroke: #0369a1; } html.ui-light .plsvg .pl-dvr { stroke: #c2410c; }
+html.ui-light .plsvg .pl-dvl-t { fill: #0369a1; } html.ui-light .plsvg .pl-dvr-t { fill: #c2410c; }
+html.ui-light .plsvg .pl-bg { stroke: #94a3b8; }
+html.ui-light .pl-aqua-t { fill: #b91c1c; }

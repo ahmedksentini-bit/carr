@@ -37,7 +37,7 @@ export const THEMES = {
     },
   },
   light: {
-    bg: '#ffffff', grid: 'rgba(0,0,0,0.05)', gridMajor: 'rgba(0,0,0,0.1)', hud: '#1f2937', hudBg: 'rgba(255,255,255,0.85)',
+    bg: '#e9ecef', grid: 'rgba(0,0,0,0.05)', gridMajor: 'rgba(0,0,0,0.1)', hud: '#1f2937', hudBg: 'rgba(255,255,255,0.85)', // gris clair, comme BVTrace
     dxfWhite: '#222222', sel: '#0369a1', hover: '#0284c7', snap: '#ca8a04', rubber: '#b45309',
     L: {
       MNT: { stroke: '#8a7f6f', w: 0.8, text: '#6b5f4e', roles: { tin: { stroke: 'rgba(138,127,111,0.35)', w: 0.5 }, major: { stroke: '#7c6f5a', w: 1.3 }, minor: { stroke: 'rgba(124,111,90,0.55)', w: 0.7 } } },
