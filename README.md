@@ -518,7 +518,13 @@ ou sur un fond topographique DXF.
   - hypothèses de BVTrace selon le jeu choisi (la liste bascule les champs) : Tunisie — Pan, P10, P100, P0, station
     Montana (table 18) ou a, b, c saisis, régionalisations Ghorbel / Kallel / Fersi / Frigui, couvert végétal,
     Francou-Rodier, note DGPC 1054 ; FAO 54 — Pan, P10, P100, IDF d'une station Montana CIEH (plage) ou a, b saisis,
-    régressions CIEH, zone Orstom (déduite de Pan ou imposée), Kr10 de secours, α10 ; T = 10 ans en FAO 54 ;
+    régressions CIEH (cases à cocher par découpage ; « Proposer selon Pan et la position » ; aucune cochée = les
+    proposées d'après Pan et la longitude des bassins sont appliquées, sinon le CIEH ne donnait aucun débit), zone
+    Orstom (déduite de Pan ou imposée), Kr10 de secours, α10, **C par défaut** ; T = 10 ans en FAO 54. Entrées FAO 54
+    propres à chaque bassin, comme les colonnes de saisie de BVTrace : **C** (colonne du tableau des résultats et
+    détail du bassin), Kr10 imposé, infiltrabilité, densité de drainage Dd, Ig. En jeu Tunisie, C ne se saisit pas :
+    il vient de l'abaque pente × couverture végétale (BVTrace, hydrologie-tunisie). Le détail du bassin liste les débits
+    Orstom et CIEH par régression, la médiane et le motif des régressions non calculées (donnée manquante) ;
   - **fiche du bassin** (clic sur un bassin du plan, ou « Fiche complète » du tableau) : propriétés physiques
     (surface, périmètre, Gravelius, rectangle équivalent, plus long chemin, pentes brute / équivalente / retenue, Ig,
     altitudes, H5 / H95), courbe hypsométrique, profil de l'écoulement principal, temps de concentration, débits par

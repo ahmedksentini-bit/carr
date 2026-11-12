@@ -662,3 +662,10 @@ table.dv-click tbody tr[data-dvs]:hover { background: rgba(37, 99, 235, .15); }
 /* bouton ✕ des listes de voies (onglet Tracé) */
 .blist .li-del { padding: 1px 7px; min-width: 0; font-size: 12px; line-height: 1.4; opacity: .7; }
 .blist .li-del:hover { opacity: 1; background: var(--err); color: #fff; }
+
+/* Hydrologie FAO 54 : choix des régressions CIEH */
+.cieh-pick { border: 1px solid var(--line2); border-radius: 6px; padding: 4px 8px; margin: 6px 0; }
+.cieh-pick summary { cursor: pointer; font-weight: 600; }
+.cieh-pick .cieh-g { margin: 6px 0; display: flex; flex-direction: column; gap: 2px; }
+.cieh-pick .cieh-g label.chk { font-weight: normal; }
+.ok-txt { color: #4ade80; font-size: 11px; }

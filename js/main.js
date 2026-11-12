@@ -33,7 +33,7 @@ import { delineate } from './hydro/watershed.js';
 import { splitCells, mergeCells, basinOf } from './hydro/basinedit.js';
 import { createWorldCover } from './hydro/worldcover.js';
 import { openMontanaMap, initMontanaMap } from './montanamap.js';
-import { computeAll as hydroComputeAll, defaultHypotheses, listMontanaStations, TC_FORMULAS, FRANCOU_RODIER_REGIONS, suggestCiehRegressions, OPTION_LISTS, resolveMontanaStation, montanaAfricaIdf, KR10_GEOLOGY_CATEGORIES } from './hydro/hydrology.js';
+import { computeAll as hydroComputeAll, defaultHypotheses, listMontanaStations, TC_FORMULAS, FRANCOU_RODIER_REGIONS, suggestCiehRegressions, listCiehRegressions, OPTION_LISTS, resolveMontanaStation, montanaAfricaIdf, KR10_GEOLOGY_CATEGORIES } from './hydro/hydrology.js';
 import { sizeCulvert, culvertHydraulics, inletsForShape, defaultInletFor, slopeAboveCritical } from './hydro/culvert.js';
 import { DCAT, planChecks, platformChecks, catText, designCatOf, clothoidNeed, superPct } from './roadcat.js';
 import { isVsa } from './vsa.js';
@@ -5562,13 +5562,33 @@ function computeHydro() {
   if (!R?.crossings?.length) { S.hyRes = null; return null; }
   const zRoad = (c) => { const A = S.axpl?.get(c.key); return A?.defined ? A.PL.zAt(c.pk) : null; };
   const linkOf = (c) => (S.prj.cadres || []).find((q) => q.hydro?.id === c.id && q.axis === c.key);
-  const sig = JSON.stringify([R.date, R.rev, h.hyp, h.hyd, h.upstream, h.qsel, !!S.tn, R.crossings.map((c) => [c.id, zRoad(c), c.cover?.pct]), (S.cadres || []).filter((g) => g.c.hydro).map((g) => [g.c.id, g.c.zam, g.c.zav, g.K?.Lm, g.K?.Lp, g.K?.type, g.K?.spans, g.K?.n, g.K?.B, g.K?.H, g.K?.L, g.K?.ang, g.K?.inlet, g.s])]);
+  const sig = JSON.stringify([R.date, R.rev, h.hyp, h.hyd, h.upstream, h.qsel, h.bin, !!S.tn, R.crossings.map((c) => [c.id, zRoad(c), c.cover?.pct]), (S.cadres || []).filter((g) => g.c.hydro).map((g) => [g.c.id, g.c.zam, g.c.zav, g.K?.Lm, g.K?.Lp, g.K?.type, g.K?.spans, g.K?.n, g.K?.B, g.K?.H, g.K?.L, g.K?.ang, g.K?.inlet, g.s])]);
   if (S.hyRes && S.hySig === sig) return S.hyRes;
   const hyp = { ...h.hyp };
+  // FAO 54 sans régression CIEH choisie : régressions proposées d'après Pan et la longitude du projet (comme le bouton
+  // « Proposer » de BVTrace) — sinon le CIEH ne donnait aucun débit et la crue de projet restait vide
+  h.ciehAuto = null;
+  if (hyp.methodSet === 'fao54' && !(hyp.ciehRegressionIds || []).length) {
+    const ll = R.crossings.filter((c) => Number.isFinite(c.lon)), lon = ll.length ? ll.reduce((t, c) => t + c.lon, 0) / ll.length : null;
+    const sg = suggestCiehRegressions({ lon, pan: hyp.pan > 0 ? hyp.pan : null });
+    if (sg.length) { hyp.ciehRegressionIds = sg.map((q) => q.no); h.ciehAuto = sg; }
+  }
   const ids = new Set(R.crossings.map((c) => c.id));
   const basins = R.crossings.map((c) => ({ uid: c.id, name: c.id, areaKm2: c.totalKm2, ...c.m, slopePct: c.m.slopePct, zOutletM: c.m.zOutlet, lon: c.lon, lat: c.lat, vegetationCoverPct: c.cover?.pct ?? h.hyd.coverPct, vegetationCoverSource: c.cover ? wcSourceText(c.cover) : (Number.isFinite(h.hyd.coverPct) ? 'valeur globale saisie (non mesurée)' : null), upstreamUids: (h.upstream?.[c.id] || []).filter((u) => ids.has(u) && u !== c.id) }));
   // débit propre retenu au choix de l'utilisateur (h.qsel[id] = { mode: 'method', id, label } | { mode: 'manual', Q }) :
   // méthode de débit (clé de values.discharges, ou Orstom / régression CIEH en FAO 54) ou valeur saisie
+  // entrées propres au bassin (FAO 54, comme les colonnes de saisie de BVTrace) : C, Kr10 imposé, infiltrabilité,
+  // densité de drainage, Ig ; C par défaut du jeu FAO 54 pour les bassins sans saisie. En jeu Tunisie, C vient de
+  // l'abaque pente × couverture végétale et ne se saisit pas (BVTrace, docs/context/hydrologie-tunisie.md).
+  if (hyp.methodSet === 'fao54') basins.forEach((b) => {
+    const e = h.bin?.[b.uid] || {};
+    const C = e.C > 0 ? e.C : h.hyd.cFao > 0 ? h.hyd.cFao : null;
+    if (C) b.runoffCoeff = C;
+    if (e.kr10 > 0) b.kr10Pct = e.kr10;
+    if (e.infil) b.infiltrability = e.infil;
+    if (e.dd > 0) b.drainageDensity = e.dd;
+    if (e.ig > 0) b.igMPerKm = e.ig;
+  });
   let res = hydroComputeAll(basins, hyp);
   if (Object.keys(h.qsel || {}).length) {
     let again = false;
@@ -5649,13 +5669,42 @@ function hyHypHtml(h, stations, opt) {
       (ma ? `<label class="fld"><span class="lb">Plage</span><select data-hy="montanaAfricaRange">${(afr.find((q) => q.key === ma.station)?.ranges || []).map((r, i) => opt(i, r.label, ma.range ?? 0)).join('')}</select></label>` : '') +
       `<label class="fld"><span class="lb">a (mm/h)</span><input data-hy="idfA" type="text" inputmode="decimal" value="${idf?.ok ? esc(fmt(idf.a, 3)) : v(hy.idfA || '')}"${idf?.ok ? ' disabled' : ''}></label><label class="fld"><span class="lb">b</span><input data-hy="idfB" type="text" inputmode="decimal" value="${idf?.ok ? esc(fmt(idf.b, 3)) : v(hy.idfB || '')}"${idf?.ok ? ' disabled' : ''}></label></div>` +
       `<p class="note">i (mm/h) = a · tc<sup>b</sup>, tc en minutes${idf?.ok ? ` — ${esc(idf.source)}` : idf ? ` — ${esc(idf.reason)}` : ''}.</p>` +
-      '<h4>CIEH et Orstom</h4>' +
-      `<div class="row"><label class="fld"><span class="lb">Régressions CIEH (n°)</span><input data-hy="ciehRegressionIds" type="text" value="${esc((hy.ciehRegressionIds || []).join(' ; '))}" placeholder="vide : proposées selon Pan et la longitude"></label>` +
+      '<h4>CIEH et Orstom</h4>' + ciehPickHtml(h) +
+      `<div class="row"><label class="fld" title="Coefficient de ruissellement de la méthode rationnelle : le bulletin FAO 54 n'a pas d'abaque, C se saisit — valeur appliquée aux bassins sans C propre (colonne C du tableau des bassins)"><span class="lb">C par défaut (rationnelle)</span><input data-hyd="cFao" type="text" inputmode="decimal" value="${v(h.hyd.cFao)}" placeholder="à saisir"></label>` +
       `<label class="fld"><span class="lb">Zone Orstom</span><select data-hy="orstomZoneSel">${opt('auto', 'déduite de Pan (850 mm)', hy.orstomZoneAuto ? 'auto' : hy.orstomZone)}${opt('sahelienne', 'sahélienne', hy.orstomZoneAuto ? 'auto' : hy.orstomZone)}${opt('tropicale', 'tropicale', hy.orstomZoneAuto ? 'auto' : hy.orstomZone)}</select></label>` +
       `<label class="fld"><span class="lb">Kr10 de secours (géologie)</span><select data-hy="kr10Geology">${opt('', 'aucun', hy.kr10Geology ?? '')}${KR10_GEOLOGY_CATEGORIES.map((q) => opt(q.categorie, q.categorie, hy.kr10Geology ?? '')).join('')}</select></label>` +
       `${num('alpha10', 'Coefficient de pointe α10', '', '2,6')}</div>`;
   }
   return out;
+}
+// Entrées FAO 54 propres au bassin (colonnes de saisie de BVTrace) : C, Kr10 imposé, infiltrabilité (Orstom), densité
+// de drainage Dd (régressions qui l'exigent), Ig (mesuré sur le MNT, remplaçable).
+function hyBinHtml(h, sel) {
+  const id = sel.c.id, e = h.bin?.[id] || {}, v = sel.r.values || {}, val = (x, k = 2) => (x > 0 ? esc(fmt(x, k)) : '');
+  const inp = (f, lb, un, ph, title, k = 2) => `<label class="fld" title="${esc(title)}"><span class="lb">${lb}</span><input data-hbin="${esc(id)}" data-f="${f}" type="text" inputmode="decimal" value="${val(e[f], k)}" placeholder="${esc(ph)}">${un ? `<span class="un">${un}</span>` : ''}</label>`;
+  return '<h4>Entrées FAO 54 du bassin</h4><div class="row">'
+    + inp('C', 'C (rationnelle)', '', h.hyd.cFao > 0 ? `${fmt(h.hyd.cFao, 2)} (défaut)` : 'à saisir', 'Coefficient de ruissellement : le bulletin FAO 54 n\'a pas d\'abaque, C se saisit')
+    + inp('kr10', 'Kr10 imposé', '%', v.kr10?.value > 0 ? `${fmt(v.kr10.value, 1)} (${v.kr10.source})` : 'calculé (Orstom)', 'Lecture d\'abaque ; vide : Orstom calcule Kr10 entre Kr70 et Kr100', 1)
+    + `<label class="fld" title="Classe d'infiltrabilité du bassin (méthode Orstom)"><span class="lb">Infiltrabilité</span><select data-hbin="${esc(id)}" data-f="infil">${OPTION_LISTS.infiltrability.map((q) => `<option value="${q.id}"${(e.infil || 'RI') === q.id ? ' selected' : ''}>${q.id} — ${esc(q.label)}</option>`).join('')}</select></label>`
+    + inp('dd', 'Densité de drainage Dd', 'km/km²', 'si la régression l\'exige', 'Régressions CIEH qui font intervenir Dd')
+    + inp('ig', 'Ig', 'm/km', sel.c.m?.igMPerKm > 0 ? `${fmt(sel.c.m.igMPerKm, 1)} (MNT)` : v.igMPerKm > 0 ? `${fmt(v.igMPerKm, 1)} (déduit)` : '', 'Indice de pente global ; vide : valeur mesurée sur le MNT', 1)
+    + '</div>';
+}
+// Régressions CIEH (tableau 11 du bulletin FAO 54) : cases à cocher par découpage, régressions proposées d'après Pan et
+// la longitude du projet marquées ; aucune cochée = les proposées sont appliquées (computeHydro).
+function ciehPickHtml(h) {
+  const hy = h.hyp, sel = new Set(hy.ciehRegressionIds || []);
+  const ll = (h.res?.crossings || []).filter((c) => Number.isFinite(c.lon)), lon = ll.length ? ll.reduce((t, c) => t + c.lon, 0) / ll.length : null;
+  const sg = suggestCiehRegressions({ lon, pan: hy.pan > 0 ? hy.pan : null }), sgs = new Map(sg.map((q) => [q.no, q.motif]));
+  const all = listCiehRegressions(), groups = [...new Set(all.map((r) => r.groupe))];
+  const head = sel.size
+    ? `${sel.size} régression${sel.size > 1 ? 's' : ''} cochée${sel.size > 1 ? 's' : ''} : n° ${[...sel].join(', ')} — débit CIEH = médiane`
+    : sg.length ? `aucune cochée : les ${sg.length} proposée${sg.length > 1 ? 's' : ''} sont appliquées (n° ${sg.map((q) => q.no).join(', ')})`
+      : `aucune cochée ni proposée (${lon == null ? 'position des bassins inconnue — délimitez les bassins sur un projet géoréférencé' : ''}${lon == null && !(hy.pan > 0) ? ' ; ' : ''}${!(hy.pan > 0) ? 'Pan à saisir' : lon != null ? 'aucun découpage ne couvre ce site : cochez à la main' : ''}) — pas de débit CIEH`;
+  return `<details class="cieh-pick"${sel.size || !sg.length ? ' open' : ''}><summary>Régressions CIEH — <span class="${sel.size || sg.length ? '' : 'err'}">${esc(head)}</span></summary>`
+    + `<div class="row"><button data-ciehsugg="1" title="Coche les régressions applicables d'après Pan et la longitude des bassins (CiehCharts.Suggest de BVTrace) ; les découpages par pays se cochent à la main">Proposer selon Pan et la position</button><button data-ciehclear="1">Tout décocher</button></div>`
+    + groups.map((g) => `<div class="cieh-g"><b>${esc(g)}</b>${all.filter((r) => r.groupe === g).map((r) => `<label class="chk" title="${esc(`${r.formula} — n = ${r.n ?? '—'}, r² = ${r.r2 ?? '—'}${r.note ? ' — ' + r.note : ''}`)}"><input type="checkbox" data-ciehno="${r.no}"${sel.has(r.no) ? ' checked' : ''}> n° ${r.no} ${esc(r.description || '')}${sgs.has(r.no) ? ` <span class="ok-txt">proposée (${esc(sgs.get(r.no))})</span>` : ''}</label>`).join('')}</div>`).join('')
+    + '</details>';
 }
 const findMontanaStationName = (code) => listMontanaStations().tunisie.find((q) => q.code === code)?.name || code;
 // Cotes fil d'eau (radier) amont / aval d'un cadre ou d'une buse : saisies dans la fiche de l'ouvrage (c.zam, c.zav),
@@ -5757,9 +5806,9 @@ function renderHydro() {
   // résultats
   const HR = computeHydro();
   if (!HR) { $('#hyTable').innerHTML = '<tbody><tr><td class="note">Aucun bassin : cochez les axes et lancez « Délimiter les bassins versants ».</td></tr></tbody>'; $('#hyDetail').innerHTML = ''; $('#hyNote').textContent = ''; return; }
-  const T = HR.list[0]?.T;
-  $('#hyTable').innerHTML = `<thead><tr><th>BV</th><th>Axe</th><th>PK</th><th>S km²</th><th>L km</th><th>I %</th><th>tc min</th><th>Q${T} propre</th><th>Bassins amont</th><th>Q${T} retenu m³/s</th><th>Ouvrage</th><th>HW m</th><th>V m/s</th><th></th></tr></thead><tbody>` +
-    HR.list.map((o) => { const c = o.c, v = o.r.values || {}; const warn = (o.r.warnings || []).length + (o.rr?.warnings || []).length; return `<tr data-hy="${esc(c.id)}" class="${S.hySel === c.id ? 'on' : ''}"><td>${esc(c.id)}${c.touchesEdge ? ' ⚠' : ''}</td><td>${esc(c.traceName)}</td><td class="mono">${fmt(c.pk, 0)}</td><td class="mono">${fmt(c.totalKm2, 3)}</td><td class="mono">${fmt((c.m.lengthM || 0) / 1000, 2)}</td><td class="mono">${fmt(c.m.slopePct, 2)}</td><td class="mono">${v.tcRetained ? fmt(v.tcRetained.minutes, 1) : '—'}</td><td class="mono"${h.qsel?.[c.id] ? ` title="débit propre choisi : ${esc(o.r.retained?.method || '')}"` : ''}>${o.Qp > 0 ? fmt(o.Qp, 2) : '—'}${h.qsel?.[c.id] ? ' ✎' : ''}</td><td><input class="mini-in" data-hyup="${esc(c.id)}" type="text" size="9" value="${esc((h.upstream?.[c.id] || []).join(' ; '))}" placeholder="${c.contains?.length ? esc(c.contains.join(' ; ')) : ''}" title="Bassins dont l'écoulement passe par cet ouvrage (ex. BV-03 ; BV-05) : leurs débits s'ajoutent${c.contains?.length ? ` — amont hydrologique détecté : ${esc(c.contains.join(', '))}` : ''}"></td><td class="mono"><b>${o.Q > 0 ? fmt(o.Q, 2) : '—'}</b>${o.r.cumulative?.error ? ' !' : ''}</td><td>${o.size ? `${esc(o.size)} m${o.verif ? (o.ok ? ' ✔' : ' ✖') : ''}` : o.sz?.error ? 'erreur' : '—'}</td><td class="mono">${o.hw != null ? fmt(o.hw, 2) : '—'}</td><td class="mono">${o.v != null ? fmt(o.v, 2) : '—'}</td><td>${warn ? `<span title="avertissements">!${warn}</span>` : ''}</td></tr>`; }).join('') + '</tbody>';
+  const T = HR.list[0]?.T, fao = h.hyp.methodSet === 'fao54';
+  $('#hyTable').innerHTML = `<thead><tr><th>BV</th><th>Axe</th><th>PK</th><th>S km²</th><th>L km</th><th>I %</th><th>tc min</th>${fao ? '<th title="Coefficient de ruissellement saisi (FAO 54 : pas d\'abaque) ; vide = C par défaut">C</th>' : ''}<th>Q${T} propre</th><th>Bassins amont</th><th>Q${T} retenu m³/s</th><th>Ouvrage</th><th>HW m</th><th>V m/s</th><th></th></tr></thead><tbody>` +
+    HR.list.map((o) => { const c = o.c, v = o.r.values || {}; const warn = (o.r.warnings || []).length + (o.rr?.warnings || []).length; return `<tr data-hy="${esc(c.id)}" class="${S.hySel === c.id ? 'on' : ''}"><td>${esc(c.id)}${c.touchesEdge ? ' ⚠' : ''}</td><td>${esc(c.traceName)}</td><td class="mono">${fmt(c.pk, 0)}</td><td class="mono">${fmt(c.totalKm2, 3)}</td><td class="mono">${fmt((c.m.lengthM || 0) / 1000, 2)}</td><td class="mono">${fmt(c.m.slopePct, 2)}</td><td class="mono">${v.tcRetained ? fmt(v.tcRetained.minutes, 1) : (() => { const q = v.tc?.[h.hyp.tcFormula]; return q?.value != null ? fmt(q.value * (/^h/.test(q.unit || '') ? 60 : 1), 1) : '—'; })()}</td>${fao ? `<td><input class="mini-in" data-hbin="${esc(c.id)}" data-f="C" type="text" inputmode="decimal" size="4" value="${h.bin?.[c.id]?.C > 0 ? esc(fmt(h.bin[c.id].C, 2)) : ''}" placeholder="${h.hyd.cFao > 0 ? esc(fmt(h.hyd.cFao, 2)) : 'C'}" title="C du bassin (FAO 54) ; vide : C par défaut${h.hyd.cFao > 0 ? ` (${fmt(h.hyd.cFao, 2)})` : ' (à saisir)'}"></td>` : ''}<td class="mono"${h.qsel?.[c.id] ? ` title="débit propre choisi : ${esc(o.r.retained?.method || '')}"` : ''}>${o.Qp > 0 ? fmt(o.Qp, 2) : '—'}${h.qsel?.[c.id] ? ' ✎' : ''}</td><td><input class="mini-in" data-hyup="${esc(c.id)}" type="text" size="9" value="${esc((h.upstream?.[c.id] || []).join(' ; '))}" placeholder="${c.contains?.length ? esc(c.contains.join(' ; ')) : ''}" title="Bassins dont l'écoulement passe par cet ouvrage (ex. BV-03 ; BV-05) : leurs débits s'ajoutent${c.contains?.length ? ` — amont hydrologique détecté : ${esc(c.contains.join(', '))}` : ''}"></td><td class="mono"><b>${o.Q > 0 ? fmt(o.Q, 2) : '—'}</b>${o.r.cumulative?.error ? ' !' : ''}</td><td>${o.size ? `${esc(o.size)} m${o.verif ? (o.ok ? ' ✔' : ' ✖') : ''}` : o.sz?.error ? 'erreur' : '—'}</td><td class="mono">${o.hw != null ? fmt(o.hw, 2) : '—'}</td><td class="mono">${o.v != null ? fmt(o.v, 2) : '—'}</td><td>${warn ? `<span title="avertissements">!${warn}</span>` : ''}</td></tr>`; }).join('') + '</tbody>';
   const sel = HR.byId[S.hySel];
   $('#hyDetail').innerHTML = sel ? (() => {
     const v = sel.r.values || {}, d = v.discharges || {};
@@ -5767,15 +5816,21 @@ function renderHydro() {
       ['Surface', `${fmt(sel.c.totalKm2, 3)} km² (bassin arrêté au tracé, jointif avec ses voisins : tout le versant qui se déverse sur cette section du tracé)`],
       ['Plus long chemin, dénivelée', `${fmt((sel.c.m.lengthM || 0) / 1000, 2)} km, ${fmt(sel.c.m.dropM, 1)} m ; Hmax ${fmt(sel.c.m.hMax, 1)}, Hmin ${fmt(sel.c.m.hMin, 1)} m`],
       ['Temps de concentration', v.tc ? Object.entries(v.tc).map(([k, q]) => `${k} ${q?.value != null ? fmt(q.value, 2) : '—'} ${q?.unit || ''}`).join(' · ') + (v.tcRetained ? ` — retenu ${v.tcRetained.formula} ${fmt(v.tcRetained.minutes, 1)} min` : '') : '—'],
-      ['Intensité', v.intensityMmH != null ? `${fmt(v.intensityMmH, 2)} mm/h (${esc(v.intensitySource || '')})` : '—'],
-      ['Débits', Object.entries(d).filter(([, q]) => q != null).map(([k, q]) => `${k} ${fmt(q, 2)}`).join(' · ') || '—'],
+      ['Intensité', v.intensityMmH != null ? `${fmt(v.intensityMmH, 2)} mm/h (${String(v.intensitySource || '')})` : '—'],
+      ['Débits', [...Object.entries(d).filter(([, q]) => q != null).map(([k, q]) => `${k} ${fmt(q, 2)}`),
+        // FAO 54 : Orstom et régressions CIEH (Q10, m³/s), médiane CIEH
+        ...(v.orstom?.ok && v.orstom.q10 > 0 ? [`Orstom Q10 ${fmt(v.orstom.q10, 2)}`] : v.orstom && !v.orstom.ok ? [`Orstom : ${v.orstom.reason || 'non calculé'}`] : []),
+        ...(v.cieh?.rows || []).filter((q) => q.ok).map((q) => `CIEH n° ${q.no} ${fmt(q.q10, 2)}`),
+        ...(v.cieh?.median > 0 ? [`médiane CIEH ${fmt(v.cieh.median, 2)}`] : []),
+        ...((v.cieh?.rows || []).some((q) => !q.ok) ? [`CIEH non calculées : ${(v.cieh.rows || []).filter((q) => !q.ok).map((q) => `n° ${q.no} (${q.reason})`).join(', ')}`] : []),
+      ].join(' · ') || '—'],
       ['Débit propre', sel.Qp > 0 ? `${fmt(sel.Qp, 2)} m³/s (${sel.r.retained.method || ''})` : '—'],
-      ['Bassins amont', sel.up?.length ? `${esc(sel.up.join(', '))} → débit cumulé ${sel.r.cumulative?.Q != null ? `${fmt(sel.r.cumulative.Q, 2)} m³/s` : esc(sel.r.cumulative?.error || '—')}` : `aucun${sel.c.contains?.length ? ` (amont hydrologique détecté : ${esc(sel.c.contains.join(', '))} — à saisir dans le tableau s'il se déverse dans cet ouvrage)` : ''}`],
+      ['Bassins amont', sel.up?.length ? `${String(sel.up.join(', '))} → débit cumulé ${sel.r.cumulative?.Q != null ? `${fmt(sel.r.cumulative.Q, 2)} m³/s` : String(sel.r.cumulative?.error || '—')}` : `aucun${sel.c.contains?.length ? ` (amont hydrologique détecté : ${String(sel.c.contains.join(', '))} — à saisir dans le tableau s'il se déverse dans cet ouvrage)` : ''}`],
       ['Débit retenu pour l\'ouvrage', sel.Q > 0 ? `${fmt(sel.Q, 2)} m³/s` : '—'],
-      ['Ouvrage', sel.size ? `${esc(sel.size)} m, L ${fmt(sel.lg?.K?.L ?? sel.L, 1)} m, biais ${sel.biais} gr — ${esc(sel.sz?.message || '')}` : esc(sel.sz?.message || sel.sz?.error || '—')],
+      ['Ouvrage', sel.size ? `${String(sel.size)} m, L ${fmt(sel.lg?.K?.L ?? sel.L, 1)} m, biais ${sel.biais} gr — ${String(sel.sz?.message || '')}` : String(sel.sz?.message || sel.sz?.error || '—')],
       ['Fil d\'eau amont / aval', sel.inv ? `${fmt(sel.inv.zam, 2)} / ${fmt(sel.inv.zav, 2)} m, pente ${fmt(sel.inv.J * 100, 2)} % (${sel.inv.src})${sel.rr?.upstreamWaterElev ? ` — eau en amont ${fmt(sel.rr.upstreamWaterElev, 2)} m` : ''}` : '—'],
       ['Cotes', `chaussée ${sel.zr != null ? fmt(sel.zr, 2) : 'à définir (profil en long)'} · TN au franchissement ${fmt(sel.zt, 2)} m${sel.zr != null && Number.isFinite(sel.zt) && sel.zr - sel.zt < 2 ? ` — chaussée à ${fmt(sel.zr - sel.zt, 2)} m seulement au-dessus du fil d'eau : relevez le profil en long pour loger l'ouvrage (hauteur + traverse + remblai + revanche)` : ''}`],
-    ]) + `<div class="row"><span class="lb">Débit propre retenu</span>${qSelHtml(sel)}</div>` + `<details class="hy-tabdetail"><summary>Détail des calculs par méthode (formules, données, application numérique)</summary><div class="hy-detail">${hyDetailHtml(v.detail)}</div></details>` + (() => {
+    ]) + (h.hyp.methodSet === 'fao54' ? hyBinHtml(h, sel) : '') + `<div class="row"><span class="lb">Débit propre retenu</span>${qSelHtml(sel)}</div>` + `<details class="hy-tabdetail"><summary>Détail des calculs par méthode (formules, données, application numérique)</summary><div class="hy-detail">${hyDetailHtml(v.detail)}</div></details>` + (() => {
       const K = sel.lg?.K, r0 = sel.ret || {};
       const ty = S.hyohType?.[sel.c.id] || (K ? K.type : h.hyd.shape === 'circular' ? 'buse' : 'picf'), buse = ty === 'buse', pont = ty === 'poutres';
       const val = (v) => (v == null || !Number.isFinite(+v) ? '' : esc(fmt(+v, 2)));
@@ -6194,14 +6249,30 @@ function bindHydro() {
   $('#hyAxes').addEventListener('change', (e) => { const k = e.target.dataset.hyax; if (!k) return; const h = hyCfg(); const cur = new Set(h.axes || hyAxes().filter((a) => hyAxisChecked(h, a)).map((a) => a.key)); if (e.target.checked) cur.add(k); else cur.delete(k); h.axes = [...cur]; });
   $('#hyHyp').addEventListener('click', (e) => {
     if (e.target.closest('[data-wc]')) measureCovers(null, { redo: true });
+    if (e.target.closest('[data-ciehsugg]')) {
+      const h = hyCfg(), ll = (h.res?.crossings || []).filter((c) => Number.isFinite(c.lon)), lon = ll.length ? ll.reduce((t, c) => t + c.lon, 0) / ll.length : null;
+      const sg = suggestCiehRegressions({ lon, pan: h.hyp.pan > 0 ? h.hyp.pan : null });
+      if (!sg.length) { toast(`Aucune régression proposée : ${lon == null ? 'position des bassins inconnue (délimitez-les sur un projet géoréférencé)' : !(h.hyp.pan > 0) ? 'saisissez Pan' : 'aucun découpage climatique ou de longitude ne couvre ce site — cochez un découpage par pays'}.`, 'warn'); return; }
+      hySet(['hyp', 'ciehRegressionIds'], sg.map((q) => q.no)); toast(`Régressions proposées : n° ${sg.map((q) => q.no).join(', ')}.`);
+    }
+    if (e.target.closest('[data-ciehclear]')) hySet(['hyp', 'ciehRegressionIds'], []);
     const mb = e.target.closest('[data-mtmap]'); if (mb) openMontana(mb.dataset.mtmap);
   });
   initMontanaMap();
   document.addEventListener('change', (e) => {
     const q = e.target.closest('[data-qsel]'); if (q) { setQsel(q.dataset.qsel, q.value); return; }
+    const hb = e.target.closest('[data-hbin]'); if (hb) { // entrée FAO 54 d'un bassin (tableau, détail ou fiche)
+      const h = hyCfg(), id = hb.dataset.hbin, f = hb.dataset.f; h.bin = { ...(h.bin || {}) }; const cur = { ...(h.bin[id] || {}) };
+      const x = f === 'infil' ? hb.value : parseNum(hb.value);
+      if (f === 'C' && x > 1) { toast('C est compris entre 0 et 1.', 'warn'); hb.value = ''; return; }
+      if (x === '' || x == null || (typeof x === 'number' && !(x > 0)) || (f === 'infil' && x === 'RI')) delete cur[f]; else cur[f] = x;
+      if (Object.keys(cur).length) h.bin[id] = cur; else delete h.bin[id];
+      S.hySig = null; update(); if ($('#dlgBV')?.open && S.bvSel === id) renderBvSheet(); return;
+    }
     const m = e.target.closest('[data-qman]'); if (m) { const v = parseNum(m.value); if (v > 0) setQsel(m.dataset.qman, 'manual', v); }
   });
   $('#hyHyp').addEventListener('change', (e) => {
+    if (e.target.dataset.ciehno) { const h = hyCfg(), no = +e.target.dataset.ciehno, cur = new Set(h.hyp.ciehRegressionIds || []); if (e.target.checked) cur.add(no); else cur.delete(no); hySet(['hyp', 'ciehRegressionIds'], [...cur].sort((a, b) => a - b)); return; }
     const k = e.target.dataset.hy, kd = e.target.dataset.hyd; if (!k && !kd) return;
     if (kd) { hySet(['hyd', kd], parseNum(e.target.value)); return; }
     let v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
