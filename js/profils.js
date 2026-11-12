@@ -85,7 +85,7 @@ export function nearestAxis(axes, w, tol) {
 
 export function profParams(prj) {
   const p = prj.prof || {};
-  return { step: Math.max(1, num(p.step, 25)), tan: p.tan !== false, tick: Math.max(0.5, num(p.tick, 2)), series: p.series || [], manual: p.manual || [], on: p.on !== false };
+  return { step: Math.max(1, num(p.step, 25)), tan: p.tan !== false, tick: Math.max(0.5, num(p.tick, 2)), series: p.series || [], manual: p.manual || [], skip: p.skip || [], on: p.on !== false, bis: p.bis === true };
 }
 
 // PK origine d'un axe (voie principale, voies secondaires ; 0 ailleurs) et écriture 12+345,67.
@@ -97,17 +97,21 @@ function pk0Of(prj, key) {
 }
 export function pkText(v) { const a = Math.abs(v), km = Math.floor(a / 1000 + 1e-9), m = a - km * 1000; return `${v < 0 ? '−' : ''}${km}+${m.toFixed(2).padStart(6, '0').replace('.', ',')}`; }
 
+export const BIS = ['bis', 'ter', 'quater', 'quinquies', 'sexies', 'septies', 'octies', 'novies', 'decies'];
 // Liste numérotée des profils et symboles en plan (D.prims, calque PROFILS).
 export function buildProfils(prj, D, TH = 1) {
   const P = profParams(prj), axes = listAxes(prj, D), byKey = Object.fromEntries(axes.map((a) => [a.key, a]));
   const per = {}, issues = [];
   // Fusion des profils voisins : à moins de 5 cm, un seul profil ; un point de tangence à moins de 0,50 m d'un profil de
   // série le remplace (le profil est placé exactement au point de tangence).
-  const add = (key, s, src, type, ref) => {
+  // profils de série ou de tangence retirés sur le plan (supprimés ou déplacés : un profil manuel les remplace)
+  const skipped = (key, s) => P.skip.some((k) => k.axis === key && Math.abs(+k.s - s) < 0.05);
+  const add = (key, s, src, type, ref, extra) => {
+    if (src !== 'manuel' && skipped(key, s)) return;
     const L = (per[key] = per[key] || []);
     const q = L.find((x) => Math.abs(x.s - s) < 0.05) || (src === 'tangence' ? L.find((x) => x.src === 'série' && Math.abs(x.s - s) < 0.5) : null);
     if (q) { if (src === 'tangence') { q.s = s; q.type = type; q.src = 'tangence'; } else if (type && !q.type) q.type = type; if (src === 'manuel') q.src = 'manuel'; return; }
-    L.push({ s, src, type, ref });
+    L.push({ s, src, type, ref, ...(extra || {}) });
   };
   for (const se of P.series) {
     const ax = byKey[se.axis];
@@ -121,14 +125,19 @@ export function buildProfils(prj, D, TH = 1) {
     if (b - a > 0.05) add(ax.key, b, 'série', '', se.id);
     if (se.tan ?? P.tan) for (const t of ax.tan) if (t.s > a + 0.05 && t.s < b - 0.05) add(ax.key, t.s, 'tangence', t.type, se.id);
   }
-  for (const m of P.manual) { const ax = byKey[m.axis]; if (ax) add(ax.key, Math.max(0, Math.min(ax.len, +m.s)), 'manuel', '', m.id); }
+  for (const m of P.manual) { const ax = byKey[m.axis]; if (ax) add(ax.key, Math.max(0, Math.min(ax.len, +m.s)), 'manuel', '', m.id, m.bis ? { bis: true } : null); }
   const list = [];
   for (const ax of axes) {
     const L = (per[ax.key] || []).sort((u, v) => u.s - v.s);
-    L.forEach((q, i) => {
+    // numérotation : P1, P2… dans l'ordre des abscisses ; un profil ajouté « bis » ne prend pas de numéro, il reprend celui
+    // du profil qui le précède suivi de bis, ter, quater…
+    let num0 = 0, nb = 0;
+    L.forEach((q) => {
       const { p, t } = ax.at(q.s), n = G.rot90(t);
       const gis = (((Math.atan2(n.x, n.y) * 200) / Math.PI) % 400 + 400) % 400; // gisement de la normale (gr, depuis le nord)
-      list.push({ axis: ax.key, axisName: ax.name, n: i + 1, name: `P${i + 1}`, s: q.s, pk: pk0Of(prj, ax.key) + q.s, p, t, nrm: n, gis, src: q.src, type: q.type, ref: q.ref });
+      let name;
+      if (q.bis) { name = `P${num0}${BIS[Math.min(nb, BIS.length - 1)]}`; nb++; } else { num0++; nb = 0; name = `P${num0}`; }
+      list.push({ axis: ax.key, axisName: ax.name, n: num0, name, s: q.s, pk: pk0Of(prj, ax.key) + q.s, p, t, nrm: n, gis, src: q.src, type: q.type, ref: q.ref, bis: !!q.bis });
     });
   }
   // Symbole : cercle sur l'axe, court segment perpendiculaire (des deux côtés), numéro au bout du segment côté gauche

@@ -553,6 +553,12 @@ ou sur un fond topographique DXF.
   clothoïde / arc ; un point de tangence à moins de 0,50 m d'une station la remplace), ou profils isolés placés à la
   main. Symbole à la manière de Macao : petit cercle sur l'axe et segment perpendiculaire, numéro P1, P2… par axe
   (calque GIRA_PROFILS). Tableau (axe, abscisse, X, Y, gisement de la normale, origine) et export CSV.
+  **Sur le plan** (outil Sélection, `js/profedit.js`) : le profil survolé (symbole ou numéro) passe en surbrillance ;
+  clic droit : Déplacer (le profil suit le curseur le long de son axe avec son nom et son PK, posé au clic), Ajouter un
+  profil avant / après (placé de même entre ses voisins), Ajouter au PK (saisi « 1+234,50 » ou en mètres), Supprimer.
+  Nouveaux profils au choix : numérotation reprise (P1, P2… renumérotés) ou suffixe bis, ter… du profil qui précède
+  (P12bis) ; « Renuméroter » retire les suffixes. Un profil de série ou de tangence déplacé ou supprimé est retiré de
+  la série (prj.prof.skip) et, s'il est déplacé, remplacé par un profil manuel.
 - **Aucune chaussée superposée hors ouvrage** : deux plates-formes (chaussée et accotements revêtus) ne se croisent
   qu'au droit d'un ouvrage. Chaque bretelle est contrôlée tous les 2 m contre l'autoroute, les voies secondaires et les
   autres bretelles ; un recouvrement de plates-formes hors tablier est une erreur. Sont exclus les zones de raccordement
