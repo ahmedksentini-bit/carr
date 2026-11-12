@@ -203,6 +203,11 @@ ou sur un fond topographique DXF.
   de la droite d'origine (accrochage), la pente est gardée et seul le rayon change. Un déplacement qui ferait chevaucher
   un raccordement voisin est refusé. Dans le panneau de droite (fenêtre en grand), le sommet sélectionné liste TE et TS
   avec PK, Z projet (modifiables) et Z TN : saisir le PK garde la pente, saisir Z fait pivoter la droite.
+  **Extrémités** : un point saisi à l'origine ou à la fin de l'axe se déplace en cote seule (son abscisse reste à
+  l'extrémité). Une extrémité **calée** (voie secondaire sur un carrefour, bretelle sur sa chaussée hôte) se libère
+  en la glissant, après confirmation : elle devient un point saisi (« début / fin libéré ») dont la cote ne suit plus le
+  calage ; « Recaler l'extrémité » dans le panneau du point revient au calage. Anneau : glisser l'origine crée un point à
+  s = 0 (le bouclage suit). Branche : le point « anneau » reste imposé par le bord de l'anneau (un clic dit où le régler).
   La ligne rouge remplace la pente constante de la branche dans le modèle altimétrique (dévers, points d'implantation).
   Contrôles : chevauchement des raccordements, pente maximale et rayons minimaux (ARP catégorie R80 par défaut, valeurs
   urbaines usuelles — à confirmer selon la catégorie ; l'autoroute et les voies secondaires suivent leur catégorie de
