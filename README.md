@@ -628,7 +628,8 @@ ou sur un fond topographique DXF.
   secondaire, bretelle, branche) au pas choisi, avec en option les points de tangence compris entre eux (droite /
   clothoïde / arc ; un point de tangence à moins de 0,50 m d'une station la remplace), ou profils isolés placés à la
   main. Symbole à la manière de Macao : petit cercle sur l'axe et segment perpendiculaire, numéro P1, P2… par axe
-  (calque GIRA_PROFILS). Tableau (axe, abscisse, X, Y, gisement de la normale, origine) et export CSV.
+  (calque GIRA_PROFILS, blanc ; sur le plan : trait, numéro et PK en blanc gras avec liseré sombre, lisibles sur
+  l'imagerie ; noir gras en thème clair). Tableau (axe, abscisse, X, Y, gisement de la normale, origine) et export CSV.
   **Sur le plan** (outil Sélection, `js/profedit.js`) : le profil survolé (symbole ou numéro) passe en surbrillance ;
   clic droit : Déplacer (le profil suit le curseur le long de son axe avec son nom et son PK, posé au clic), Ajouter un
   profil avant / après (placé de même entre ses voisins), Ajouter au PK (saisi « 1+234,50 » ou en mètres), Supprimer.
