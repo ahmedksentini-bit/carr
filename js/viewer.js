@@ -31,7 +31,7 @@ export const THEMES = {
       EET: { stroke: '#bef264', w: 1.1, dash: [6, 3] },
       SIGNALISATION: { stroke: '#f87171', w: 1.4, text: '#fca5a5' },
       IMPLANTATION: { stroke: '#e879f9', w: 1, text: '#f0abfc' },
-      PROFILS: { stroke: '#4ade80', w: 1.1, text: '#86efac' },
+      PROFILS: { stroke: '#ffffff', w: 2.4, text: '#ffffff', bold: true, halo: 'rgba(0,0,0,0.8)', shadow: 'rgba(0,0,0,0.7)' },
       BASSINS: { stroke: '#38bdf8', w: 1.2, text: '#7dd3fc', fill: { bv: 'rgba(56,189,248,0.07)' }, roles: { stream: { stroke: 'rgba(96,165,250,0.85)', w: 1 }, part: { stroke: 'rgba(56,189,248,0.45)', w: 0.8 } } },
       UVR: { stroke: '#f9a8d4', w: 1.2, text: '#fbcfe8', roles: { link: { stroke: 'rgba(249,168,212,0.6)', w: 0.8, dash: [4, 3] }, am: { stroke: '#fde68a', w: 1.4 } } },
     },
@@ -64,7 +64,7 @@ export const THEMES = {
       EET: { stroke: '#4d7c0f', w: 1.1, dash: [6, 3] },
       SIGNALISATION: { stroke: '#b91c1c', w: 1.4, text: '#991b1b' },
       IMPLANTATION: { stroke: '#a21caf', w: 1, text: '#86198f' },
-      PROFILS: { stroke: '#15803d', w: 1.1, text: '#166534' },
+      PROFILS: { stroke: '#111827', w: 2.4, text: '#111827', bold: true },
       BASSINS: { stroke: '#0369a1', w: 1.2, text: '#075985', fill: { bv: 'rgba(3,105,161,0.07)' }, roles: { stream: { stroke: 'rgba(37,99,235,0.8)', w: 1 }, part: { stroke: 'rgba(3,105,161,0.4)', w: 0.8 } } },
       UVR: { stroke: '#be185d', w: 1.2, text: '#9d174d', roles: { link: { stroke: 'rgba(190,24,93,0.55)', w: 0.8, dash: [4, 3] }, am: { stroke: '#92400e', w: 1.4 } } },
     },
@@ -147,17 +147,27 @@ function setStroke(ctx, v, st, prim) {
   } else ctx.setLineDash(st.dash || []);
 }
 
-function drawText(ctx, v, p, s, h, rot, align, color, minPx = 3.5) {
+function drawText(ctx, v, p, s, h, rot, align, color, minPx = 3.5, o = {}) {
   const px = h * v.s;
   if (px < minPx) return;
   const [x, y] = v.w2s(p.x, p.y);
   if (x < -400 || y < -400 || x > v.W + 400 || y > v.H + 400) return;
   ctx.save();
   ctx.translate(x, y); ctx.rotate(-rot);
-  ctx.font = `${Math.min(px, 400)}px "Segoe UI", system-ui, sans-serif`;
+  ctx.font = `${o.bold ? 'bold ' : ''}${Math.min(px, 400)}px "Segoe UI", system-ui, sans-serif`;
   ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'middle';
+  // liseré sombre sous un texte clair : lisible sur l'imagerie claire (sable, béton)
+  if (o.halo) { ctx.strokeStyle = o.halo; ctx.lineWidth = Math.max(2, px * 0.18); ctx.lineJoin = 'round'; ctx.strokeText(s, 0, 0); }
   ctx.fillText(s, 0, 0);
   ctx.restore();
+}
+
+// Trait clair (profils en travers en blanc) : liseré sombre dessous, lisible sur l'imagerie claire.
+function underlay(ctx, st) {
+  if (!st.shadow) return;
+  const lw = ctx.lineWidth, ss = ctx.strokeStyle;
+  ctx.strokeStyle = st.shadow; ctx.lineWidth = lw + 2; ctx.stroke();
+  ctx.strokeStyle = ss; ctx.lineWidth = lw;
 }
 
 function arrowHead(ctx, x0, y0, x1, y1, size) {
@@ -189,7 +199,7 @@ export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
         ctx.fill(pr.rule || 'evenodd');
       } else if (pr.k === 'path') {
         setStroke(ctx, v, st.roles?.[pr.role] ? { ...st, ...st.roles[pr.role] } : st, pr);
-        ctx.beginPath(); tracePath(ctx, v, pr.segs); if (pr.closed) ctx.closePath(); ctx.stroke();
+        ctx.beginPath(); tracePath(ctx, v, pr.segs); if (pr.closed) ctx.closePath(); underlay(ctx, st); ctx.stroke();
         if (pr.arrow) {
           const s = pr.segs[pr.segs.length - 1], a = G.segStart(s), b = G.segEnd(s);
           const [x0, y0] = v.w2s(a.x, a.y), [x1, y1] = v.w2s(b.x, b.y);
@@ -198,7 +208,7 @@ export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
       } else if (pr.k === 'circle') {
         setStroke(ctx, v, st, pr);
         const [cx, cy] = v.w2s(pr.c.x, pr.c.y);
-        ctx.beginPath(); ctx.arc(cx, cy, pr.r * v.s, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx, cy, pr.r * v.s, 0, Math.PI * 2); underlay(ctx, st); ctx.stroke();
       } else if (pr.k === 'hatch') {
         setStroke(ctx, v, st.roles?.[pr.role] ? { ...st, ...st.roles[pr.role] } : st, pr);
         ctx.lineWidth = Math.max(0.6, (pr.wm || 0) * v.s);
@@ -223,7 +233,7 @@ export function drawDesign(ctx, v, D, theme, vis, opts = {}) {
           ctx.fillText(pr.code, x, y + px / 2 + 2);
         }
       } else if (pr.k === 'text') {
-        drawText(ctx, v, pr.p, pr.s, pr.h, pr.rot, pr.align, pr.color || st.text || st.stroke);
+        drawText(ctx, v, pr.p, pr.s, pr.h, pr.rot, pr.align, pr.color || st.text || st.stroke, 3.5, { bold: st.bold, halo: st.halo });
       } else if (pr.k === 'arrow') {
         if (pr.len * v.s < 10) continue;
         const b = G.add(pr.p, G.mul(pr.dir, pr.len));
