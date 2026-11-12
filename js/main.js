@@ -4397,11 +4397,14 @@ function refreshPLAxis(c) {
   const lim = axisLimits(S.prj, key);
   // Éditeur : points saisis triés (l'indice d'un point est son rang dans cette liste).
   const pis = normPis(store.pis), tEnd = A.tied.find((t) => t.end === 1), tSt = A.tied.find((t) => t.end === 0);
+  const free = store.free || [];
   const infoE = (i, nd) => {
     const t = A.tied.find((q) => Math.abs(q.s - nd.s) < 1e-6);
-    if (t) return { fixed: true, pi: -1, label: `calé (${t.end ? 'fin' : 'début'})` };
+    if (t) return { fixed: true, pi: -1, label: `calé (${t.end ? 'fin' : 'début'})`, tie: { end: t.end, why: t.why } };
     const k = pis.findIndex((q) => Math.abs(q.s - nd.s) < 1e-6);
-    return k < 0 ? { fixed: true, pi: -1, label: '' } : { fixed: false, pi: k, label: `PI ${k + 1}` };
+    if (k < 0) return { fixed: true, pi: -1, label: '' };
+    const fe = [0, 1].find((e) => free.includes(e) && Math.abs(nd.s - (e ? ax.len : 0)) < 0.05);
+    return { fixed: false, pi: k, label: `PI ${k + 1}${fe != null ? ` (${fe ? 'fin' : 'début'} libéré)` : ''}`, ...(fe != null ? { freed: fe } : {}) };
   };
   $('#plChart').hidden = false;
   plEditor().render({
@@ -4409,6 +4412,19 @@ function refreshPLAxis(c) {
     stations: plCartStations(key, ax, PL), overlay: ov.draw, zExtra: ov.z, plan: plPlanBand(ax), devers: plDeversBand(ax),
     limits: lim, defaultR: lim.Rconv, endFixed: tEnd ? { s: tEnd.s, z: tEnd.z } : null, startFixed: tSt ? { s: tSt.s, z: tSt.z } : null,
     note: A.defined ? '' : `Aucune ligne rouge sur ${ax.name} : outil « Point » (clic) ou « Draft TN… »${A.tied.length ? ' — extrémités calées sur les chaussées hôtes' : ''}.`,
+    // extrémité calée (carrefour, chaussée hôte) : libérée sur demande, elle devient un point saisi ; « Recaler » revient au calage
+    freeEnd(inf, nd) {
+      const t = inf.tie; if (!t) return false;
+      if (!window.confirm(`Libérer l'extrémité ${t.end ? 'de fin' : 'de début'} de ${ax.name} ?\n\nElle est calée sur ${t.why} : une fois libérée, sa cote ne suivra plus ce calage (raccord à vérifier). « Recaler » dans le panneau du point revient au calage.`)) return null;
+      store.free = [...new Set([...(store.free || []), t.end])];
+      store.pis = [...normPis(store.pis).filter((q) => Math.abs(q.s - nd.s) > 0.5), { s: Math.round(nd.s * 100) / 100, z: Math.round(nd.z * 1000) / 1000, R: 0 }].sort((a, b) => a.s - b.s);
+      update(); return true;
+    },
+    tieEnd(end) {
+      store.free = (store.free || []).filter((e) => e !== end); if (!store.free.length) delete store.free;
+      const sE = end ? ax.len : 0; store.pis = normPis(store.pis).filter((q) => Math.abs(q.s - sE) > 0.5);
+      update(); toast(`Extrémité ${end ? 'de fin' : 'de début'} de ${ax.name} recalée.`);
+    },
   });
   S.plPi = S.plEd.sel;
   $('#plTable').innerHTML = '<thead><tr><th>Point</th><th>s (m)</th><th>z (m)</th><th>R (m)</th><th>pente aval</th><th></th></tr></thead><tbody>' +
@@ -4605,7 +4621,13 @@ function refreshPLRing(c) {
   $('#plChart').hidden = false;
   plEditor().render({
     key: 'g:ring', name: 'Anneau (rive intérieure)', PL, defined, tn, pis: store.pis.map((q) => ({ s: +q.s, z: +q.z, R: +q.R || 0 })),
-    nodeInfo: (k, nd) => { const i = defined ? piOf(nd) : -1; return i >= 0 ? { fixed: false, pi: i, label: `PI ${i + 1}` } : { fixed: true, pi: -1, label: k ? 'bouclage (s = L)' : 'origine' }; },
+    nodeInfo: (k, nd) => { const i = defined ? piOf(nd) : -1; return i >= 0 ? { fixed: false, pi: i, label: `PI ${i + 1}` } : { fixed: true, pi: -1, label: k ? 'bouclage (s = L)' : 'origine', ring: true }; },
+    // origine / bouclage de l'anneau (même point) : un point saisi à s = 0 les rend déplaçables (cote seule)
+    freeEnd(inf, nd) {
+      if (!inf.ring) return false;
+      store.pis = [...store.pis.filter((q) => Math.abs(((+q.s % L) + L) % L) > 0.5 && Math.abs(((+q.s % L) + L) % L - L) > 0.5), { s: 0, z: Math.round(nd.z * 1000) / 1000, R: 0 }];
+      update(); return true;
+    },
     sMin: 0, sEnd: L, stations, limits: RING_PL_LIMITS, defaultR: RING_PL_LIMITS.Rconv, endFixed: null, startFixed: null,
     note: defined ? '' : 'Pas de ligne rouge sur l\'anneau : cote zC et déclivité du site (onglet Profil), en tiretés. Outil « Point » (clic) ou « Draft TN… » pour la saisir.',
   });
@@ -4656,7 +4678,7 @@ function refreshPL() {
   $('#plChart').hidden = false;
   plEditor().render({
     key: `b:${bd.idx}`, name: bd.name, PL, defined: d.defined, tn: tnLine, pis: pisB,
-    nodeInfo: (i) => (i === 0 ? { fixed: true, pi: -1, label: 'anneau' } : d.defined ? { fixed: false, pi: i - 1, label: `PI ${i}` } : { fixed: true, pi: -1, label: 'pente courante' }),
+    nodeInfo: (i) => (i === 0 ? { fixed: true, pi: -1, label: 'anneau', why: 'cote du bord de l\'anneau (profil de l\'anneau ou zC et déclivité, onglets Profil long / Profil) : modifiez-la là' } : d.defined ? { fixed: false, pi: i - 1, label: `PI ${i}` } : { fixed: true, pi: -1, label: 'pente courante', why: 'pente constante de l\'onglet Branches : créez la ligne rouge (outil Point ou Draft TN)' }),
     sMin: 0, sEnd, stations: cartSt, limits: lim, defaultR: S.prj.context === 'urbain' ? 800 : 3000, endFixed: null, startFixed: { s: 0, z: d.db.z0 },
     note: d.defined ? '' : `Pas de ligne rouge saisie : pente constante de l'onglet Branches (tiretés). Outil « Point » (clic) ou « Draft TN… » pour la créer.`,
   });

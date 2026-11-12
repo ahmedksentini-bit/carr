@@ -72,7 +72,9 @@ export function buildAxisProfiles(prj, D, axes, juncs = [], tin = null) {
     else if (ax.key.startsWith('x:')) {
       // voie secondaire raccordée à un carrefour : extrémité calée sur la cote zC de son centre
       const tied = [];
+      const free = store[ax.key]?.free || [];
       for (const end of [0, 1]) {
+        if (free.includes(end)) continue; // extrémité libérée par l'utilisateur : point saisi
         const s = end ? ax.len : 0, p = ax.at(s).p, j = juncs.find((q) => (q.zAt || (q.zC != null && Number.isFinite(q.zC))) && G.dist(q.O, p) < q.Rg + 85);
         if (j) { const z = j.zAt ? j.zAt(p) : j.zC; tied.push({ s, z: Math.round(z * 1000) / 1000, R: 0, why: `${j.name || 'carrefour'} (${j.zAt ? 'profil de l\'anneau' : 'zC'})`, end }); }
       }
@@ -93,8 +95,9 @@ export function buildAxisProfiles(prj, D, axes, juncs = [], tin = null) {
       const r = pending[i], ax = byKey[`r:${r.id}`];
       const hk = [hostKey(prj, r.from?.ref), hostKey(prj, r.to?.ref)];
       if (pass < 3 && hk.some((k) => k && k.startsWith('r:') && byKey[k] && !out.has(k))) continue; // hôte bretelle pas encore résolu
-      const tied = [];
+      const tied = [], free = store[`r:${r.id}`]?.free || [];
       for (const [end, k] of [[0, hk[0]], [1, hk[1]]]) {
+        if (free.includes(end)) continue; // extrémité libérée par l'utilisateur : point saisi
         const s = end ? ax.len : 0, p = ax.at(s).p;
         let z = null, why = '';
         if (k) { const h = zHost(k, p); if (h) { z = h.z; why = `${byKey[k].name} (s = ${fmt(h.s, 1)} m)`; } }

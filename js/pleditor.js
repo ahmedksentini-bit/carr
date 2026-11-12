@@ -224,6 +224,7 @@ export function createPlEditor(host, hooks) {
         `<dl><dt>pente amont</dt><dd>${g1 == null ? '—' : pct(g1)}</dd><dt>pente aval</dt><dd>${g2 == null ? '—' : pct(g2)}</dd>` +
         (cv ? `<dt>raccordement</dt><dd>${cv.type} · T ${fmt(cv.T, 2)} m</dd><dt>flèche</dt><dd>${fmt((cv.R * (cv.g2 - cv.g1) ** 2) / 8, 3)} m</dd>` : g1 != null && g2 != null && Math.abs(g2 - g1) > 1e-6 ? '<dt>raccordement</dt><dd>aucun (R = 0)</dd>' : '') +
         `<dt>TN</dt><dd>${tnAt(+q.s) == null ? '—' : `${fmt(tnAt(+q.s), 2)} (${(+q.z - tnAt(+q.s) >= 0 ? '+' : '−') + fmt(Math.abs(+q.z - tnAt(+q.s)), 2)})`}</dd></dl>` +
+        (ctx.nodeInfo(k, PL.nodes[k]).freed != null && ctx.tieEnd ? `<div class="row"><button type="button" data-insp="tie" title="Revenir à la cote imposée par le carrefour ou la chaussée hôte">Recaler l'extrémité</button></div>` : '') +
         `<div class="row"><button type="button" data-insp="tn"${tnAt(+q.s) == null ? ' disabled' : ''} title="Cote du point = cote du terrain naturel">Caler sur TN</button><button type="button" data-insp="del">Supprimer</button></div></div>` +
         tgInsp(i);
     } else h += '<p class="ple-hint">Cliquez un point de la ligne rouge pour le régler ici (s, z, R, pentes, flèche).</p>';
@@ -438,7 +439,7 @@ export function createPlEditor(host, hooks) {
     const sn = hovEl('.ple-snap'), q = st.tool === 'add' ? snapZ(s, py) : null;
     sn.style.display = q?.kind ? '' : 'none'; if (q?.kind) { sn.setAttribute('transform', `translate(${px} ${G.Y(q.z)})`); sn.setAttribute('class', `ple-snap ${q.kind}`); }
     const nd = nodeAt(px, py), tg = !nd && st.tool === 'sel' && ctx.defined ? tgAt(px, py) : null;
-    svg.style.cursor = st.win ? 'crosshair' : st.tool === 'sel' ? (nd && !nd.inf.fixed ? 'grab' : tg ? 'move' : 'default') : st.tool === 'add' ? 'crosshair' : nd ? 'pointer' : st.tool === 'slope' && segAt(px, py) != null ? 'pointer' : 'default';
+    svg.style.cursor = st.win ? 'crosshair' : st.tool === 'sel' ? (nd && (!nd.inf.fixed || nd.inf.tie || nd.inf.ring) ? 'grab' : tg ? 'move' : nd ? 'help' : 'default') : st.tool === 'add' ? 'crosshair' : nd ? 'pointer' : st.tool === 'slope' && segAt(px, py) != null ? 'pointer' : 'default';
     const parts = [`s = ${fmt(s, 2)} m`, `TN ${zt == null ? '—' : fmt(zt, 2)}`, `projet ${zr == null ? '—' : fmt(zr, 2)}`];
     if (zt != null && zr != null) parts.push(`écart ${zr - zt >= 0 ? '+' : '−'}${fmt(Math.abs(zr - zt), 2)} m (${zr - zt >= 0 ? 'remblai' : 'déblai'})`);
     if (zr != null) parts.push(`pente ${pct(ctx.PL.gradeAt(s))}`);
@@ -460,6 +461,17 @@ export function createPlEditor(host, hooks) {
     let tg = st.tool === 'sel' && e.button === 0 && st.ctx.defined ? tgAt(x, y) : null;
     if (tg && nd && !nd.inf.fixed && Math.hypot(st.geo.X(nd.n.s) - x, st.geo.Y(nd.n.z) - y) <= Math.hypot(st.geo.X(tg.s) - x, st.geo.Y(tg.z) - y)) tg = null;
     if (tg) { st.sel = tg.pi; st.selTg = tg.end; st.drag = { kind: 'tg', t: tg, line: tgLine(tg), moved: false }; draw(); return; }
+    if (st.tool === 'sel' && nd && nd.inf.fixed && e.button === 0) { // extrémité imposée : libérable (calage) ou explication
+      const fr = st.ctx.freeEnd?.(nd.inf, nd.n);
+      if (fr === null) return; // libération refusée
+      if (fr) {
+        const k = st.ctx.pis.findIndex((q) => Math.abs(q.s - nd.n.s) < 0.05 || (nd.inf.ring && Math.abs(q.s) < 0.05));
+        if (k >= 0) { st.sel = k; st.selTg = null; st.drag = { kind: 'pt', pi: k, moved: false }; draw(); }
+        return;
+      }
+      hooks.toast?.(`${nd.inf.label || 'Point'} imposé${nd.inf.why ? ` : ${nd.inf.why}` : ''}.`, 'info');
+      st.drag = { kind: 'pan', x0: x, y0: y, v: { ...st.view }, moved: false, nd: null }; return;
+    }
     if (e.button === 1 || (st.tool === 'sel' && !(nd && !nd.inf.fixed))) { st.drag = { kind: 'pan', x0: x, y0: y, v: { ...st.view }, moved: false, nd }; return; }
     if (st.tool === 'sel' && nd && !nd.inf.fixed) { st.sel = nd.inf.pi; st.selTg = null; st.drag = { kind: 'pt', pi: nd.inf.pi, moved: false }; draw(); }
   });
@@ -490,7 +502,9 @@ export function createPlEditor(host, hooks) {
       d.moved = true;
       const ctx = st.ctx, pis = pisCopy(), lo = Math.max(ctx.sMin, ...ctx.PL.nodes.filter((n) => n.s < pis[d.pi].s - 1e-9).map((n) => n.s)) + 0.5;
       const hi = Math.min(...ctx.PL.nodes.filter((n) => n.s > pis[d.pi].s + 1e-9).map((n) => n.s), Infinity) - 0.5;
-      const s = Math.max(lo, Math.min(hi, Math.round(G.S(x) * 10) / 10));
+      const s0 = pis[d.pi].s, sE = Math.max(ctx.sEnd, ctx.PL.sEnd);
+      const atEnd = Math.abs(s0 - ctx.sMin) < 0.05 || Math.abs(s0 - ctx.sEnd) < 0.05; // origine / fin de l'axe : cote seule
+      const s = atEnd ? s0 : Math.max(lo, Math.min(hi, Math.min(sE, Math.round(G.S(x) * 10) / 10)));
       const zt = st.snap ? tnAt(s) : null, z = zt != null && Math.abs(G.Y(zt) - y) < 9 ? zt : Math.round(G.Z(y) * 100) / 100;
       pis[d.pi] = { ...pis[d.pi], s, z };
       if (!st.raf) st.raf = requestAnimationFrame(() => { st.raf = 0; commit(pis, null, { commit: false }); });
@@ -556,6 +570,7 @@ export function createPlEditor(host, hooks) {
   });
   insp.addEventListener('click', (e) => {
     const b = e.target.closest('[data-insp]'); if (!b || st.sel < 0) return;
+    if (b.dataset.insp === 'tie') { const PL = st.ctx.PL, k = PL.nodes.findIndex((n, j) => st.ctx.nodeInfo(j, n).pi === st.sel); const fe = k >= 0 ? st.ctx.nodeInfo(k, PL.nodes[k]).freed : null; if (fe != null) { st.sel = -1; st.ctx.tieEnd(fe); } return; }
     if (b.dataset.insp === 'del') del(st.sel);
     else { const pis = pisCopy(), z = tnAt(pis[st.sel].s); if (z != null) { pis[st.sel].z = z; commit(pis, pis[st.sel]); } }
   });
