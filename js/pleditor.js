@@ -180,14 +180,15 @@ export function createPlEditor(host, hooks) {
     // survol (mis à jour sans tout redessiner)
     o += `<g class="ple-hov" style="display:none"><line class="ple-cur" y1="${M.t}" y2="${M.t + G.ph}"/><circle class="ple-mtn" r="4"/><circle class="ple-mred" r="4"/><g class="ple-snap"><rect x="-6" y="-6" width="12" height="12" transform="rotate(45)"/></g><path class="ple-prev"/><rect class="ple-win"/></g>`;
     svg.innerHTML = o;
+    if (st.ohHot) svg.querySelectorAll('.pl-oh').forEach((g) => g.classList.toggle('hot', g.dataset.oh === st.ohHot)); // surbrillance gardée au redessin
     drawCart();
     syncBar(); drawInsp();
   }
   // Cartouche (BVTrace) puis bandeaux du tracé en plan (courbures) et des dévers, à la même échelle des abscisses.
   function drawCart() {
-    const ctx = st.ctx, G = st.geo, box = $('.ple-cart svg'), stripH = (ctx.plan ? 34 : 0) + (ctx.devers?.length ? 84 : 0), H = cartH() + 4 + stripH;
+    const ctx = st.ctx, G = st.geo, box = $('.ple-cart svg'), stripH = (ctx.plan ? 34 : 0) + (ctx.devers?.length ? 84 : 0), H = cartH(!!ctx.planEls?.length) + 4 + stripH;
     box.setAttribute('width', G.W); box.setAttribute('height', H); box.setAttribute('viewBox', `0 0 ${G.W} ${H}`);
-    const C = plCartSVG(ctx.PL, ctx.stations || [], { X: G.X, m: { l: M.l }, w: G.W, y0: 1, sMax: Math.min(st.view.s1, Math.max(ctx.sEnd, ctx.PL.sEnd)), sMin: Math.max(st.view.s0, ctx.sMin), clip: 'ple-cclip', noRed: !ctx.defined });
+    const C = plCartSVG(ctx.PL, ctx.stations || [], { X: G.X, m: { l: M.l }, w: G.W, y0: 1, sMax: Math.min(st.view.s1, Math.max(ctx.sEnd, ctx.PL.sEnd)), sMin: Math.max(st.view.s0, ctx.sMin), clip: 'ple-cclip', noRed: !ctx.defined, planEls: ctx.planEls });
     const sv = stripH ? plStrips({ plan: ctx.plan, devers: ctx.devers, grade: ctx.defined ? (sv) => (sv >= ctx.PL.nodes[0].s && sv <= ctx.PL.sEnd ? ctx.PL.gradeAt(sv) : NaN) : null }, { X: G.X, m: { l: M.l, r: M.r }, w: G.W, h: H, sMax: st.view.s1, stripH }) : '';
     // libellés des bandeaux (dans la colonne de gauche, hors de la zone défilante)
     const labels = (sv.match(/<text [^>]*x="([\d.]+)"[^>]*>[^<]*(?:<tspan[^>]*>[^<]*<\/tspan>[^<]*)*<\/text>/g) || []).filter((t) => +t.match(/x="([\d.]+)"/)[1] < M.l).join('');
@@ -446,6 +447,8 @@ export function createPlEditor(host, hooks) {
     if (st.tool === 'add') parts.push(`point à z = ${fmt(q.z, 2)}${q.kind ? (q.kind === 'tn' ? ' (TN)' : ' (sur la ligne rouge)') : ''}`);
     if (nd) parts.push(`${nd.inf.label} : s ${fmt(nd.n.s, 2)}, z ${fmt(nd.n.z, 3)}`);
     else if (tg) { const zt2 = tnAt(tg.s); parts.push(`${tg.end === 'A' ? 'TE' : 'TS'} de ${ctx.nodeInfo(tg.k, ctx.PL.nodes[tg.k]).label} : PK ${fmt(pk0() + tg.s, 2)}, Z ${fmt(tg.z, 3)}${zt2 == null ? '' : `, TN ${fmt(zt2, 3)}`} — glisser pour déplacer`); }
+    const oh = st.ohHot && svg.querySelector(`.pl-oh.hot`);
+    if (oh && !nd && !tg) parts.push(oh.dataset.ohtip);
     read.textContent = parts.join(' · ');
   }
 
@@ -513,7 +516,7 @@ export function createPlEditor(host, hooks) {
     hover(x, y);
   });
   svg.addEventListener('pointerup', (e) => {
-    if (!st.ctx) return;
+    if (!st.ctx || e.button === 2) return; // clic droit : menu contextuel seulement (pas de point ajouté / supprimé)
     const [x, y] = pos(e), d = st.drag; st.drag = null;
     if (d?.kind === 'win') {
       st.win = false; hovEl('.ple-win')?.setAttribute('width', 0);
@@ -535,7 +538,20 @@ export function createPlEditor(host, hooks) {
     if (st.tool === 'del') { if (nd && !nd.inf.fixed) del(nd.inf.pi); else if (nd) hooks.toast?.('Point imposé : non supprimable.', 'warn'); }
   });
   svg.addEventListener('pointerleave', () => { if (!st.drag) { const g = hovEl('.ple-hov'); if (g && !st.form) g.style.display = 'none'; } });
-  svg.addEventListener('contextmenu', (e) => { e.preventDefault(); setTool('sel'); });
+  // ouvrages de l'overlay (main.js : <g class="pl-oh" data-oh data-ohcut data-ohtip>) : surbrillance au survol, clic droit
+  const ohAt = (e) => (st.drag ? null : e.target?.closest?.('.pl-oh'));
+  function ohHot(k) {
+    if (st.ohHot === k) return; st.ohHot = k;
+    svg.querySelectorAll('.pl-oh').forEach((g) => g.classList.toggle('hot', !!k && g.dataset.oh === k));
+  }
+  svg.addEventListener('pointerover', (e) => { const g = ohAt(e); ohHot(g?.dataset.oh || null); });
+  svg.addEventListener('pointerleave', () => ohHot(null));
+  svg.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const g = ohAt(e);
+    if (g && hooks.ohMenu) { ohHot(null); hooks.ohMenu(g.dataset.oh, g.dataset.ohcut === '1'); return; }
+    setTool('sel');
+  });
   function setTool(t) { st.tool = t; st.win = false; closeForm(); syncBar(); }
   host.querySelector('.ple-tools').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b || !st.ctx) return;
