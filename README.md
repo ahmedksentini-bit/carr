@@ -11,7 +11,10 @@ ou sur un fond topographique DXF.
 
 ## Fonctions (version 1)
 
-- **Onglet Tracé** (premier onglet) : axes de la voie principale (autoroute ICTAAL ou route non autoroutière,
+- **Ordre des onglets** : Projet, Tracé, Terrain, Dévers, Profil long, Profils travers, Implantation, Carrefours plans (anneau du
+  giratoire ou carrefour en T / X ; ex-« Anneau »), Branches, Profil, PSGR, Visibilité, Contrôles, Capacité, Échangeur,
+  Ouvrages, Signalisation, Hydrologie, Vitesses / UVR.
+- **Onglet Tracé** (deuxième onglet) : axes de la voie principale (autoroute ICTAAL ou route non autoroutière,
   catégorie de conception, vitesse, profil en travers, PK origine) et des voies secondaires — dessin, import KMZ / KML,
   tableau des sommets (X, Y, R, clothoïdes, rayon appliqué), raccordement aux carrefours et croisements. L'onglet
   **Échangeur** reprend ces axes dans une liste « Voies de l'échangeur » où l'on choisit le rôle de chacun (voie
@@ -343,7 +346,7 @@ ou sur un fond topographique DXF.
 - **Voie principale** (onglet Tracé, « Tracer la voie principale ») : autoroute (ICTAAL L1 / L2) ou route non
   autoroutière (catégories de conception ARP R1 / R2 / artère 110, VSA 90 / 110, AU 70, libre ; 2×1 voies, BDD 2,00 m,
   berme 0,75 m par défaut, terre-plein central facultatif) : on peut croiser et raccorder des routes non autoroutières.
-- **Carrefour « cacahuète »** (onglet Anneau, forme de l'anneau ; `js/ringshape.js`) : deux lobes circulaires (Rg,
+- **Carrefour « cacahuète »** (onglet Carrefours plans, forme de l'anneau ; `js/ringshape.js`) : deux lobes circulaires (Rg,
   Rg2) d'entraxe e reliés par deux cols concaves (rayons à la rive extérieure, 0 = col rectiligne : giratoire oblong),
   orientés suivant la route principale ou un gisement saisi. Outil Centre (C) : deux clics, centre du lobe 1 puis du
   lobe 2 (ou X,Y / @dx,dy) — le centre (milieu), l'entraxe e et le gisement de l'axe en découlent. Référence : Sétra, fiche d'expérience RACA « Le carrefour
@@ -357,7 +360,7 @@ ou sur un fond topographique DXF.
 - **Rayon unique quand Re et Rs se chevauchent** (`fuseFillets`, `js/roundabout.js`) : au lieu de l'erreur
   « branches trop proches », le rayon d'entrée d'une branche et le rayon de sortie de la suivante sont remplacés par un
   seul arc tangent aux deux rives (prolongées en ligne droite vers l'anneau), de préférence tangent à la rive de
-  l'anneau ; si ce rayon est plus petit que le minimum « Rayon unique mini » (onglet Anneau, 12,50 m par défaut :
+  l'anneau ; si ce rayon est plus petit que le minimum « Rayon unique mini » (onglet Carrefours plans, 12,50 m par défaut :
   couronne de giration d'un autobus, 12,50 m / 5,30 m, directive 2001/85/CE), le minimum est retenu et l'arc reste en
   retrait de l'anneau ; s'il ne tient pas entre les branches, le plus grand rayon qui tient. Bord de chaussée
   concentrique, coté « R … (Re/Rs fusionnés) ». Cercle et lobe d'une cacahuète (même lobe). Sans chevauchement, la case « Rayon unique
