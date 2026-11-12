@@ -171,6 +171,18 @@ ou sur un fond topographique DXF.
   branche suivante (ACI : voie de 4 m, bandes dérasées 2,00 m à droite et 0,50 m à gauche, rive intérieure de rayon
   40 m, îlot de séparation de 2 m minimum le long des bordures du giratoire, biseau de décélération de 80 m,
   voie d'insertion de 70 m et biseau de 70 m) ; les branches concernées sont allongées automatiquement.
+- **Signalisation des virages** (onglet Signalisation, `js/virages.js`) d'après le guide SETRA « Comment signaler les
+  virages ? Signalisation verticale » (juillet 2002, repris par l'IISR — arrêté du 8 avril 2002), sur les routes
+  bidirectionnelles à 2 voies (autoroutes, chaussées séparées et bretelles exclues), **dans chaque sens** : vitesse dans
+  le virage Vv = 102 / (1 + 346 / R^1,5) (R : rayon minimal), vitesse d'approche Va depuis le virage précédent
+  (accélération 0,8 m/s² corrigée de la pente amont, au-delà de 75 m d'alignement ; 102 km/h au plus), classe d'après
+  Va − Vv : < 8 km/h aucune, 8 à 16 balises J1, 16 à 40 A1 + J1 + J4 tri-chevrons, ≥ 40 A1 + J4 monochevrons dans
+  toute la courbe. Panneau A1a / A1b à 150 m en amont (rase campagne), J4 tri-chevrons à l'extérieur du virage dans
+  l'axe de la voie d'approche, J1 / J4 monochevrons sur le bord extérieur (espacement indicatif) ; tableau des virages
+  (alignement, pente, Va, Vv, classe) ; critères de surclassement calculables signalés dans les contrôles
+  (R(−1)/R > 1,3 entre virages non isolés, resserrement du rayon, ligne droite > 5 km). La visite de terrain
+  (lisibilité, visibilité sur et dans le virage, accidents) reste à faire pour confirmer la classe. Case « Signaler les
+  virages » (cochée par défaut en interurbain).
 - **Signalisation verticale** (onglet Signalisation, calque `GIRA_SIGNALISATION`, mâts dans les points d'implantation) :
   panneaux placés automatiquement sur l'axe de chaque branche, à droite du sens concerné, le bord du panneau à 0,70 m
   de la BDD (ou du bord de la voie derrière le caniveau en urbain), ou sur l'axe des îlots séparateurs.
