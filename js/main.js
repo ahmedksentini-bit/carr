@@ -588,7 +588,21 @@ function computeTalus() {
     const rings = (o.rings || []).map((r) => G.samplePath(r, 1)).filter((r) => r.length > 2);
     if (rings.length) areas.push({ rings, rule: o.rule });
   }
-  return talusPrims(out, masks, { esp: T.esp, areas });
+  // têtes des cadres et PIPO : le talus est coupé entre les murs en aile, devant le mur de tête, et raccordé aux
+  // extrémités extérieures des murs (corde entre leurs extrémités = bord du talus coupé)
+  const cuts = [];
+  for (const g of S.cadres || []) {
+    if (g.err || !g.K || g.K.type === 'poutres' || g.K.type === 'buse' || !(g.K.wingL > 0.1)) continue;
+    let hp; try { hp = cadreHeadPolys(g); } catch { continue; }
+    for (const k of [0, 1]) {
+      const wings = (hp[k] || []).slice(g.K.murette ? 1 : 0); // [c0, e1, e1 + ép., c0 + ép.] par mur en aile
+      if (wings.length < 2) continue;
+      const [wa, wb] = wings, poly = [wa[0], wa[1], wb[1], wb[0]];
+      masks.push(poly);
+      cuts.push([wa[1], wb[1]]);
+    }
+  }
+  return talusPrims(out, masks, { esp: T.esp, areas, cuts });
 }
 // Couloirs de terrassement de tous les axes (coupes au profil type, talus non découpés), mis en cache : talus en plan
 // et limite des talus qui se chevauchent dans les profils en travers (talus vertical, pas de double comptage).

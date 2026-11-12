@@ -253,10 +253,24 @@ export function earthworkIndex(corridors) {
     },
   };
 }
-// opts.areas : surfaces revêtues [{ rings: [[{ x, y }]], rule }] où le talus est masqué.
+// opts.areas : surfaces revêtues [{ rings: [[{ x, y }]], rule }] où le talus est masqué ; opts.cuts : segments [a, b]
+// de coupure du talus (dessinés comme bord de talus là où ils traversent un talus).
 export function talusPrims(corridors, masks = [], opts = {}) {
   const esp = Math.max(0.5, +opts.esp || 2), R = new Regions(10, opts.areas?.length ? new Areas(opts.areas) : null);
   fillRegions(R, corridors);
+  // coupures (têtes d'ouvrages : corde entre les extrémités des murs en aile) : parties situées dans un talus, avant
+  // l'ajout des masques — elles deviennent le bord du talus coupé
+  const inTalus = (x, y) => { const list = R.grid.get(Math.floor(x / R.cell) + ',' + Math.floor(y / R.cell)) || []; return list.some((i) => { const t = R.tris[i]; return (t.kind === 'R' || t.kind === 'D') && inTri(t, x, y) != null; }); };
+  const cutLines = [];
+  for (const [a, b] of opts.cuts || []) {
+    const L = Math.hypot(b.x - a.x, b.y - a.y), n = Math.max(2, Math.ceil(L / 0.25));
+    let start = null;
+    for (let i = 0; i <= n; i++) {
+      const q = { x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n }, on = inTalus(q.x, q.y);
+      if (on && !start) start = q;
+      if ((!on || i === n) && start) { const e = on ? q : { x: a.x + ((b.x - a.x) * (i - 1)) / n, y: a.y + ((b.y - a.y) * (i - 1)) / n }; if (Math.hypot(e.x - start.x, e.y - start.y) > 0.05) cutLines.push([start, e]); start = null; }
+    }
+  }
   const flat = (p) => ({ x: p.x, y: p.y, z: 0 });
   for (const poly of masks) if (poly?.length > 2) for (let i = 1; i + 1 < poly.length; i++) R.add(flat(poly[0]), flat(poly[i]), flat(poly[i + 1]), 'P', -1);
 
@@ -291,7 +305,7 @@ export function talusPrims(corridors, masks = [], opts = {}) {
   if (meet.length) prims.push({ k: 'hatch', L: 'TALUS', role: 'inter', lines: strip(meet), wm: 0.06 });
   if (barb.R.length) prims.push({ k: 'hatch', L: 'TALUS', role: 'R', lines: strip(barb.R), wm: 0.04 });
   if (barb.D.length) prims.push({ k: 'hatch', L: 'TALUS', role: 'D', lines: strip(barb.D), wm: 0.04 });
-  if (bord.length) prims.push({ k: 'hatch', L: 'TALUS', role: 'crete', lines: strip(bord), wm: 0.06 });
+  if (bord.length || cutLines.length) prims.push({ k: 'hatch', L: 'TALUS', role: 'crete', lines: [...strip(bord), ...cutLines], wm: 0.06 });
   if (eet.length) prims.push({ k: 'hatch', L: 'EET', lines: strip(eet), wm: 0.06 });
   return { prims, n: { barbules: nb, meet: meet.length } };
 }
