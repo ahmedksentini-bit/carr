@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Bureau de calcul des chaussées (chaussee.ksr-infra.org) dans INFRA-KSR">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="enhancements.css">
+<link rel="stylesheet" href="site.css">
+<style>
+  /* dans l'onglet d'INFRA-KSR : pas de bandeau de site, toute la largeur du cadre */
+  main.main-bureau { max-width: none; padding: 14px 16px 40px; }
+  .software-sidebar { max-height: calc(100vh - 28px) !important; top: 14px !important; }
+</style>
+<title>Bureau de calcul — Chaussées</title>
+</head><body class="page-bureau">
+<main id="app" tabindex="-1" class="main-bureau">
+  <p class="method-note">Chargement du bureau de calcul…</p>
+</main>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<input type="file" id="fichierImport" accept="application/json,.json" hidden>
+<noscript>Activez JavaScript pour utiliser le bureau de calcul.</noscript>
+<script type="module" src="src/socle.js"></script>
+<script type="module" src="src/bureau.js"></script>
+<script type="module" src="src/tableaux.js"></script>
+</body></html>

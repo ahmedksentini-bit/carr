@@ -6821,10 +6821,25 @@ function refreshCapPlan(T) {
 }
 
 function showTab(name) {
+  const cur = $('.tabs [data-tab].on')?.dataset.tab; if (cur && cur !== name) S.tabBefore = cur;
   $$('.tabs [data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
   $$('.tab').forEach((t) => (t.hidden = t.id !== 'tab-' + name));
   if (name === 'implantation') try { refreshTabAxes(); } catch (e) { console.error(e); }
   if (name === 'uvr') try { UV?.render(); } catch (e) { console.error(e); }
+  // Chaussées : le bureau occupe toute la largeur (plan masqué) ; chargé à la première ouverture
+  const full = name === 'chaussee', app = $('main.app'), was = app?.classList.contains('full-tab');
+  app?.classList.toggle('full-tab', full);
+  if (full) { const f = $('#chFrame'); if (f && !f.getAttribute('src')) f.src = f.dataset.src; }
+  if (was !== full) requestAnimationFrame(() => { try { viewer.resize?.(); viewer.invalidate(); } catch { /* */ } });
+}
+// Bureau de calcul des chaussées (chaussee/, tools/sync-chaussee.py) : son état vit dans le stockage local de même
+// origine (clé du bureau) ; il est joint au fichier projet INFRA-KSR à l'enregistrement et restauré à l'ouverture.
+const CH_KEY = 'chaussee-bureau-v1';
+function chausseeState() { try { return JSON.parse(localStorage.getItem(CH_KEY) || 'null'); } catch { return null; } }
+function chausseeRestore(st) {
+  if (!st || typeof st !== 'object') return;
+  try { localStorage.setItem(CH_KEY, JSON.stringify(st)); } catch { return; }
+  const f = $('#chFrame'); if (f?.getAttribute('src')) f.contentWindow?.location.reload();
 }
 
 // --------------------------------------------------------- Liaisons
@@ -6890,6 +6905,7 @@ function bindUI() {
     }
   });
   $$('.tabs [data-tab]').forEach((b) => b.addEventListener('click', () => { showTab(b.dataset.tab); if (b.dataset.tab === 'pl') plPopOpen(); }));
+  $('#chBack')?.addEventListener('click', () => showTab(S.tabBefore && S.tabBefore !== 'chaussee' ? S.tabBefore : 'projet'));
   $$('.tools [data-tool]').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
   $$('.tools [data-act]').forEach((b) => b.addEventListener('click', () => (b.dataset.act === 'zoomGira' ? zoomGira() : zoomAll())));
   $$('.tog').forEach((b) => { b.classList.toggle('on', !!S.tog[b.dataset.tog]); b.addEventListener('click', () => toggle(b.dataset.tog)); });
@@ -7634,7 +7650,8 @@ function exportCSV() {
 }
 
 function saveProject() {
-  const data = JSON.stringify({ ...S.prj, view: { cx: viewer.cx, cy: viewer.cy, s: viewer.s }, ...(S.kml.length ? { kml: S.kml } : {}), savedAt: new Date().toISOString() }, null, 1);
+  const ch = chausseeState();
+  const data = JSON.stringify({ ...S.prj, view: { cx: viewer.cx, cy: viewer.cy, s: viewer.s }, ...(S.kml.length ? { kml: S.kml } : {}), ...(ch ? { chaussee: ch } : {}), savedAt: new Date().toISOString() }, null, 1);
   download(fname('ksr.json'), data, 'application/json');
 }
 
@@ -7644,12 +7661,14 @@ async function openProject(file) {
     if (!APP_IDS.includes(js.app)) throw new Error('ce fichier n\'est pas un projet INFRA-KSR (ni GIRA)');
     js.app = 'INFRA-KSR';
     const kml = Array.isArray(js.kml) ? js.kml : null; delete js.kml;
+    const ch = js.chaussee && typeof js.chaussee === 'object' ? js.chaussee : null; delete js.chaussee;
     S.prj = migrate(js); S.D = null; S.trSig = new Map(); S.trGood = new Map();
     S.sel = -1; S.hist = []; S.fut = [];
     applyCRS(); syncCtxUI(); syncCrsUI(); renderBranchForm(); update();
     if (js.view && isFinite(js.view.s)) { viewer.cx = js.view.cx; viewer.cy = js.view.cy; viewer.s = js.view.s; viewer.invalidate(); } else zoomGira();
     if (kml) { S.kml = kml; S.kmlCache.clear(); saveKml(); renderKmlLayers(); }
-    toast(`Projet « ${S.prj.name} » ouvert.` + (kml ? ` ${kml.length} calque(s) KMZ / KML.` : ''));
+    if (ch) chausseeRestore(ch);
+    toast(`Projet « ${S.prj.name} » ouvert.` + (kml ? ` ${kml.length} calque(s) KMZ / KML.` : '') + (ch ? ' Bureau de calcul des chaussées restauré.' : ''));
   } catch (e) { toast('Ouverture impossible : ' + e.message, 'err'); }
 }
 
