@@ -212,6 +212,11 @@ ou sur un fond topographique DXF.
   altitude sont dessinés sur le plan par-dessus le projet (plus lisibles quand le TN vient du SRTM, sans autre fond) ; la
   dénivelée projet − TN de chaque profil est écrite à la verticale au-dessus de la ligne rouge (vert : remblai, + ;
   orange : déblai, −).
+  Ouvrages (cadres, PIPO, buses) : sur le plan, fiche à côté de l'ouvrage — désignation, n × B × H (ou n × buse Ø),
+  PK, biais (gr), longueur, fil d'eau amont → aval (pente) et **fil d'eau au droit de l'axe** ; sur le profil en long,
+  **coupe de l'ouvrage** au droit de l'axe (largeurs le long de l'axe divisées par le sinus du biais, hauteurs à
+  l'échelle des hauteurs : radier, piédroits, traverse, ouvertures ; buses en ellipses), repère et cote « FE axe » ; le
+  plan de comparaison est choisi pour que la coupe tienne dans le cadre avec la ligne rouge.
   La ligne rouge remplace la pente constante de la branche dans le modèle altimétrique (dévers, points d'implantation).
   Contrôles : chevauchement des raccordements, pente maximale et rayons minimaux (ARP catégorie R80 par défaut, valeurs
   urbaines usuelles — à confirmer selon la catégorie ; l'autoroute et les voies secondaires suivent leur catégorie de
