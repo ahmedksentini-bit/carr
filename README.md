@@ -208,6 +208,10 @@ ou sur un fond topographique DXF.
   en la glissant, après confirmation : elle devient un point saisi (« début / fin libéré ») dont la cote ne suit plus le
   calage ; « Recaler l'extrémité » dans le panneau du point revient au calage. Anneau : glisser l'origine crée un point à
   s = 0 (le bouclage suit). Branche : le point « anneau » reste imposé par le bord de l'anneau (un clic dit où le régler).
+  **Tracé combiné** (`js/combine.js`) : feuilles plan + profil en long + cartouche à l'échelle. Les points du MNT et leur
+  altitude sont dessinés sur le plan par-dessus le projet (plus lisibles quand le TN vient du SRTM, sans autre fond) ; la
+  dénivelée projet − TN de chaque profil est écrite à la verticale au-dessus de la ligne rouge (vert : remblai, + ;
+  orange : déblai, −).
   La ligne rouge remplace la pente constante de la branche dans le modèle altimétrique (dévers, points d'implantation).
   Contrôles : chevauchement des raccordements, pente maximale et rayons minimaux (ARP catégorie R80 par défaut, valeurs
   urbaines usuelles — à confirmer selon la catégorie ; l'autoroute et les voies secondaires suivent leur catégorie de
