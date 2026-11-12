@@ -380,6 +380,7 @@ function update({ commit = true, panels = true } = {}) {
     try { S.checks = checkDesign(S.prj, S.D); } catch (e) { console.error(e); S.checks = []; }
     S.Do = otherDesigns();
   }
+  for (const c of S.checks) c.j = true; // contrôles du carrefour actif (localisés au centre à défaut d'autre repère)
   for (const msg of S.roadWarns || []) S.checks.push({ lvl: 'warn', msg });
   try { computePsgr(); } catch (e) { console.error(e); S.psgrPrims = []; }
   S.ouvr = null; S.cadres = [];
@@ -1922,6 +1923,7 @@ function plusPos(e) {
 function drawOverlay(ctx, v, T) {
   try { drawEmprise(ctx, v); } catch (e) { console.error(e); }
   try { UV?.overlay(ctx, v); } catch (e) { console.error(e); }
+  try { drawCheckFlash(ctx, v); } catch (e) { console.error(e); }
   if (S.D?.O) {
     const [x, y] = v.w2s(S.D.O.x, S.D.O.y);
     ctx.strokeStyle = S.prj.center.auto ? T.L.AXE.stroke : T.sel; ctx.lineWidth = 1.6; ctx.setLineDash([]);
@@ -3990,12 +3992,77 @@ function refreshDevers() {
     '</tbody></table>';
 }
 
+// Localisation d'un contrôle : point du plan (c.at) et PK sur son axe. Le PK vient, dans l'ordre, du contrôle lui-même
+// (c.s), du message (« 1+234 », « s = 123 m ») ou de la projection du point sur l'axe le plus proche ; l'axe, de c.ax,
+// du nom en tête du message ou du groupe (branche). Ouvrages : point de l'ouvrage nommé ; carrefour : son centre.
+const pkStr = (v) => { const r = Math.round(v), k = Math.floor(r / 1000); return `${k}+${String(r - k * 1000).padStart(3, '0')}`; };
+const PK_RE = /\b(\d+)\+(\d{3})\b/, SEQ_RE = /\bs\s*=\s*(\d+)(?:,(\d+))?/;
+function locateChecks(list) {
+  let axes = [];
+  try { axes = S.prof?.axes || (S.D ? listAxes(S.prj, S.D) : []); } catch (e) { console.error(e); }
+  const byName = axes.filter((a) => a.name).sort((a, b) => b.name.length - a.name.length);
+  const SEPS = [' (', ' :', ' —', ' –', ' ·', ', '];
+  const named = (t) => t && byName.find((a) => t === a.name || SEPS.some((sp) => t.startsWith(a.name + sp)));
+  const brAx = (t) => { const b = t && (S.prj.branches || []).find((q) => q.name === t || t.startsWith(`${q.name} · `)); return b && axes.find((a) => a.key === `b:${b.id}`); };
+  const works = [...(S.cadres || []), ...(S.ouvr?.list || [])].filter((o) => o.name);
+  const mid = (poly) => (poly?.length ? { x: poly.reduce((a, p) => a + p.x, 0) / poly.length, y: poly.reduce((a, p) => a + p.y, 0) / poly.length } : null);
+  for (const c of list) {
+    const msg = c.msg || '';
+    let ax = (c.ax && axes.find((a) => a.key === c.ax)) || named(msg) || named(c.group) || brAx(c.group) || null;
+    let at = c.at || null, s = Number.isFinite(c.s) ? c.s : null;
+    if (!at && (c.group === 'Ouvrages' || c.group === 'PSGR')) {
+      const o = works.filter((q) => msg.startsWith(`${q.name} `) || msg.startsWith(`${q.name},`)).sort((a, b) => b.name.length - a.name.length)[0];
+      if (o) at = o.p || o.P || mid(o.poly);
+    }
+    if (!at && ax) { // « PI 3 », « sommet 3 » : sommet de l'axe saisi
+      const mv = /\b(?:PI|sommet)\s+(\d+)/.exec(msg), id = ax.key.slice(2);
+      const V = ax.key === 'hwy' ? S.prj.hwy?.axis : ax.key.startsWith('x:') ? (S.prj.crosses || []).find((q) => q.id === id)?.axis : ax.key.startsWith('r:') ? (S.prj.ramps || []).find((q) => q.id === id)?.pis : null;
+      if (mv && V?.[+mv[1]]) at = { x: V[+mv[1]].x, y: V[+mv[1]].y };
+    }
+    if (s == null && ax) {
+      const m = PK_RE.exec(msg), m2 = m ? null : SEQ_RE.exec(msg);
+      if (m) s = +m[1] * 1000 + +m[2]; else if (m2) s = +`${m2[1]}.${m2[2] || 0}`;
+    }
+    if (s != null && ax) { s = Math.max(0, Math.min(ax.len, s)); if (!at) at = ax.at(s).p; }
+    else if (at) { // PK du point sur l'axe le plus proche (à moins de 40 m)
+      let best = null;
+      for (const a of ax ? [ax] : axes) { const pr = a.project(at); if (pr && Math.abs(pr.off) < 40 && (!best || Math.abs(pr.off) < Math.abs(best.pr.off))) best = { a, pr }; }
+      if (best) { ax = best.a; s = best.pr.s; }
+    } else if (ax) { // contrôle de tout l'axe : vue sur l'axe entier
+      c.fit = ax; at = ax.at(ax.key.startsWith('b:') ? Math.min(ax.len, 10) : ax.len / 2).p;
+    }
+    if (!at && c.j && S.D?.O) at = S.D.O;
+    c.at = at; c.pk = s; c.axName = ax?.name || '';
+  }
+}
+// Vue sur un contrôle : cadrage du point (ou de l'axe entier) et repère clignotant.
+function gotoCheck(c) {
+  if (c.fit) {
+    const pts = []; for (let k = 0; k <= 40; k++) pts.push(c.fit.at((c.fit.len * k) / 40).p);
+    viewer.fit({ x0: Math.min(...pts.map((p) => p.x)), y0: Math.min(...pts.map((p) => p.y)), x1: Math.max(...pts.map((p) => p.x)), y1: Math.max(...pts.map((p) => p.y)) }, 0.08);
+  } else { const r = 35; viewer.fit({ x0: c.at.x - r, y0: c.at.y - r, x1: c.at.x + r, y1: c.at.y + r }, 0.02); }
+  S.chkFlash = { p: c.at, t0: performance.now() };
+  const tick = () => { viewer.invalidate(); if (S.chkFlash && performance.now() - S.chkFlash.t0 < 2600) requestAnimationFrame(tick); else S.chkFlash = null; };
+  tick();
+}
+function drawCheckFlash(ctx, v) {
+  const F = S.chkFlash; if (!F?.p) return;
+  const t = (performance.now() - F.t0) / 2600; if (t > 1) return;
+  const [x, y] = v.w2s(F.p.x, F.p.y), ph = (t * 3) % 1;
+  ctx.save(); ctx.setLineDash([]);
+  ctx.strokeStyle = `rgba(239,68,68,${(1 - ph) * (1 - t * 0.5)})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, 8 + ph * 34, 0, Math.PI * 2); ctx.stroke();
+  ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.moveTo(x - 14, y); ctx.lineTo(x + 14, y); ctx.moveTo(x, y - 14); ctx.lineTo(x, y + 14); ctx.stroke();
+  ctx.restore();
+}
+
 function refreshChecks() {
   const order = { err: 0, warn: 1, info: 2, ok: 3 };
   const list = [...S.checks].sort((a, b) => order[a.lvl] - order[b.lvl]);
   const icon = { err: '✕', warn: '!', info: 'i', ok: '✓' };
+  try { locateChecks(list); } catch (e) { console.error(e); }
   S.checkList = list;
-  $('#checks').innerHTML = list.map((c, k) => `<li class="${c.lvl}${c.at ? ' goto' : ''}" data-k="${k}"${c.at ? ' title="Cliquer pour centrer la vue"' : ''}><span class="ic">${icon[c.lvl]}</span><span class="grp">${esc(c.group)}</span><span>${esc(c.msg)}</span></li>`).join('');
+  const pkTag = (c) => (c.pk != null ? `<span class="pk">PK ${pkStr(c.pk)}${c.axName ? ` · ${esc(c.axName)}` : ''}</span>` : c.fit ? `<span class="pk">${esc(c.axName)}</span>` : '');
+  $('#checks').innerHTML = list.map((c, k) => `<li class="${c.lvl}${c.at ? ' goto' : ''}" data-k="${k}"${c.at ? ' title="Cliquer pour voir sur le plan"' : ''}><span class="ic">${icon[c.lvl]}</span><span class="grp">${esc(c.group)}</span><span>${pkTag(c)}${esc(c.msg)}</span></li>`).join('');
   const n = S.checks.filter((c) => c.lvl === 'err').length, w = S.checks.filter((c) => c.lvl === 'warn').length;
   const bd = $('#chkBadge');
   bd.textContent = n ? String(n) : w ? String(w) : '';
@@ -6176,7 +6243,7 @@ function bindUI() {
   $('#checks').addEventListener('click', (e) => {
     const li = e.target.closest('li.goto'), c = li && S.checkList?.[+li.dataset.k];
     if (!c?.at) return;
-    viewer.cx = c.at.x; viewer.cy = c.at.y; viewer.s = Math.max(viewer.s, 6); viewer.invalidate();
+    gotoCheck(c);
   });
   $('#dxfLayers').addEventListener('change', (e) => {
     if (e.target.id === 'empLayer') { S.prj.opts.emprise = { ...(S.prj.opts.emprise || {}), layer: e.target.value }; update(); }

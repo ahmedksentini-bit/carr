@@ -42,7 +42,7 @@ export function initUvr(api) {
       try { res.push(analyzeAxis(ax, { baseCat: axBase(u, ax), trav: u.trav[ax.key] || [], triggers: trg, arterial: !!u.axes[ax.key]?.art, zAt, edits: u.edits[ax.key], junctions: junctionsOn(ax) }, u.opts)); } catch (e) { console.error(e); }
     }
     S.uvr = { res };
-    for (const r of res) for (const c of r.checks) S.checks.push({ lvl: c.lvl, group: 'Vitesses / UVR', msg: c.msg });
+    for (const r of res) for (const c of r.checks) S.checks.push({ lvl: c.lvl, group: 'Vitesses / UVR', msg: c.msg, ax: r.key });
     if (u.plan !== false) try { draw(res, axes); } catch (e) { console.error(e); }
   }
 
