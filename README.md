@@ -772,7 +772,9 @@ ou sur un fond topographique DXF.
   la largeur (le plan revient avec « ◧ Plan » ou un autre onglet). Le bureau tourne dans un cadre de même origine, qui
   isole ses styles clairs de l'interface : ses modules sont copiés **sans modification** par
   `python3 tools/sync-chaussee.py [chemin/vers/dimchaussee]` (fermeture des imports de bureau.js, à relancer après
-  chaque évolution du bureau). Son état (tous les modules et le cartouche) est **joint au fichier projet INFRA-KSR** à
+  chaque évolution du bureau). La page des **fiches matériaux** (lien « Toutes les fiches de ce référentiel ») est copiée
+  aussi, avec un retour au bureau ; tout autre lien vers le site (cours, exerciseur) s'ouvre sur chaussee.ksr-infra.org
+  dans un nouvel onglet (`chaussee/ksr-liens.js`) au lieu de charger une page absente dans le cadre. Son état (tous les modules et le cartouche) est **joint au fichier projet INFRA-KSR** à
   l'enregistrement et restauré à l'ouverture ; ses propres boutons Enregistrer / Ouvrir (fichier du bureau seul)
   restent disponibles.
 - **Exports** : DXF R12 par calques `GIRA_*` (AutoCAD, Covadis, BricsCAD…), PNG, points d'implantation X, Y, Z en CSV,

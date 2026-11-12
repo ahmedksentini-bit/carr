@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="fr"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="enhancements.css">
+<link rel="stylesheet" href="site.css">
+<style>main { max-width: none; padding: 14px 16px 40px; } .retour { display: inline-block; margin-bottom: 10px; font-weight: 800; color: var(--blue); text-decoration: none; }</style>
+<title>Fiches matériaux — Chaussées</title>
+</head><body>
+<main id="app" tabindex="-1">
+  <a class="retour" href="bureau.html">← Retour au bureau de calcul</a>
+  <section class="chapter-banner"><span class="num">≡</span>
+    <div><h1 id="fichesTitre">Fiches matériaux</h1>
+    <p>Les fiches des matériaux de chaussée des cinq référentiels du cours : emploi, normes de produit,
+       d'essai et de mise en œuvre, exigences et paramètres de calcul. Ce sont elles qui passent dans le CCTP.</p></div></section>
+  <div class="card" style="margin-top:17px">
+    <h2>Référentiels</h2>
+    <ul class="chapitre-sommaire" id="fichesSommaire"><li class="method-note">Chargement…</li></ul>
+  </div>
+  <div id="fichesContenu"></div>
+</main>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<noscript>Activez JavaScript pour afficher les fiches.</noscript>
+<script src="ksr-liens.js"></script>
+<script type="module" src="src/socle.js"></script>
+<script type="module" src="src/fiches-page.js"></script>
+<script type="module" src="src/tableaux.js"></script>
+</body></html>
