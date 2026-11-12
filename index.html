@@ -191,6 +191,13 @@
         <button data-tab="signalisation">Signalisation</button>
         <button data-tab="hydro">Hydrologie</button>
         <button data-tab="uvr" title="Déclencheurs UVR et plan de gestion des vitesses (Guide M1 ESCWA/UNRSF)">Vitesses / UVR</button>
+        <button data-tab="chaussee" title="Bureau de calcul des chaussées (chaussee.ksr-infra.org) : Burmister, dimensionnement, catalogues, rétrocalcul, renforcement, notes de calcul">Chaussées</button>
+      </div>
+
+      <div class="tab" id="tab-chaussee" hidden>
+        <div class="ch-bar"><span>Bureau de calcul des chaussées — même menu et mêmes modules que <a href="https://chaussee.ksr-infra.org/bureau.html" target="_blank" rel="noopener">chaussee.ksr-infra.org</a> ; ses données sont enregistrées avec le projet INFRA-KSR.</span>
+          <button id="chBack" class="mini" title="Revenir au plan (un autre onglet le fait aussi)">◧ Plan</button></div>
+        <iframe id="chFrame" title="Bureau de calcul des chaussées" data-src="chaussee/bureau.html"></iframe>
       </div>
 
       <div class="tab" id="tab-trace" hidden>

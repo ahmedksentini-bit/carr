@@ -763,6 +763,16 @@ ou sur un fond topographique DXF.
   de détection des hors-gabarit, B12 sur le musoir, gabarit physique à l'entrée). TPC des branches adaptables à la
   trémie ; exports DXF du profil en long et de la coupe type. Le dossier-guide PSGR du SETRA (annexe II de la
   circulaire de 1971) n'étant pas disponible, les valeurs non citées par RECTUR sont celles de la classe RECTUR voisine.
+- **Chaussées (onglet dédié, bureau de calcul de chaussee.ksr-infra.org ; `chaussee/`)** : tout le bureau de calcul
+  du dépôt dimchaussee, avec son menu latéral par groupes — Projet et tableau de bord ; Données (trafic, sols et
+  plateforme GTR, fiches matériaux) ; Chaussée neuve (catalogue, dimensionnement) ; Renforcement (auscultation,
+  rétrocalcul, renforcement) ; Calcul (Burmister, structure) — et ses notes de calcul imprimables. L'onglet prend toute
+  la largeur (le plan revient avec « ◧ Plan » ou un autre onglet). Le bureau tourne dans un cadre de même origine, qui
+  isole ses styles clairs de l'interface : ses modules sont copiés **sans modification** par
+  `python3 tools/sync-chaussee.py [chemin/vers/dimchaussee]` (fermeture des imports de bureau.js, à relancer après
+  chaque évolution du bureau). Son état (tous les modules et le cartouche) est **joint au fichier projet INFRA-KSR** à
+  l'enregistrement et restauré à l'ouverture ; ses propres boutons Enregistrer / Ouvrir (fichier du bureau seul)
+  restent disponibles.
 - **Exports** : DXF R12 par calques `GIRA_*` (AutoCAD, Covadis, BricsCAD…), PNG, points d'implantation X, Y, Z en CSV,
   projet `.gira.json` (et sauvegarde automatique dans le navigateur).
 

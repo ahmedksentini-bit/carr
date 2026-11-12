@@ -83,6 +83,14 @@ main.app { display: grid; grid-template-columns: 46px minmax(0, 1fr) 452px; min-
 .badge.err { background: var(--err); color: #300; }
 .badge.warn { background: var(--warn); color: #3a2a00; }
 .tab { overflow-y: auto; padding: 4px 14px 28px; flex: 1; min-height: 0; }
+/* Onglet Chaussées : le bureau de calcul (cadre de même origine) prend la place du plan et du panneau */
+main.app.full-tab .stage { display: none; }
+main.app.full-tab .panel { grid-column: 2 / -1; }
+#tab-chaussee { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+#tab-chaussee[hidden] { display: none; }
+#tab-chaussee .ch-bar { display: flex; align-items: center; gap: 10px; padding: 5px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line); }
+#tab-chaussee .ch-bar span { flex: 1; } #tab-chaussee .ch-bar a { color: var(--accent); }
+#chFrame { flex: 1; width: 100%; border: 0; background: #f3f8fb; min-height: 0; }
 .tab h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
 .tab h4 { font-size: 12.5px; margin: 16px 0 6px; font-weight: 600; }
 .note { color: var(--muted); font-size: 12px; margin: 6px 0; }
