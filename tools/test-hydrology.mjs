@@ -396,5 +396,16 @@ const camp = H.computeAll([
 near('cumul amont : Q(B) = Q(A) + Q(B)', H._internals.roundNet(camp[0].retained.Q + camp[1].retained.Q, 2), camp[1].cumulative.Q, 1e-6);
 check('cumul amont : débit effectif de B = cumul', camp[1].effectiveQ === camp[1].cumulative.Q);
 
+// Cartes d'isohyètes FAO 54 (figures 3 et 4, relevé de BVTrace) — ancres du bulletin p. 55-56 : 14° N, 0° → P10 ≈ 86 mm,
+// Pan ≈ 500 mm (tolérance 15 % de BVTrace : au-delà, c'est le relevé qui serait à revoir) ; refus hors du faisceau.
+{
+  const { isohyetValueAt } = await import('../js/hydro/isohyet.js');
+  const p10 = isohyetValueAt('p10', 0, 14), pan = isohyetValueAt('pan', 0, 14);
+  check('Isohyètes : P10 à 14° N, 0° encadré', p10.ok);
+  check('Isohyètes : P10 à 14° N, 0° ≈ 86 mm (± 15 %)', p10.ok && Math.abs(p10.value - 86) / 86 < 0.15);
+  check('Isohyètes : Pan à 14° N, 0° ≈ 500 mm (± 15 %)', pan.ok && Math.abs(pan.value - 500) / 500 < 0.15);
+  check('Isohyètes : refus hors du faisceau (Tunisie)', !isohyetValueAt('pan', 10, 36).ok);
+  check('Isohyètes : refus sans position', !isohyetValueAt('p10', NaN, 14).ok);
+}
 console.log(`\n${passed} contrôle(s) réussi(s), ${failures} échec(s).`);
 process.exit(failures === 0 ? 0 : 1);
