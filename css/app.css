@@ -652,3 +652,9 @@ ul.ouvr-items li.info { color: var(--muted); }
 .cat-svg .cat-ar { fill: none; stroke: #60a5fa; stroke-dasharray: 3 2; stroke-width: 1; }
 .cat-svg .cat-ts { fill: #fbbf24; } .cat-svg .cat-r { stroke: #a3e635; stroke-width: 1.1; fill: none; } .cat-svg .cat-d { stroke: #fb923c; stroke-width: 1.1; fill: none; stroke-dasharray: 2 1.5; }
 .cat-svg .cat-lt { fill: #94a3b8; font: 7.5px system-ui, sans-serif; }
+
+/* Onglet Dévers : lignes cliquables (centrent le plan) */
+table.dv-click tbody tr[data-dvs] { cursor: pointer; }
+table.dv-click tbody tr[data-dvs]:hover { background: rgba(37, 99, 235, .15); }
+#dvRingBox { margin-top: 12px; border-top: 1px solid var(--line2); padding-top: 4px; }
+#dvRingBox summary { cursor: pointer; font-weight: 600; margin: 6px 0; }

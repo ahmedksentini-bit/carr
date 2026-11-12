@@ -124,8 +124,15 @@ ou sur un fond topographique DXF.
   quelconques du même axe, « Raccorder à une autre droite… » puis clic sur la seconde droite : les deux droites sont
   prolongées jusqu'à leur intersection, qui devient le sommet du cercle, et les sommets intermédiaires disparaissent
   (Échap annule).
-- **Dévers** : anneau à dévers imposé de 1,5 % vers l'extérieur, constant sur site en pente (ou cône sur plan incliné),
-  profil en long des rives, variation des dévers de chaque branche, flèches de dévers sur le plan.
+- **Dévers** (onglet refait) : pour chaque axe de route (voie principale, voies secondaires, bretelles), les dévers
+  **réellement appliqués** au projet (profils types et plages, catégorie de conception, rotation le long des
+  clothoïdes) : synthèse (catégorie, toit, dévers maximal, courbes déversées, aquaplaning), diagramme courbure +
+  dévers gauche / droit + zones d'aquaplaning, tableau des **courbes** (rayon minimal, sens, dévers requis par la
+  catégorie et appliqués, clothoïdes présentes / requises, ✓ / ✖), **points de changement** (bornes des éléments du
+  tracé et des plages de profils types) et **zones d'aquaplaning** (pente combinée < 0,5 % avec la ligne rouge). Un
+  clic sur une ligne centre le plan sur le point. Le carrefour actif garde, repliés en bas, l'anneau à dévers imposé
+  de 1,5 % vers l'extérieur (constant sur site en pente ou cône sur plan incliné), le profil en long des rives et la
+  variation des dévers de chaque branche ; flèches de dévers sur le plan.
 - **Épures de giration (T et X)** : semi-remorque de 16,50 m (largeur 2,55 m, empattement du tracteur 3,80 m, sellette
   à 0,50 m, pivot – essieu 7,80 m, pivot – arrière 12,00 m), modèle cinématique (tractrices). Pour chaque branche
   secondaire : tourne-à-droite et tourne-à-gauche, entrant et sortant ; le conducteur s'écarte vers l'extérieur de sa
