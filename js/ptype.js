@@ -222,7 +222,9 @@ export function sectionFromTypes(o) {
   const terr = join(terrHalf(H[-1].proj, H[-1].arase), terrHalf(H[1].proj, H[1].arase));
   const platform = proj.filter((q) => q.br === 'C' && q.m !== 'tn' && q.m !== 'cond');
   const eet = (sd) => (H[sd].eet ? { y: sd * H[sd].eet.x, z: o.zA + H[sd].eet.z, br: H[sd].eet.br } : null);
-  return { proj, arase, terr, platform, endL: eet(-1), endR: eet(1), branch: { left: H[1].br, right: H[-1].br }, halves: H };
+  // points de contrôle déblai / remblai (point de test de la condition) de chaque côté
+  const test = (sd) => (H[sd].test ? { y: sd * H[sd].test.x, z: o.zA + H[sd].test.z, br: H[sd].br } : null);
+  return { proj, arase, terr, platform, endL: eet(-1), endR: eet(1), branch: { left: H[1].br, right: H[-1].br }, halves: H, tests: [test(1), test(-1)].filter(Boolean) };
 }
 
 // ------------------------------------------------------------------------------------------------ Bibliothèque

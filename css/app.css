@@ -632,3 +632,7 @@ ul.ouvr-items li.info { color: var(--muted); }
 .ptbig .pt-sep { stroke: var(--line2); }
 .ptbig .pt-v { fill: #e5e7eb; font: 11px var(--mono); }
 .ptbig .pt-rap { stroke: #64748b; stroke-width: .7; stroke-dasharray: 2 3; }
+.ptbig .pt-test { fill: #fbbf24; stroke: #111; stroke-width: 1; }
+.cat-svg .cat-ar { fill: none; stroke: #60a5fa; stroke-dasharray: 3 2; stroke-width: 1; }
+.cat-svg .cat-ts { fill: #fbbf24; } .cat-svg .cat-r { stroke: #a3e635; stroke-width: 1.1; fill: none; } .cat-svg .cat-d { stroke: #fb923c; stroke-width: 1.1; fill: none; stroke-dasharray: 2 1.5; }
+.cat-svg .cat-lt { fill: #94a3b8; font: 7.5px system-ui, sans-serif; }

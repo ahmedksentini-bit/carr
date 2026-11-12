@@ -35,7 +35,9 @@ export function ohSheet(o) {
   // zones : titre, plan (haut), coupe (bas, moitié de la zone utile)
   const titleH = 10, gap = 4, avail = inner.h - titleH - gap, planR = { x: inner.x, y: inner.y + titleH, w: inner.w, h: avail * 0.45 }, secR = { x: inner.x, y: planR.y + planR.h + gap, w: inner.w, h: avail - planR.h };
   const labelW = 38, plotX = inner.x + labelW, plotW = inner.w - labelW - 6;
-  const kFit = Math.min(plotW / (x1 - x0), (secR.h - 26) / (zHi - zLo));
+  // coupe : cotation de la plate-forme en haut, dessin, cotes de longueur, cartouche (TN, fil d'eau, projet) en bas
+  const CROW = 7, CROWS = 4, cartH = CROW * CROWS, pTop = secR.y + 15, pBot = secR.y + secR.h - cartH - 11;
+  const kFit = Math.min(plotW / (x1 - x0), (pBot - pTop) / (zHi - zLo));
   const scales = [50, 100, 200, 250, 400, 500, 1000];
   const scale = o.scale > 0 ? o.scale : (scales.find((sc) => 1000 / sc <= kFit) || 1000);
   const k = 1000 / scale;
@@ -82,15 +84,15 @@ export function ohSheet(o) {
 
   // ------------------------------------------------------------------ coupe
   svg += txt(inner.x + 3, secR.y + 5, 'COUPE LONGITUDINALE', 2.6, { w: 'bold' });
-  const zMid = (zLo + zHi) / 2, yS = secR.y + 8 + (secR.h - 26) / 2, Y = (z) => yS - (z - zMid) * k;
+  const zMid = (zLo + zHi) / 2, yS = (pTop + pBot) / 2, Y = (z) => yS - (z - zMid) * k;
   // échelle des cotes à gauche
   const stepZ = k >= 8 ? 0.5 : k >= 3 ? 1 : 2;
   for (let z = Math.ceil(zLo / stepZ) * stepZ; z <= zHi + 1e-9; z += stepZ) {
-    const y = Y(z); if (y < secR.y + 7 || y > secR.y + secR.h - 16) continue;
+    const y = Y(z); if (y < pTop || y > pBot) continue;
     svg += `<line x1="${plotX}" y1="${y.toFixed(2)}" x2="${(plotX + plotW).toFixed(2)}" y2="${y.toFixed(2)}" stroke="#eef0f3" stroke-width="0.12"/>`;
     svg += `<line x1="${plotX - 1.5}" y1="${y.toFixed(2)}" x2="${plotX}" y2="${y.toFixed(2)}" stroke="#000" stroke-width="0.15"/>` + txt(plotX - 2.2, y + 0.7, f2(z, stepZ < 1 ? 1 : 0), 1.9, { a: 'end' });
   }
-  svg += `<line x1="${plotX}" y1="${secR.y + 7}" x2="${plotX}" y2="${(secR.y + secR.h - 16).toFixed(2)}" stroke="#000" stroke-width="0.2"/>`;
+  svg += `<line x1="${plotX}" y1="${pTop}" x2="${plotX}" y2="${pBot.toFixed(2)}" stroke="#000" stroke-width="0.2"/>`;
   // terrain naturel, remblai sous la route
   const line = (pts) => pts.map((q, i) => `${i ? 'L' : 'M'}${P(X(q.x), Y(q.z))}`).join('');
   if (road.length > 1 && tn.length > 1) {
@@ -121,8 +123,23 @@ export function ohSheet(o) {
   svg += txt(X(xm), Y(zfe(xm) + H / 2) + 0.8, `pente ${f2(J * 100)} %`, 2, { a: 'middle', c: '#1d4ed8' });
   // axe de la route
   const zAxR = o.zR;
-  svg += `<line x1="${X(0).toFixed(2)}" y1="${(secR.y + 7).toFixed(2)}" x2="${X(0).toFixed(2)}" y2="${(secR.y + secR.h - 16).toFixed(2)}" stroke="#b91c1c" stroke-width="0.15" stroke-dasharray="4 1 1 1"/>`;
-  svg += txt(X(0) + 1, secR.y + 9.5, `axe ${o.axisName} · PK ${fmtPk(o.pk).replace(/,00$/, '')}`, 2, { c: '#b91c1c', halo: true });
+  svg += `<line x1="${X(0).toFixed(2)}" y1="${(pTop - 6).toFixed(2)}" x2="${X(0).toFixed(2)}" y2="${pBot.toFixed(2)}" stroke="#b91c1c" stroke-width="0.15" stroke-dasharray="4 1 1 1"/>`;
+  svg += txt(X(0) + 1, secR.y + 5, `axe ${o.axisName} · PK ${fmtPk(o.pk).replace(/,00$/, '')}`, 2, { c: '#b91c1c', halo: true });
+  // cotation des éléments de la plate-forme (largeurs mesurées perpendiculairement à la route) au-dessus de la coupe
+  if (o.cs && Math.abs(dn) > 0.05) {
+    const plat = o.cs.platform.map((q) => ({ x: q.y / dn, w: q.y, z: q.z, label: q.label || '' })).sort((a, b) => a.x - b.x).filter((q) => q.x >= x0 && q.x <= x1);
+    const yc = pTop - 4;
+    for (let i = 0; i + 1 < plat.length; i++) {
+      const a = plat[i], b = plat[i + 1], wdt = Math.abs(b.w - a.w); if (wdt < 0.05) continue;
+      const xa = X(a.x), xb = X(b.x);
+      svg += `<line x1="${xa.toFixed(2)}" y1="${yc}" x2="${xb.toFixed(2)}" y2="${yc}" stroke="#374151" stroke-width="0.12"/>`;
+      const lb = (Math.abs(a.x) > Math.abs(b.x) ? a : b).label.replace(/\s*\(.*\)/, '');
+      const t = `${f2(wdt)}`, room = Math.abs(xb - xa);
+      if (room > t.length * 1.0) svg += txt((xa + xb) / 2, yc - 0.7, t, 1.6, { a: 'middle', c: '#374151' });
+      if (lb && room > lb.length * 0.95) svg += txt((xa + xb) / 2, yc + 2.2, lb, 1.4, { a: 'middle', c: '#6b7280' });
+    }
+    for (const q of plat) svg += `<line x1="${X(q.x).toFixed(2)}" y1="${(yc - 1.4).toFixed(2)}" x2="${X(q.x).toFixed(2)}" y2="${Y(q.z).toFixed(2)}" stroke="#9ca3af" stroke-width="0.08" stroke-dasharray="0.6 0.6"/>`;
+  }
   if (zAxR != null) svg += txt(X(0) + 1, Y(zAxR) - 1.2, `chaussée ${f2(zAxR)}`, 2, { c: '#b91c1c', w: 'bold', halo: true });
   svg += txt(X(0) + 1, Y(zfe(0)) + 3, `FE axe ${f2(zfe(0))}`, 2, { c: '#1d4ed8', w: 'bold', halo: true });
   if (zAxR != null) { const hr = zAxR - top(0); svg += txt(X(0) - 1, (Y(zAxR) + Y(top(0))) / 2 + 0.7, `remblai sur traverse ${f2(hr)} m`, 1.9, { a: 'end', c: hr < 0 ? '#dc2626' : '#374151', halo: true }); }
@@ -133,15 +150,31 @@ export function ohSheet(o) {
     const xUp = o.upLeft ? -Lm : Lp, xDn = o.upLeft ? Lp : -Lm, sgn = o.upLeft ? 1 : -1, zUp = zfe(xUp), zDn = zfe(xDn), Hin = H;
     const ok = (v) => Number.isFinite(v) && v > 0;
     const yIn = Math.min(Hin, ok(hy.yIn) ? hy.yIn : ok(hy.yc) ? hy.yc : Hin), yOut = Math.min(Hin, ok(hy.yOut) ? hy.yOut : ok(hy.yn) ? hy.yn : yIn);
-    const pts = [{ x: xUp - sgn * ext * 0.9, z: o.phe }, { x: xUp, z: o.phe }, { x: xUp, z: zUp + yIn }];
-    if (ok(hy.yn) && hy.yn < Hin) pts.push({ x: xUp + sgn * (Lm + Lp) * 0.35, z: zfe(xUp + sgn * (Lm + Lp) * 0.35) + Math.min(Hin, hy.yn) });
-    pts.push({ x: xDn, z: zDn + yOut });
-    const zTw = Number.isFinite(hy.twElev) && hy.twElev > zDn - 5 ? Math.max(zDn, hy.twElev) : zDn + (ok(hy.twDepth) ? hy.twDepth : 0);
-    pts.push({ x: xDn, z: zTw }, { x: xDn + sgn * ext * 0.9, z: zTw });
-    const bed = (x) => (sgn * (x - xUp) < 0 ? Math.min(zUp, o.tnAt(x) ?? zUp) : sgn * (x - xDn) > 0 ? Math.min(zDn, o.tnAt(x) ?? zDn) : zfe(x));
+    // points clés le long de l'écoulement (u depuis la face amont), puis interpolation cubique monotone (Fritsch –
+    // Carlson) : ligne d'eau continue et lissée, sans dépassement entre deux points ; jamais au-dessus de l'intrados
+    const L = Lm + Lp, Hs = Math.max(1, H), zTw = Number.isFinite(hy.twElev) && hy.twElev > zDn - 5 ? Math.max(zDn, hy.twElev) : zDn + (ok(hy.twDepth) ? hy.twDepth : 0);
+    const ku = [[-ext * 0.95, o.phe], [-Math.min(ext * 0.6, 3 * Hs), o.phe], [0, zUp + yIn]];
+    if (ok(hy.yn) && hy.yn < Hin) ku.push([L * 0.4, zfe(xUp + sgn * L * 0.4) + Math.min(Hin, hy.yn)]);
+    ku.push([L, zDn + yOut], [L + Math.min(ext * 0.6, 3 * Hs), zTw], [L + ext * 0.95, zTw]);
+    const n = ku.length, dx = [], dl = [], m = new Array(n).fill(0);
+    for (let i = 0; i + 1 < n; i++) { dx.push(ku[i + 1][0] - ku[i][0]); dl.push((ku[i + 1][1] - ku[i][1]) / Math.max(1e-6, dx[i])); }
+    for (let i = 1; i + 1 < n; i++) m[i] = dl[i - 1] * dl[i] <= 0 ? 0 : (3 * (dx[i - 1] + dx[i])) / ((2 * dx[i] + dx[i - 1]) / dl[i - 1] + (dx[i] + 2 * dx[i - 1]) / dl[i]);
+    m[0] = 0; m[n - 1] = 0;
+    const zw = (u) => {
+      let i = 0; while (i + 2 < n && u > ku[i + 1][0]) i++;
+      const h = dx[i], t = Math.max(0, Math.min(1, (u - ku[i][0]) / h)), t2 = t * t, t3 = t2 * t;
+      return (2 * t3 - 3 * t2 + 1) * ku[i][1] + (t3 - 2 * t2 + t) * h * m[i] + (-2 * t3 + 3 * t2) * ku[i + 1][1] + (t3 - t2) * h * m[i + 1];
+    };
+    const pts = [];
+    for (let i = 0; i <= 160; i++) {
+      const u = ku[0][0] + ((ku[n - 1][0] - ku[0][0]) * i) / 160, x = xUp + sgn * u;
+      let z = zw(u); if (u >= 0 && u <= L) z = Math.min(z, zfe(x) + Hin);
+      pts.push({ x, z });
+    }
+    const bed = (x) => { const u = sgn * (x - xUp); return u < 0 ? Math.min(zUp, o.tnAt(x) ?? zUp) : u > L ? Math.min(zDn, o.tnAt(x) ?? zDn) : zfe(x); };
     const top = pts.map((q, i) => `${i ? 'L' : 'M'}${P(X(q.x), Y(q.z))}`).join('');
-    const xs = pts.map((q) => q.x), bot = []; for (let i = 0; i <= 40; i++) { const x = xs[xs.length - 1] + ((xs[0] - xs[xs.length - 1]) * i) / 40; bot.push(`L${P(X(x), Y(bed(x)))}`); }
-    svg += `<path d="${top}${bot.join('')}Z" fill="rgba(56,189,248,0.25)" stroke="none"/><path d="${top}" fill="none" stroke="#0284c7" stroke-width="0.35"/>`;
+    const bot = pts.slice().reverse().map((q) => `L${P(X(q.x), Y(Math.min(q.z, bed(q.x))))}`).join('');
+    svg += `<path d="${top}${bot}Z" fill="rgba(56,189,248,0.25)" stroke="none"/><path d="${top}" fill="none" stroke="#0284c7" stroke-width="0.35"/>`;
     const lab = [];
     if (hy.Q > 0) lab.push(`Q = ${f2(hy.Q)} m³/s`);
     if (ok(hy.yIn)) lab.push(`y entrée ${f2(hy.yIn)} m`);
@@ -159,9 +192,23 @@ export function ohSheet(o) {
     svg += txt(X((xu + xv) / 2), yP - 1, `PHE ${f2(o.phe)}`, 2, { a: 'middle', c: '#0284c7', w: 'bold', halo: true });
   }
   // cotation des longueurs sous la coupe
-  const yD = secR.y + secR.h - 9, dim = (xa, xb, label) => `<line x1="${X(xa).toFixed(2)}" y1="${yD}" x2="${X(xb).toFixed(2)}" y2="${yD}" stroke="#000" stroke-width="0.15"/><line x1="${X(xa).toFixed(2)}" y1="${yD - 1.2}" x2="${X(xa).toFixed(2)}" y2="${yD + 1.2}" stroke="#000" stroke-width="0.15"/><line x1="${X(xb).toFixed(2)}" y1="${yD - 1.2}" x2="${X(xb).toFixed(2)}" y2="${yD + 1.2}" stroke="#000" stroke-width="0.15"/>` + txt(X((xa + xb) / 2), yD - 0.8, label, 2, { a: 'middle' });
+  const yD = pBot + 5, dim = (xa, xb, label) => `<line x1="${X(xa).toFixed(2)}" y1="${yD}" x2="${X(xb).toFixed(2)}" y2="${yD}" stroke="#000" stroke-width="0.15"/><line x1="${X(xa).toFixed(2)}" y1="${yD - 1.2}" x2="${X(xa).toFixed(2)}" y2="${yD + 1.2}" stroke="#000" stroke-width="0.15"/><line x1="${X(xb).toFixed(2)}" y1="${yD - 1.2}" x2="${X(xb).toFixed(2)}" y2="${yD + 1.2}" stroke="#000" stroke-width="0.15"/>` + txt(X((xa + xb) / 2), yD - 0.8, label, 2, { a: 'middle' });
   svg += dim(-Lm, 0, `${f2(Lm)} m`) + dim(0, Lp, `${f2(Lp)} m`);
-  svg += txt(X(0), yD + 4.5, `L = ${f2(Lm + Lp)} m (biais ${f2(K.ang, 1)} gr)`, 2.2, { a: 'middle', w: 'bold' });
+  svg += txt(X(Lp) + 3, yD + 0.7, `L = ${f2(Lm + Lp)} m (biais ${f2(K.ang, 1)} gr)`, 2, { w: 'bold' });
+  // cartouche : distances depuis l'axe de la route le long de l'ouvrage, TN, fil d'eau, cote projet (chaussée, talus)
+  const c0 = secR.y + secR.h - cartH, xL = secR.x, xR = secR.x + secR.w;
+  const rowsC = [['DISTANCES (m)', 'd'], ['TERRAIN NATUREL', 'tn'], ['FIL D\'EAU OUVRAGE', 'fe'], ['COTE PROJET', 'zp']];
+  rowsC.forEach(([lb], i) => { const y = c0 + i * CROW; svg += `<line x1="${xL}" y1="${y}" x2="${xR}" y2="${y}" stroke="#000" stroke-width="${i ? 0.12 : 0.3}"/>` + txt(xL + 1.5, y + CROW / 2 + 0.7, lb, 1.8, { w: 'bold' }); });
+  svg += `<line x1="${plotX}" y1="${c0}" x2="${plotX}" y2="${c0 + cartH}" stroke="#000" stroke-width="0.2"/>`;
+  const zRoad = (x) => { for (let i = 0; i + 1 < road.length; i++) { const a = road[i], b = road[i + 1]; if (x >= a.x - 1e-9 && x <= b.x + 1e-9) return b.x - a.x < 1e-9 ? Math.max(a.z, b.z) : a.z + ((b.z - a.z) * (x - a.x)) / (b.x - a.x); } return null; };
+  const cand = [-Lm, 0, Lp, ...road.map((q) => q.x)].filter((x) => x >= x0 && x <= x1).sort((a, b) => a - b), keepC = [];
+  for (const x of cand) { if (!keepC.length || X(x) - X(keepC[keepC.length - 1]) >= 3.2) keepC.push(x); else if (Math.abs(x) < 1e-6 || Math.abs(x + Lm) < 1e-6 || Math.abs(x - Lp) < 1e-6) keepC[keepC.length - 1] = x; }
+  const vtc = (x, i, v) => { const yb = c0 + (i + 1) * CROW - 0.6; return `<text x="${(x + 0.6).toFixed(2)}" y="${yb.toFixed(2)}" font-size="1.45" transform="rotate(-90 ${(x + 0.6).toFixed(2)} ${yb.toFixed(2)})">${v}</text>`; };
+  for (const x of keepC) {
+    const xx = X(x), t = o.tnAt(x), zp2 = zRoad(x), fe = x >= -Lm - 1e-6 && x <= Lp + 1e-6 ? zfe(x) : null;
+    svg += `<line x1="${xx.toFixed(2)}" y1="${c0}" x2="${xx.toFixed(2)}" y2="${c0 + cartH}" stroke="#9ca3af" stroke-width="0.1"/>`;
+    svg += vtc(xx, 0, f2(x)) + vtc(xx, 1, t == null ? '—' : f2(t)) + vtc(xx, 2, fe == null ? '—' : f2(fe)) + vtc(xx, 3, zp2 == null ? '—' : f2(zp2));
+  }
   svg += '</svg>';
   return { svg, scale, paper: [PW, PH] };
 }

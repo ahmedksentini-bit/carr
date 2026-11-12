@@ -258,8 +258,26 @@ export function ptBigSVG(cs, opts = {}) {
     out += `<path class="pl-fill" d="${fill}"/><path class="pl-cut" d="${cut}"/>`;
     out += `<path class="pl-tn" d="${tnIn.map((q, i) => `${i ? 'L' : 'M'}${P(q.y, q.z)}`).join('')}"/>`;
   }
+  // couches de chaussée (épaisseurs des profils types) sous la ligne projet, sur l'étendue de l'arase de chaque côté
+  for (const sd of [1, -1]) {
+    const Ls = (sd === 1 ? cs.layers?.left : cs.layers?.right) || [], ar = (cs.arase || []).filter((q) => sd * q.y >= -1e-6);
+    if (!Ls.length || ar.length < 2) continue;
+    const ya = Math.min(...ar.map((q) => sd * q.y)), yb = Math.max(...ar.map((q) => sd * q.y));
+    const ys2 = [ya, ...cs.proj.map((q) => sd * q.y).filter((u) => u > ya + 1e-6 && u < yb - 1e-6), yb].sort((u, v) => u - v);
+    let cum = 0;
+    for (const L of Ls) {
+      const e = Math.max(0, +L.e || 0); if (!(e > 0)) continue;
+      const topL = ys2.map((u) => ({ y: sd * u, z: (zP(sd * u) ?? 0) - cum })), botL = ys2.map((u) => ({ y: sd * u, z: (zP(sd * u) ?? 0) - cum - e }));
+      out += `<path d="${[...topL, ...botL.reverse()].map((q, i) => `${i ? 'L' : 'M'}${P(q.y, q.z)}`).join('')}Z" fill="${L.color || '#7B8794'}" fill-opacity="0.75" stroke="#111" stroke-width="0.4"><title>${L.nom || ''} ${L.mat || ''} ${fmt(e, 2)} m</title></path>`;
+      const mid = botL[Math.floor(botL.length / 2)];
+      if (e * k > 9) out += `<text class="pl-lb" x="${X(sd * (ya + yb) / 2).toFixed(1)}" y="${(Y(mid.z + e / 2) + 3.5).toFixed(1)}" text-anchor="middle" font-size="9.5">${L.nom || ''}${L.mat ? ` ${L.mat}` : ''} ${fmt(e * 100, 0)} cm</text>`;
+      cum += e;
+    }
+  }
   if (cs.arase?.length > 1) out += `<path class="pl-arase" d="${cs.arase.map((q, i) => `${i ? 'L' : 'M'}${P(q.y, q.z)}`).join('')}"/>`;
   out += `<path class="pl-red" d="${cs.proj.map((q, i) => `${i ? 'L' : 'M'}${P(q.y, q.z)}`).join('')}"/>`;
+  // points de contrôle déblai / remblai
+  for (const t of cs.tests || []) out += `<path d="M${(X(t.y)).toFixed(1)},${(Y(t.z) - 6).toFixed(1)}l5,6l-5,6l-5,-6Z" class="pt-test"><title>Point de contrôle D/R : ${t.br === 'D' ? 'déblai' : t.br === 'R' ? 'remblai' : 'TN inconnu'}</title></path><text class="pl-lb" x="${X(t.y).toFixed(1)}" y="${(Y(t.z) + 18).toFixed(1)}" text-anchor="middle" font-size="9.5">contrôle ${t.br === 'D' ? 'D' : t.br === 'R' ? 'R' : '?'}</text>`;
   out += `<line class="pl-tg" x1="${X(0).toFixed(1)}" y1="${m.t}" x2="${X(0).toFixed(1)}" y2="${yBase}"/>`;
   for (const e of ends) if (e.br) out += `<circle class="pl-eet" cx="${X(e.y).toFixed(1)}" cy="${Y(e.z).toFixed(1)}" r="3.5"/>`;
   // libellés des bandes au milieu de chaque bande, sans chevauchement

@@ -107,7 +107,7 @@ function typedSection(pf, tin, halfW, zA, L, R, clip = null) {
   return {
     s: 0, p: pf.p, n: pf.n, platform: S.platform, proj: S.proj, arase: S.arase, terr: S.terr, tn: tl, cut: ar.cut, fill: ar.fill,
     ...(arS ? { cutS: arS.cut, fillS: arS.fill } : {}), endL: S.endL, endR: S.endR, branch: S.branch, ok: hasTN,
-    zAxe: zA, zTN: tin ? tinZ(tin, pf.p.x, pf.p.y) : null, halfW, types: { left: L.name, right: R.name }, cutBy,
+    zAxe: zA, zTN: tin ? tinZ(tin, pf.p.x, pf.p.y) : null, halfW, types: { left: L.name, right: R.name }, cutBy, tests: S.tests, layers: { left: L.layers || [], right: R.layers || [] },
   };
 }
 
