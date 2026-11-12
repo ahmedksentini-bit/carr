@@ -488,4 +488,4 @@ function txt(x, y, s, h, { a = 'start', w = 'normal', c = '#000', rot = 0, halo 
   const t = `x="${x.toFixed(2)}" y="${y.toFixed(2)}" font-size="${h.toFixed(2)}" text-anchor="${a}"${w !== 'normal' ? ` font-weight="${w}"` : ''}${rot ? ` transform="rotate(${rot.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)})"` : ''}`;
   return `${halo ? `<text ${t} fill="none" stroke="#fff" stroke-width="${(h * 0.35).toFixed(2)}" stroke-linejoin="round">${esc(s)}</text>` : ''}<text ${t} fill="${c}">${esc(s)}</text>`;
 }
-export { fmtPk, r2 };
+export { fmtPk, r2, primSvg, txt, STY, LAYERS };
