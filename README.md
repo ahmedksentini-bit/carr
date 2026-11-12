@@ -525,6 +525,7 @@ ou sur un fond topographique DXF.
     détail du bassin), Kr10 imposé, infiltrabilité, densité de drainage Dd, Ig. En jeu Tunisie, C ne se saisit pas :
     il vient de l'abaque pente × couverture végétale (BVTrace, hydrologie-tunisie). Le détail du bassin liste les débits
     Orstom et CIEH par régression, la médiane et le motif des régressions non calculées (donnée manquante) ;
+    bouton **⤢ Agrandir** des résultats : tableau des bassins et détail du bassin choisi en plein écran ;
   - **fiche du bassin** (clic sur un bassin du plan, ou « Fiche complète » du tableau) : propriétés physiques
     (surface, périmètre, Gravelius, rectangle équivalent, plus long chemin, pentes brute / équivalente / retenue, Ig,
     altitudes, H5 / H95), courbe hypsométrique, profil de l'écoulement principal, temps de concentration, débits par

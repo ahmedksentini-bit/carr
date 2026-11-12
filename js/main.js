@@ -5387,6 +5387,10 @@ function bindPT() {
   $('#ptStation').addEventListener('change', (e) => { S.ptSt = +e.target.value; refreshPT(); });
   $('#btnPtPrev').addEventListener('click', () => { S.ptSt = Math.max(0, S.ptSt - 1); refreshPT(); });
   $('#btnPtPop').addEventListener('click', ptPopOpen);
+  // tableau de l'hydrologie en grand : le tableau et le détail du bassin passent dans la fenêtre, puis reviennent
+  $('#btnHyBig')?.addEventListener('click', () => { const dlg = $('#dlgHyT'); if (dlg.open) return; $('#hyBigBody').append($('#hyBigPart'), $('#hyDetail')); dlg.showModal(); renderHydro(); });
+  $('#hyBigClose')?.addEventListener('click', () => $('#dlgHyT').close());
+  $('#dlgHyT')?.addEventListener('close', () => { $('#hyBigHome').after($('#hyBigPart')); $('#hyDetHome').after($('#hyDetail')); renderHydro(); });
   $('#ptPopClose').addEventListener('click', () => $('#dlgPT').close());
   $('#dlgPT').addEventListener('close', () => { ptPopBack(); refreshPT(); });
   $('#dlgPT').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
