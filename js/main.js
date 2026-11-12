@@ -112,7 +112,7 @@ function newProject(context = 'interurbain') {
     signs: {}, // signalisation verticale : valeurs vides = valeurs par défaut du contexte (norms.SIGNS)
     tn: { source: '', step: '', edges: false, points: false, pts: [], info: null }, // terrain naturel (points x, y, z)
     pt: {}, // profils en travers : pas, demi-largeur, talus (valeurs vides = défauts de pt.js)
-    hwy: { on: false, name: 'A1', cat: 'L2', V: '', lanes: 2, wLane: '', bau: '', bdg: '', median: '', berme: '', pk0: '', axis: [] }, // échangeur : section courante
+    hwy: { on: false, name: 'A1', kind: 'autoroute', cat: 'L2', V: '', lanes: 2, wLane: '', bau: '', bdg: '', median: '', berme: '', pk0: '', axis: [] }, // échangeur : section courante
     ramps: [], // échangeur : bretelles
     crosses: [], // voies secondaires (une par échangeur : tige, route croisée ou seconde autoroute)
     traffic: { period: 'HPM', site: context === 'urbain' ? 'urbain' : 'rase', uvpPL: 2, od: {}, pl: {}, qp: {}, tad: {} },
@@ -134,6 +134,8 @@ function migrate(p, opt = {}) {
     traffic: { ...base.traffic, ...p.traffic, od: { ...p.traffic?.od }, pl: { ...p.traffic?.pl }, qp: { ...p.traffic?.qp }, tad: { ...p.traffic?.tad } },
   };
   delete out.view; delete out.cross;
+  // type de la voie principale explicite (absent = autoroute, valeur par défaut) : la liste « Type » ne reste pas vide
+  if (out.hwy.kind !== 'route') out.hwy.kind = 'autoroute';
   out.kind = ['T', 'X'].includes(p.kind) ? p.kind : 'giratoire';
   if (!Array.isArray(out.plan.main)) out.plan.main = ['', ''];
   out.ring.devers = RING_DEVERS; // valeur imposée
@@ -894,10 +896,10 @@ function renderCrossFields() {
   if (S.xsel >= 0 && C[S.xsel]?.main) S.xsel = C.findIndex((c) => !c.main);
   if (!(S.msel >= 0 && C[S.msel]?.main)) S.msel = -1;
   const H = hwyParams(S.prj);
-  $('#mainList').innerHTML = `<li data-mi="-1" class="${S.msel < 0 ? 'on' : ''}"><span class="dot"></span><b>${esc(H.name)}</b><span>voie principale 1 · ${H.kind === 'autoroute' ? 'autoroute' : 'route'}${S.prj.hwy?.axis?.length >= 2 ? '' : ' (à tracer)'}</span><span></span></li>`
-    + C.map((c, i) => (c.main ? `<li data-mi="${i}" class="${i === S.msel ? 'on' : ''}"><span class="dot"></span><b>${esc(c.name || `Voie principale ${i + 2}`)}</b><span>${c.kind === 'autoroute' ? 'autoroute' : 'route'}</span><span></span></li>` : '')).join('');
+  $('#mainList').innerHTML = `<li data-mi="-1" class="${S.msel < 0 ? 'on' : ''}"><span class="dot"></span><b>${esc(H.name)}</b><span>voie principale 1 · ${H.kind === 'autoroute' ? 'autoroute' : 'route'}${S.prj.hwy?.axis?.length >= 2 ? '' : ' (à tracer)'}</span><span>${S.prj.hwy?.axis?.length >= 2 ? '<button class="li-del" data-rdel="h" title="Supprimer cette voie">✕</button>' : ''}</span></li>`
+    + C.map((c, i) => (c.main ? `<li data-mi="${i}" class="${i === S.msel ? 'on' : ''}"><span class="dot"></span><b>${esc(c.name || `Voie principale ${i + 2}`)}</b><span>${c.kind === 'autoroute' ? 'autoroute' : 'route'}</span><span><button class="li-del" data-rdel="${i}" title="Supprimer cette voie">✕</button></span></li>` : '')).join('');
   $('#grpHwy').hidden = S.msel >= 0; $('#grpMainX').hidden = S.msel < 0;
-  $('#crossList').innerHTML = C.map((c, i) => (c.main ? '' : `<li data-xi="${i}" class="${i === S.xsel ? 'on' : ''}"><span class="dot"></span><b>${esc(c.name || `Voie secondaire ${i + 1}`)}</b><span>${c.kind === 'autoroute' ? 'autoroute (nœud)' : 'route ordinaire'}</span><span></span></li>`)).join('') || '<li class="empty-li">Aucune voie secondaire.</li>';
+  $('#crossList').innerHTML = C.map((c, i) => (c.main ? '' : `<li data-xi="${i}" class="${i === S.xsel ? 'on' : ''}"><span class="dot"></span><b>${esc(c.name || `Voie secondaire ${i + 1}`)}</b><span>${c.kind === 'autoroute' ? 'autoroute (nœud)' : 'route ordinaire'}</span><span><button class="li-del" data-rdel="${i}" title="Supprimer cette voie">✕</button></span></li>`)).join('') || '<li class="empty-li">Aucune voie secondaire.</li>';
   $('#mainXFields').innerHTML = S.msel >= 0 ? crossFieldsHtml(S.msel) : '';
   $('#crossFields').innerHTML = S.xsel >= 0 ? crossFieldsHtml(S.xsel) : '';
   renderEchAxes();
@@ -1679,9 +1681,24 @@ function bindEch() {
     else { const c = S.prj.crosses[+k]; S.echPick = +k; if (c?.main) S.msel = +k; else S.xsel = +k; }
     S.echSig = ''; refreshPanels(); viewer.invalidate();
   });
-  $('#mainList').addEventListener('click', (e) => { const li = e.target.closest('li[data-mi]'); if (!li) return; S.msel = +li.dataset.mi; S.echSig = ''; refreshPanels(); viewer.invalidate(); });
+  // suppression d'une voie depuis les listes de l'onglet Tracé (bouton ✕ de la ligne)
+  const delRoad = (e) => {
+    const b = e.target.closest('[data-rdel]'); if (!b) return false;
+    e.stopPropagation();
+    if (b.dataset.rdel === 'h') {
+      const H = S.prj.hwy;
+      if (!confirm(t(`Supprimer l'axe de la voie principale ${H.name || ''} ? Les bretelles qui s'y raccordent restent à supprimer ou à raccorder ; la voie peut être retracée.`))) return true;
+      H.axis = []; S.echSig = ''; syncInputs(); update(); toast(`Axe de ${H.name || 'la voie principale'} supprimé.`); return true;
+    }
+    const i = +b.dataset.rdel, X = S.prj.crosses[i]; if (!X) return true;
+    if (!confirm(t(`Supprimer la voie ${X.name || ''} ? Les bretelles qui s'y raccordent deviennent libres.`))) return true;
+    removeCross(i);
+    S.echSig = ''; syncInputs(); update(); toast(`Voie ${X.name || ''} supprimée.`);
+    return true;
+  };
+  $('#mainList').addEventListener('click', (e) => { if (delRoad(e)) return; const li = e.target.closest('li[data-mi]'); if (!li) return; S.msel = +li.dataset.mi; S.echSig = ''; refreshPanels(); viewer.invalidate(); });
   $('#crossFields').addEventListener('click', (e) => { const b = e.target.closest('[data-xconnect]'); if (!b) return; const msg = connectCross(+b.dataset.xconnect); if (msg) { S.echSig = ''; update(); toast(msg); } else toast('Aucun carrefour ni croisement à raccorder pour cette voie.', 'warn'); });
-  $('#crossList').addEventListener('click', (e) => { const li = e.target.closest('li[data-xi]'); if (!li) return; S.xsel = +li.dataset.xi; S.echSig = ''; refreshPanels(); viewer.invalidate(); });
+  $('#crossList').addEventListener('click', (e) => { if (delRoad(e)) return; const li = e.target.closest('li[data-xi]'); if (!li) return; S.xsel = +li.dataset.xi; S.echSig = ''; refreshPanels(); viewer.invalidate(); });
   const place = (kind) => {
     if (!S.D?.hwy?.ok) { toast('Activez l\'autoroute et dessinez d\'abord son axe.', 'warn'); return; }
     if (['trompette', 'trefle', 'demitrefle', ...DIAMONDS].includes(kind)) { setTool('pickx'); S.pendingTpl = kind; setPrompt(); return; } // l'échangeur se construit sur une voie secondaire
@@ -2763,17 +2780,34 @@ function splitHwy(sP, d, C) {
 // Carrefour posé (ou déplacé) sur une voie secondaire : la voie est coupée à R + Lb de part et d'autre du centre et y
 // arrive par ses branches ; les extrémités libres des bretelles voisines (losange, demi-échangeur à extrémités libres)
 // sont reportées dans l'anneau, où elles dessinent leur branche, ou au centre d'un carrefour plan.
+// Point de l'axe le plus proche du centre d'un carrefour. La distance se mesure à l'axe réel (arcs et clothoïdes) :
+// mesurée au polygone des sommets, un centre posé sur l'axe dans une grande courbe en était à plusieurs dizaines de
+// mètres (flèche du polygone des tangentes) et la voie n'était ni coupée ni raccordée. s (abscisse sur le polygone,
+// celle des fonctions de coupure) et q viennent du polygone, à partir du point de l'axe réel.
+function nearAxis(key, pts, C) {
+  const L = polyS(pts), onPoly = (P) => {
+    let best = null;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i], ab = G.sub(b, a), ll = G.dot(ab, ab) || 1, t = Math.max(0, Math.min(1, G.dot(G.sub(P, a), ab) / ll)), q = G.add(a, G.mul(ab, t)), d = G.dist(q, P);
+      if (!best || d < best.d) best = { d, s: L[i - 1] + t * Math.sqrt(ll), q };
+    }
+    return best;
+  };
+  const poly = onPoly(C);
+  let ax = null; try { ax = (S.prof?.axes || (S.D ? listAxes(S.prj, S.D) : [])).find((a) => a.key === key); } catch { /* axe pas encore calculé */ }
+  const pr = ax?.project?.(C);
+  if (!pr || !Number.isFinite(pr.s)) return poly;
+  const Pr = ax.at(Math.max(0, Math.min(ax.len, pr.s))).p, dReal = G.dist(Pr, C);
+  if (!poly || dReal >= poly.d) return poly;
+  const b = onPoly(Pr);
+  return { d: dReal, s: b.s, q: Pr };
+}
 function connectJunctionToRoads(j) {
   const msgs = [];
   // Voie principale : coupée si c'est une route ; une autoroute ne reçoit pas de carrefour à niveau.
   const H = S.prj.hwy;
   if (H?.on && (H.axis || []).length >= 2) {
-    const pts = H.axis, L = polyS(pts);
-    let best = null;
-    for (let i = 1; i < pts.length; i++) {
-      const a = pts[i - 1], b = pts[i], ab = G.sub(b, a), ll = G.dot(ab, ab) || 1, t = Math.max(0, Math.min(1, G.dot(G.sub(j.C, a), ab) / ll)), q = G.add(a, G.mul(ab, t)), d = G.dist(q, j.C);
-      if (!best || d < best.d) best = { d, s: L[i - 1] + t * Math.sqrt(ll), q };
-    }
+    const pts = H.axis, best = nearAxis('hwy', pts, j.C);
     const atEnd = G.dist(pts[0], j.C) < j.R + PS_LB + 5 || G.dist(pts[pts.length - 1], j.C) < j.R + PS_LB + 5;
     if (best && best.d <= j.R + 15 && !atEnd) {
       // Voie principale encore typée « autoroute » (type par défaut, p. ex. axe importé d'un KMZ) sans aucune bretelle
@@ -2797,12 +2831,7 @@ function connectJunctionToRoads(j) {
   for (let m = 0; m < S.prj.crosses.length; m++) {
     const X = S.prj.crosses[m];
     if (X.on === false || (X.axis || []).length < 2) continue;
-    const pts = X.axis, L = polyS(pts);
-    let best = null;
-    for (let i = 1; i < pts.length; i++) {
-      const a = pts[i - 1], b = pts[i], ab = G.sub(b, a), ll = G.dot(ab, ab) || 1, t = Math.max(0, Math.min(1, G.dot(G.sub(j.C, a), ab) / ll)), q = G.add(a, G.mul(ab, t)), d = G.dist(q, j.C);
-      if (!best || d < best.d) best = { d, s: L[i - 1] + t * Math.sqrt(ll), q };
-    }
+    const pts = X.axis, L = polyS(pts), best = nearAxis('x:' + X.id, pts, j.C);
     if (!best || best.d > j.R + 15) continue;
     // Carrefour plan (T, X) sans route principale : la route en devient la principale, rectiligne au centre — le centre
     // est ramené sur son axe.
@@ -2858,6 +2887,10 @@ function centerPlaced() {
   if (!j) return;
   j.C = { x: +S.prj.center.x, y: +S.prj.center.y };
   const msgs = connectJunctionToRoads(j);
+  if (!msgs.length && !(j.J?.branches || []).length) { // aucune voie à portée : le dire plutôt que de ne rien faire
+    toast(`${j.name} : aucune voie à moins de R + 15 m (${fmt(j.R + 15, 0)} m) de son centre hors de ses extrémités — aucune branche créée. Posez le centre sur l'axe d'une voie, ou amenez l'extrémité d'une voie secondaire sur le carrefour.`, 'warn');
+    return;
+  }
   if (msgs.length) { S.echSig = ''; update(); toast(`${msgs.join(' ; ')}.`, msgs.some((t) => t.includes('pas de carrefour')) ? 'warn' : 'info'); }
 }
 function connectCross(k, { ends = false } = {}) {
