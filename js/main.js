@@ -4383,7 +4383,7 @@ function refreshPLAxis(c) {
   };
   $('#plChart').hidden = false;
   plEditor().render({
-    key, name: ax.name, PL, defined: A.defined, tn: tnLine, pis, nodeInfo: infoE, sMin: 0, sEnd: ax.len,
+    key, name: ax.name, PL, defined: A.defined, tn: tnLine, pis, nodeInfo: infoE, sMin: 0, sEnd: ax.len, pk0: pkOrigin(S.prj, key),
     stations: plCartStations(key, ax, PL), overlay: ov.draw, zExtra: ov.z, plan: plPlanBand(ax), devers: plDeversBand(ax),
     limits: lim, defaultR: lim.Rconv, endFixed: tEnd ? { s: tEnd.s, z: tEnd.z } : null, startFixed: tSt ? { s: tSt.s, z: tSt.z } : null,
     note: A.defined ? '' : `Aucune ligne rouge sur ${ax.name} : outil « Point » (clic) ou « Draft TN… »${A.tied.length ? ' — extrémités calées sur les chaussées hôtes' : ''}.`,

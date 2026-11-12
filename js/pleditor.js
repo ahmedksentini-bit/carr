@@ -10,7 +10,12 @@
 // (setPis). Contexte : { key, name, PL (plBuild / buildNodes), defined, tn [[s, z]], pis [{ s, z, R }] (points
 // saisis, triés), nodeInfo(i, nœud) → { fixed, pi, label }, sMin, sEnd, stations [{ num, s, z }], overlay(ctx),
 // zExtra [z], limits { gMax, Rconv, Rconc, label }, defaultR, startFixed / endFixed { s, z } | null (extrémités
-// imposées : bord de l'anneau, chaussée hôte), plan, devers (bandeaux), note }.
+// imposées : bord de l'anneau, chaussée hôte), plan, devers (bandeaux), note, pk0 (PK de s = 0) }.
+//
+// Points de tangence : chaque raccordement a deux poignées (entrée TE, sortie TS). Glisser TE déplace l'extrémité de la
+// droite amont, qui pivote autour du sommet précédent, sans toucher à la droite aval : le sommet glisse sur la droite
+// aval jusqu'à l'intersection et le rayon devient R = 2 T / |Δi| (T = distance du sommet à TE). TS de même, côté aval.
+// Près de la droite d'origine (accrochage), la pente est gardée et seul le rayon change.
 import { fmt } from './common.js';
 import { plCartSVG, cartH, plDraft, plStrips } from './pl.js';
 
@@ -37,7 +42,7 @@ const STEP_TXT = {
 };
 
 export function createPlEditor(host, hooks) {
-  const st = { tool: 'sel', view: null, key: null, sel: -1, snap: true, labels: true, ve: 0, form: null, drag: null, hover: null, raf: 0, ctx: null, geo: null };
+  const st = { tool: 'sel', view: null, key: null, sel: -1, selTg: null, snap: true, labels: true, ve: 0, form: null, drag: null, hover: null, raf: 0, ctx: null, geo: null };
   host.classList.add('ple');
   host.innerHTML = `
     <div class="ple-tools">
@@ -161,6 +166,14 @@ export function createPlEditor(host, hooks) {
       if (st.labels) o += `<text x="${X(nd.s).toFixed(1)}" y="${(Y(nd.z) - 11).toFixed(1)}" text-anchor="middle">${esc(inf.label)}</text>`;
       o += '</g>';
     });
+    // points de tangence des raccordements (poignées)
+    if (ctx.defined) for (const t of tgList()) {
+      if (t.s < v.s0 - 1 || t.s > v.s1 + 1) continue;
+      const x = X(t.s), y = Y(t.z), on = st.sel === t.pi && st.selTg === t.end;
+      o += `<g class="ple-tgp${on ? ' sel' : ''}${st.sel === t.pi ? ' cur' : ''}"><rect x="${(x - 4.5).toFixed(1)}" y="${(y - 4.5).toFixed(1)}" width="9" height="9" transform="rotate(45 ${x.toFixed(1)} ${y.toFixed(1)})"/>`;
+      if (st.labels && st.sel === t.pi) o += `<text x="${x.toFixed(1)}" y="${(y + 18).toFixed(1)}" text-anchor="middle">${t.end === 'A' ? 'TE' : 'TS'}</text>`;
+      o += '</g>';
+    }
     if (!ctx.defined) o += `<text class="ple-empty" x="${(M.l + W - M.r) / 2}" y="${M.t + 22}" text-anchor="middle">${esc(ctx.note || 'Aucune ligne rouge : outil « Point » ou « Draft TN… » pour la créer.')}</text>`;
     o += `<rect class="ple-frame" x="${M.l}" y="${M.t}" width="${G.pw}" height="${G.ph}"/>`;
     o += `<text class="ple-ve" x="${W - M.r}" y="${M.t - 5}" text-anchor="end">exagération × ${fmt(v.ve, v.ve < 1 ? 2 : 0)}${st.ve ? '' : ' (auto)'}</text>`;
@@ -202,18 +215,85 @@ export function createPlEditor(host, hooks) {
     const ctx = st.ctx, PL = ctx.PL, i = st.sel, q = ctx.pis[i];
     const lim = ctx.limits || {};
     let h = `<h4>${esc(ctx.name)}</h4><p class="ple-lim">${esc(lim.label || '')}</p>`;
-    if (q) {
-      const k = PL.nodes.findIndex((n, j) => !ctx.nodeInfo(j, n).fixed && ctx.nodeInfo(j, n).pi === i);
+    const kq = q ? PL.nodes.findIndex((n, j) => !ctx.nodeInfo(j, n).fixed && ctx.nodeInfo(j, n).pi === i) : -1;
+    if (q && kq >= 0) {
+      const k = kq;
       const g1 = k > 0 ? PL.segs[k - 1]?.g : null, g2 = PL.segs[k]?.g ?? null, cv = PL.curves.find((c) => c.i === k);
       h += `<div class="ple-pt"><b>${esc(ctx.nodeInfo(k, PL.nodes[k]).label)}</b>` +
         ['s', 'z', 'R'].map((f) => `<label>${{ s: 's (m)', z: 'z (m)', R: 'R (m)' }[f]}<input data-f="${f}" value="${fmt(+q[f] || 0, f === 'z' ? 3 : f === 's' ? 2 : 0)}" inputmode="decimal"></label>`).join('') +
         `<dl><dt>pente amont</dt><dd>${g1 == null ? '—' : pct(g1)}</dd><dt>pente aval</dt><dd>${g2 == null ? '—' : pct(g2)}</dd>` +
         (cv ? `<dt>raccordement</dt><dd>${cv.type} · T ${fmt(cv.T, 2)} m</dd><dt>flèche</dt><dd>${fmt((cv.R * (cv.g2 - cv.g1) ** 2) / 8, 3)} m</dd>` : g1 != null && g2 != null && Math.abs(g2 - g1) > 1e-6 ? '<dt>raccordement</dt><dd>aucun (R = 0)</dd>' : '') +
         `<dt>TN</dt><dd>${tnAt(+q.s) == null ? '—' : `${fmt(tnAt(+q.s), 2)} (${(+q.z - tnAt(+q.s) >= 0 ? '+' : '−') + fmt(Math.abs(+q.z - tnAt(+q.s)), 2)})`}</dd></dl>` +
-        `<div class="row"><button type="button" data-insp="tn"${tnAt(+q.s) == null ? ' disabled' : ''} title="Cote du point = cote du terrain naturel">Caler sur TN</button><button type="button" data-insp="del">Supprimer</button></div></div>`;
+        `<div class="row"><button type="button" data-insp="tn"${tnAt(+q.s) == null ? ' disabled' : ''} title="Cote du point = cote du terrain naturel">Caler sur TN</button><button type="button" data-insp="del">Supprimer</button></div></div>` +
+        tgInsp(i);
     } else h += '<p class="ple-hint">Cliquez un point de la ligne rouge pour le régler ici (s, z, R, pentes, flèche).</p>';
     h += `<p class="ple-hint"><kbd>P</kbd> point · <kbd>I</kbd> pente · <kbd>R</kbd> rayon · <kbd>Suppr</kbd> supprimer · <kbd>F</kbd> zoom tout · <kbd>Échap</kbd> sélection</p>`;
     insp.innerHTML = h;
+  }
+
+  // ------------------------------------------------------------------ points de tangence
+  const pk0 = () => +st.ctx?.pk0 || 0;
+  // Raccordements à poignées : sommet saisi (non imposé), entre deux nœuds, T > 0. { k, pi, c, end, s, z }
+  function tgList() {
+    const ctx = st.ctx, PL = ctx.PL, out = [];
+    for (const c of PL.curves || []) {
+      if (!(c.T > 0.01)) continue;
+      const k = PL.nodes.findIndex((n) => Math.abs(n.s - c.s) < 1e-6);
+      if (k <= 0 || k >= PL.nodes.length - 1) continue;
+      const inf = ctx.nodeInfo(k, PL.nodes[k]); if (inf.fixed) continue;
+      for (const end of ['A', 'B']) { const sv = end === 'A' ? c.sA : c.sB; out.push({ k, pi: inf.pi, c, end, s: sv, z: PL.zAt(sv) }); }
+    }
+    return out;
+  }
+  function tgAt(px, py) {
+    const G = st.geo; let best = null, bd = 8;
+    for (const t of tgList()) { const d = Math.hypot(G.X(t.s) - px, G.Y(t.z) - py); if (d < bd) { bd = d; best = t; } }
+    return best;
+  }
+  // Nouveau sommet et rayon quand le point de tangence `end` du sommet k est amené en (s, z). Renvoie { s, z, R } ou un
+  // message d'erreur. TE (A) : droite amont pivotant autour du nœud k − 1, droite aval fixe ; TS (B) : l'inverse.
+  function tgSolve(k, end, s, z) {
+    const PL = st.ctx.PL, P = PL.nodes[k - 1], N = PL.nodes[k + 1];
+    if (!P || !N) return 'raccordement sans droites de part et d\'autre';
+    let gA, gB, sp;
+    if (end === 'A') {
+      if (!(s > P.s + 0.1)) return 'point de tangence avant le sommet précédent';
+      gA = (z - P.z) / (s - P.s); gB = PL.segs[k].g;
+      if (Math.abs(gA - gB) < 1e-5) return 'droites parallèles : pas de raccordement';
+      sp = (N.z - gB * N.s - P.z + gA * P.s) / (gA - gB);
+      if (!(sp > s + 0.05 && sp < N.s - 0.05)) return 'sommet hors de la droite aval';
+      const zp = P.z + gA * (sp - P.s), T = sp - s;
+      // raccordements voisins : celui du sommet précédent change avec la pente amont, celui du suivant ne bouge pas
+      const Tp = k >= 2 ? ((+P.R || 0) * Math.abs(gA - PL.segs[k - 2].g)) / 2 : 0, cN = PL.curves.find((c) => Math.abs(c.s - N.s) < 1e-6);
+      if (P.s + Tp > s + 0.01) return 'chevauche le raccordement du sommet précédent';
+      if (cN && sp + T > cN.sA + 0.01) return 'chevauche le raccordement du sommet suivant';
+      return { s: sp, z: zp, R: (2 * T) / Math.abs(gB - gA) };
+    }
+    if (!(s < N.s - 0.1)) return 'point de tangence après le sommet suivant';
+    gA = PL.segs[k - 1].g; gB = (N.z - z) / (N.s - s);
+    if (Math.abs(gA - gB) < 1e-5) return 'droites parallèles : pas de raccordement';
+    sp = (z - P.z + gA * P.s - gB * s) / (gA - gB);
+    if (!(sp > P.s + 0.05 && sp < s - 0.05)) return 'sommet hors de la droite amont';
+    const T = s - sp, NN = PL.nodes[k + 2], Tn = NN ? ((+N.R || 0) * Math.abs(PL.segs[k + 1].g - gB)) / 2 : 0, cP = PL.curves.find((c) => Math.abs(c.s - P.s) < 1e-6);
+    if (N.s - Tn < s - 0.01) return 'chevauche le raccordement du sommet suivant';
+    if (cP && sp - T < cP.sB - 0.01) return 'chevauche le raccordement du sommet précédent';
+    return { s: sp, z: P.z + gA * (sp - P.s), R: (2 * T) / Math.abs(gB - gA) };
+  }
+  function tgApply(t, s, z, opts) {
+    const r = tgSolve(t.k, t.end, s, z); if (typeof r === 'string') return r;
+    const pis = pisCopy(); pis[t.pi] = { s: r.s, z: r.z, R: r.R };
+    commit(pis, null, opts); return null;
+  }
+  // droite d'origine du point de tangence (pour l'accrochage et la saisie du seul PK) : z(s)
+  function tgLine(t) {
+    const PL = st.ctx.PL, n = PL.nodes[t.k], g = t.end === 'A' ? PL.segs[t.k - 1].g : PL.segs[t.k].g;
+    return (sv) => n.z + g * (sv - n.s);
+  }
+  function tgInsp(pi) {
+    const L = tgList().filter((t) => t.pi === pi); if (!L.length) return '';
+    return `<div class="ple-tgbox"><b>Points de tangence</b><table><thead><tr><th></th><th>PK</th><th>Z projet</th><th>Z TN</th></tr></thead><tbody>` +
+      L.map((t) => { const zt = tnAt(t.s); return `<tr class="${st.selTg === t.end ? 'on' : ''}" title="${t.end === 'A' ? 'Entrée du raccordement : fin de la droite amont' : 'Sortie du raccordement : début de la droite aval'}"><th>${t.end === 'A' ? 'TE' : 'TS'}</th><td><input data-tg="${t.end}" data-tf="s" value="${fmt(pk0() + t.s, 2)}" inputmode="decimal"></td><td><input data-tg="${t.end}" data-tf="z" value="${fmt(t.z, 3)}" inputmode="decimal"></td><td class="mono">${zt == null ? '—' : fmt(zt, 3)}</td></tr>`; }).join('') +
+      `</tbody></table><p class="ple-hint">PK seul : la pente est gardée, le rayon change. Z : la droite ${'pivote'} autour du sommet voisin, l'autre droite ne bouge pas. Les poignées ◆ se glissent aussi sur le dessin.</p></div>`;
   }
 
   // ------------------------------------------------------------------ modifications
@@ -357,13 +437,14 @@ export function createPlEditor(host, hooks) {
     mr.style.display = zr == null ? 'none' : ''; if (zr != null) { mr.setAttribute('cx', px); mr.setAttribute('cy', G.Y(zr)); }
     const sn = hovEl('.ple-snap'), q = st.tool === 'add' ? snapZ(s, py) : null;
     sn.style.display = q?.kind ? '' : 'none'; if (q?.kind) { sn.setAttribute('transform', `translate(${px} ${G.Y(q.z)})`); sn.setAttribute('class', `ple-snap ${q.kind}`); }
-    const nd = nodeAt(px, py);
-    svg.style.cursor = st.win ? 'crosshair' : st.tool === 'sel' ? (nd && !nd.inf.fixed ? 'grab' : 'default') : st.tool === 'add' ? 'crosshair' : nd ? 'pointer' : st.tool === 'slope' && segAt(px, py) != null ? 'pointer' : 'default';
+    const nd = nodeAt(px, py), tg = !nd && st.tool === 'sel' && ctx.defined ? tgAt(px, py) : null;
+    svg.style.cursor = st.win ? 'crosshair' : st.tool === 'sel' ? (nd && !nd.inf.fixed ? 'grab' : tg ? 'move' : 'default') : st.tool === 'add' ? 'crosshair' : nd ? 'pointer' : st.tool === 'slope' && segAt(px, py) != null ? 'pointer' : 'default';
     const parts = [`s = ${fmt(s, 2)} m`, `TN ${zt == null ? '—' : fmt(zt, 2)}`, `projet ${zr == null ? '—' : fmt(zr, 2)}`];
     if (zt != null && zr != null) parts.push(`écart ${zr - zt >= 0 ? '+' : '−'}${fmt(Math.abs(zr - zt), 2)} m (${zr - zt >= 0 ? 'remblai' : 'déblai'})`);
     if (zr != null) parts.push(`pente ${pct(ctx.PL.gradeAt(s))}`);
     if (st.tool === 'add') parts.push(`point à z = ${fmt(q.z, 2)}${q.kind ? (q.kind === 'tn' ? ' (TN)' : ' (sur la ligne rouge)') : ''}`);
     if (nd) parts.push(`${nd.inf.label} : s ${fmt(nd.n.s, 2)}, z ${fmt(nd.n.z, 3)}`);
+    else if (tg) { const zt2 = tnAt(tg.s); parts.push(`${tg.end === 'A' ? 'TE' : 'TS'} de ${ctx.nodeInfo(tg.k, ctx.PL.nodes[tg.k]).label} : PK ${fmt(pk0() + tg.s, 2)}, Z ${fmt(tg.z, 3)}${zt2 == null ? '' : `, TN ${fmt(zt2, 3)}`} — glisser pour déplacer`); }
     read.textContent = parts.join(' · ');
   }
 
@@ -375,8 +456,12 @@ export function createPlEditor(host, hooks) {
     const [x, y] = pos(e), nd = nodeAt(x, y);
     svg.setPointerCapture?.(e.pointerId);
     if (st.win) { st.drag = { kind: 'win', x0: x, y0: y }; return; }
+    // poignée de tangence si elle est plus proche que le sommet (à petite échelle, TE / TS et sommet se touchent)
+    let tg = st.tool === 'sel' && e.button === 0 && st.ctx.defined ? tgAt(x, y) : null;
+    if (tg && nd && !nd.inf.fixed && Math.hypot(st.geo.X(nd.n.s) - x, st.geo.Y(nd.n.z) - y) <= Math.hypot(st.geo.X(tg.s) - x, st.geo.Y(tg.z) - y)) tg = null;
+    if (tg) { st.sel = tg.pi; st.selTg = tg.end; st.drag = { kind: 'tg', t: tg, line: tgLine(tg), moved: false }; draw(); return; }
     if (e.button === 1 || (st.tool === 'sel' && !(nd && !nd.inf.fixed))) { st.drag = { kind: 'pan', x0: x, y0: y, v: { ...st.view }, moved: false, nd }; return; }
-    if (st.tool === 'sel' && nd && !nd.inf.fixed) { st.sel = nd.inf.pi; st.drag = { kind: 'pt', pi: nd.inf.pi, moved: false }; draw(); }
+    if (st.tool === 'sel' && nd && !nd.inf.fixed) { st.sel = nd.inf.pi; st.selTg = null; st.drag = { kind: 'pt', pi: nd.inf.pi, moved: false }; draw(); }
   });
   svg.addEventListener('pointermove', (e) => {
     if (!st.ctx) return;
@@ -389,6 +474,18 @@ export function createPlEditor(host, hooks) {
       return;
     }
     if (d?.kind === 'win') { const r = hovEl('.ple-win'); hovEl('.ple-hov').style.display = ''; r.setAttribute('x', Math.min(x, d.x0)); r.setAttribute('y', Math.min(y, d.y0)); r.setAttribute('width', Math.abs(x - d.x0)); r.setAttribute('height', Math.abs(y - d.y0)); return; }
+    if (d?.kind === 'tg') {
+      d.moved = true;
+      const s = Math.round(G.S(x) * 100) / 100, zl = d.line(s);
+      const z = st.snap && Math.abs(G.Y(zl) - y) < 9 ? zl : Math.round(G.Z(y) * 1000) / 1000;
+      const r = tgSolve(d.t.k, d.t.end, s, z);
+      if (typeof r === 'string') { read.textContent = `${d.t.end === 'A' ? 'TE' : 'TS'} : ${r}`; return; }
+      const pis = pisCopy(); pis[d.t.pi] = { s: r.s, z: r.z, R: r.R };
+      const zt = tnAt(s);
+      read.textContent = `${d.t.end === 'A' ? 'TE' : 'TS'} : PK ${fmt(pk0() + s, 2)} · Z ${fmt(z, 3)}${zt == null ? '' : ` · TN ${fmt(zt, 3)}`} · R ${fmt(r.R, 0)} m${z === zl ? ' (pente gardée)' : ''}`;
+      if (!st.raf) st.raf = requestAnimationFrame(() => { st.raf = 0; commit(pis, null, { commit: false }); });
+      return;
+    }
     if (d?.kind === 'pt') {
       d.moved = true;
       const ctx = st.ctx, pis = pisCopy(), lo = Math.max(ctx.sMin, ...ctx.PL.nodes.filter((n) => n.s < pis[d.pi].s - 1e-9).map((n) => n.s)) + 0.5;
@@ -413,8 +510,9 @@ export function createPlEditor(host, hooks) {
       }
       draw(); return;
     }
+    if (d?.kind === 'tg') { if (d.moved) { cancelAnimationFrame(st.raf); st.raf = 0; hooks.commit?.(); } draw(); return; }
     if (d?.kind === 'pt') { if (d.moved) { cancelAnimationFrame(st.raf); st.raf = 0; hooks.commit?.(); } draw(); return; }
-    if (d?.kind === 'pan') { if (!d.moved) { st.sel = d.nd && !d.nd.inf.fixed ? d.nd.inf.pi : -1; draw(); } return; }
+    if (d?.kind === 'pan') { if (!d.moved) { st.sel = d.nd && !d.nd.inf.fixed ? d.nd.inf.pi : -1; st.selTg = null; draw(); } return; }
     if (st.form && st.tool !== 'slope' && st.tool !== 'radius') return;
     const nd = nodeAt(x, y), G = st.geo;
     if (st.tool === 'add') { const s = G.S(x), q = snapZ(s, y), err = addAt(Math.round(s * 10) / 10, Math.round(q.z * 1000) / 1000); if (err) hooks.toast?.(err, 'warn'); return; }
@@ -444,6 +542,14 @@ export function createPlEditor(host, hooks) {
   $('[data-snap]').addEventListener('change', (e) => { st.snap = e.target.checked; });
   $('[data-labels]').addEventListener('change', (e) => { st.labels = e.target.checked; draw(); });
   insp.addEventListener('change', (e) => {
+    const end = e.target.dataset.tg;
+    if (end && st.sel >= 0) {
+      const t = tgList().find((q) => q.pi === st.sel && q.end === end), v = pnum(e.target.value); if (!t || !Number.isFinite(v)) return;
+      st.selTg = end;
+      const s = e.target.dataset.tf === 's' ? v - pk0() : t.s, z = e.target.dataset.tf === 's' ? tgLine(t)(s) : v;
+      const err = tgApply(t, s, z); if (err) { hooks.toast?.(`${end === 'A' ? 'TE' : 'TS'} : ${err}.`, 'warn'); draw(); }
+      return;
+    }
     const f = e.target.dataset.f; if (!f || st.sel < 0) return;
     const v = pnum(e.target.value); if (!Number.isFinite(v)) return;
     const pis = pisCopy(), q = pis[st.sel]; q[f] = f === 'R' ? Math.max(0, v) : v; commit(pis, q);
