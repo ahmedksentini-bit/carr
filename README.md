@@ -263,7 +263,9 @@ ou sur un fond topographique DXF.
   même échelle (H = V, ajustée ou 1/100 à 1/500) : terrain naturel du MNT le long de l'ouvrage, ligne projet de la
   route (profil en travers au droit de l'ouvrage, biais pris en compte) et remblai, corps de l'ouvrage (radier,
   ouverture, traverse, murs de tête), fils d'eau cotés aux deux faces et au droit de l'axe, pente, cote de chaussée,
-  remblai sur traverse, PHE amont si l'hydraulique est calculée, longueurs de part et d'autre de l'axe. Boutons de
+  remblai sur traverse, PHE amont si l'hydraulique est calculée, longueurs de part et d'autre de l'axe. En plan (et
+  au tracé combiné), le **talus est coupé entre les murs en aile** de chaque tête de cadre ou de PIPO, devant le mur de
+  tête, et raccordé aux extrémités extérieures des murs (corde entre leurs extrémités dessinée en bord de talus). Boutons de
   face : fil d'eau ±1 / ±10 cm (les cotes deviennent saisies ; « Fils d'eau automatiques » y revient), longueur de la
   face (±10 cm, ±1 m, ±5 m) ; ◀ OH / OH ▶ par PK ; Imprimer (page à l'échelle exacte). Le plan montre aussi les talus
   (barbules, entrées en terre) ; la coupe montre la **ligne d'eau** du calcul hydraulique de l'ouvrage (onglet
