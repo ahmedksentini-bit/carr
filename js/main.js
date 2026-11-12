@@ -18,7 +18,7 @@ import { combinedSheets, combinedHtml } from './combine.js';
 import { ohSheet } from './ohcoupe.js';
 import { upright, toGon, spanSupports } from './common.js';
 import { ptParams, crossSection, crossSections, ptChartSVG, ptBigSVG, ptDXF, crossSectionFrom, mainPlatform } from './pt.js';
-import { plParams, plBuild, plStations, plTerrainLine, plDXF, plChecks, axisLength, axisPointAt, PL_LIMITS } from './pl.js';
+import { plParams, plBuild, plStations, plTerrainLine, plDXF, plChecks, axisLength, axisPointAt, PL_LIMITS, plStrips, lowCombined } from './pl.js';
 import { createPlEditor } from './pleditor.js';
 import { ringProfile, profileSVG, profileDXF } from './profile.js';
 import { LAYERS } from './layers.js';
@@ -35,7 +35,7 @@ import { createWorldCover } from './hydro/worldcover.js';
 import { openMontanaMap, initMontanaMap } from './montanamap.js';
 import { computeAll as hydroComputeAll, defaultHypotheses, listMontanaStations, TC_FORMULAS, FRANCOU_RODIER_REGIONS, suggestCiehRegressions, OPTION_LISTS, resolveMontanaStation, montanaAfricaIdf, KR10_GEOLOGY_CATEGORIES } from './hydro/hydrology.js';
 import { sizeCulvert, culvertHydraulics, inletsForShape, defaultInletFor, slopeAboveCritical } from './hydro/culvert.js';
-import { DCAT, planChecks, platformChecks, catText, designCatOf, clothoidNeed } from './roadcat.js';
+import { DCAT, planChecks, platformChecks, catText, designCatOf, clothoidNeed, superPct } from './roadcat.js';
 import { isVsa } from './vsa.js';
 import { ringFrames } from './ringshape.js';
 import { clearanceChecks, worstClearance, structureSpans } from './gabarit.js';
@@ -3624,7 +3624,7 @@ function syncCtxUI() {
   $('#ringPane').hidden = plan;
   $('#planPane').hidden = !plan;
   $$('#deversFields [data-for], #capFields [data-for], #visFields [data-for]').forEach((el) => (el.hidden = (el.dataset.for === 'plan') !== plan));
-  $('#dvHead').textContent = plan ? 'Route principale' : 'Anneau';
+  $('#dvHead').textContent = `Carrefour actif — ${plan ? 'route principale et branches' : 'anneau et branches'}`;
   $('#dvChartHead').textContent = plan ? 'Profil en long de la route principale' : 'Profil en long des bords de l\'anneau';
 }
 
@@ -3980,8 +3980,101 @@ function lineChart({ series, xMin, xMax, yMin, yMax, xLabel, yLabel, yFmt = (v) 
   return s;
 }
 
+// Dévers des axes (voie principale, voies secondaires, bretelles) : ceux que le projet applique réellement (profils
+// types et plages, catégorie de conception, rotation sur les clothoïdes), comparés aux dévers requis par la catégorie,
+// et zones d'aquaplaning avec la ligne rouge. Remplace l'ancien onglet limité à l'anneau du giratoire, gardé replié.
+function refreshDvAxis() {
+  let axes = [];
+  try { axes = (S.prof?.axes || (S.D ? listAxes(S.prj, S.D) : [])).filter((a) => /^(hwy|x:|r:)/.test(a.key) && a.len > 1); } catch (e) { console.error(e); }
+  const sel = $('#dvAxis');
+  if (!axes.length) {
+    sel.innerHTML = '<option value="">(aucun axe)</option>';
+    $('#dvSum').innerHTML = '<p class="note">Aucun axe de route : tracez la voie principale, une voie secondaire ou une bretelle (onglet Tracé).</p>';
+    for (const id of ['dvChart', 'dvCurves', 'dvBreaks', 'dvAqua']) $('#' + id).innerHTML = '';
+    S.dvAx = null; $('#dvAxBox').hidden = true;
+    return;
+  }
+  if (!axes.some((a) => a.key === S.dvSel)) S.dvSel = axes.some((a) => a.key === S.plSel) ? S.plSel : axes[0].key;
+  $('#dvAxBox').hidden = false;
+  sel.innerHTML = axes.map((a) => `<option value="${esc(a.key)}"${a.key === S.dvSel ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
+  const ax = axes.find((a) => a.key === S.dvSel), pk0 = pkOrigin(S.prj, ax.key), PK = (v) => pkStr(pk0 + v);
+  let T = null; try { T = axisType(S.prj, S.D, ax.key); } catch (e) { console.error(e); }
+  const TP = typeParams(S.prj), dn = Math.max(0, +(S.prj.pt?.dev ?? 2.5) || 2.5);
+  const devAt = (v) => { try { const d = axisPlatform(S.prj, S.D, ax, T, Math.max(0, Math.min(ax.len, v)), 0, TP).dev; return { l: (d.left ?? -d.d) * 100, r: (d.right ?? -d.d) * 100 }; } catch { return null; } };
+  const A = S.axpl?.get(ax.key), grade = A?.defined ? (v) => (v >= A.PL.nodes[0].s && v <= A.PL.sEnd ? A.PL.gradeAt(v) : NaN) : null;
+  const els = (ax.al?.elems || []).filter((e) => e.len > 1e-6);
+  const cat = ax.key.startsWith('r:') ? null : designCatOf(ax.H || null), C = cat ? DCAT[cat] : null;
+  const band = plDeversBand(ax) || [];
+  const aqua = grade ? lowCombined(band, grade) : [];
+  const single = !!T?.single, pc = (v) => (v == null || !isFinite(v) ? '—' : `${v > 0 ? '+' : ''}${fmt(v, 2)} %`);
+  const maxAbs = band.reduce((m, q) => Math.max(m, Math.abs(q.l), single ? 0 : Math.abs(q.r)), 0);
+  // diagramme : courbure, dévers gauche / droit, zones d'aquaplaning (mêmes bandeaux que l'éditeur de profil en long)
+  // largeur du panneau en pixels (textes à leur taille réelle) ; l'onglet peut être masqué au moment du calcul
+  const w = Math.max(380, ($('#dvChart').clientWidth || (document.querySelector('aside.panel')?.clientWidth || 470) - 36) - 4), m = { l: 46, r: 8 }, plan = plPlanBand(ax), stripH = (plan ? 34 : 0) + 84, h = stripH + 22, sMax = ax.len, X = (v) => m.l + (v / sMax) * (w - m.l - m.r);
+  let svg = `<svg viewBox="0 0 ${w} ${h}" class="plsvg" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto">`;
+  const tick = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000].find((v) => (sMax / v) * 58 <= w - m.l - m.r) || 10000;
+  for (let v = Math.ceil(pk0 / tick) * tick - pk0; v <= sMax + 1e-6; v += tick) svg += `<line class="pl-bg" x1="${X(v)}" y1="12" x2="${X(v)}" y2="${h - 2}"/><text class="pl-bt" x="${X(v)}" y="10" text-anchor="middle">${pkStr(pk0 + v)}</text>`;
+  svg += plStrips({ plan, devers: band, grade }, { X, m, w, h, sMax, stripH }) + '</svg>';
+  $('#dvChart').innerHTML = band.length ? svg : '<p class="note">Dévers indisponibles pour cet axe.</p>';
+  // courbes : dévers requis par la catégorie, appliqués au milieu de l'arc, clothoïdes requises / présentes
+  // courbes : éléments courbes consécutifs (clothoïde – arc – clothoïde, ou clothoïdes seules) d'un même sommet ;
+  // rayon minimal, dévers requis par la catégorie, appliqués au point le plus courbé, clothoïdes présentes / requises
+  const curves = [];
+  for (let i = 0; i < els.length; i++) {
+    if (els[i].kind === 'L') continue;
+    const g = [els[i]]; while (i + 1 < els.length && els[i + 1].kind !== 'L' && (els[i + 1].pi == null || els[i + 1].pi === els[i].pi)) g.push(els[++i]);
+    let km = 0, sm = g[0].s0, sg = 1;
+    for (const e of g) for (const t of [0, e.len / 2, e.len]) { const kk = e.curvAt(t); if (Math.abs(kk) > Math.abs(km)) { km = kk; sm = e.s0 + t; } }
+    if (Math.abs(km) < 1e-9) continue;
+    const arc = g.find((e) => e.kind === 'A'); if (arc) sm = arc.s0 + arc.len / 2;
+    sg = Math.sign(km);
+    curves.push({ s0: g[0].s0, s1: g[g.length - 1].s0 + g[g.length - 1].len, R: 1 / Math.abs(km), sm, left: sg > 0, cl: [g[0].kind === 'C' ? g[0].len : 0, g[g.length - 1].kind === 'C' && g.length > 1 ? g[g.length - 1].len : 0] });
+  }
+  const nCurv = curves.filter((c) => C && !C.noSuper && c.R < C.Rdn).length;
+  $('#dvSum').innerHTML = kv([
+    ['Catégorie', cat ? `${C.label}${C.noSuper ? '' : ` — Rm ${fmt(C.Rm, 0)} m, Rdn ${fmt(C.Rdn, 0)} m`}` : 'bretelle'],
+    ['Toit (alignement)', `${fmt(dn, 2)} %${single ? ' (bretelle : dévers unique)' : ''}`],
+    ['Dévers maximal', `${fmt(maxAbs, 2)} %${maxAbs > 7.001 ? ' ✖ > 7 %' : ''}`],
+    ['Courbes déversées', C?.noSuper ? 'aucune (catégorie sans dévers)' : String(nCurv)],
+    ['Aquaplaning', grade ? (aqua.length ? `${aqua.length} zone${aqua.length > 1 ? 's' : ''}, ${fmt(aqua.reduce((t, [a, b]) => t + (b - a), 0), 0)} m` : 'aucune zone') : 'profil en long à définir'],
+  ]);
+  $('#dvCurves').innerHTML = curves.length
+    ? '<thead><tr><th>PK début</th><th>PK fin</th><th>R min (m)</th><th>Sens</th><th>Dévers requis</th><th>Appliqué G</th><th>Appliqué D</th><th>Clothoïdes (m)</th><th>Requise (m)</th><th></th></tr></thead><tbody>' + curves.map((c) => {
+      const d = devAt(c.sm), req = C ? superPct(cat, c.R, dn) : null, need = C ? clothoidNeed(cat, c.R, ax.H || {}, dn) : 0, flat = !C || C.noSuper || c.R >= C.Rdn;
+      const reqTxt = !C ? '—' : flat ? `toit ${fmt(dn, 2)} %` : `${fmt(req, 2)} % vers l'intérieur`;
+      // côté intérieur (gauche si virage à gauche) : pente −req vers l'extérieur de ce côté ; côté extérieur : +req
+      const okD = !C || !d || (flat ? Math.abs(d.l + dn) < 0.15 && (single || Math.abs(d.r + dn) < 0.15) : Math.abs((c.left ? -d.l : -d.r) - req) < 0.15);
+      const okC = !need || Math.min(...c.cl) >= need - 0.5;
+      return `<tr data-dvs="${c.sm}"><td>${PK(c.s0)}</td><td>${PK(c.s1)}</td><td>${fmt(c.R, 0)}</td><td>${c.left ? 'gauche' : 'droite'}</td><td>${reqTxt}</td><td>${pc(d?.l)}</td><td>${single ? '—' : pc(d?.r)}</td><td>${c.cl.map((v) => (v ? fmt(v, 1) : '—')).join(' / ')}</td><td>${need ? fmt(need, 1) : '—'}</td><td>${okD && okC ? '✓' : `<span class="err">✖ ${okD ? '' : 'dévers '}${okC ? '' : 'clothoïde'}</span>`}</td></tr>`;
+    }).join('') + '</tbody>'
+    : '<tbody><tr><td class="note">Aucune courbe : axe en alignement, dévers en toit.</td></tr></tbody>';
+  // points de changement : bornes des éléments du tracé et des plages de profils types
+  const KIND = { L: 'droite', C: 'clothoïde', A: 'arc' }, rk = [];
+  for (const e of els) rk.push({ s: e.s0, what: `début ${KIND[e.kind] || e.kind}${e.kind === 'A' ? ` R ${fmt(e.R, 0)}` : ''}` });
+  rk.push({ s: ax.len, what: 'fin de l\'axe' });
+  for (const r of S.prj.ptt?.axes?.[ax.key]?.ranges || []) for (const [v, w2] of [[+r.s0, 'début'], [+r.s1, 'fin']]) if (v > 0 && v < ax.len) rk.push({ s: v, what: `${w2} de plage de profils types` });
+  rk.sort((a, b) => a.s - b.s);
+  let prev = null;
+  const rows = [];
+  for (const q of rk) {
+    const d = devAt(q.s + (q.s >= ax.len ? -0.01 : 0.01));
+    if (!d) continue;
+    const key = `${fmt(d.l, 2)}|${fmt(d.r, 2)}`;
+    if (prev === key && /^début droite$/.test(q.what) && rows.length && /début droite/.test(rows[rows.length - 1])) { continue; } // deux alignements de suite (sommet sans rayon)
+    rows.push(`<tr data-dvs="${q.s}"><td>${PK(q.s)}</td><td>${fmt(q.s, 2)}</td><td>${esc(q.what)}</td><td>${pc(d.l)}</td><td>${single ? '—' : pc(d.r)}</td><td>${prev && prev !== key ? 'changement' : ''}</td></tr>`);
+    prev = key;
+  }
+  $('#dvBreaks').innerHTML = '<thead><tr><th>PK</th><th>s (m)</th><th>Point</th><th>Dévers G</th><th>Dévers D</th><th></th></tr></thead><tbody>' + rows.join('') + '</tbody>';
+  $('#dvAqua').innerHTML = !grade ? '<tbody><tr><td class="note">Profil en long de l\'axe à définir : la pente combinée √(i² + d²) n\'est pas calculable.</td></tr></tbody>'
+    : aqua.length ? '<thead><tr><th>PK début</th><th>PK fin</th><th>Longueur (m)</th><th>Déclivité</th><th>Remède</th></tr></thead><tbody>' + aqua.map(([a, b]) => `<tr data-dvs="${(a + b) / 2}"><td>${PK(a)}</td><td>${PK(b)}</td><td>${fmt(b - a, 1)}</td><td>${pc((grade((a + b) / 2) || 0) * 100)}</td><td>déclivité ≥ 0,5 % au droit de la rotation du dévers, ou rotation plus courte</td></tr>`).join('') + '</tbody>'
+      : '<tbody><tr><td class="note">Aucune zone : la pente combinée reste ≥ 0,5 % sur tout l\'axe.</td></tr></tbody>';
+  S.dvAx = ax;
+}
 function refreshDevers() {
+  try { refreshDvAxis(); } catch (e) { console.error(e); }
   const D = S.D;
+  $('#dvRingBox').hidden = !D?.devers;
+  if (D?.devers && !S.dvAx && !S.dvRingOpened) { $('#dvRingBox').open = true; S.dvRingOpened = true; } // giratoire seul, sans axe de route
   if (!D?.devers) { $('#deversOut').innerHTML = ''; $('#ringChart').innerHTML = ''; $('#branchChart').innerHTML = ''; $('#branchDevTable').innerHTML = ''; return; }
   const dv = D.devers, pc = (v) => fmt(v * 100, 2) + ' %';
   if (dv.mode === 'plan') {
@@ -4868,6 +4961,8 @@ function drawOhMove(ctx, v) {
 }
 function bindPL() {
   $('#plBranch').addEventListener('change', (e) => { S.plSel = e.target.value; S.plPi = -1; refreshPL(); });
+  $('#dvAxis').addEventListener('change', (e) => { S.dvSel = e.target.value; refreshDevers(); });
+  $('#tab-devers').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-dvs]'); if (!tr || !S.dvAx) return; const v = +tr.dataset.dvs; gotoCheck({ at: S.dvAx.at(Math.max(0, Math.min(S.dvAx.len, v))).p }); });
   $('#plVe').addEventListener('change', refreshPL);
   $('#btnPlPop').addEventListener('click', plPopOpen);
   $('#plPopClose').addEventListener('click', () => $('#dlgPL').close());
