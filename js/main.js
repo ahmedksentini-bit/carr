@@ -5137,11 +5137,16 @@ function catPreview(q) {
     try {
       const P = q.make(), H = halfSection(P, null, { devers: -0.025, xmax: 40 }), L = H.proj.filter((r) => r.m !== 'tn');
       if (L.length < 2) return '';
-      const xs = L.map((r) => r.x), zs = L.map((r) => r.z), x1 = Math.max(...xs), z0 = Math.min(...zs), z1 = Math.max(...zs), W = 220, Hh = 46, k = (W - 8) / Math.max(1, x1), kz = k * 4;
-      const Y = (z) => Hh / 2 + 6 - (z - (z0 + z1) / 2) * kz;
-      const d = L.map((r, i) => `${i ? 'L' : 'M'}${(4 + r.x * k).toFixed(1)},${Y(r.z).toFixed(1)}`).join('');
-      const marks = L.filter((r) => /BORDURE|CANIVEAU|TPC/.test(r.zone || '')).map((r) => `<circle cx="${(4 + r.x * k).toFixed(1)}" cy="${Y(r.z).toFixed(1)}" r="1.4"/>`).join('');
-      return `<svg viewBox="0 0 ${W} ${Hh}" width="${W}" height="${Hh}"><line x1="4" y1="2" x2="4" y2="${Hh - 2}" class="cat-ax"/><path d="${d}" class="cat-pl"/>${marks}</svg>`;
+      // plate-forme, arase, point de contrôle D/R et amorces des talus (remblai 3/2, déblai 1/1) jusqu'aux EET
+      const T = H.test, tal = 2.2, xs = [...L.map((r) => r.x), T ? T.x + tal * 1.5 : 0], zs = [...L.map((r) => r.z), ...H.arase.map((r) => r.z), T ? T.z - tal : 0, T ? T.z + tal * 0.7 : 0];
+      const x1 = Math.max(...xs), z0 = Math.min(...zs), z1 = Math.max(...zs), W = 220, Hh = 54, k = (W - 10) / Math.max(1, x1), kz = Math.min(k * 4, (Hh - 10) / Math.max(0.2, z1 - z0));
+      const X = (x) => 4 + x * k, Y = (z) => Hh / 2 - (z - (z0 + z1) / 2) * kz;
+      const d = L.map((r, i) => `${i ? 'L' : 'M'}${X(r.x).toFixed(1)},${Y(r.z).toFixed(1)}`).join('');
+      const ar = H.arase.length > 1 ? `<path d="${H.arase.map((r, i) => `${i ? 'L' : 'M'}${X(r.x).toFixed(1)},${Y(r.z).toFixed(1)}`).join('')}" class="cat-ar"/>` : '';
+      const tst = T ? `<path d="M${X(T.x).toFixed(1)},${(Y(T.z) - 3.5).toFixed(1)}l3,3.5l-3,3.5l-3,-3.5Z" class="cat-ts"/><path d="M${X(T.x).toFixed(1)},${Y(T.z).toFixed(1)}L${X(T.x + tal * 1.5).toFixed(1)},${Y(T.z - tal).toFixed(1)}" class="cat-r"/><path d="M${X(T.x).toFixed(1)},${Y(T.z).toFixed(1)}L${X(T.x + tal * 0.7).toFixed(1)},${Y(T.z + tal * 0.7).toFixed(1)}" class="cat-d"/>` : '';
+      const marks = L.filter((r) => /BORDURE|CANIVEAU|TPC/.test(r.zone || '')).map((r) => `<circle cx="${X(r.x).toFixed(1)}" cy="${Y(r.z).toFixed(1)}" r="1.4"/>`).join('');
+      const lay = (P.layers || []).map((l) => l.nom).join(' / ');
+      return `<svg viewBox="0 0 ${W} ${Hh}" width="${W}" height="${Hh}"><line x1="4" y1="2" x2="4" y2="${Hh - 2}" class="cat-ax"/>${ar}<path d="${d}" class="cat-pl"/>${tst}${marks}<text x="${W - 3}" y="${Hh - 3}" text-anchor="end" class="cat-lt">${esc(lay)}</text></svg>`;
     } catch (e) { console.error(e); return ''; }
   })();
   return q._svg;
