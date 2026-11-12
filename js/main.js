@@ -2015,7 +2015,10 @@ function axisElements(ref) {
         if (prev?.kind === 'C' && !prev.out) grp.unshift(prev);
         if (next?.kind === 'C' && next.out) grp.push(next);
         const tg = (al.tangents || []).find((q) => q.i === e.pi) || {};
-        out.push({ kind: 'curve', vi: e.pi, els: grp, R: e.R, A1: tg.A1 || 0, A2: tg.A2 || 0, L1: tg.L1 || 0, L2: tg.L2 || 0, defl: tg.defl || 0, La: e.len, T: tg.T || 0, s0: grp[0].s0 });
+        // raccordement : sélectionnable sur son arc (sur tout le groupe si l'arc est nul : clothoïde – clothoïde)
+        out.push({ kind: 'curve', vi: e.pi, els: e.len > 0.5 ? [e] : grp, R: e.R, A1: tg.A1 || 0, A2: tg.A2 || 0, L1: tg.L1 || 0, L2: tg.L2 || 0, defl: tg.defl || 0, La: e.len, T: tg.T || 0, s0: grp[0].s0 });
+        // clothoïdes d'entrée et de sortie : éléments à part (propriétés propres)
+        for (const c of grp) if (c.kind === 'C' && c.len > 0.05) out.push({ kind: 'clo', vi: e.pi, end: c.out ? 'out' : 'in', els: [c], A: c.A, L: c.len, R: c.R, s0: c.s0, p0: c.pointAt(0), p1: c.pointAt(c.len) });
       } else if (e.kind === 'L' && e.len > 0.05) {
         const m = e.pointAt(e.len / 2); let kk = 0, bd = Infinity;
         for (let j = 0; j + 1 < ax.length; j++) { const d = G.distToSeg(m, ax[j], ax[j + 1]); if (d < bd) { bd = d; kk = j; } }
@@ -2039,7 +2042,7 @@ const axElRefs = () => [...(S.prj.hwy?.on && (S.prj.hwy.axis || []).length >= 2 
 /** Élément d'axe d'un objet 'axel' : { ref, kind, idx } → entrée de axisElements. */
 function axElOf(el) {
   const A = axisElements(el.ref); if (!A) return null;
-  return A.list.find((q) => (el.kind === 'line' ? q.kind === 'line' && q.k === el.idx : q.kind === el.kind && q.vi === el.idx)) || null;
+  return A.list.find((q) => (el.kind === 'line' ? q.kind === 'line' && q.k === el.idx : q.kind === el.kind && q.vi === el.idx && (el.kind !== 'clo' || q.end === el.end))) || null;
 }
 /** Panneau de la fenêtre d'un élément d'axe. */
 function renderAxEl(el) {
@@ -2057,6 +2060,25 @@ function renderAxEl(el) {
     box.innerHTML = `<p class="note">${t('Sommet sans raccordement (angle vif) : les deux droites se coupent ici. Saisissez un rayon pour reconstruire le cercle tangent aux deux droites.')}</p>`
       + `<div class="row"><label class="fld">${t('Rayon R')} [m]<input data-axel="newr" inputmode="decimal" value="${String(+S.ttrR || 300).replace('.', ',')}"></label><button data-axact="rebuild" class="primary">${t('Reconstruire le cercle')}</button></div>`
       + rows([['Sommet', `${q.vi}`], ['Déviation', fmtDev(q.defl)], ['Tangente pour ce rayon', `${fmt((+S.ttrR || 300) * Math.tan(q.defl / 2), 2)} m`]]);
+    return;
+  }
+  if (q.kind === 'clo') {
+    const p = ax[q.vi] || {}, pk0 = parseNum(String(A.P?.pk0 ?? '')) || 0, lTxt = p.lc == null || p.lc === '' ? '' : String(p.lc).replace('.', ',');
+    const pk = (sv) => `${fmt(sv, 2)} m (${A.P?.kind === 'route' ? 'PR' : 'PK'} ${fmt((pk0 + sv) / 1000, 3)})`;
+    box.innerHTML = rows([
+      ['Clothoïde', `${t(q.end === 'out' ? 'sortie' : 'entrée')} — ${t('sommet')} ${q.vi}`],
+      ['Paramètre A', `${fmt(q.A, 2)} m`],
+      ['Longueur L', `${fmt(q.L, 2)} m`],
+      ['Rayon au raccord avec l\'arc', `${fmt(q.R, 2)} m`],
+      ['Angle de la clothoïde τ = L / 2R', fmtDev(q.L / (2 * q.R))],
+      [q.end === 'out' ? 'Début (CS)' : 'Début (TS)', pk(q.s0)],
+      [q.end === 'out' ? 'Fin (ST)' : 'Fin (SC)', pk(q.s0 + q.L)],
+      ['X, Y début', `${q.p0.x.toFixed(3)} ; ${q.p0.y.toFixed(3)}`],
+      ['X, Y fin', `${q.p1.x.toFixed(3)} ; ${q.p1.y.toFixed(3)}`],
+    ])
+      + `<div class="row"><label class="fld">${t('Rayon R')} [m]<input data-axel="r" inputmode="decimal" value="${String(+p.r || '').replace('.', ',')}"></label>`
+      + `<label class="fld">${t('Longueur de clothoïde L')} [m]<input data-axel="lc" inputmode="decimal" value="${lTxt}" placeholder="auto"></label></div>`
+      + `<p class="note">${t('R et L s\'appliquent au raccordement du sommet (clothoïdes d\'entrée et de sortie) ; L vide : longueur de la catégorie ; L = 0 : arc seul.')}</p>`;
     return;
   }
   const p = ax[q.vi] || {}, f = (A.fit || []).find((g) => g.i === q.vi), Rreq = +p.r || 0;
@@ -2139,7 +2161,7 @@ function hitElement(px, py) {
   // éléments de l'axe en plan (droites, raccordements) des voies d'échangeur : à quelques pixels de l'axe
   if (S.tool === 'select') for (const ref of axElRefs()) {
     const A = axisElements(ref); if (!A) continue;
-    for (const q of A.list) { const d = polyDist(q.pts), idx = q.kind === 'line' ? q.k : q.vi; if (d < (q.kind === 'pi' ? 8 : 6)) cands.push({ type: 'axel', i: `${ref.t}${ref.i ?? ''}:${q.kind}:${idx}`, ref, kind: q.kind, idx, sc: 500 + d + (q.kind === 'line' ? 0.5 : q.kind === 'pi' ? -1 : 0) }); }
+    for (const q of A.list) { const d = polyDist(q.pts), idx = q.kind === 'line' ? q.k : q.vi; if (d < (q.kind === 'pi' ? 8 : 7)) cands.push({ type: 'axel', i: `${ref.t}${ref.i ?? ''}:${q.kind}:${idx}${q.end || ''}`, ref, kind: q.kind, idx, end: q.end, sc: 500 + d + (q.kind === 'line' ? 0.5 : q.kind === 'pi' ? -1 : q.kind === 'clo' ? -0.3 : 0) }); }
   }
   for (const [type, i, r] of [['hwy', 0, D?.hwy], ...(D?.crosses || []).map((c, k) => ['cross', k, c])]) {
     if (!r?.ok) continue;
@@ -2155,7 +2177,7 @@ function hitElement(px, py) {
   if (!cands.length) { const id = bvAt(wq); if (id) cands.push({ type: 'bv', i: id, sc: 5000 }); } // bassin versant : seulement hors des éléments du projet
   cands.sort((a, b) => a.sc - b.sc);
   const c0 = cands[0];
-  return c0 ? (c0.type === 'axel' ? { type: 'axel', i: c0.i, ref: c0.ref, kind: c0.kind, idx: c0.idx } : { type: c0.type, i: c0.i }) : null;
+  return c0 ? (c0.type === 'axel' ? { type: 'axel', i: c0.i, ref: c0.ref, kind: c0.kind, idx: c0.idx, end: c0.end } : { type: c0.type, i: c0.i }) : null;
 }
 // Contour (monde) d'un ouvrage du plan : tablier ou cadre.
 function ouvrPoly(key) {
@@ -2174,7 +2196,7 @@ function popTitle(el) {
   if (el.type === 'cross') return `Voie secondaire ${S.prj.crosses[el.i]?.name || ''}`;
   if (el.type === 'branch') return `Branche ${S.prj.branches[el.i]?.name || ''}`;
   if (el.type === 'ouvr') return `Ouvrage ${ouvrName(el.i)}`;
-  if (el.type === 'axel') { const A = axisElements(el.ref); return `${A?.name || ''} — ${el.kind === 'curve' ? `${t('raccordement du sommet')} ${el.idx}` : el.kind === 'pi' ? `${t('sommet')} ${el.idx} ${t('(angle vif)')}` : `${t('droite')} ${el.idx}-${el.idx + 1}`}`; }
+  if (el.type === 'axel') { const A = axisElements(el.ref); return `${A?.name || ''} — ${el.kind === 'curve' ? `${t('raccordement du sommet')} ${el.idx}` : el.kind === 'clo' ? `${t(el.end === 'out' ? 'clothoïde de sortie du sommet' : 'clothoïde d\'entrée du sommet')} ${el.idx}` : el.kind === 'pi' ? `${t('sommet')} ${el.idx} ${t('(angle vif)')}` : `${t('droite')} ${el.idx}-${el.idx + 1}`}`; }
   return `${S.D?.kind === 'giratoire' ? 'Giratoire' : 'Carrefour'} — ${S.prj.jname || ''}`;
 }
 function openPop(el, px, py) {
