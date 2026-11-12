@@ -14,6 +14,9 @@ ou sur un fond topographique DXF.
 - **Ordre des onglets** : Projet, Tracé, Terrain, Dévers, Profil long, Profils travers, Implantation, Carrefours plans (anneau du
   giratoire ou carrefour en T / X ; ex-« Anneau »), Branches, Profil, PSGR, Visibilité, Contrôles, Capacité, Échangeur,
   Ouvrages, Signalisation, Hydrologie, Vitesses / UVR.
+- **Onglet Projet** : ce qui vaut pour tout le projet — nom, contenu (axes du tracé, carrefours, bretelles, avec liens
+  vers leurs onglets), système de coordonnées, fond de plan, fond DXF, calques KMZ, affichage. La liste des carrefours,
+  le type et le contexte (interurbain / urbain) du carrefour actif sont en tête de l'onglet **Carrefours plans**.
 - **Onglet Tracé** (deuxième onglet) : axes de la voie principale (autoroute ICTAAL ou route non autoroutière,
   catégorie de conception, vitesse, profil en travers, PK origine) et des voies secondaires — dessin, import KMZ / KML,
   tableau des sommets (X, Y, R, clothoïdes, rayon appliqué), raccordement aux carrefours et croisements. L'onglet

@@ -99,7 +99,7 @@ function newCross(k) {
 function newProject(context = 'interurbain') {
   const R = PRESETS[context].ring, jid = uid();
   return {
-    app: 'INFRA-KSR', version: 1, name: 'Giratoire sans titre', context, kind: 'giratoire',
+    app: 'INFRA-KSR', version: 1, name: 'Projet sans titre', context, kind: 'giratoire',
     crs: { id: 'utm', zone: 32, south: false, def: '' },
     bg: { provider: 'esri', opacity: 1, places: true },
     center: { auto: true, x: null, y: null },
@@ -863,6 +863,19 @@ function autosave() {
   saveTimer = setTimeout(() => {
     try { localStorage.setItem('gira.autosave', JSON.stringify({ ...S.prj, view: { cx: viewer.cx, cy: viewer.cy, s: viewer.s } })); } catch { /* stockage indisponible */ }
   }, 500);
+}
+
+// Onglet Projet : contenu du projet (liens vers les onglets).
+function renderPrjSummary() {
+  const box = $('#prjSummary'); if (!box) return;
+  const P = S.prj, C = P.crosses || [], nMain = 1 + C.filter((c) => c.main).length, nSec = C.filter((c) => !c.main).length;
+  const nJ = 1 + (P.others || []).length, nR = (P.ramps || []).length, hw = P.hwy?.axis?.length >= 2;
+  const go = (tab, txt) => `<a href="#" data-gotab="${tab}">${txt}</a>`;
+  box.innerHTML = 'Contenu : ' + [
+    go('trace', hw || C.length ? `${hw ? nMain : nMain - 1} voie(s) principale(s), ${nSec} voie(s) secondaire(s)` : 'aucun axe tracé'),
+    go('anneau', `${nJ} carrefour${nJ > 1 ? 's' : ''} (actif : ${esc(P.jname || '')})`),
+    ...(nR ? [go('echangeur', `${nR} bretelle${nR > 1 ? 's' : ''}`)] : []),
+  ].join(' · ') + '.';
 }
 
 // ================================================================ Échangeur
@@ -3607,6 +3620,7 @@ function syncInputs() {
   }
   $('#centerAuto').checked = !!S.prj.center.auto;
   $('#prjName').value = S.prj.name;
+  renderPrjSummary();
   $('#themeSel').value = S.prj.opts.theme;
   $('#angSel').value = S.prj.opts.angleUnit;
   for (const el of $$('[data-vis]')) el.checked = S.prj.opts.vis[el.dataset.vis] !== false;
@@ -6123,7 +6137,8 @@ function bindUI() {
   $('#themeSel').addEventListener('change', (e) => { S.prj.opts.theme = e.target.value; viewer.invalidate(); autosave(); });
   $('#angSel').addEventListener('change', (e) => { S.prj.opts.angleUnit = e.target.value; update(); });
   $('#centerAuto').addEventListener('change', (e) => { S.prj.center.auto = e.target.checked; update(); });
-  $('#prjName').addEventListener('change', (e) => { S.prj.name = e.target.value.trim() || 'Giratoire'; commitHistory(); autosave(); });
+  $('#prjSummary').addEventListener('click', (e) => { const a = e.target.closest('[data-gotab]'); if (!a) return; e.preventDefault(); showTab(a.dataset.gotab); });
+  $('#prjName').addEventListener('change', (e) => { S.prj.name = e.target.value.trim() || 'Projet'; commitHistory(); autosave(); });
   $('#btnRingDefaults').addEventListener('click', applyGuideValues);
   $('#btnAddBranch').addEventListener('click', () => setTool('axis'));
   $('#btnPlaceCenter').addEventListener('click', () => setTool('center'));

@@ -573,3 +573,6 @@ ul.ouvr-items li.info { color: var(--muted); }
 .uvck .blist li { display: block; cursor: default; padding: 5px 10px; font-size: 12px; line-height: 1.35; }
 .uvck .blist li.warn { border-left: 3px solid #f59e0b; }
 .uvck .blist li.info { border-left: 3px solid #3b82f6; }
+
+/* bloc affiché seulement dans la fenêtre flottante (le même réglage est déjà en tête de l'onglet) */
+#tab-anneau .pop-only { display: none; }
