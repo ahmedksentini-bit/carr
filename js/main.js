@@ -2713,6 +2713,28 @@ function bendToCenter(q, end, C, d) {
 }
 // Coupe la voie secondaire m de part et d'autre de l'abscisse sP (polyligne des sommets) à ± d : le premier tronçon reste
 // la voie m, le second devient une nouvelle voie ; renvoie les extrémités créées [E1 | null, E2 | null] et le nouvel indice.
+// Ouvrages (cadres, PIPO, buses, ponts à poutres) et franchissements hydrologiques accrochés à un axe qu'on va couper :
+// leur point réel avant la coupe, pour les rattacher ensuite au tronçon le plus proche (clé et abscisse recalculées).
+// Sans ce report, un ouvrage situé au-delà de la coupe gardait son abscisse sur un tronçon raccourci et se retrouvait
+// ramené à son extrémité, au carrefour ; et son bassin versant, ne le reconnaissant plus (autre axe), en recréait un.
+function attachedOn(key, oldPath) {
+  const out = [];
+  if (!oldPath) return out;
+  for (const c of S.prj.cadres || []) if (c.axis === key && c.s !== '' && c.s != null && Number.isFinite(+c.s)) out.push({ kind: 'cad', o: c, P: G.pathPointAt(oldPath, +c.s) });
+  for (const c of S.prj.hydro?.res?.crossings || []) if (c.key === key && Number.isFinite(c.x) && Number.isFinite(c.y)) out.push({ kind: 'hy', o: c, P: { x: c.x, y: c.y } });
+  return out;
+}
+// paths : [[clé d'axe, chemin, nom]] des tronçons après la coupe
+function reattach(list, paths) {
+  for (const q of list) {
+    let best = null;
+    for (const [key, path, name] of paths) { const pr = path ? pathProject(path, q.P) : null; if (pr && (!best || pr.d < best.pr.d)) best = { key, name, pr }; }
+    if (!best) continue;
+    const sNew = Math.round(best.pr.s * 100) / 100;
+    if (q.kind === 'cad') { q.o.axis = best.key; q.o.s = sNew; if (best.name) q.o.axisName = best.name; }
+    else { q.o.key = best.key; q.o.pk = sNew; if (best.name) q.o.traceName = best.name; }
+  }
+}
 function splitCross(m, sP, d, C = null) {
   const X = S.prj.crosses[m], pts = X.axis.map((q) => ({ ...q })), L = polyS(pts), Ltot = L[L.length - 1];
   const s1 = sP - d, s2 = sP + d;
@@ -2725,7 +2747,10 @@ function splitCross(m, sP, d, C = null) {
   const bends = [];
   if (C) for (const [q, end] of [[p1, 1], [p2, 0]]) { const b = bendToCenter(q, end, C, d); if (b) bends.push(b); }
   // bretelles accrochées : point d'accroche avant la coupe, rattaché ensuite au tronçon le plus proche
-  const oldPath = S.D?.crosses?.[m]?.path, hooks = [];
+  // chemin de l'axe AVANT la coupe, recalculé d'après ses sommets (le dessin courant S.D peut manquer ou dater)
+  const dn0 = Math.max(0, +(S.prj.pt?.dev ?? 2.5) || 2.5);
+  let oldPath = null; try { oldPath = roadAlignment(crossParams(S.prj, m), dn0).path; } catch { oldPath = S.D?.crosses?.[m]?.path || null; }
+  const hooks = [], att = attachedOn(`x:${X.id}`, oldPath);
   if (oldPath) for (const r of S.prj.ramps || []) for (const e of [r.from, r.to]) { const x = parseXref(e?.ref); if (x && x.k === m && e.s !== '' && e.s != null) hooks.push({ e, sens: x.s, P: G.pathPointAt(oldPath, +e.s) }); }
   const pis = S.prj.axpl?.[`x:${X.id}`]?.pis || [];
   const piS1 = pis.filter((q) => +q.s < s1), piS2 = pis.filter((q) => +q.s > s2).map((q) => ({ ...q, s: Math.round((+q.s - s2) * 10) / 10 }));
@@ -2750,9 +2775,10 @@ function splitCross(m, sP, d, C = null) {
   const paths = [[m, roadAlignment(crossParams(S.prj, m), dn).path], ...(nk >= 0 ? [[nk, roadAlignment(crossParams(S.prj, nk), dn).path]] : [])];
   for (const h of hooks) {
     let best = null;
-    for (const [k2, path] of paths) { const pr = pathProject(path, h.P); if (pr && (!best || pr.d < best.d)) best = { k2, pr }; }
+    for (const [k2, path] of paths) { const pr = pathProject(path, h.P); if (pr && (!best || pr.d < best.pr.d)) best = { k2, pr }; }
     if (best) { h.e.ref = xref(best.k2, h.sens); h.e.s = Math.round(best.pr.s * 100) / 100; }
   }
+  reattach(att, paths.map(([k2, path]) => [`x:${S.prj.crosses[k2].id}`, path, S.prj.crosses[k2].name]));
   return { E: [p1 ? p1[p1.length - 1] : null, p2 ? p2[0] : null], nk, ids, bends };
 }
 // Voie principale de type route coupée de part et d'autre de l'abscisse sP (polyligne des sommets) à ± d : le tronçon
@@ -2767,13 +2793,14 @@ function splitHwy(sP, d, C) {
   if (p1) p1[0] = { ...p1[0], r: '' }; if (p2) p2[p2.length - 1] = { ...p2[p2.length - 1], r: '' };
   const bends = [];
   for (const [q, end] of [[p1, 1], [p2, 0]]) { const b = bendToCenter(q, end, C, d); if (b) bends.push(b); }
-  const dn = Math.max(0, +(S.prj.pt?.dev ?? 2.5) || 2.5), oldPath = S.D?.hwy?.path;
+  const dn = Math.max(0, +(S.prj.pt?.dev ?? 2.5) || 2.5);
+  // chemin de l'axe AVANT la coupe, recalculé d'après ses sommets (le dessin courant S.D peut manquer ou dater)
+  let oldPath = null; try { oldPath = roadAlignment(hwyParams(S.prj), dn).path; } catch { oldPath = S.D?.hwy?.path || null; }
   const sOld = (P) => (oldPath ? pathProject(oldPath, P)?.s ?? 0 : 0);
   // accroches à reporter : bretelles (hwy1 / hwy2), ouvrages sur l'axe, points du profil en long
-  const hooks = [], cads = [];
+  const hooks = [], att = attachedOn('hwy', oldPath);
   if (oldPath) {
     for (const r of S.prj.ramps || []) for (const e of [r.from, r.to]) { const m = /^hwy([12])$/.exec(e?.ref || ''); if (m && e.s !== '' && e.s != null) hooks.push({ e, sens: +m[1], P: G.pathPointAt(oldPath, +e.s) }); }
-    for (const c of S.prj.cadres || []) if (c.axis === 'hwy' && c.s !== '' && c.s != null) cads.push({ c, P: G.pathPointAt(oldPath, +c.s) });
   }
   const pis = S.prj.axpl?.hwy?.pis || [], sA = p2 ? sOld(p2[0]) : 0, pk0 = +H.pk0 || 0;
   let ids = [null, null], nk = -1;
@@ -2790,9 +2817,9 @@ function splitHwy(sP, d, C) {
     if (pis.length) S.prj.axpl.hwy.pis = pis.filter((q) => +q.s > s2).map((q) => ({ ...q, s: Math.round((+q.s - sA) * 10) / 10 }));
   }
   const paths = [['hwy', roadAlignment(hwyParams(S.prj), dn).path], ...(nk >= 0 ? [[nk, roadAlignment(crossParams(S.prj, nk), dn).path]] : [])];
-  const nearest = (P) => { let best = null; for (const [k2, path] of paths) { const pr = pathProject(path, P); if (pr && (!best || pr.d < best.d)) best = { k2, pr }; } return best; };
+  const nearest = (P) => { let best = null; for (const [k2, path] of paths) { const pr = pathProject(path, P); if (pr && (!best || pr.d < best.pr.d)) best = { k2, pr }; } return best; };
   for (const h of hooks) { const b = nearest(h.P); if (b) { h.e.ref = b.k2 === 'hwy' ? 'hwy' + h.sens : xref(b.k2, h.sens); h.e.s = Math.round(b.pr.s * 100) / 100; } }
-  for (const q of cads) { const b = nearest(q.P); if (b) { q.c.axis = b.k2 === 'hwy' ? 'hwy' : `x:${S.prj.crosses[b.k2].id}`; q.c.s = Math.round(b.pr.s * 100) / 100; } }
+  reattach(att, paths.map(([k2, path]) => k2 === 'hwy' ? ['hwy', path, H.name || 'Voie principale'] : [`x:${S.prj.crosses[k2].id}`, path, S.prj.crosses[k2].name]));
   return { E: [p1 ? p1[p1.length - 1] : null, p2 ? p2[0] : null], nk, ids, bends };
 }
 // Carrefour posé (ou déplacé) sur une voie secondaire : la voie est coupée à R + Lb de part et d'autre du centre et y
@@ -5668,7 +5695,8 @@ function computeHydro() {
   const h = hyCfg(), R = h.res;
   if (!R?.crossings?.length) { S.hyRes = null; return null; }
   const zRoad = (c) => { const A = S.axpl?.get(c.key); return A?.defined ? A.PL.zAt(c.pk) : null; };
-  const linkOf = (c) => (S.prj.cadres || []).find((q) => q.hydro?.id === c.id && q.axis === c.key);
+  // ouvrage d'un bassin : même axe de préférence, sinon par l'identifiant seul (axe coupé depuis par un carrefour)
+  const linkOf = (c) => (S.prj.cadres || []).find((q) => q.hydro?.id === c.id && q.axis === c.key) || (S.prj.cadres || []).find((q) => q.hydro?.id === c.id);
   const sig = JSON.stringify([R.date, R.rev, h.hyp, h.hyd, h.upstream, h.qsel, h.bin, !!S.tn, R.crossings.map((c) => [c.id, zRoad(c), c.cover?.pct]), (S.cadres || []).filter((g) => g.c.hydro).map((g) => [g.c.id, g.c.zam, g.c.zav, g.K?.Lm, g.K?.Lp, g.K?.type, g.K?.spans, g.K?.n, g.K?.B, g.K?.H, g.K?.L, g.K?.ang, g.K?.inlet, g.s])]);
   if (S.hyRes && S.hySig === sig) return S.hyRes;
   const hyp = { ...h.hyp };
@@ -6490,7 +6518,7 @@ function bindHydro() {
       const ax = hyAxes().find((a) => a.key === o.c.key);
       const data = { type: 'poutres', usage: 'eau', axis: o.c.key, axisName: ax?.name || o.c.traceName, s: o.c.pk, spans: over.spans, biais: +(over.biais ?? o.biais), hydro: { id: o.c.id, Q: o.Q, T: o.T } };
       S.prj.cadres = S.prj.cadres || [];
-      const ex = S.prj.cadres.find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key);
+      const ex = S.prj.cadres.find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key) || S.prj.cadres.find((q) => q.hydro?.id === o.c.id);
       if (ex) { const keep = { s: ex.s, name: ex.name }; for (const k of ['B', 'H', 'n', 'Hr', 'L', 'Lg', 'Ld', 'ep', 'et', 'er', 'ei']) delete ex[k]; Object.assign(ex, data, { s: keep.s }); if (keep.name) ex.name = keep.name; } else S.prj.cadres.push({ id: uid(), ...data });
       return;
     }
@@ -6501,7 +6529,7 @@ function bindHydro() {
     const hyd = hyCfg().hyd, inlet = hyd.inlet != null && buse === (hyd.shape === 'circular') ? hyd.inlet : undefined;
     const data = { type: buse ? 'buse' : 'picf', usage: 'eau', axis: o.c.key, axisName: ax?.name || o.c.traceName, s: o.c.pk, n: Math.max(1, Math.round(+(over.n ?? o.ret?.cells ?? 1))), B, H, biais: +(over.biais ?? o.biais), Hr, hydro: { id: o.c.id, Q: o.Q, T: o.T, hw: o.hw, v: o.v }, ...(inlet != null ? { inlet } : {}) };
     S.prj.cadres = S.prj.cadres || [];
-    const ex = S.prj.cadres.find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key);
+    const ex = S.prj.cadres.find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key) || S.prj.cadres.find((q) => q.hydro?.id === o.c.id);
     if (ex) { const keep = { s: ex.s, L: ex.L, Lg: ex.Lg, Ld: ex.Ld, name: ex.name }; Object.assign(ex, data, over.keepPos === false ? {} : { s: keep.s }); if (over.keepL !== false) for (const f of ['L', 'Lg', 'Ld']) if (keep[f] != null) ex[f] = keep[f]; } else S.prj.cadres.push({ id: uid(), ...data });
   };
   $('#hyDetail').addEventListener('click', (e) => {
@@ -6509,7 +6537,7 @@ function bindHydro() {
     if (go) { S.osel = `c:${go.dataset.hyohgo}`; showTab('ouvrages'); refreshPanels(); return; }
     if (!ap && !rs) return;
     const o = S.hyRes?.byId?.[(ap || rs).dataset[ap ? 'hyohapply' : 'hyohreset']]; if (!o) return;
-    if (rs) { const ex = (S.prj.cadres || []).find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key); if (ex) S.prj.cadres = S.prj.cadres.filter((q) => q !== ex); S.hySig = null; computeHydro(); const o2 = S.hyRes?.byId?.[o.c.id]; if (o2?.ret) hyPlace(o2, { keepL: false }); update(); toast(`${o.c.id} : ouvrage remis au dimensionnement proposé.`); return; }
+    if (rs) { const ex = (S.prj.cadres || []).find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key) || (S.prj.cadres || []).find((q) => q.hydro?.id === o.c.id); if (ex) S.prj.cadres = S.prj.cadres.filter((q) => q !== ex); S.hySig = null; computeHydro(); const o2 = S.hyRes?.byId?.[o.c.id]; if (o2?.ret) hyPlace(o2, { keepL: false }); update(); toast(`${o.c.id} : ouvrage remis au dimensionnement proposé.`); return; }
     const over = {}; for (const el of $('#hyDetail').querySelectorAll('[data-hyoh]')) { const k = el.dataset.hyoh, v = k === 'type' || k === 'spans' ? el.value.trim() : parseNum(el.value); if (k === 'type' || k === 'spans' || Number.isFinite(v)) over[k] = v; }
     if (over.type === 'poutres') { if (!parseSpansTxt(over.spans).length || !parseSpansTxt(over.spans).every((x) => x >= 4)) { toast('Travées du pont : longueurs d\'au moins 4 m séparées par « ; ».', 'warn'); return; } }
     else if (!(over.B > 0.2) || (over.type !== 'buse' && !(over.H > 0.2))) { toast('Dimensions de l\'ouvrage à saisir (m).', 'warn'); return; }
