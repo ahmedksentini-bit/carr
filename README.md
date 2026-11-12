@@ -197,6 +197,12 @@ ou sur un fond topographique DXF.
   auto ou imposée, lecture au survol (s, TN, projet, écart, pente), bandes de déblai (rouge) / remblai (jaune),
   inspecteur du point sélectionné (s, z, R, pentes, T, flèche, calage sur le TN), raccourcis P / I / R / Suppr / F /
   Échap / Ctrl+Z. Tests : `node tools/test-pl.mjs`.
+  **Points de tangence** : chaque raccordement montre ses deux points de tangence (TE, entrée ; TS, sortie) en
+  poignées ◆. Glisser TE déplace l'extrémité de la droite amont, qui pivote autour du sommet précédent, sans toucher à
+  la droite aval : le sommet glisse sur la droite aval et le rayon devient R = 2 T / |Δi| ; TS de même côté aval. Près
+  de la droite d'origine (accrochage), la pente est gardée et seul le rayon change. Un déplacement qui ferait chevaucher
+  un raccordement voisin est refusé. Dans le panneau de droite (fenêtre en grand), le sommet sélectionné liste TE et TS
+  avec PK, Z projet (modifiables) et Z TN : saisir le PK garde la pente, saisir Z fait pivoter la droite.
   La ligne rouge remplace la pente constante de la branche dans le modèle altimétrique (dévers, points d'implantation).
   Contrôles : chevauchement des raccordements, pente maximale et rayons minimaux (ARP catégorie R80 par défaut, valeurs
   urbaines usuelles — à confirmer selon la catégorie ; l'autoroute et les voies secondaires suivent leur catégorie de

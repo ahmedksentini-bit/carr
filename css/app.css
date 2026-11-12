@@ -486,6 +486,9 @@ dialog.ptt-dlg .dlg-head { flex-wrap: wrap; }
 .ple-svg .ple-node.fixed circle { fill: #38bdf8; }
 .ple-svg .ple-node.sel circle { fill: #fff; stroke: #ef4444; stroke-width: 3; }
 .ple-svg .ple-node text { fill: #e5e7eb; font: 10.5px var(--mono); paint-order: stroke; stroke: var(--panel2); stroke-width: 3; }
+.ple-svg .ple-tgp rect { fill: #fbbf24; stroke: #1f2937; stroke-width: 1.2; cursor: move; }
+.ple-svg .ple-tgp.cur rect { fill: #fde68a; } .ple-svg .ple-tgp.sel rect { fill: #fff; stroke: #f59e0b; stroke-width: 2.5; }
+.ple-svg .ple-tgp text { fill: #fde68a; font: 10px var(--mono); paint-order: stroke; stroke: var(--panel2); stroke-width: 3; }
 .ple-svg .ple-empty { fill: #fbbf24; font-size: 12.5px; }
 .ple-svg .ple-cur { stroke: #94a3b8; stroke-dasharray: 2 3; }
 .ple-svg .ple-mtn { fill: #c8a165; } .ple-svg .ple-mred { fill: #ef4444; }
@@ -499,6 +502,12 @@ dialog.ptt-dlg .dlg-head { flex-wrap: wrap; }
 .ple-insp .ple-pt input { font: 12px var(--mono); padding: 2px 4px; width: 100%; }
 .ple-insp dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 8px 0; }
 .ple-insp dt { opacity: .7; } .ple-insp dd { margin: 0; font-family: var(--mono); text-align: right; }
+.ple-insp .ple-tgbox { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+.ple-insp .ple-tgbox table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+.ple-insp .ple-tgbox th, .ple-insp .ple-tgbox td { padding: 2px 3px; text-align: left; font-weight: normal; }
+.ple-insp .ple-tgbox thead th { opacity: .7; font-size: 11px; } .ple-insp .ple-tgbox tbody th { font: 600 11.5px var(--mono); color: #fbbf24; }
+.ple-insp .ple-tgbox input { font: 12px var(--mono); padding: 2px 4px; width: 100%; min-width: 0; }
+.ple-insp .ple-tgbox tr.on th { color: #fff; }
 .ple-insp .row { display: flex; gap: 6px; } .ple-insp .row button { flex: 1; padding: 3px 6px; font-size: 12px; }
 #tab-pl .ple { grid-template-columns: 34px minmax(0, 1fr); height: 420px; }
 #tab-pl .ple-insp, #tab-pl .ple-key { display: none; }
