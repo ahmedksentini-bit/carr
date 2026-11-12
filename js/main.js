@@ -16,7 +16,7 @@ import { tinZ } from './tin.js';
 import { planElements, profileElements, tabulation, tablesCsv, pkOrigin } from './tabexport.js';
 import { combinedSheets, combinedHtml } from './combine.js';
 import { ohSheet } from './ohcoupe.js';
-import { upright, toGon } from './common.js';
+import { upright, toGon, spanSupports } from './common.js';
 import { ptParams, crossSection, crossSections, ptChartSVG, ptBigSVG, ptDXF, crossSectionFrom, mainPlatform } from './pt.js';
 import { plParams, plBuild, plStations, plTerrainLine, plDXF, plChecks, axisLength, axisPointAt, PL_LIMITS } from './pl.js';
 import { createPlEditor } from './pleditor.js';
@@ -4889,11 +4889,34 @@ function bindPL() {
     const ohs = (S.cadres || []).filter((g) => g.ax?.key === key && !g.err && g.c).map((g) => {
       const K = g.K, s = +g.c.s || 0;
       if (!K) return { name: g.name, s, label: '' };
-      if (K.type === 'poutres') return { name: g.name, s, kind: 'poutres', label: `${K.spans.map((v) => fmt(v, 1)).join(' + ')} m`, ang: K.ang, L: K.L };
+      if (K.type === 'poutres') { // pont à poutres porté par l'axe : lignes d'appui le long de l'axe, tablier d'épaisseur h
+        const xs = spanSupports(K.spans), sup = xs.map((x, i) => ({ s: s + x, kind: i === 0 || i === xs.length - 1 ? 'culee' : 'pile' }));
+        return { name: g.name, s, kind: 'deck', label: `pont à poutres ${K.typ === 'BP' ? 'VIPP' : K.typ} ${K.spans.map((v) => fmt(v, 1)).join(' + ')} m`, ang: K.ang, L: K.L, sup, sa: sup[0].s - K.about, sb: sup[sup.length - 1].s + K.about, h: K.h };
+      }
       const zR = PL ? PL.zAt(s) : null, zB = g.inv ? g.inv.zAx : zR != null ? zR - K.Hr - K.et - K.H : null;
       const dims = K.type === 'buse' ? `${K.n > 1 ? `${K.n} × ` : ''}buse Ø ${fmt(K.B, 2)}` : `${K.n > 1 ? `${K.n} × ` : ''}${fmt(K.B, 2)} × ${fmt(K.H, 2)}`;
       return { name: g.name, s, kind: K.type, label: dims, n: K.n, B: K.B, H: K.H, ep: K.ep, et: K.et, ei: K.ei, er: K.er, sinP: K.sinP, ang: K.ang, L: K.L, zB, zam: g.inv?.zam ?? null, zav: g.inv?.zav ?? null, J: g.inv?.J ?? null };
     });
+    // passages supérieurs et ponts de l'onglet Ouvrages : sur la voie portée, le tablier (lignes d'appui projetées sur
+    // l'axe) ; sur la voie franchie, le tablier au-dessus de la ligne rouge (cote de la voie portée − épaisseur) et ses
+    // appuis, avec le tirant d'air
+    const carried = (o) => { const m = /^x:([^:@]+):/.exec(o.key || ''); if (m) return `x:${m[1]}`; const t = /^t:(.+)$/.exec(o.key || ''); return t ? `r:${t[1]}` : null; };
+    const projS = (pts) => pts.map((p) => ax.project(p)).filter((pr) => pr && Math.abs(pr.off) < 80).map((pr) => pr.s);
+    for (const o of S.ouvr?.list || []) {
+      const span = `${(o.spans || []).map((v) => fmt(v, 1)).join(' + ')} m`;
+      if (carried(o) === key) {
+        const ss = (o.supPts || []).map((q) => ({ s: ax.project(q.p)?.s, kind: q.kind === 'pile' ? 'pile' : 'culee' })).filter((q) => Number.isFinite(q.s)).sort((a, b) => a.s - b.s);
+        if (ss.length < 2) continue;
+        const ab = (o.about || 0.5) / Math.max(0.3, Math.sin(((o.psi ?? 100) * Math.PI) / 200));
+        ohs.push({ name: o.name, s: (ss[0].s + ss[ss.length - 1].s) / 2, kind: 'deck', label: `PS ${span}`, ang: o.psi, sup: ss, sa: ss[0].s - ab, sb: ss[ss.length - 1].s + ab, h: o.h || 1 });
+      } else if (o.lowKey === key && o.P) {
+        const pr = ax.project(o.P); if (!pr || Math.abs(pr.off) > 80) continue;
+        const ck = carried(o), A2 = ck ? S.axpl?.get(ck) : null, ax2 = A2 ? (S.prof?.axes || listAxes(S.prj, S.D)).find((a) => a.key === ck) : null;
+        const s2 = ax2?.project(o.P)?.s, zTop = A2?.defined && Number.isFinite(s2) ? A2.PL.zAt(s2) : null;
+        const sp = projS(o.poly || []); if (sp.length < 2) continue;
+        ohs.push({ name: o.name, s: pr.s, kind: 'over', label: `PS ${span}`, sa: Math.min(...sp), sb: Math.max(...sp), zTop, h: o.h || 1, sup: (o.supPts || []).filter((q) => q.kind === 'pile').map((q) => ({ s: ax.project(q.p)?.s, off: ax.project(q.p)?.off })).filter((q) => Number.isFinite(q.s) && Math.abs(q.off) < 30) });
+      }
+    }
     const scale = +$('#plCbScale').value || 1000, zs = +$('#plCbZ').value || 0, format = $('#plCbFmt').value || 'A3';
     // un axe long (20 km et plus) demande quelques secondes : la fenêtre s'ouvre tout de suite (dans le geste de
     // l'utilisateur, sinon le navigateur la bloque) avec un message d'attente, le calcul suit après un rafraîchissement
