@@ -15,6 +15,7 @@ import { dxfTerrainLayers, pointsFromDxf, parsePointsFile, fetchSRTM, buildTerra
 import { tinZ } from './tin.js';
 import { planElements, profileElements, tabulation, tablesCsv, pkOrigin } from './tabexport.js';
 import { combinedSheets, combinedHtml } from './combine.js';
+import { ohSheet } from './ohcoupe.js';
 import { upright, toGon } from './common.js';
 import { ptParams, crossSection, crossSections, ptChartSVG, ptDXF, crossSectionFrom, mainPlatform } from './pt.js';
 import { plParams, plBuild, plStations, plTerrainLine, plDXF, plChecks, axisLength, axisPointAt, PL_LIMITS } from './pl.js';
@@ -1925,6 +1926,7 @@ function drawOverlay(ctx, v, T) {
   try { drawEmprise(ctx, v); } catch (e) { console.error(e); }
   try { UV?.overlay(ctx, v); } catch (e) { console.error(e); }
   try { PE?.overlay(ctx, v); } catch (e) { console.error(e); }
+  try { drawOhMove(ctx, v); } catch (e) { console.error(e); }
   try { drawCheckFlash(ctx, v); } catch (e) { console.error(e); }
   if (S.D?.O) {
     const [x, y] = v.w2s(S.D.O.x, S.D.O.y);
@@ -3240,8 +3242,10 @@ function bindCanvas() {
     if (e.button === 2) {
       if (S.uvrMove) { UV?.cancelMove(); return; }
       if (S.profMode) { PE?.cancel(); return; }
+      if (S.ohMove) { ohMoveCancel(); return; }
       if (S.tool === 'select') { const h = UV?.hit(px, py); if (h) { UV.menu(h, e.clientX, e.clientY); return; } }
       if (S.tool === 'select') { const q = PE?.hit(px, py); if (q) { PE.menu(q, e.clientX, e.clientY); return; } }
+      if (S.tool === 'select') { const el = hitElement(px, py); if (el?.type === 'ouvr') { ouvrMenu(el.i, e.clientX, e.clientY, px, py); return; } }
       if (S.tool === 'axis') finishAxis();
       else if (S.tool === 'bvcut') bvFinishCut();
       else if (S.tool === 'measure') { S.meas = []; viewer.invalidate(); }
@@ -3251,6 +3255,7 @@ function bindCanvas() {
     if (e.button !== 0) return;
     if (S.uvrMove) { UV?.drop(); return; } // pose de l'aménagement déplacé
     if (S.profMode) { PE?.drop(); return; } // pose du profil déplacé ou ajouté
+    if (S.ohMove) { ohMoveDrop(); return; } // pose de l'ouvrage déplacé
     const w = pickPoint(px, py);
     if (S.tool === 'axis') { S.draft.push(w); setPrompt(); }
     else if (S.tool === 'center') placeCenterAt(w);
@@ -3343,6 +3348,7 @@ function onMove(px, py) {
   else if (d?.kind === 'center') { S.prj.center = { auto: false, x: w.x, y: w.y }; d.moved = true; update({ commit: false, panels: false }); }
   else if (!d && S.uvrMove) { if (UV?.moveTo(w)) viewer.invalidate(); $('#cv').style.cursor = 'move'; }
   else if (!d && S.profMode) { if (PE?.moveTo(w)) viewer.invalidate(); $('#cv').style.cursor = 'move'; }
+  else if (!d && S.ohMove) { if (ohMoveTo(w)) viewer.invalidate(); $('#cv').style.cursor = 'move'; }
   else if (!d && S.tool === 'select') {
     if (UV?.hover(px, py) | PE?.hover(px, py)) viewer.invalidate();
     const h = hitAxis(px, py);
@@ -3404,7 +3410,7 @@ function bindKeys() {
     if (typing) return;
     if ($('#dlgHelp').open) return;
     switch (e.key) {
-      case 'Escape': if (UV?.cancelMove()) return; if (PE?.cancel()) return; if (S.ttr) { S.ttr = null; toast(t('Raccordement annulé.')); return; } if (S.pop) { closePop(); return; } cancelTool(); return;
+      case 'Escape': if (UV?.cancelMove()) return; if (PE?.cancel()) return; if (ohMoveCancel()) return; if (S.ttr) { S.ttr = null; toast(t('Raccordement annulé.')); return; } if (S.pop) { closePop(); return; } cancelTool(); return;
       case 'Enter': if (S.tool === 'axis') finishAxis(); else if (S.tool === 'bvcut') { e.preventDefault(); bvFinishCut(); } return; // sans preventDefault, l'appui atteindrait le premier bouton de la fiche rouverte
       case 'Backspace': if (undoPoint()) e.preventDefault(); return;
       case 'Delete': if (S.pop) { popDelete(); return; } if (S.sel >= 0) deleteBranch(S.sel); return;
@@ -4745,6 +4751,107 @@ function plPopOpen() {
   refreshPL();
 }
 function plPopBack() { const home = $('#plGraphHome'); if (home && $('#plGraph').parentNode !== home.parentNode) home.after($('#plGraph')); }
+// ------------------------------------------------------------------ coupe longitudinale d'un ouvrage (ohcoupe.js)
+// Feuille plan + coupe à la manière de BVTrace ; boutons de face : fil d'eau (±1 / ±10 cm) et longueur (déplacement de
+// la face), ◀ OH / OH ▶ pour passer d'un ouvrage à l'autre par PK croissant, impression à l'échelle.
+function ohCadres() { return (S.cadres || []).filter((g) => !g.err && g.K && g.K.type !== 'poutres' && g.c && g.ax).sort((a, b) => (a.sX ?? a.s) - (b.sX ?? b.s)); }
+function ohCur() { return ohCadres().find((g) => g.c.id === S.ohId) || null; }
+function ohData(g) {
+  const K = g.K, inv = g.inv, A = S.axpl?.get(g.ax.key), zR = A?.defined ? A.PL.zAt(g.s) : null;
+  let zL, zRt, upLeft = true;
+  if (inv) { upLeft = inv.down === 1; zL = upLeft ? inv.zam : inv.zav; zRt = upLeft ? inv.zav : inv.zam; }
+  else if (zR != null) zL = zRt = zR - K.Hr - K.et - K.H;
+  else return null;
+  let cs = null;
+  if (A?.defined && !g.ax.key.startsWith('b:')) try { cs = axisSections(S.prj, S.D, g.ax, A, [{ s: g.s, name: '' }], S.tn?.tin || null).list[0] || null; } catch (e) { console.error(e); }
+  const tin = S.tn?.tin, tnAt = (x) => { if (!tin) return null; const q = G.add(g.p, G.mul(g.d, x)); return tinZ(tin, q.x, q.y); };
+  const hy = (S.hyRes?.list || []).find((o) => o.lg?.c?.id === g.c.id);
+  return { name: g.name, K, g, zLeft: zL, zRight: zRt, upLeft, zR, cs, tnAt, prims: S.D?.prims || [], pk: pkOrigin(S.prj, g.ax.key) + g.s, axisName: g.ax.name, phe: hy?.rr?.upstreamWaterElev ?? null, project: S.prj.name, src: inv?.src || 'radier tiré de la chaussée' };
+}
+function ohRender() {
+  const dlg = $('#dlgOH'); if (!dlg?.open) return;
+  const g = ohCur();
+  if (!g) { $('#ohMain').innerHTML = '<p class="note" style="color:#fff">Ouvrage introuvable.</p>'; return; }
+  const d = ohData(g);
+  if (!d) { $('#ohMain').innerHTML = `<p class="note" style="color:#fff">${esc(g.name)} : fils d'eau inconnus — définissez le profil en long de ${esc(g.ax.name)} ou un MNT (onglet Terrain), ou saisissez les cotes fil d'eau dans la fiche de l'ouvrage.</p>`; return; }
+  const R = ohSheet({ ...d, format: $('#ohPage').value, scale: +$('#ohScale').value || 0 });
+  S.ohLast = { R, name: g.name };
+  $('#ohMain').innerHTML = R.svg;
+  const L = ohCadres(), i = L.findIndex((q) => q.c.id === g.c.id);
+  $('#ohTtl').textContent = `Coupe longitudinale — ${g.name} (${i + 1} / ${L.length}) · 1/${R.scale}`;
+  $('#ohNote').textContent = `Fils d'eau : ${g.c.zam != null && g.c.zam !== '' ? 'saisis' : d.src}.${d.cs ? '' : ' Ligne projet de la route absente (profil en long de l\'axe à définir).'}${S.tn ? '' : ' Aucun MNT : terrain naturel non tracé.'}`;
+}
+function ohOpen(id) { S.ohId = id; const dlg = $('#dlgOH'); if (!dlg.open) dlg.showModal(); ohRender(); }
+function ohEdit(fn) { const g = ohCur(); if (!g) return; fn(g, g.c, g.K); update(); ohRender(); }
+function ohFe(face, dz) {
+  ohEdit((g, c, K) => {
+    const d = ohData(g); if (!d) return;
+    if (!(c.zam !== '' && c.zam != null) || !(c.zav !== '' && c.zav != null)) { c.zam = +(d.upLeft ? d.zLeft : d.zRight).toFixed(3); c.zav = +(d.upLeft ? d.zRight : d.zLeft).toFixed(3); }
+    const up = (face === 'L') === d.upLeft; // la face désignée est-elle l'amont ?
+    if (up) c.zam = +(+c.zam + dz).toFixed(3); else c.zav = +(+c.zav + dz).toFixed(3);
+  });
+}
+function ohLen(face, dl) {
+  ohEdit((g, c, K) => {
+    if (c.Lg == null && c.Ld == null) { c.Lg = K.Lg; c.Ld = K.Ld; }
+    delete c.L;
+    const f = (face === 'L') === !!K.leftP ? 'Ld' : 'Lg'; // face gauche du dessin = côté −d de l'ouvrage
+    c[f] = Math.max(K.W / 2, Math.round((+c[f] + dl) * 100) / 100);
+  });
+}
+function ohStep(k) { const L = ohCadres(); if (L.length < 2) return; const i = Math.max(0, L.findIndex((q) => q.c.id === S.ohId)); S.ohId = L[(i + k + L.length) % L.length].c.id; ohRender(); }
+function bindOH() {
+  $('#ohClose').addEventListener('click', () => $('#dlgOH').close());
+  $('#ohPrev').addEventListener('click', () => ohStep(-1));
+  $('#ohNext').addEventListener('click', () => ohStep(1));
+  $('#ohScale').addEventListener('change', ohRender);
+  $('#ohPage').addEventListener('change', ohRender);
+  $('#ohBody').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.fe) { const [f, v] = b.dataset.fe.split(','); ohFe(f, +v); }
+    else if (b.dataset.len) { const [f, v] = b.dataset.len.split(','); ohLen(f, +v); }
+    else if (b.id === 'ohAuto') ohEdit((g, c) => { delete c.zam; delete c.zav; });
+    else if (b.id === 'ohFiche') { const id = S.ohId; $('#dlgOH').close(); S.osel = `c:${id}`; showTab('ouvrages'); update({ commit: false }); }
+  });
+  $('#ohPrint').addEventListener('click', () => {
+    const L = S.ohLast; if (!L) return;
+    const html = combinedHtml([L.R.svg], { paper: L.R.paper }, `Coupe longitudinale ${L.name} — ${S.prj.name}`), url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+    const w = window.open(url, '_blank'); if (!w) download(fname('csv').replace(/\.csv$/, `_coupe_${L.name}.html`), html, 'text/html;charset=utf-8');
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+  });
+}
+// Menu du clic droit sur un ouvrage du plan : fiche, coupe longitudinale (cadres et buses), déplacer, supprimer.
+function ouvrMenu(key, cx, cy, px, py) {
+  let m = document.getElementById('ouvrMenu');
+  if (!m) { m = document.createElement('div'); m.id = 'ouvrMenu'; m.className = 'ctxmenu'; document.body.appendChild(m); }
+  const cid = String(key).startsWith('c:') ? String(key).slice(2) : null, g = cid ? (S.cadres || []).find((q) => q.c?.id === cid) : null, culvert = g?.K && g.K.type !== 'poutres';
+  m.innerHTML = `<div class="ttl">Ouvrage ${esc(ouvrName(key))}</div><button data-m="fiche">Propriétés (fiche)…</button>${culvert ? '<button data-m="coupe">Coupe longitudinale…</button>' : ''}${g ? '<button data-m="move">Déplacer</button><button data-m="del" class="danger">Supprimer</button>' : ''}`;
+  m.hidden = false; m.style.left = `${Math.min(cx, window.innerWidth - 220)}px`; m.style.top = `${Math.min(cy, window.innerHeight - 180)}px`;
+  const close = () => { m.hidden = true; document.removeEventListener('pointerdown', away, true); };
+  const away = (e) => { if (!m.contains(e.target)) close(); };
+  setTimeout(() => document.addEventListener('pointerdown', away, true));
+  m.onclick = (e) => {
+    const b = e.target.closest('button[data-m]'); if (!b) return; close();
+    if (b.dataset.m === 'fiche') openPop({ type: 'ouvr', i: key }, px, py);
+    else if (b.dataset.m === 'coupe') ohOpen(cid);
+    else if (b.dataset.m === 'move') { S.ohMove = { id: cid, s: g.s }; toast(`Déplacez ${g.name} le long de ${g.ax.name}, cliquez pour le poser (Échap : annuler).`); viewer.invalidate(); }
+    else if (b.dataset.m === 'del') { if (!confirm(t(`Supprimer l'ouvrage ${g.name} ?`))) return; S.prj.cadres = S.prj.cadres.filter((q) => q.id !== cid); S.osel = null; update(); }
+  };
+}
+function ohMoveTo(w) { const M = S.ohMove; if (!M) return false; const g = (S.cadres || []).find((q) => q.c?.id === M.id), pr = g?.ax?.project(w); if (!pr) return false; M.s = Math.round(Math.max(0, Math.min(g.ax.len, pr.s)) * 100) / 100; return true; }
+function ohMoveDrop() { const M = S.ohMove; if (!M) return false; S.ohMove = null; const c = (S.prj.cadres || []).find((q) => q.id === M.id); if (c) { c.s = M.s; update(); toast(`Ouvrage déplacé à l'abscisse ${fmt(M.s, 2)} m.`); } return true; }
+function ohMoveCancel() { if (!S.ohMove) return false; S.ohMove = null; viewer.invalidate(); return true; }
+function drawOhMove(ctx, v) {
+  const M = S.ohMove; if (!M) return;
+  const g = (S.cadres || []).find((q) => q.c?.id === M.id); if (!g?.poly?.length) return;
+  const dv = G.sub(g.ax.at(M.s).p, g.p);
+  ctx.save(); ctx.setLineDash([]); ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2; ctx.fillStyle = 'rgba(56,189,248,.18)';
+  ctx.beginPath(); g.poly.forEach((q, i) => { const [x, y] = v.w2s(q.x + dv.x, q.y + dv.y); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); ctx.closePath(); ctx.fill(); ctx.stroke();
+  const [x, y] = v.w2s(g.p.x + dv.x, g.p.y + dv.y), txt = `${g.name} · s = ${fmt(M.s, 2)} m — cliquez pour poser`;
+  ctx.font = '600 12px system-ui, sans-serif'; const tw = ctx.measureText(txt).width;
+  ctx.fillStyle = 'rgba(15,23,42,.85)'; ctx.fillRect(x + 12, y - 26, tw + 10, 18); ctx.fillStyle = '#e0f2fe'; ctx.fillText(txt, x + 17, y - 13);
+  ctx.restore();
+}
 function bindPL() {
   $('#plBranch').addEventListener('change', (e) => { S.plSel = e.target.value; S.plPi = -1; refreshPL(); });
   $('#plVe').addEventListener('change', refreshPL);
@@ -4855,6 +4962,16 @@ function ptList() {
   const bd = ptBranch();
   return bd ? crossSections(S.prj, bd, S.tn?.tin) : [];
 }
+// Profil en travers en grand (fenêtre) : le bloc station + dessin y est déplacé ; dessin à la taille de la fenêtre.
+function ptChartOpts() {
+  const ve = +($('#ptVe').value || 0), dlg = $('#dlgPT');
+  if (!dlg?.open) return { ve };
+  const b = $('#ptPopBody'), w = Math.max(600, b.clientWidth - 30), h = Math.max(300, b.clientHeight - 70);
+  return { ve, w, h };
+}
+function ptPopTitle(cs) { const t = $('#ptPopTtl'); if (t) t.textContent = cs ? `Profil en travers — ${cs.name ? `${cs.name} · ` : ''}s = ${fmt(cs.s, 2)} m${cs.zAxe != null ? ` · z axe ${fmt(cs.zAxe, 3)}` : ''}` : 'Profil en travers'; }
+function ptPopOpen() { const dlg = $('#dlgPT'); if (!dlg || dlg.open) return; $('#ptPopBody').appendChild($('#ptGraph')); dlg.showModal(); refreshPT(); }
+function ptPopBack() { const home = $('#ptGraphHome'); if (home && $('#ptGraph').parentNode !== home.parentNode) home.after($('#ptGraph')); }
 function refreshPT() {
   $('#pttBox').hidden = true;
   const sel = $('#ptBranch'), cands = (S.D?.branches || []).filter((bd) => bd.role !== 'principale');
@@ -4888,7 +5005,8 @@ function refreshPT() {
   if (st.dataset.sig !== ssig) { st.dataset.sig = ssig; st.innerHTML = list.map((c, i) => `<option value="${i}">s = ${fmt(c.s, 1)} m</option>`).join(''); }
   st.value = String(S.ptSt);
   const cs = list[S.ptSt];
-  $('#ptChart').innerHTML = cs ? ptChartSVG(cs, { ve: +($('#ptVe').value || 0) }) : '';
+  $('#ptChart').innerHTML = cs ? ptChartSVG(cs, ptChartOpts()) : '';
+  ptPopTitle(cs);
   const last = list[list.length - 1];
   $('#ptTable').innerHTML = '<thead><tr><th>s (m)</th><th>z axe</th><th>z TN</th><th>déblai m²</th><th>remblai m²</th><th>V déblai m³</th><th>V remblai m³</th></tr></thead><tbody>' +
     list.map((c, i) => `<tr class="${i === S.ptSt ? 'on' : ''}" data-pts="${i}"><td class="mono">${fmt(c.s, 1)}</td><td class="mono">${fmt(c.zAxe)}</td><td class="mono">${c.zTN == null ? '—' : fmt(c.zTN)}</td>` +
@@ -4912,7 +5030,8 @@ function refreshPTAxis(c) {
   if (st.dataset.sig !== ssig) { st.dataset.sig = ssig; st.innerHTML = list.map((q, i) => `<option value="${i}">${esc(q.name)} — s = ${fmt(q.s, 1)} m</option>`).join(''); }
   st.value = String(S.ptSt);
   const cs = list[S.ptSt];
-  $('#ptChart').innerHTML = cs ? ptChartSVG(cs, { ve: +($('#ptVe').value || 0) }) : '';
+  $('#ptChart').innerHTML = cs ? ptChartSVG(cs, ptChartOpts()) : '';
+  ptPopTitle(cs);
   $('#ptTable').innerHTML = '<thead><tr><th>Profil</th><th>s (m)</th><th>z axe</th><th>z TN</th><th>dévers</th><th>déblai m²</th><th>remblai m²</th><th>V déblai m³</th><th>V remblai m³</th></tr></thead><tbody>' +
     list.map((q, i) => `<tr class="${i === S.ptSt ? 'on' : ''}" data-pts="${i}"><td>${esc(q.name)}</td><td class="mono">${fmt(q.s, 1)}</td><td class="mono">${fmt(q.zAxe)}</td><td class="mono">${q.zTN == null ? '—' : fmt(q.zTN)}</td><td class="mono" title="pentes transversales gauche / droite (positives : montent vers l'extérieur)">${devTxt(q.dev)}</td>` +
       `<td class="mono cut">${fmt(q.cut, 2)}</td><td class="mono fill">${fmt(q.fill, 2)}</td><td class="mono cut">${fmt(q.vCut, 0)}</td><td class="mono fill">${fmt(q.vFill, 0)}</td></tr>`).join('') + '</tbody>';
@@ -5010,6 +5129,12 @@ function bindPT() {
   $('#ptVe').addEventListener('change', refreshPT);
   $('#ptStation').addEventListener('change', (e) => { S.ptSt = +e.target.value; refreshPT(); });
   $('#btnPtPrev').addEventListener('click', () => { S.ptSt = Math.max(0, S.ptSt - 1); refreshPT(); });
+  $('#btnPtPop').addEventListener('click', ptPopOpen);
+  $('#ptPopClose').addEventListener('click', () => $('#dlgPT').close());
+  $('#dlgPT').addEventListener('close', () => { ptPopBack(); refreshPT(); });
+  $('#dlgPT').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+  $('#dlgPT').addEventListener('keydown', (e) => { if (e.target.closest('input, select')) return; if (e.key === 'ArrowLeft') { e.preventDefault(); $('#btnPtPrev').click(); } else if (e.key === 'ArrowRight') { e.preventDefault(); $('#btnPtNext').click(); } });
+  window.addEventListener('resize', () => { if ($('#dlgPT')?.open) refreshPT(); });
   $('#btnPtNext').addEventListener('click', () => { S.ptSt += 1; refreshPT(); });
   $('#ptTable').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-pts]'); if (tr) { S.ptSt = +tr.dataset.pts; refreshPT(); } });
   $('#btnPtDxf').addEventListener('click', () => {
@@ -6287,6 +6412,7 @@ function bindUI() {
 
   bindTerrain();
   bindPL();
+  bindOH();
   bindPT();
   bindHydro(); bindBvSheet(); bindDrawBar();
   UV = initUvr({ S, $, toast, update, listAxes, viewer, setTool, esc, fmt, parseNum, download, fname, G }); UV.bind();

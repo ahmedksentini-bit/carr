@@ -220,6 +220,18 @@ ou sur un fond topographique DXF.
   **Aquaplaning** : sur le bandeau des dévers de l'éditeur et sur les rangées « Dévers » du cartouche du tracé combiné,
   un rectangle rouge transparent marque les tronçons où la pente combinée √(i² + d²) est inférieure à 0,5 % d'un côté
   au moins (dévers interpolé, déclivité de la ligne rouge) : rotation du dévers sur une ligne rouge trop plate.
+- **Coupe longitudinale d'un ouvrage** (`js/ohcoupe.js`, comme la planche de BVTrace) : clic droit sur un ouvrage du
+  plan → Propriétés (fiche), **Coupe longitudinale…**, Déplacer (l'ouvrage suit le curseur le long de son axe porteur,
+  posé au clic), Supprimer. La coupe s'ouvre en grand : feuille paysage A4 / A3 / A2, vue en plan en haut (ouvrage à
+  l'horizontale, route du bas vers le haut, amont et aval, sens d'écoulement), coupe le long de l'ouvrage en bas à la
+  même échelle (H = V, ajustée ou 1/100 à 1/500) : terrain naturel du MNT le long de l'ouvrage, ligne projet de la
+  route (profil en travers au droit de l'ouvrage, biais pris en compte) et remblai, corps de l'ouvrage (radier,
+  ouverture, traverse, murs de tête), fils d'eau cotés aux deux faces et au droit de l'axe, pente, cote de chaussée,
+  remblai sur traverse, PHE amont si l'hydraulique est calculée, longueurs de part et d'autre de l'axe. Boutons de
+  face : fil d'eau ±1 / ±10 cm (les cotes deviennent saisies ; « Fils d'eau automatiques » y revient), longueur de la
+  face (±10 cm, ±1 m, ±5 m) ; ◀ OH / OH ▶ par PK ; Imprimer (page à l'échelle exacte).
+- **Profil en travers en grand** : onglet Profils travers, « ⤢ Ouvrir le profil en travers en grand » ; dessin à la
+  taille de la fenêtre, ◀ ▶ ou flèches du clavier pour passer d'un profil à l'autre.
   La ligne rouge remplace la pente constante de la branche dans le modèle altimétrique (dévers, points d'implantation).
   Contrôles : chevauchement des raccordements, pente maximale et rayons minimaux (ARP catégorie R80 par défaut, valeurs
   urbaines usuelles — à confirmer selon la catégorie ; l'autoroute et les voies secondaires suivent leur catégorie de
