@@ -485,6 +485,13 @@ ou sur un fond topographique DXF.
     E.4.2, cartographie C1.6, aménagements, checklists CK-F03 à F06, CK-A08, A12, A13), CSV ; sur le plan, calque
     `GIRA_UVR` : bandes colorées des catégories, déclencheurs, aménagements et panneaux (B14, entrée / sortie
     d'agglomération, zone 30, passage piéton, enfants) ;
+  - sur le plan (outil Sélection), un aménagement survolé passe en surbrillance ; clic droit : **Propriétés**,
+    **Déplacer** (l'aménagement suit le curseur le long de son axe, avec son PK, et se pose au clic ; Échap ou clic
+    droit pour annuler), **Supprimer** ; les étiquettes d'aménagements voisins sont décalées en rangées pour rester
+    lisibles ;
+  - recherche OpenStreetMap par tronçons d'environ 2 km, lus deux à la fois (déclencheurs et bâtiments en parallèle) ;
+    un serveur Overpass qui tarde plus de 8 s est doublé par le suivant et la première réponse l'emporte (au lieu
+    d'attendre jusqu'à 75 s par serveur et par tour) ; durée affichée à la fin ;
   - référentiel au choix : Guide M1 (catégories A à E) ou **Roads-for-Life (R4L)** du Guide for Safe Speeds de la
     Banque mondiale / WRI (2024, § 2.2–2.3, fig. 7–8) : base de l'axe (accès contrôlé 100, liaison rurale 80 avec
     séparateur ou 70, accès rurale 70 / 50, liaison urbaine, axe urbain principal), tout générateur d'usagers

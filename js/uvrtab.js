@@ -48,7 +48,7 @@ export function initUvr(api) {
 
   // ---------------------------------------------------------------- plan
   function draw(res, axes) {
-    S.uvrHits = [];
+    S.uvrHits = []; S.uvrGeom = new Map();
     const TH = (S.prj.opts?.textH || 0.8) * 1.2, P = (o) => S.D.prims.push(o);
     const u = cfg();
     for (const r of res) {
@@ -66,9 +66,19 @@ export function initUvr(api) {
       }
       // aménagements
       const across = (s, o0, o1) => [G.L(ptAt(s, o0), ptAt(s, o1))];
+      // étiquettes des aménagements : un aménagement voisin du même côté (chevauchement le long de l'axe) décale la
+      // suivante d'une ligne vers l'extérieur de la chaussée
+      const placed = [];
+      const labelRow = (s, side, text, h) => {
+        const half = (text.length * h * 0.62) / 2 + 0.6;
+        let k = 0;
+        while (placed.some((q) => q.side === side && q.k === k && Math.abs(q.s - s) < q.half + half)) k++;
+        placed.push({ s, side, k, half });
+        return k;
+      };
       for (const q of r.treat) {
         if (q.list || q.code === 'lineaire' || q.code === 'prescr') continue;
-        const s = q.s, w = half + 0.5;
+        const s = q.s, w = half + 0.5, n0 = S.D.prims.length;
         const poly = (pts) => pts.map((p, i) => G.L(p, pts[(i + 1) % pts.length]));
         const band = (a, b, o0, o1) => { const n = Math.max(1, Math.ceil((b - a) / 2)), L = [], R = []; for (let i = 0; i <= n; i++) { const x = a + ((b - a) * i) / n; L.push(ptAt(x, o0)); R.push(ptAt(x, o1)); } return poly([...L, ...R.reverse()]); };
         const fillPoly = (segs, color) => { P({ k: 'fill', L: 'UVR', rings: [segs], color }); P({ k: 'path', L: 'UVR', role: 'am', closed: true, segs }); };
@@ -88,9 +98,12 @@ export function initUvr(api) {
           fillPoly(poly([ptAt(cl(s - 12), w), ptAt(cl(s - 7), w - 2), ptAt(cl(s - 3), w - 2), ptAt(cl(s), w)]), 'rgba(22,163,74,0.55)');
           fillPoly(poly([ptAt(cl(s), -w), ptAt(cl(s + 3), -w + 2), ptAt(cl(s + 7), -w + 2), ptAt(cl(s + 12), -w)]), 'rgba(22,163,74,0.55)');
         } else P({ k: 'path', L: 'UVR', role: 'am', segs: across(s, half2[0], half2[1]) });
+        // géométrie de l'aménagement (survol, aperçu du déplacement)
+        S.uvrGeom.set(`${q.key}|${r.key}`, { ax: r.key, s, code: q.code, segs: S.D.prims.slice(n0).flatMap((pr) => pr.segs || (pr.rings || []).flat()) });
         // étiquette courte au bord de la chaussée, côté du sens concerné
         const LBL = { feux: 'Feux', radar: 'Radar', pmv: '30 heures scol.', bandes: 'Bandes ×3', portail: 'Portail', plateau: 'Plateau', passage: 'Passage', chicane: 'Chicane', zone30: 'Zone 30', rappel30: 'Rappel 30', annonce: 'Annonce', retrec: 'Rétréciss.', limite: 'Limitation', sortie: 'Sortie', cloture: 'Clôture' };
-        const lp = ptAt(s, (q.dir === -1 ? 1 : -1) * (w + 2.2));
+        const side = q.dir === -1 ? 1 : -1, row = LBL[q.code] ? labelRow(s, side, LBL[q.code], TH * 1.3) : 0;
+        const lp = ptAt(s, side * (w + 2.2 + row * TH * 1.8));
         if (LBL[q.code]) P({ k: 'text', L: 'UVR', p: lp, s: LBL[q.code], rot: ang(s), align: 'center', h: TH * 1.3, color: '#fbbf24' });
         // points de sélection : l'étiquette (au bord, hors des poignées de l'axe) et le symbole sur la chaussée
         for (const hp of [lp, ptAt(s, (q.dir === -1 ? 1 : -1) * w * 0.5)]) (S.uvrHits = S.uvrHits || []).push({ key: q.key, ax: r.key, p: hp, label: q.label });
@@ -122,21 +135,43 @@ export function initUvr(api) {
   function polylineLL(axes, step = 80) {
     return axes.map((ax) => { const out = []; for (let s = 0; s <= ax.len + 1e-6; s += Math.min(step, ax.len)) { const p = ax.at(s).p, ll = S.crs.toLL(p.x, p.y); out.push([ll.lat, ll.lon]); } const p = ax.at(ax.len).p, ll = S.crs.toLL(p.x, p.y); out.push([ll.lat, ll.lon]); return out; });
   }
-  // Requête Overpass : chaque serveur à son tour, deux tours (le second après une pause), 75 s au plus par essai.
-  async function overpass(q) {
+  // Requête Overpass « couverte » : le premier serveur est interrogé ; s'il n'a pas répondu après HEDGE ms, le suivant l'est
+  // aussi, en parallèle, et la première réponse valide l'emporte (les autres sont annulées). Un serveur en erreur (429,
+  // 504, délai dépassé côté serveur) passe aussitôt la main. Deux tours au plus. Avant : 75 s × 3 serveurs × 2 tours
+  // pouvaient être attendus en série pour une seule requête bloquée — d'où les imports de plusieurs minutes.
+  const HEDGE = 8000, TMO = 40000;
+  async function overpass(q, start = 0) {
     let last = null;
     for (let round = 0; round < 2; round++) {
-      if (round) await new Promise((ok) => setTimeout(ok, 3000));
-      for (const url of OVERPASS) {
-        const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 75000);
-        try {
-          const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(q), signal: ctl.signal });
-          if (!r.ok) { last = new Error(`${new URL(url).host} : HTTP ${r.status}`); continue; }
-          const j = await r.json();
-          if (OVERPASS[0] !== url) OVERPASS.splice(0, OVERPASS.length, url, ...OVERPASS.filter((v) => v !== url)); // le serveur qui a répondu passe en tête
-          return j;
-        } catch (e) { last = e.name === 'AbortError' ? new Error(`${new URL(url).host} : délai dépassé`) : e; } finally { clearTimeout(tm); }
-      }
+      if (round) await new Promise((ok) => setTimeout(ok, 2000));
+      const urls = OVERPASS.map((_, i) => OVERPASS[(i + start) % OVERPASS.length]);
+      const j = await new Promise((resolve) => {
+        let done = false, pending = 0, next = 0;
+        const ctls = [];
+        const launch = () => {
+          if (done || next >= urls.length) return;
+          const url = urls[next++], host = new URL(url).host, ctl = new AbortController();
+          ctls.push(ctl); pending++;
+          const tm = setTimeout(() => ctl.abort(), TMO), hd = setTimeout(launch, HEDGE);
+          fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(q), signal: ctl.signal })
+            .then(async (r) => {
+              if (!r.ok) throw new Error(`${host} : HTTP ${r.status}`);
+              const js = await r.json();
+              if (/runtime error|timed out|out of memory/i.test(js?.remark || '')) throw new Error(`${host} : ${js.remark}`);
+              return js;
+            })
+            .then((js) => {
+              if (done) return;
+              done = true; ctls.forEach((c) => c !== ctl && c.abort());
+              if (OVERPASS[0] !== url) OVERPASS.splice(0, OVERPASS.length, url, ...OVERPASS.filter((v) => v !== url)); // le serveur qui a répondu passe en tête
+              resolve(js);
+            })
+            .catch((e) => { if (done) return; last = e.name === 'AbortError' ? new Error(`${host} : délai dépassé`) : e; clearTimeout(hd); launch(); })
+            .finally(() => { clearTimeout(tm); clearTimeout(hd); pending--; if (!done && !pending && next >= urls.length) resolve(null); });
+        };
+        launch();
+      });
+      if (j) return j;
     }
     throw last || new Error('Overpass indisponible');
   }
@@ -156,29 +191,40 @@ export function initUvr(api) {
       for (const b of P.bld) { const k2 = b.join(','); if (!seen.has(k2)) { seen.add(k2); u.built.bld.push(b); nB++; } }
     };
     // un tronçon dont la requête échoue est coupé en deux et retenté une fois
-    const poi = async (pl, depth = 0) => {
-      try { take(parseOverpass(await overpass(overpassPoiQL(overpassBBoxOf(pl, u.opts.R))))); return true; }
-      catch (e) { if (depth < 1 && pl.length > 3) { const m = Math.floor(pl.length / 2); const a = await poi(pl.slice(0, m + 1), depth + 1), b = await poi(pl.slice(m), depth + 1); return a && b; } console.warn(e); return false; }
+    const poi = async (pl, w, depth = 0) => {
+      try { take(parseOverpass(await overpass(overpassPoiQL(overpassBBoxOf(pl, u.opts.R)), w))); return true; }
+      catch (e) { if (depth < 1 && pl.length > 3) { const m = Math.floor(pl.length / 2); const [a, b] = await Promise.all([poi(pl.slice(0, m + 1), w, depth + 1), poi(pl.slice(m), w + 1, depth + 1)]); return a && b; } console.warn(e); return false; }
     };
+    const t0 = performance.now();
     try {
-      const polys = polylineLL(axes, step);
+      const polys = polylineLL(axes, step), jobs = [];
       for (let i = 0; i < polys.length; i++) {
         // tronçons d'environ 2 km
-        const pl = polys[i], chunk = 25, n = Math.ceil((pl.length - 1) / chunk);
-        for (let k = 0, j = 1; k < pl.length - 1; k += chunk, j++) {
-          const part = pl.slice(k, k + chunk + 1), s0 = k * step, s1 = Math.min(axes[i].len, (k + chunk) * step);
-          info(`OpenStreetMap — ${axes[i].name} : tronçon ${j} / ${n} (PK ${fmtPK(s0)} – ${fmtPK(s1)})…`);
-          if (!(await poi(part))) failed.push(`${axes[i].name} ${fmtPK(s0)}–${fmtPK(s1)}`);
-          // bâtiments : après trois échecs de suite, on cesse de les demander (les traversées restent à vérifier)
-          if (bldKo >= 3) bldFailed.push(`${fmtPK(s0)}–${fmtPK(s1)}`);
-          else try { take(parseOverpass(await overpass(overpassBldQL(part, 120)))); bldKo = 0; } catch (e) { console.warn(e); bldKo++; bldFailed.push(`${fmtPK(s0)}–${fmtPK(s1)}`); }
-        }
+        const pl = polys[i], chunk = 25;
+        for (let k = 0; k < pl.length - 1; k += chunk) jobs.push({ name: axes[i].name, part: pl.slice(k, k + chunk + 1), s0: k * step, s1: Math.min(axes[i].len, (k + chunk) * step) });
       }
+      // tronçons traités deux par deux, chaque file commençant par un serveur différent ; déclencheurs et bâtiments
+      // d'un même tronçon demandés en même temps
+      let next = 0, nDone = 0;
+      const tick = () => info(`OpenStreetMap — ${nDone} / ${jobs.length} tronçon(s) lu(s) (${Math.round((performance.now() - t0) / 1000)} s)…`);
+      const worker = async (w) => {
+        for (let J; (J = jobs[next++]);) {
+          const tag = `${J.name} ${fmtPK(J.s0)}–${fmtPK(J.s1)}`;
+          const bldP = bldKo >= 3 ? Promise.resolve(false)
+            : overpass(overpassBldQL(J.part, 120), w + 1).then((j) => { take(parseOverpass(j)); bldKo = 0; return true; }, (e) => { console.warn(e); bldKo++; return false; });
+          const [okP, okB] = await Promise.all([poi(J.part, w), bldP]);
+          if (!okP) failed.push(tag);
+          if (!okB) bldFailed.push(`${fmtPK(J.s0)}–${fmtPK(J.s1)}`);
+          nDone++; tick();
+        }
+      };
+      tick();
+      await Promise.all([0, 1].slice(0, jobs.length).map((w) => worker(w)));
       if (u.built.bld.length > 40000) u.built.bld = u.built.bld.slice(-40000);
       u.run = true;
       const nTr = detectTrav();
       update();
-      info(`OSM : ${nT} déclencheur(s), ${nP} zone(s) bâtie(s), ${nB} bâtiment(s) ; ${nTr} traversée(s) de localité détectée(s).${failed.length ? ` Tronçons sans réponse : ${failed.join(', ')}.` : ''}${bldFailed.length ? ` Bâtiments non lus : PK ${bldFailed.join(', ')}.` : ''}`);
+      info(`OSM (${Math.round((performance.now() - t0) / 1000)} s) : ${nT} déclencheur(s), ${nP} zone(s) bâtie(s), ${nB} bâtiment(s) ; ${nTr} traversée(s) de localité détectée(s).${failed.length ? ` Tronçons sans réponse : ${failed.join(', ')}.` : ''}${bldFailed.length ? ` Bâtiments non lus : PK ${bldFailed.join(', ')}.` : ''}`);
       if (failed.length) toast(`OpenStreetMap : ${nT} déclencheur(s) ajouté(s), mais ${failed.length} tronçon(s) sans réponse des serveurs (${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}) — relancez la recherche plus tard : les déclencheurs déjà trouvés sont gardés, sans doublon.`, 'warn');
       else toast(`OpenStreetMap : ${nT} déclencheur(s) UVR ajouté(s), ${nTr} traversée(s) de localité${bldFailed.length ? ` (bâtiments non lus sur ${bldFailed.length} tronçon(s) : traversées à vérifier)` : ''}. Vérifiez la liste (sources OSM incomplètes : confirmation terrain C1.6).`);
     } catch (e) {
@@ -519,6 +565,79 @@ ${ck('CK-F03', 'Générateurs UVR identifiés et cartographiés', nT > 0)}${ck('
     };
     dlg.showModal();
   }
-  return { compute, render, bind, pick, cfg, hit, openTreat };
+  // ---------------------------------------------------------------- survol, menu, déplacement sur le plan
+  const gKey = (h) => `${h.key}|${h.ax}`;
+  // Survol (outil Sélection) : l'aménagement sous le curseur est mis en surbrillance ; renvoie vrai s'il a changé.
+  function hover(px, py) {
+    const h = S.uvrMove ? null : hit(px, py), k = h ? gKey(h) : null;
+    if (k === (S.uvrHover || null)) return false;
+    S.uvrHover = k; return true;
+  }
+  // Géométrie de l'aménagement décalée de ds le long de son axe (même distance à l'axe).
+  function shifted(g, ds) {
+    const ax = allAxes().find((a) => a.key === g.ax); if (!ax) return [];
+    const mv = (p) => { const pr = ax.project(p); if (!pr) return p; const q = ax.at(Math.max(0, Math.min(ax.len, pr.s + ds))); return G.add(q.p, G.mul(G.rot90(q.t), pr.off)); };
+    return g.segs.map((sg) => (sg.t === 'L' ? G.L(mv(sg.a), mv(sg.b)) : sg));
+  }
+  function overlay(ctx, v) {
+    const stroke = (segs, col, wpx, dash) => {
+      ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = wpx; ctx.setLineDash(dash || []); ctx.lineJoin = 'round';
+      ctx.beginPath();
+      for (const sg of segs) for (const [k, p] of G.samplePath([sg], 0.5).entries()) { const [x, y] = v.w2s(p.x, p.y); if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+      ctx.stroke(); ctx.restore();
+    };
+    const M = S.uvrMove;
+    if (M) {
+      const g = S.uvrGeom?.get(M.k); if (!g) return;
+      stroke(g.segs, 'rgba(148,163,184,0.7)', 1.5, [4, 4]);
+      const segs = shifted(g, M.s - g.s);
+      stroke(segs, 'rgba(56,189,248,0.35)', 9); stroke(segs, '#38bdf8', 2);
+      const ax = allAxes().find((a) => a.key === g.ax), q = ax?.at(M.s);
+      if (q) { const [x, y] = v.w2s(q.p.x, q.p.y); ctx.save(); ctx.font = '600 12px system-ui, sans-serif'; const t = `PK ${fmtPK(M.s)} — cliquez pour placer (Échap : annuler)`, tw = ctx.measureText(t).width; ctx.fillStyle = 'rgba(15,23,42,.85)'; ctx.fillRect(x + 12, y - 26, tw + 10, 18); ctx.fillStyle = '#e0f2fe'; ctx.fillText(t, x + 17, y - 13); ctx.restore(); }
+      return;
+    }
+    const g = S.uvrHover && S.uvrGeom?.get(S.uvrHover);
+    if (g) { stroke(g.segs, 'rgba(250,204,21,0.35)', 10); stroke(g.segs, '#facc15', 2.2); }
+  }
+  // Menu du clic droit : Propriétés, Déplacer, Supprimer.
+  function menu(h, cx, cy) {
+    let m = document.getElementById('uvrMenu');
+    if (!m) { m = document.createElement('div'); m.id = 'uvrMenu'; m.className = 'ctxmenu'; document.body.appendChild(m); }
+    const r = (S.uvr?.res || []).find((q) => q.key === h.ax), q = r?.treat.find((x) => x.key === h.key); if (!q) return;
+    const fixed = q.list || q.code === 'lineaire';
+    m.innerHTML = `<div class="ttl">${esc((MANUAL[q.code]?.name) || q.code)} · PK ${fmtPK(q.s)}</div><button data-m="prop">Propriétés…</button>${fixed ? '' : '<button data-m="move">Déplacer</button>'}<button data-m="del" class="danger">Supprimer</button>`;
+    m.style.left = `${cx}px`; m.style.top = `${cy}px`; m.hidden = false;
+    const close = () => { m.hidden = true; document.removeEventListener('pointerdown', away, true); };
+    const away = (e) => { if (!m.contains(e.target)) close(); };
+    setTimeout(() => document.addEventListener('pointerdown', away, true));
+    m.onclick = (e) => {
+      const b = e.target.closest('button[data-m]'); if (!b) return; close();
+      if (b.dataset.m === 'prop') openTreat(h);
+      else if (b.dataset.m === 'move') { S.uvrMove = { k: gKey(h), key: h.key, ax: h.ax, s: q.s }; S.uvrHover = null; toast('Déplacez la souris le long de l\'axe, cliquez pour placer l\'aménagement (Échap : annuler).'); viewer.invalidate(); }
+      else remove(h);
+    };
+  }
+  function remove(h) {
+    const u = cfg(), r = (S.uvr?.res || []).find((q) => q.key === h.ax), q = r?.treat.find((x) => x.key === h.key); if (!q) return;
+    const ed = edOf(u, r.key), man = q.key.startsWith('manual:') ? ed.add.find((x) => `manual:${x.id}` === q.key) : null;
+    if (man) ed.add = ed.add.filter((x) => x !== man); else { ed.del.push(q.key); delete ed.mv[q.key]; delete ed.sign[q.key]; }
+    u.run = true; S.uvrHover = null; update(); toast('Aménagement supprimé (rétablissable dans l\'onglet Vitesses / UVR).');
+  }
+  // Déplacement en cours : position suivie au curseur (projeté sur l'axe), posée au clic.
+  function moveTo(w) {
+    const M = S.uvrMove; if (!M) return false;
+    const ax = allAxes().find((a) => a.key === M.ax), pr = ax?.project(w); if (!pr) return false;
+    M.s = Math.max(0, Math.min(ax.len, pr.s)); return true;
+  }
+  function drop() {
+    const M = S.uvrMove; if (!M) return false;
+    S.uvrMove = null;
+    const u = cfg(), ed = edOf(u, M.ax), v = Math.round(M.s * 10) / 10;
+    if (M.key.startsWith('manual:')) { const a = ed.add.find((x) => `manual:${x.id}` === M.key); if (a) a.s = v; } else ed.mv[M.key] = v;
+    u.run = true; update(); toast(`Aménagement placé au PK ${fmtPK(v)}.`);
+    return true;
+  }
+  function cancelMove() { if (!S.uvrMove) return false; S.uvrMove = null; viewer.invalidate(); return true; }
+  return { compute, render, bind, pick, cfg, hit, openTreat, hover, overlay, menu, moveTo, drop, cancelMove };
 }
 export { defaultUvrOpts };

@@ -271,8 +271,11 @@ export function detectBuilt(ax, { polys = [], bld = [] }, opts = {}) {
   const cell = 50, idx = new Map();
   for (const b of bld) { const k = `${Math.floor(b.x / cell)},${Math.floor(b.y / cell)}`; let a = idx.get(k); if (!a) idx.set(k, (a = [])); a.push(b); }
   const near = (p, r) => { const out = [], i0 = Math.floor((p.x - r) / cell), i1 = Math.floor((p.x + r) / cell), j0 = Math.floor((p.y - r) / cell), j1 = Math.floor((p.y + r) / cell); for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) for (const b of idx.get(`${i},${j}`) || []) if (dist(b, p) <= r) out.push(b); return out; };
+  // emprise de chaque zone bâtie : le test point-dans-polygone n'est fait que si le point tombe dans le rectangle
+  const boxes = polys.map((P) => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const p of P) { if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; } return { P, x0, y0, x1, y1 }; });
+  const inBuilt = (p) => boxes.some((B) => p.x >= B.x0 && p.x <= B.x1 && p.y >= B.y0 && p.y <= B.y1 && pointInRing(p, B.P));
   const flag = smp.map((q) => {
-    for (const P of polys) for (const off of [0, 40, -40]) if (pointInRing(add(q.p, mul(q.n, off)), P)) return true;
+    for (const off of [0, 40, -40]) if (inBuilt(add(q.p, mul(q.n, off)))) return true;
     if (!bld.length) return false;
     let n = 0;
     for (const b of near(q.p, 100)) { const v = sub(b, q.p), lg = Math.abs(v.x * q.t.x + v.y * q.t.y), lt = Math.abs(v.x * q.n.x + v.y * q.n.y); if (lg <= 50 && lt <= 80) n++; }
