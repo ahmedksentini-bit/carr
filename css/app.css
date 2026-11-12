@@ -678,3 +678,8 @@ dialog.dlg-big #hyBigBody { flex: 1; overflow: auto; padding: 10px 14px; }
 #hyBigBody #hyDetail { margin-top: 14px; border-top: 1px solid var(--line2); padding-top: 8px; }
 #hyBigBody #hyDetail dl { display: grid; grid-template-columns: minmax(180px, 22%) 1fr; gap: 4px 14px; }
 #hyBigBody #hyDetail dd { margin: 0; }
+/* Profil en long : remblai sur traverse des ouvrages hydrauliques */
+.plsvg .pl-cov { stroke: #facc15; stroke-width: 1.2; stroke-dasharray: 3 2; }
+.plsvg .pl-cov-t { fill: #facc15; font-size: 10.5px; font-weight: 600; paint-order: stroke; stroke: #0b1220; stroke-width: 3px; }
+.plsvg .pl-cov-t.warn { fill: #fb923c; }
+.plsvg .pl-cov-t.bad { fill: #f87171; }

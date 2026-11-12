@@ -4714,7 +4714,8 @@ function plAxisOverlay(key, ax, PL) {
     }
     // radier au droit de l'axe : cotes fil d'eau de l'ouvrage (saisies ou automatiques), sinon tiré de la chaussée
     const K = g.K, zR = PL.zAt(g.s), zB = g.inv ? g.inv.zAx : zR - K.Hr - K.et - K.H, zI = zB + K.H, zT = zI + K.et, hw = K.W / 2 / K.sinP;
-    items.push({ t: 'cad', s: g.s, hw, zT, zI, zB, zF: zB - (K.type === 'pipo' ? 0 : K.er), K, label: `${g.name} · ${K.type === 'buse' ? `buse Ø ${fmt(K.B, 2)}` : `${K.n > 1 ? `${K.n} × ` : ''}${fmt(K.B, 2)} × ${fmt(K.H, 2)}`} · fil d'eau ${g.inv ? `${fmt(g.inv.zam, 2)} → ${fmt(g.inv.zav, 2)} (${fmt(g.inv.J * 100, 2)} %)` : fmt(zB, 2)}` });
+    const cov = ohCover(g, zB);
+    items.push({ t: 'cad', s: g.s, hw, zT, zI, zB, zF: zB - (K.type === 'pipo' ? 0 : K.er), K, cov, label: `${g.name} · ${K.type === 'buse' ? `buse Ø ${fmt(K.B, 2)}` : `${K.n > 1 ? `${K.n} × ` : ''}${fmt(K.B, 2)} × ${fmt(K.H, 2)}`} · fil d'eau ${g.inv ? `${fmt(g.inv.zam, 2)} → ${fmt(g.inv.zav, 2)} (${fmt(g.inv.J * 100, 2)} %)` : fmt(zB, 2)}` });
     zs.push(zB - K.er);
   }
   const draw = ({ X, Y, vis, m, ph }) => {
@@ -4747,11 +4748,44 @@ function plAxisOverlay(key, ax, PL) {
           o += `<rect class="pl-cadi" x="${x0 + 1}" y="${vis(it.zI)}" width="${Math.max(1, x1 - x0 - 2)}" height="${Math.max(1, vis(it.zB) - vis(it.zI))}"/>`;
         }
         o += `<text class="pl-ovl" x="${X(it.s)}" y="${vis(it.zF) + 12}" text-anchor="middle">${esc(it.label)}</text>`;
+        if (it.cov) { // remblai sur traverse le long de l'ouvrage (coupe longitudinale : profil en travers avec dévers)
+          const c = it.cov, bad = c.min < 0, low = c.min < c.need - 1e-6, yT = Math.min(vis(it.zT), vis(c.zMaxRoad)) - 6;
+          o += `<line class="pl-cov" x1="${X(it.s)}" x2="${X(it.s)}" y1="${vis(it.zT)}" y2="${vis(c.zAtAxis)}"/>`;
+          o += `<text class="pl-cov-t${bad ? ' bad' : low ? ' warn' : ''}" x="${X(it.s)}" y="${yT}" text-anchor="middle">remblai sur traverse min ${fmt(c.min, 2)} · max ${fmt(c.max, 2)} m${bad ? ' — traverse au-dessus de la chaussée' : low ? ` — sous le remblai prévu (${fmt(c.need, 2)} m)` : ''}</text>`;
+        }
       }
     }
     return o;
   };
   return { draw: items.length ? draw : null, z: zs };
+}
+// Remblai sur traverse d'un cadre, d'un PIPO ou d'une buse, comme sa coupe longitudinale : ligne projet de la route le
+// long de l'ouvrage (profil en travers de l'axe porteur au droit de l'ouvrage, dévers compris, plate-forme construite),
+// moins le dessus de la traverse (fil d'eau le long de l'ouvrage + H + traverse) ; min et max sur la partie de la
+// plate-forme au-dessus de l'ouvrage. need : remblai minimal saisi ou par défaut de l'ouvrage (Hr).
+function ohCover(g, zBaxis) {
+  const K = g.K, A = S.axpl?.get(g.ax?.key);
+  if (!K || !A?.defined || g.ax.key.startsWith('b:')) return null;
+  let cs = null;
+  try { cs = axisSections(S.prj, S.D, g.ax, A, [{ s: g.s, name: '' }], S.tn?.tin || null).list[0] || null; } catch { return null; }
+  const pl = (cs?.platform || []).filter((q) => Number.isFinite(q.y) && Number.isFinite(q.z));
+  if (pl.length < 2) return null;
+  const dn = G.dot(g.d, cs.n);
+  if (Math.abs(dn) < 0.05) return null;
+  const pts = pl.map((q) => ({ x: q.y / dn, z: q.z })).sort((a, b) => a.x - b.x);
+  const zRoad = (x) => { if (x < pts[0].x || x > pts.at(-1).x) return null; for (let i = 1; i < pts.length; i++) if (x <= pts[i].x) { const a = pts[i - 1], b = pts[i]; return a.z + ((b.z - a.z) * (x - a.x)) / Math.max(1e-9, b.x - a.x); } return pts.at(-1).z; };
+  // fil d'eau le long de l'ouvrage : −Lm (côté −d) → +Lp (côté +d)
+  const inv = g.inv, Lm = K.Lm, Lp = K.Lp;
+  const zM = inv ? (inv.down === 0 ? inv.zav : inv.zam) : zBaxis, zP = inv ? (inv.down === 1 ? inv.zav : inv.zam) : zBaxis;
+  const zTop = (x) => zM + ((zP - zM) * (x + Lm)) / Math.max(1e-6, Lm + Lp) + K.H + K.et;
+  const a = Math.max(-Lm, pts[0].x), b = Math.min(Lp, pts.at(-1).x);
+  if (!(b > a)) return null;
+  let min = Infinity, max = -Infinity, zMaxRoad = -Infinity;
+  const xs = [a, b, ...pts.map((q) => q.x).filter((x) => x > a && x < b)];
+  for (let x = a; x <= b; x += 0.25) xs.push(x);
+  for (const x of xs) { const z = zRoad(x); if (z == null) continue; const c = z - zTop(x); if (c < min) min = c; if (c > max) max = c; if (z > zMaxRoad) zMaxRoad = z; }
+  if (!Number.isFinite(min)) return null;
+  return { min, max, need: Math.max(0, +K.Hr || 0), zAtAxis: zRoad(0) ?? zMaxRoad, zMaxRoad };
 }
 // Éditeur interactif du profil en long (pleditor.js, ergonomie BVTrace) : créé une fois dans #plChart ; il remplace
 // la liste des points saisis de l'axe affiché et l'historique d'annulation reste celui du projet.
@@ -5094,7 +5128,8 @@ function bindPL() {
         ax, PL, pk0: pkOrigin(S.prj, key), tnAt: (s) => (tin ? tinZ(tin, ax.at(s).p.x, ax.at(s).p.y) : null),
         // sans profils implantés : un pas régulier lisible à l'échelle de la feuille (≥ 15 mm), indépendant de la
         // longueur de l'axe (sinon 200 m sur 20 km → recouvrement d'une demi-feuille et deux fois trop de feuilles)
-        stations: plCartStations(key, ax, A.PL, [10, 20, 25, 50, 100, 200, 500].find((v) => (v * 1000) / scale >= 15) || 1000), devAt, ohs, prims: [...(S.D?.prims || []), ...(S.Do || []).flatMap((d) => d.D?.prims || []), ...(S.talus?.prims || [])],
+        stations: plCartStations(key, ax, A.PL, [10, 20, 25, 50, 100, 200, 500].find((v) => (v * 1000) / scale >= 15) || 1000), devAt,
+        tiles: $('#plCbSat')?.checked && S.crs?.geo ? noteTiles : null, ohs, prims: [...(S.D?.prims || []), ...(S.Do || []).flatMap((d) => d.D?.prims || []), ...(S.talus?.prims || [])],
         dxf: S.dxf, tnPts: Array.isArray(S.prj.tn?.pts) ? S.prj.tn.pts : [], tnSrc: S.prj.tn?.source || '', tnPrims: combinedContours(), format, scale, zScale: zs > 0 ? zs : Math.max(1, Math.round(scale / 10)), title: ax.name, project: S.prj.name,
       });
     } catch (e) { console.error(e); toast('Tracé combiné : ' + e.message, 'err'); try { w?.close(); } catch { /* */ } return; }

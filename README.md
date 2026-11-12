@@ -238,7 +238,8 @@ ou sur un fond topographique DXF.
   **Axes longs** (20 km et plus) : les primitives du projet sont découpées une fois en tronçons à boîte englobante
   (bordures, marquages, hachures) et les grands aplats (chaussée, TPC) discrétisés puis découpés à l'emprise de chaque
   feuille (Sutherland–Hodgman) ; seule la part qui touche la feuille est écrite (axe de 22,7 km : 70 feuilles A3 en
-  6 s, 26 Mo, au lieu d'un blocage). Sans profils implantés, le cartouche suit un pas régulier lisible à l'échelle
+  6 s, 26 Mo, au lieu d'un blocage). Case **« Fond satellite »** (option, projet géoréférencé) : imagerie Esri World
+  Imagery sous le projet sur la bande du plan de chaque feuille (tuiles reprojetées, ≈ 150 dpi), chargée à l'ouverture. Sans profils implantés, le cartouche suit un pas régulier lisible à l'échelle
   (≥ 15 mm : 20 m au 1/1000), et le recouvrement des feuilles vaut ce pas. La fenêtre s'ouvre tout de suite avec un
   message d'attente.
   Ouvrages (cadres, PIPO, buses) : sur le plan, fiche à côté de l'ouvrage — désignation, n × B × H (ou n × buse Ø),
@@ -564,7 +565,11 @@ ou sur un fond topographique DXF.
   - **cotes fil d'eau amont / aval** de chaque cadre ou buse : automatiques (TN du MNT au droit des têtes, sens de
     l'écoulement du bassin lié ; à défaut pente du thalweg, ou radier tiré de la chaussée) ou **saisies** dans la fiche de
     l'ouvrage, la fiche du bassin ou le détail de l'onglet Hydrologie (champ vide : automatique) ; elles fixent la pente
-    du radier du calcul hydraulique, le radier dessiné au profil en long et le remblai sur traverse qui en résulte ;
+    du radier du calcul hydraulique, le radier dessiné au profil en long et le remblai sur traverse qui en résulte
+    (au profil en long, sur chaque cadre, PIPO ou buse : **remblai sur traverse min et max** le long de l'ouvrage, comme
+    sa coupe longitudinale — ligne projet du profil en travers au droit de l'ouvrage, dévers compris, sur la
+    plate-forme, moins le dessus de la traverse suivant les fils d'eau ; rouge si la traverse dépasse la chaussée,
+    orange sous le remblai prévu) ;
     inscrites au droit des têtes sur le plan (FE amont / aval). Alertes : pente du radier inférieure à la pente critique
     de l'ouvrage vérifié (écoulement fluvial, contrôle par l'aval, dépôts ; pente conseillée), contre-pente, traverse
     au-dessus de la chaussée ;
