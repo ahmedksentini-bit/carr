@@ -40,18 +40,22 @@ const fmtE = (E) => (E >= 1000 ? `${fmt(E, 3)} MPa` : `${fmt(E, 3)} MPa`);
  * de leur bande de roulement, le moyeu qui les relie, et sous chacun la pression
  * de contact (bandeau rouge et flèches). xs : axes des roues ; yc : surface de la
  * chaussée ; id : préfixe des marqueurs de la figure (flèche « fl »).
+ * Un pneu reste DEBOUT quelle que soit l'échelle : quand la hauteur disponible ne
+ * suffit pas (figure très dilatée en largeur, comme la carte des champs), le corps
+ * du pneu est rétréci à h / 1,45 ; la pression de contact garde, elle, la largeur
+ * exacte du disque (l), qui est la donnée du calcul.
  */
 export function jumelageDeFace(xs, yc, l, id, { h = Math.max(40, Math.min(120, 1.7 * l)), fleches = true } = {}) {
-  const yb = yc - 7, yh = yb - h, rx = Math.min(l * 0.3, 14);
+  const lb = Math.min(l, h / 1.45), yb = yc - 7, yh = yb - h, rx = Math.min(lb * 0.3, 14);
   let s = "";
   if (xs.length > 1) {   // le moyeu, vu entre les deux pneus
     const x0 = Math.min(...xs), x1 = Math.max(...xs), ym = yh + h * 0.5;
     s += `<rect x="${x0.toFixed(1)}" y="${(ym - 6).toFixed(1)}" width="${(x1 - x0).toFixed(1)}" height="12" rx="3" fill="#6b7280"/>`;
   }
   for (const x of xs) {
-    s += `<rect x="${(x - l / 2).toFixed(1)}" y="${yh.toFixed(1)}" width="${l.toFixed(1)}" height="${h.toFixed(1)}" rx="${rx.toFixed(1)}" fill="#1f2937"/>`;
+    s += `<rect x="${(x - lb / 2).toFixed(1)}" y="${yh.toFixed(1)}" width="${lb.toFixed(1)}" height="${h.toFixed(1)}" rx="${rx.toFixed(1)}" fill="#1f2937"/>`;
     for (const f of [-0.22, 0, 0.22])
-      s += `<path d="M${(x + f * l).toFixed(1)} ${(yh + 6).toFixed(1)}V${(yb - 6).toFixed(1)}" stroke="#4b5563" stroke-width="${Math.max(1.2, l / 30).toFixed(1)}"/>`;
+      s += `<path d="M${(x + f * lb).toFixed(1)} ${(yh + 6).toFixed(1)}V${(yb - 6).toFixed(1)}" stroke="#4b5563" stroke-width="${Math.max(1.2, lb / 30).toFixed(1)}"/>`;
     s += `<rect x="${(x - l / 2).toFixed(1)}" y="${(yc - 6).toFixed(1)}" width="${l.toFixed(1)}" height="6" fill="${COULEURS.effort}" opacity=".85"/>`;
     if (fleches) for (let k = -2; k <= 2; k++) {
       const xx = x + (k * l) / 5;
