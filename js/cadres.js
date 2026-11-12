@@ -263,4 +263,4 @@ export function poutresData(g, name, prj) {
 }
 export const poutresLink = (g, name, prj) => `${PSIDA_URL}#poutres/d=${encodeURIComponent(b64(JSON.stringify(poutresData(g, name, prj))))}`;
 export const cadreLink = (g, name, prj) => g.K?.type === 'poutres' ? poutresLink(g, name, prj) : `${PSIDA_URL}#cadres/d=${encodeURIComponent(b64(JSON.stringify(cadreData(g, name, prj))))}`;
-export const cadreProject = (g, name, prj) => JSON.stringify({ format: 'psida-projet', version: '0.99', date: new Date().toISOString(), source: 'GIRA (carr.ksr-infra.org)', data: g.K?.type === 'poutres' ? poutresData(g, name, prj) : cadreData(g, name, prj) }, null, 1);
+export const cadreProject = (g, name, prj) => JSON.stringify({ format: 'psida-projet', version: '0.99', date: new Date().toISOString(), source: 'INFRA-KSR (carr.ksr-infra.org)', data: g.K?.type === 'poutres' ? poutresData(g, name, prj) : cadreData(g, name, prj) }, null, 1);

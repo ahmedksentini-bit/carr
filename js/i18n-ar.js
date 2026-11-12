@@ -131,8 +131,8 @@ export const AR = {
   'Signalisation désactivée.': 'التشوير معطّل.',
   'Aucun panneau : dessinez les branches.': 'لا توجد لوحات: ارسم الفروع.',
   // Barre du haut, onglets, barre d'état
-  'GIRA — Conception de carrefours giratoires': 'GIRA — تصميم المفترقات الدائرية',
-  'Conception de giratoires · SETRA / CERTU': 'تصميم المفترقات الدائرية · SETRA / CERTU',
+  'INFRA-KSR — Conception routière : tracés, carrefours, giratoires, échangeurs': 'INFRA-KSR — التصميم الطرقي: المسارات والمفترقات والمفترقات الدائرية والمبادلات',
+  'Tracés · carrefours · giratoires · échangeurs': 'المسارات · المفترقات · المفترقات الدائرية · المبادلات',
   'Nouveau': 'جديد',
   'Ouvrir': 'فتح',
   'Enregistrer': 'حفظ',
@@ -153,8 +153,8 @@ export const AR = {
   'GRILLE': 'الشبكة',
   'Nom du projet': 'اسم المشروع',
   'Nouveau projet': 'مشروع جديد',
-  'Ouvrir un projet .gira.json': 'فتح مشروع ‎.gira.json',
-  'Enregistrer le projet (.gira.json)': 'حفظ المشروع (‎.gira.json)',
+  'Ouvrir un projet .ksr.json (ou .gira.json)': 'فتح مشروع ‎.ksr.json (أو ‎.gira.json)',
+  'Enregistrer le projet (.ksr.json)': 'حفظ المشروع (‎.ksr.json)',
   'Annuler (Ctrl+Z)': 'تراجع (Ctrl+Z)',
   'Rétablir (Ctrl+Y)': 'إعادة (Ctrl+Y)',
   'Exporter le plan au format DXF (AutoCAD, Covadis…)': 'تصدير المخطط بصيغة DXF (AutoCAD، Covadis…)',
@@ -725,7 +725,8 @@ export const AR = {
   'Principale · axe · fin de stockage (côté B#)': 'الرئيسية · المحور · نهاية التخزين (جهة B#)',
 
   // Fenêtre d'aide
-  'GIRA — aide': 'GIRA — مساعدة',
+  'INFRA-KSR — aide': 'INFRA-KSR — مساعدة',
+  'Tracé': 'المسار',
   ': choisissez le contexte (interurbain / urbain), le système de coordonnées et le fond (satellite, ou DXF topo dans le même système).': ': اختر السياق (خارج العمران / حضري)، ونظام الإحداثيات، والخلفية (صور القمر الصناعي، أو DXF طبوغرافي في النظام نفسه).',
   'Axe': 'المحور',
   ': dessinez l\'axe de chaque branche en cliquant de l\'extérieur vers le carrefour.': ': ارسم محور كل فرع بالنقر من الخارج نحو المفترق.',

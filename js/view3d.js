@@ -267,7 +267,7 @@ export class View3D {
   snapshot() { this.renderer.render(this.scene, this.camera); return this.renderer.domElement.toDataURL('image/png'); }
   // OBJ : un groupe par maillage, coordonnées monde (X, Y, Z en mètres, exagération retirée).
   exportOBJ(name = 'carrefour') {
-    const out = [`# GIRA — ${name} — X Y Z (m)`], ve = this.ve;
+    const out = [`# INFRA-KSR — ${name} — X Y Z (m)`], ve = this.ve;
     let off = 1;
     for (const m of this.meshes) {
       const g = m.geometry, pos = g.getAttribute('position'); if (!pos) continue;

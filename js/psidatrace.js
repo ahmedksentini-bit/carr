@@ -177,7 +177,7 @@ export function deckTrace(B) {
   };
   const stations = st.map((q) => +q.s.toFixed(4));
   return {
-    segments: segments.map(clean), s0: stations[0], source: `GIRA – ${B.name || 'ouvrage'}`, stations,
+    segments: segments.map(clean), s0: stations[0], source: `INFRA-KSR – ${B.name || 'ouvrage'}`, stations,
     ...(psiLignes.some((p) => p !== 100) ? { psiLignes } : {}),
     curved, psiMin, rMin: curved ? 1 / kMax : Infinity, spans: stations.slice(1).map((s, k) => s - stations[k]),
     elements: segments.map(libelleElement), ecart, warnings,

@@ -459,4 +459,4 @@ const b64 = (txt) => (typeof btoa === 'function' ? btoa(unescape(encodeURICompon
 // Alertes du tracé exporté (biais < 50 gr à une ligne d'appui, angle vif, reconstitution imprécise) à montrer avant l'export.
 export function psidaWarnings(o) { const t = o.curved && typeof o.trace === 'function' ? o.trace() : null; return t?.warnings || []; }
 export function psidaLink(o, prj, niv = null) { return `${PSIDA_URL}#conception/d=${encodeURIComponent(b64(JSON.stringify(psidaData(o, prj, niv))))}`; }
-export function psidaProject(o, prj, niv = null) { return JSON.stringify({ format: 'psida-projet', version: '0.99', date: new Date().toISOString(), source: 'GIRA (carr.ksr-infra.org)', data: psidaData(o, prj, niv) }, null, 1); }
+export function psidaProject(o, prj, niv = null) { return JSON.stringify({ format: 'psida-projet', version: '0.99', date: new Date().toISOString(), source: 'INFRA-KSR (carr.ksr-infra.org)', data: psidaData(o, prj, niv) }, null, 1); }
