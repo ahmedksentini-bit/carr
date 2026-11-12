@@ -6937,6 +6937,19 @@ function bindUI() {
     // téléphone : la barre d'onglets est en haut de la page, le contenu sous le plan — on y descend
     if (window.matchMedia('(max-width: 760px)').matches) $('.panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }));
+  // Largeur du panneau des onglets : poignée sur son bord (glisser), mémorisée dans le navigateur ; double-clic : défaut
+  {
+    const grip = $('#panelGrip'), root = document.documentElement, KEY = 'gira.panelW';
+    const setW = (w) => { if (w) root.style.setProperty('--panelW', `${w}px`); else root.style.removeProperty('--panelW'); };
+    const clampW = (w) => Math.round(Math.max(300, Math.min(window.innerWidth - 360, w)));
+    try { const w = +localStorage.getItem(KEY); if (w > 0) setW(clampW(w)); } catch { /* */ }
+    let drag = null;
+    grip?.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, w: $('.panel').getBoundingClientRect().width, rtl: document.documentElement.dir === 'rtl' }; grip.setPointerCapture(e.pointerId); grip.classList.add('on'); e.preventDefault(); });
+    grip?.addEventListener('pointermove', (e) => { if (!drag) return; setW(clampW(drag.w + (drag.rtl ? -1 : 1) * (e.clientX - drag.x))); });
+    const end = () => { if (!drag) return; drag = null; grip.classList.remove('on'); try { localStorage.setItem(KEY, String(Math.round($('.panel').getBoundingClientRect().width))); } catch { /* */ } };
+    grip?.addEventListener('pointerup', end); grip?.addEventListener('pointercancel', end);
+    grip?.addEventListener('dblclick', () => { setW(null); try { localStorage.removeItem(KEY); } catch { /* */ } });
+  }
   $('#chBack')?.addEventListener('click', () => showTab(S.tabBefore && S.tabBefore !== 'chaussee' ? S.tabBefore : 'projet'));
   $$('.tools [data-tool]').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
   $$('.tools [data-act]').forEach((b) => b.addEventListener('click', () => (b.dataset.act === 'zoomGira' ? zoomGira() : zoomAll())));

@@ -395,9 +395,10 @@ function segsD(segs, T, k) {
 
 // ------------------------------------------------------------------------------------------------ Profil en long
 const CART = [
-  { key: 'num', label: 'N° PROFIL', h: 5 }, { key: 'dp', label: 'DISTANCES PARTIELLES', h: 9 }, { key: 'pk', label: 'PK (ABSCISSES)', h: 9 },
-  { key: 'tn', label: 'COTES TN', h: 9 }, { key: 'zp', label: 'COTES PROJET', h: 9 }, { key: 'el', label: 'DÉCLIVITÉS / RAYONS', h: 6 },
-  { key: 'len', label: 'LONGUEURS / DÉNIVELÉES', h: 5 }, { key: 'ax', label: 'TRACÉ EN PLAN', h: 8 }, { key: 'dl', label: 'DÉVERS GAUCHE (%)', h: 8 }, { key: 'dr', label: 'DÉVERS DROIT (%)', h: 8 },
+  // hauteurs (mm papier) dimensionnées pour des écritures lisibles (2,2 à 2,4 mm) — valeurs à la verticale incluses
+  { key: 'num', label: 'N° PROFIL', h: 6.5 }, { key: 'dp', label: 'DISTANCES PARTIELLES', h: 10 }, { key: 'pk', label: 'PK (ABSCISSES)', h: 12 },
+  { key: 'tn', label: 'COTES TN', h: 11 }, { key: 'zp', label: 'COTES PROJET', h: 11 }, { key: 'el', label: 'DÉCLIVITÉS / RAYONS', h: 7 },
+  { key: 'len', label: 'LONGUEURS / DÉNIVELÉES', h: 6 }, { key: 'ax', label: 'TRACÉ EN PLAN', h: 9.5 }, { key: 'dl', label: 'DÉVERS GAUCHE (%)', h: 9 }, { key: 'dr', label: 'DÉVERS DROIT (%)', h: 9 },
 ];
 
 function profileBand(o) {
@@ -644,19 +645,19 @@ function cartouche(o, rows, y0, X, vis, zp, tn) {
   out += `<line x1="${x0}" y1="${y0}" x2="${x1}" y2="${y0}" stroke="#000" stroke-width="0.35"/><line x1="${plotX0}" y1="${y0}" x2="${plotX0}" y2="${y}" stroke="#000" stroke-width="0.25"/>`;
   rows.forEach((r, j) => {
     if (j) out += `<line x1="${x0}" y1="${tops[j]}" x2="${x1}" y2="${tops[j]}" stroke="#000" stroke-width="0.15"/>`;
-    out += txt(x0 + 1.5, tops[j] + r.h / 2 + 0.7, r.label, Math.min(2, r.h * 0.42), { w: 'bold' });
+    out += txt(x0 + 1.5, tops[j] + r.h / 2 + 0.85, r.label, Math.min(2.4, r.h * 0.42), { w: 'bold' });
   });
   const row = (key) => rows.findIndex((r) => r.key === key);
   // stations retenues : au moins 2,6 mm entre deux rappels (valeurs écrites à la verticale)
   const keep = [];
-  for (const q of vis) if (!keep.length || X(q.s) - X(keep[keep.length - 1].s) >= 2.6) keep.push(q);
+  for (const q of vis) if (!keep.length || X(q.s) - X(keep[keep.length - 1].s) >= 3.4) keep.push(q);
   if (vis.length && keep[keep.length - 1] !== vis[vis.length - 1]) { if (keep.length > 1) keep.pop(); keep.push(vis[vis.length - 1]); }
-  const vt = (x, j, v) => { const r = rows[j], yb = tops[j] + r.h - 0.8, fs = Math.min(1.7, (r.h - 1.2) / Math.max(4, String(v).length * 0.56)); return `<text x="${(x + 0.7).toFixed(2)}" y="${yb.toFixed(2)}" font-size="${fs.toFixed(2)}" transform="rotate(-90 ${(x + 0.7).toFixed(2)} ${yb.toFixed(2)})">${esc(v)}</text>`; };
+  const vt = (x, j, v) => { const r = rows[j], yb = tops[j] + r.h - 0.8, fs = Math.min(2.6, (r.h - 1.2) / Math.max(4, String(v).length * 0.56)); return `<text x="${(x + 0.7).toFixed(2)}" y="${yb.toFixed(2)}" font-size="${fs.toFixed(2)}" transform="rotate(-90 ${(x + 0.7).toFixed(2)} ${yb.toFixed(2)})">${esc(v)}</text>`; };
   const skipRows = new Set([row('el'), row('len'), row('ax')]);
   keep.forEach((q, i) => {
     const x = X(q.s);
     rows.forEach((r, j) => { if (!skipRows.has(j) && j !== row('dp')) out += `<line x1="${x.toFixed(2)}" y1="${tops[j]}" x2="${x.toFixed(2)}" y2="${tops[j] + r.h}" stroke="#9ca3af" stroke-width="0.12"/>`; });
-    out += txt(x, tops[row('num')] + rows[row('num')].h / 2 + 0.7, String(q.num), 1.8, { a: 'middle', w: 'bold' });
+    out += txt(x, tops[row('num')] + rows[row('num')].h / 2 + 0.8, String(q.num), 2.2, { a: 'middle', w: 'bold' });
     if (i) out += vt((X(keep[i - 1].s) + x) / 2 - 0.7, row('dp'), f2(q.s - keep[i - 1].s));
     out += vt(x, row('pk'), fmtPk(o.pk0 + q.s).replace(/,00$/, ''));
     out += vt(x, row('tn'), f2(tn(q.s)));
@@ -684,7 +685,7 @@ function cartouche(o, rows, y0, X, vis, zp, tn) {
       const xa = X(A), xb = X(B), ua = (A - e.s0) / (e.s1 - e.s0), ub = (B - e.s0) / (e.s1 - e.s0);
       d += `M${xa.toFixed(2)},${lvl(e, ua).toFixed(2)}L${xb.toFixed(2)},${lvl(e, ub).toFixed(2)}`;
       if (e.s0 >= s0 - 1e-6) out += `<line x1="${xa.toFixed(2)}" y1="${t}" x2="${xa.toFixed(2)}" y2="${t + h}" stroke="#000" stroke-width="0.12"/>`;
-      const len = `L = ${f2(e.s1 - e.s0)}`, w = xb - xa, fs = Math.min(1.7, h * 0.24);
+      const len = `L = ${f2(e.s1 - e.s0)}`, w = xb - xa, fs = Math.min(2.1, h * 0.23);
       const lab = e.kind === 'L' ? `droite · ${len}` : e.kind === 'A' ? `R = ${f2(e.R, 0)} ${e.sg > 0 ? 'gauche' : 'droite'} · ${len}` : `A = ${f2(e.A, 0)} · ${len}`;
       const sh = e.kind === 'L' ? len : e.kind === 'A' ? `R ${f2(e.R, 0)}` : `A ${f2(e.A, 0)}`;
       const tx = w >= lab.length * fs * 0.56 ? lab : w >= sh.length * fs * 0.58 ? sh : '';
@@ -701,8 +702,8 @@ function cartouche(o, rows, y0, X, vis, zp, tn) {
       const xa = X(A), xb = X(B), w = xb - xa, ye = tops[je], yl = tops[jl];
       let s = `<line x1="${xa.toFixed(2)}" y1="${ye}" x2="${xa.toFixed(2)}" y2="${yl + rows[jl].h}" stroke="#000" stroke-width="0.15"/><line x1="${xb.toFixed(2)}" y1="${ye}" x2="${xb.toFixed(2)}" y2="${yl + rows[jl].h}" stroke="#000" stroke-width="0.15"/>`;
       if (kind === 'para') s += `<path d="M${xa.toFixed(2)},${ye + rows[je].h - 1}Q${((xa + xb) / 2).toFixed(2)},${(ye + (label.includes('rentrant') ? rows[je].h + 1 : -1)).toFixed(2)} ${xb.toFixed(2)},${ye + rows[je].h - 1}" fill="none" stroke="#b91c1c" stroke-width="0.15"/>`;
-      if (w >= label.length * 0.95) s += txt((xa + xb) / 2, ye + rows[je].h * 0.55, label, 1.8, { a: 'middle' });
-      if (w >= lab2.length * 0.95) s += txt((xa + xb) / 2, yl + rows[jl].h * 0.68, lab2, 1.8, { a: 'middle' });
+      if (w >= label.length * 1.35) s += txt((xa + xb) / 2, ye + rows[je].h * 0.6, label, 2.5, { a: 'middle' });
+      if (w >= lab2.length * 1.3) s += txt((xa + xb) / 2, yl + rows[jl].h * 0.72, lab2, 2.4, { a: 'middle' });
       return s;
     };
     // dénivelée de chaque élément (cote de fin − cote de début)
