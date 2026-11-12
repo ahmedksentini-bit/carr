@@ -395,7 +395,23 @@ a.btn:hover { filter: brightness(1.08); }
 /* Profil type construit point par point (pttedit.js) */
 .ptt-box { border: 1px solid var(--line2); border-radius: 8px; padding: 6px 10px; margin: 6px 0 10px; }
 .ptt-box details summary { cursor: pointer; margin: 6px 0; }
-.ptt-box table input, .ptt-box table select { width: 100%; min-width: 70px; }
+.ptt-box .ptt-title { font-weight: 600; margin: 2px 0 8px; }
+.ptt-box .ptt-grid { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; }
+.ptt-box .ptt-grid2 { grid-template-columns: auto minmax(0, 1fr); }
+.ptt-box .ptt-grid select, .ptt-box .ptt-wide { width: 100%; min-width: 0; box-sizing: border-box; }
+.ptt-box .ptt-grid .lb { white-space: nowrap; }
+.ptt-box > .ptt-wide { margin: 8px 0 2px; }
+.ptt-box details { border-top: 1px solid var(--line2); margin-top: 8px; padding-top: 2px; }
+.ptt-box details > .ptt-wide, .ptt-box details > select { margin: 6px 0; }
+.ptt-box .ptt-n { opacity: .65; font-weight: normal; }
+.ptt-box .ptt-ranges { display: flex; flex-direction: column; gap: 6px; }
+.ptt-box .ptt-rg { border: 1px solid var(--line2); border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; }
+.ptt-box .ptt-rgh { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ptt-box .ptt-rgh label { display: inline-flex; align-items: center; gap: 4px; }
+.ptt-box .ptt-rgh input { width: 78px; }
+.ptt-box .ptt-rgh button { margin-left: auto; }
+.ptt-box .ptt-btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.ptt-box .ptt-btns button { min-width: 0; padding-left: 4px; padding-right: 4px; }
 dialog.ptt-dlg .ptt-name input { width: 220px; }
 dialog.ptt-dlg .ptt-tools { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; padding: 6px 14px; border-bottom: 1px solid var(--line2); }
 dialog.ptt-dlg .ptt-tools button.on { background: #2563eb; color: #fff; border-color: #2563eb; }

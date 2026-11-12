@@ -2776,7 +2776,17 @@ function connectJunctionToRoads(j) {
     }
     const atEnd = G.dist(pts[0], j.C) < j.R + PS_LB + 5 || G.dist(pts[pts.length - 1], j.C) < j.R + PS_LB + 5;
     if (best && best.d <= j.R + 15 && !atEnd) {
-      if (H.kind !== 'route') msgs.push(`${H.name || 'Autoroute'} : pas de carrefour à niveau sur une autoroute — échangeur (onglet Échangeur) ou voie principale de type route`);
+      // Voie principale encore typée « autoroute » (type par défaut, p. ex. axe importé d'un KMZ) sans aucune bretelle
+      // d'échangeur : y poser un carrefour dit clairement que c'est une route → elle passe en route non autoroutière,
+      // profil en travers figé à l'identique (voies, BAU/BDD, TPC, berme), puis elle est coupée comme une route.
+      const usedByRamps = (S.prj.ramps || []).some((r) => [r.from, r.to].some((e) => /^hwy/.test(e?.ref || '')));
+      if (H.kind !== 'route' && !usedByRamps) {
+        const P = hwyParams(S.prj);
+        for (const f of ['lanes', 'wLane', 'bau', 'bdg', 'median', 'berme']) if (H[f] === '' || H[f] == null) H[f] = P[f];
+        H.kind = 'route'; H.dcat = S.prj.context === 'urbain' ? 'AU70' : P.median > 0 ? 'A110' : 'R1';
+        msgs.push(`${H.name || 'Voie principale'} était de type autoroute : passée en route non autoroutière (${DCAT[H.dcat].label}, même profil en travers ; type modifiable dans Tracé) pour recevoir ${j.name}`);
+      }
+      if (H.kind !== 'route') msgs.push(`${H.name || 'Autoroute'} : pas de carrefour à niveau sur une autoroute qui porte des bretelles d'échangeur — échangeur (onglet Échangeur) ou voie principale de type route`);
       else {
         if (j.plan && !(j.J.plan?.main || []).filter((id) => (j.J.branches || []).some((b) => b.id === id)).length && best.d > 0.01) { j.C = r3p(best.q); j.J.center = { ...j.J.center, auto: false, x: j.C.x, y: j.C.y }; }
         const name = H.name || 'Voie principale', r = splitHwy(best.s, j.R + PS_LB, j.C);
@@ -2848,7 +2858,7 @@ function centerPlaced() {
   if (!j) return;
   j.C = { x: +S.prj.center.x, y: +S.prj.center.y };
   const msgs = connectJunctionToRoads(j);
-  if (msgs.length) { S.echSig = ''; update(); toast(`${msgs.join(' ; ')}.`); }
+  if (msgs.length) { S.echSig = ''; update(); toast(`${msgs.join(' ; ')}.`, msgs.some((t) => t.includes('pas de carrefour')) ? 'warn' : 'info'); }
 }
 function connectCross(k, { ends = false } = {}) {
   const msgs = [], X = S.prj.crosses[k];
@@ -4459,11 +4469,11 @@ function refreshPLAxis(c) {
 }
 // Stations du cartouche (comme BVTrace) : profils en travers implantés sur l'axe, sinon pas régulier (10, 20, 25, 50 ou
 // 100 m selon la longueur) ; cote TN lue sur le MNT.
-function plCartStations(key, ax, PL) {
+function plCartStations(key, ax, PL, stepIn = 0) {
   const tin = S.tn?.tin || null, zTN = (s) => { if (!tin) return null; const { p } = ax.at(s); return tinZ(tin, p.x, p.y); };
   const imp = (S.prof?.list || []).filter((q) => q.axis === key).sort((a, b) => a.s - b.s);
   if (imp.length >= 2) return imp.map((q) => ({ num: q.name, s: q.s, z: zTN(q.s) }));
-  const step = [10, 20, 25, 50, 100, 200, 500].find((v) => ax.len / v <= 120) || 1000, out = [];
+  const step = stepIn > 0 ? stepIn : [10, 20, 25, 50, 100, 200, 500].find((v) => ax.len / v <= 120) || 1000, out = [];
   let n = 1;
   for (let s = 0; s <= ax.len + 1e-9; s += step) out.push({ num: n++, s, z: zTN(s) });
   if (ax.len - out[out.length - 1].s > 0.5) out.push({ num: n, s: ax.len, z: zTN(ax.len) });
@@ -4885,19 +4895,27 @@ function bindPL() {
       return { name: g.name, s, kind: K.type, label: dims, n: K.n, B: K.B, H: K.H, ep: K.ep, et: K.et, ei: K.ei, er: K.er, sinP: K.sinP, ang: K.ang, L: K.L, zB, zam: g.inv?.zam ?? null, zav: g.inv?.zav ?? null, J: g.inv?.J ?? null };
     });
     const scale = +$('#plCbScale').value || 1000, zs = +$('#plCbZ').value || 0, format = $('#plCbFmt').value || 'A3';
+    // un axe long (20 km et plus) demande quelques secondes : la fenêtre s'ouvre tout de suite (dans le geste de
+    // l'utilisateur, sinon le navigateur la bloque) avec un message d'attente, le calcul suit après un rafraîchissement
+    const w = window.open('', '_blank');
+    try { w?.document.write('<!DOCTYPE html><meta charset="utf-8"><title>Tracé combiné…</title><body style="font:15px Arial;padding:24px">Génération du tracé combiné de ' + esc(ax.name) + '…</body>'); } catch { /* fenêtre fermée */ }
+    toast(`Tracé combiné de ${ax.name} : génération…`);
+    setTimeout(() => {
     let R;
     try {
       R = combinedSheets({
         ax, PL, pk0: pkOrigin(S.prj, key), tnAt: (s) => (tin ? tinZ(tin, ax.at(s).p.x, ax.at(s).p.y) : null),
-        stations: plCartStations(key, ax, A.PL), devAt, ohs, prims: [...(S.D?.prims || []), ...(S.Do || []).flatMap((d) => d.D?.prims || []), ...(S.talus?.prims || [])],
+        // sans profils implantés : un pas régulier lisible à l'échelle de la feuille (≥ 15 mm), indépendant de la
+        // longueur de l'axe (sinon 200 m sur 20 km → recouvrement d'une demi-feuille et deux fois trop de feuilles)
+        stations: plCartStations(key, ax, A.PL, [10, 20, 25, 50, 100, 200, 500].find((v) => (v * 1000) / scale >= 15) || 1000), devAt, ohs, prims: [...(S.D?.prims || []), ...(S.Do || []).flatMap((d) => d.D?.prims || []), ...(S.talus?.prims || [])],
         dxf: S.dxf, tnPts: Array.isArray(S.prj.tn?.pts) ? S.prj.tn.pts : [], tnSrc: S.prj.tn?.source || '', tnPrims: combinedContours(), format, scale, zScale: zs > 0 ? zs : Math.max(1, Math.round(scale / 10)), title: ax.name, project: S.prj.name,
       });
-    } catch (e) { console.error(e); toast('Tracé combiné : ' + e.message, 'err'); return; }
+    } catch (e) { console.error(e); toast('Tracé combiné : ' + e.message, 'err'); try { w?.close(); } catch { /* */ } return; }
     const html = combinedHtml(R.svgs, R.info, `Tracé combiné ${ax.name} — ${S.prj.name}`), url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
-    const w = window.open(url, '_blank');
-    if (!w) download(fname('csv').replace(/\.csv$/, `_trace_combine_${ax.name}.html`), html, 'text/html;charset=utf-8');
+    if (w && !w.closed) w.location.href = url; else download(fname('csv').replace(/\.csv$/, `_trace_combine_${ax.name}.html`), html, 'text/html;charset=utf-8');
     setTimeout(() => URL.revokeObjectURL(url), 120000);
     toast(`Tracé combiné de ${ax.name} : ${R.info.sheets} feuille${R.info.sheets > 1 ? 's' : ''} ${format} au 1/${scale} (${fmt(R.info.coverage, 0)} m par feuille, recouvrement ${fmt(R.info.overlap, 1)} m)${PL ? '' : ' — sans ligne rouge (profil non saisi)'}${tin ? '' : ' — sans TN (aucun MNT)'}.`);
+    }, 30);
   });
   $('#btnPlDxf').addEventListener('click', () => {
     const ac = plAxisCtx();
@@ -5062,10 +5080,15 @@ function renderPTT(c, list) {
   const libSel = $('#pttLib'), keep = libSel.value;
   libSel.innerHTML = (S.prj.ptt?.profiles || []).map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('') || '<option value="">(vide)</option>';
   if (keep && findProfile(S.prj, keep)) libSel.value = keep;
+  // plages en cartes (abscisses sur une ligne, un demi-profil par ligne) : les noms longs restent lisibles
+  const nm = (id) => findProfile(S.prj, id)?.name || 'Automatique (paramètres de l\'axe)';
   $('#pttRanges').innerHTML = (A.ranges || []).length
-    ? '<thead><tr><th>s début (m)</th><th>s fin (m)</th><th>gauche</th><th>droite</th><th></th></tr></thead><tbody>' + A.ranges.map((r, i) => `<tr><td><input data-rg="${i}" data-rk="s0" inputmode="decimal" value="${fmt(r.s0, 1)}"></td><td><input data-rg="${i}" data-rk="s1" inputmode="decimal" value="${fmt(r.s1, 1)}"></td>`
-      + `<td><select data-rg="${i}" data-rk="left">${pttOptions(ok(r.left))}</select></td><td><select data-rg="${i}" data-rk="right">${pttOptions(ok(r.right))}</select></td><td><button data-rgdel="${i}" title="Supprimer la plage">✕</button></td></tr>`).join('') + '</tbody>'
-    : '<tbody><tr><td class="note">Aucune plage : les demi-profils ci-dessus valent sur tout l\'axe.</td></tr></tbody>';
+    ? A.ranges.map((r, i) => `<div class="ptt-rg"><div class="ptt-rgh"><b>Plage ${i + 1}</b><label>s <input data-rg="${i}" data-rk="s0" inputmode="decimal" value="${fmt(r.s0, 1)}"></label><span>→</span><label><input data-rg="${i}" data-rk="s1" inputmode="decimal" value="${fmt(r.s1, 1)}"> m</label><button data-rgdel="${i}" title="Supprimer la plage">✕</button></div>`
+      + `<div class="ptt-grid ptt-grid2"><span class="lb">Gauche</span><select data-rg="${i}" data-rk="left" title="${esc(nm(ok(r.left)))}">${pttOptions(ok(r.left))}</select><span class="lb">Droite</span><select data-rg="${i}" data-rk="right" title="${esc(nm(ok(r.right)))}">${pttOptions(ok(r.right))}</select></div></div>`).join('')
+    : '<p class="note">Aucune plage : les demi-profils ci-dessus valent sur tout l\'axe.</p>';
+  $('#pttL').title = nm(ok(A.left)); $('#pttR').title = nm(ok(A.right));
+  $('#pttRgN').textContent = (A.ranges || []).length ? `(${A.ranges.length})` : '';
+  $('#pttLibN').textContent = `(${(S.prj.ptt?.profiles || []).length})`;
 }
 // Ouvre l'éditeur sur le demi-profil du côté sd (1 gauche, −1 droite) de l'axe : profil de la bibliothèque (modifié en
 // place) ou profil automatique (copié dans la bibliothèque et affecté à ce côté à la validation).
