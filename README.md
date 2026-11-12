@@ -211,7 +211,9 @@ ou sur un fond topographique DXF.
   **Tracé combiné** (`js/combine.js`) : feuilles plan + profil en long + cartouche à l'échelle. Les points du MNT et leur
   altitude sont dessinés sur le plan par-dessus le projet (plus lisibles quand le TN vient du SRTM, sans autre fond) ; la
   dénivelée projet − TN de chaque profil est écrite à la verticale au-dessus de la ligne rouge (vert : remblai, + ;
-  orange : déblai, −).
+  orange : déblai, −). Sur le plan, par-dessus le projet : talus (barbules, entrées en terre), aménagements de l'onglet
+  Vitesses / UVR (bandes de catégorie, plateaux, passages, bandes rugueuses, portails… avec leurs désignations) et
+  signalisation verticale (mât, panneau et code : B14-50, C20a, AB25…).
   Ouvrages (cadres, PIPO, buses) : sur le plan, fiche à côté de l'ouvrage — désignation, n × B × H (ou n × buse Ø),
   PK, biais (gr), longueur, fil d'eau amont → aval (pente) et **fil d'eau au droit de l'axe** ; sur le profil en long,
   **coupe de l'ouvrage** au droit de l'axe (largeurs le long de l'axe divisées par le sinus du biais, hauteurs à

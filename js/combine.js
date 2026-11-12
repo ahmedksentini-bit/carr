@@ -21,6 +21,8 @@ const STY = {
   TALUS: { stroke: '#8b6f47', w: 0.12 }, EET: { stroke: '#8b6f47', w: 0.2, dash: [1.2, 0.6] }, LIMITE: { stroke: '#666', w: 0.13 }, ACCOTEMENT: { stroke: '#666', w: 0.13, dash: [1.5, 1] },
   BORDURE: { stroke: '#111', w: 0.32 }, MARQUAGE: { stroke: '#333', w: 0.15 }, RETENUE: { stroke: '#444', w: 0.25 },
   OUVRAGE: { stroke: '#1d4ed8', w: 0.3, fill: '#dbe6fb' }, AXE: { stroke: '#b91c1c', w: 0.15, dash: [6, 1, 1, 1] },
+  // par-dessus : aménagements de modération des vitesses (onglet Vitesses / UVR) et signalisation verticale, nommés
+  UVR: { stroke: '#b45309', w: 0.25, text: '#92400e' }, SIGNALISATION: { stroke: '#111827', w: 0.15, text: '#111827' },
 };
 const LAYERS = Object.keys(STY);
 
@@ -173,7 +175,7 @@ function planBand(o) {
     out += lab;
   }
   // projet dessiné
-  for (const L of LAYERS) for (const pr of o.prims || []) if (pr.L === L) out += primSvg(pr, STY[L], T, k);
+  for (const L of LAYERS) for (const pr of o.prims || []) if (pr.L === L) out += primSvg(pr, STY[L], T, k, phi);
   // points du terrain naturel (semis du MNT) et leur altitude, par-dessus le projet (un MNT SRTM n'a pas d'autre fond) ;
   // étiquettes sans chevauchement (grille de 7 × 2,5 mm)
   if (o.tnPts?.length) {
@@ -241,7 +243,7 @@ function planBand(o) {
 }
 
 // Primitive du projet (repère monde) → SVG papier.
-function primSvg(pr, sty, T, k) {
+function primSvg(pr, sty, T, k, phi = null) {
   const d = (segs) => segsD(segs, T, k);
   const dash = (a) => (a && a[0] * k >= 0.3 ? ` stroke-dasharray="${a.map((v) => (v * k).toFixed(2)).join(' ')}"` : '');
   if (pr.k === 'fill') {
@@ -250,14 +252,24 @@ function primSvg(pr, sty, T, k) {
   }
   if (pr.k === 'path' && sty.stroke) {
     const w = Math.max(sty.w, (pr.wm || 0) * k);
-    return `<path d="${d(pr.segs)}${pr.closed ? 'Z' : ''}" fill="none" stroke="${sty.stroke}" stroke-width="${w.toFixed(2)}" stroke-linejoin="round"${pr.dash ? dash(pr.dash) : sty.dash ? ` stroke-dasharray="${sty.dash.join(' ')}"` : ''}/>`;
+    return `<path d="${d(pr.segs)}${pr.closed ? 'Z' : ''}" fill="none" stroke="${pr.color || sty.stroke}" stroke-width="${w.toFixed(2)}" stroke-linejoin="round"${pr.dash ? dash(pr.dash) : sty.dash ? ` stroke-dasharray="${sty.dash.join(' ')}"` : ''}/>`;
   }
   if (pr.k === 'hatch' && sty.stroke) {
     let s = '';
     for (const [a, b] of pr.lines) { const p = T(a), q = T(b); s += `M${p.x.toFixed(2)},${p.y.toFixed(2)}L${q.x.toFixed(2)},${q.y.toFixed(2)}`; }
     return s ? `<path d="${s}" stroke="${sty.stroke}" stroke-width="${Math.max(0.1, (pr.wm || 0) * k).toFixed(2)}"/>` : '';
   }
-  if (pr.k === 'circle' && sty.stroke) { const c = T(pr.c); return `<circle cx="${c.x.toFixed(2)}" cy="${c.y.toFixed(2)}" r="${(pr.r * k).toFixed(2)}" fill="none" stroke="${sty.stroke}" stroke-width="${sty.w}"/>`; }
+  if (pr.k === 'circle' && sty.stroke) { const c = T(pr.c); return `<circle cx="${c.x.toFixed(2)}" cy="${c.y.toFixed(2)}" r="${Math.max(0.25, pr.r * k).toFixed(2)}" fill="none" stroke="${pr.color || sty.stroke}" stroke-width="${sty.w}"/>`; }
+  // textes (désignations des aménagements) : seulement quand l'orientation de la feuille est connue
+  if (pr.k === 'text' && sty.text && phi != null && pr.s) {
+    const p = T(pr.p), h = Math.max(1.3, Math.min(3, (pr.h || 1) * k));
+    return txt(p.x, p.y, String(pr.s), h, { a: pr.align === 'left' ? 'start' : pr.align === 'right' ? 'end' : 'middle', c: pr.color || sty.text, rot: upright(-((pr.rot || 0) - phi) * 180 / Math.PI), halo: true });
+  }
+  // panneaux : carré au pied du mât, côté opposé à la chaussée, et code du panneau
+  if (pr.k === 'sign' && pr.code) {
+    const out = pr.out || { x: 0, y: 0 }, c = T({ x: pr.p.x + out.x * 1.2, y: pr.p.y + out.y * 1.2 }), a = 1.6;
+    return `<rect x="${(c.x - a / 2).toFixed(2)}" y="${(c.y - a / 2).toFixed(2)}" width="${a}" height="${a}" fill="#fff" stroke="${sty.stroke || '#111'}" stroke-width="0.2"/>` + txt(c.x + a / 2 + 0.4, c.y + 0.5, String(pr.code), 1.5, { c: sty.text || '#111', w: 'bold', halo: true });
+  }
   return '';
 }
 function segsD(segs, T, k) {
