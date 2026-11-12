@@ -10,7 +10,7 @@
 [hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body {
-  display: grid; grid-template-rows: 46px minmax(0, 1fr) 30px;
+  display: grid; grid-template-rows: 46px auto minmax(0, 1fr) 30px; grid-template-columns: minmax(0, 1fr);
   background: var(--bg); color: var(--text);
   font: 13px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif; overflow: hidden;
 }
@@ -75,10 +75,13 @@ main.app { display: grid; grid-template-columns: 46px minmax(0, 1fr) 452px; min-
 
 /* ---------- Panneau */
 .panel { background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
-.tabs { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--line); flex: none; }
+/* Onglets : barre de menu en haut, sur toute la largeur (sous l'en-tête), une ligne sur un écran large */
+nav.topnav { background: var(--panel); border-bottom: 1px solid var(--line); padding: 0 8px 0 54px; min-width: 0; }
+.tabs { display: flex; flex-wrap: wrap; flex: none; }
 .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding: 8px 8px 6px; font-size: 12.5px; color: var(--muted); }
 .tabs button:hover { color: var(--text); }
 .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+.badge:empty { display: none; }
 .badge { display: inline-block; min-width: 16px; padding: 0 4px; border-radius: 8px; font-size: 11px; line-height: 16px; text-align: center; }
 .badge.err { background: var(--err); color: #300; }
 .badge.warn { background: var(--warn); color: #3a2a00; }
@@ -247,6 +250,9 @@ dialog li { margin: 4px 0; }
 .keys code { font-family: var(--mono); color: var(--accent); }
 .right { text-align: right; margin-top: 12px; }
 
+/* en-tête : le sous-titre cède la place aux boutons avant qu'ils ne débordent (écran de 1280 px) */
+@media (max-width: 1440px) { .brand .sub { display: none; } }
+header.top { min-width: 0; overflow-x: auto; scrollbar-width: none; }
 @media (max-width: 1100px) {
   .brand .sub { display: none; }
   main.app { grid-template-columns: 46px minmax(0, 1fr) 390px; }
@@ -259,6 +265,7 @@ dialog li { margin: 4px 0; }
   body { display: block; overflow: auto; }
   main.app { height: auto; }
   .panel { min-height: 85vh; }
+  nav.topnav { padding: 0; position: sticky; top: 0; z-index: 5; }
   .tabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; position: sticky; top: 0; z-index: 5; background: var(--panel); }
   .tabs button { flex: none; white-space: nowrap; padding: 10px 10px 8px; font-size: 13.5px; }
   .tab { overflow: visible; flex: none; }
@@ -289,6 +296,7 @@ table.axr input.odc { width: 70px; text-align: right; font-family: var(--mono); 
 html[dir=rtl] body { font-family: "Segoe UI", Tahoma, "Noto Sans Arabic", system-ui, sans-serif; }
 html[dir=rtl] .tools { border-right: 0; border-left: 1px solid var(--line); }
 html[dir=rtl] .panel { border-left: 0; border-right: 1px solid var(--line); }
+html[dir=rtl] nav.topnav { padding: 0 54px 0 8px; }
 html[dir=rtl] .toast { border-left-width: 1px; border-right: 4px solid var(--info); }
 html[dir=rtl] .toast.warn { border-right-color: var(--warn); }
 html[dir=rtl] .toast.err { border-right-color: var(--err); }

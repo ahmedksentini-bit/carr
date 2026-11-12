@@ -6904,7 +6904,11 @@ function bindUI() {
       if (q) { viewer.cx = q.p.x; viewer.cy = q.p.y; viewer.s = Math.max(viewer.s, 6); S.snap = { ...q.p, kind: `point ${q.n}` }; viewer.invalidate(); }
     }
   });
-  $$('.tabs [data-tab]').forEach((b) => b.addEventListener('click', () => { showTab(b.dataset.tab); if (b.dataset.tab === 'pl') plPopOpen(); }));
+  $$('.tabs [data-tab]').forEach((b) => b.addEventListener('click', () => {
+    showTab(b.dataset.tab); if (b.dataset.tab === 'pl') plPopOpen();
+    // téléphone : la barre d'onglets est en haut de la page, le contenu sous le plan — on y descend
+    if (window.matchMedia('(max-width: 760px)').matches) $('.panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
   $('#chBack')?.addEventListener('click', () => showTab(S.tabBefore && S.tabBefore !== 'chaussee' ? S.tabBefore : 'projet'));
   $$('.tools [data-tool]').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
   $$('.tools [data-act]').forEach((b) => b.addEventListener('click', () => (b.dataset.act === 'zoomGira' ? zoomGira() : zoomAll())));
