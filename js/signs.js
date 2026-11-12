@@ -45,9 +45,15 @@ export const CATALOG = {
   D20: { label: 'Direction de position', shape: 'dir', w: 1.5 },
   D60: { label: 'Confirmation de direction', shape: 'dir', w: 2.0 },
   D31: { label: 'Direction de position (voie directe)', shape: 'dir', w: 1.2 },
+  // Signalisation des virages (guide SETRA « Comment signaler les virages ? », 2002 ; virages.js)
+  A1a: { label: 'Virage à droite (A1a)', shape: 'tri' },
+  A1b: { label: 'Virage à gauche (A1b)', shape: 'tri' },
+  J1: { label: 'Balise de virage J1', shape: 'j5' },
+  J4: { label: 'Balise J4 tri-chevrons', shape: 'dir', w: 1.2 },
+  J4m: { label: 'Balise J4 monochevron', shape: 'j5' },
 };
 
-const widthOf = (code, gamme) => {
+export const widthOf = (code, gamme) => {
   const c = CATALOG[code], g = GAMMES[gamme] || GAMMES.normale;
   return c.shape === 'dir' ? c.w : g[c.shape];
 };

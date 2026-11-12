@@ -43,6 +43,12 @@ const ICONS = {
   B51: () => `<rect x="6" y="4" width="52" height="56" fill="${W}" stroke="${K}" stroke-width="3"/><circle cx="32" cy="26" r="16" fill="${W}" stroke="#888" stroke-width="4"/><text x="32" y="31" font-family="Arial, sans-serif" font-weight="bold" font-size="14" fill="#888" text-anchor="middle">30</text><text x="32" y="55" font-family="Arial, sans-serif" font-weight="bold" font-size="10" fill="#888" text-anchor="middle">ZONE</text><path d="M10 56 L54 8" stroke="${K}" stroke-width="4"/>`,
   A13a: () => tri(true) + `<circle cx="26" cy="27" r="3.5" fill="${K}"/><circle cx="38" cy="29" r="3" fill="${K}"/><path d="M26 31 L24 42 L20 50 M24 42 L28 50 M26 33 L32 37 M38 32 L37 42 L34 50 M37 42 L40 50 M32 37 L38 34" fill="none" stroke="${K}" stroke-width="3" stroke-linecap="round"/>`,
   C20a: () => `<rect x="4" y="4" width="56" height="56" fill="${B}" stroke="${W}" stroke-width="3"/><path d="M32 12 L54 52 H10 Z" fill="${W}"/><circle cx="32" cy="27" r="3.5" fill="${K}"/><path d="M32 31 L31 40 L27 48 M31 40 L36 48 M32 33 L37 37 M32 33 L27 37" fill="none" stroke="${K}" stroke-width="2.6" stroke-linecap="round"/>`,
+  // Virages (A1a à droite, A1b à gauche) ; balises J1 (plaque à bandes) et J4 (chevrons blancs sur fond bleu).
+  A1a: () => tri(true) + `<path d="M26 50 V36 Q26 24 38 24 H40" fill="none" stroke="${K}" stroke-width="5"/><path d="M38 17 l9 7 l-9 7 Z" fill="${K}"/>`,
+  A1b: () => tri(true) + `<path d="M38 50 V36 Q38 24 26 24 H24" fill="none" stroke="${K}" stroke-width="5"/><path d="M26 17 l-9 7 l9 7 Z" fill="${K}"/>`,
+  J1: () => `<rect x="18" y="4" width="28" height="56" fill="${W}" stroke="${K}" stroke-width="2"/><path d="M18 18 L46 4 M18 32 L46 18 M18 46 L46 32 M18 60 L46 46" stroke="${R}" stroke-width="7"/>`,
+  J4: () => `<rect x="2" y="14" width="60" height="36" fill="${B}" stroke="${W}" stroke-width="2"/><path d="M10 20 L20 32 L10 44 M26 20 L36 32 L26 44 M42 20 L52 32 L42 44" fill="none" stroke="${W}" stroke-width="5"/>`,
+  J4m: () => `<rect x="12" y="6" width="40" height="52" fill="${B}" stroke="${W}" stroke-width="2"/><path d="M24 16 L40 32 L24 48" fill="none" stroke="${W}" stroke-width="7"/>`,
   ANN: () => rect() + `<text x="32" y="30" font-family="Arial, sans-serif" font-weight="bold" font-size="10" fill="${K}" text-anchor="middle">RALENTIR</text><text x="32" y="43" font-family="Arial, sans-serif" font-size="10" fill="${K}" text-anchor="middle">250 m</text>`,
 };
 // Limitation de vitesse B14 : disque blanc à bord rouge, valeur au centre (code « B14-50 »).
@@ -74,7 +80,7 @@ export function signImage(code, onLoad) {
 
 // Contour (polygone local, unité = largeur du panneau 1) de la forme, pour le DXF : vue de face schématique.
 export function signOutline(code) {
-  const shape = /^AB4$/.test(code) ? 'octo' : /^(AB(25|2|3a|3b|5)|A13a)$/.test(code) ? (/^AB3|AB5/.test(code) ? 'triDown' : 'triUp')
+  const shape = /^AB4$/.test(code) ? 'octo' : /^(AB(25|2|3a|3b|5)|A13a|A1a|A1b)$/.test(code) ? (/^AB3|AB5/.test(code) ? 'triDown' : 'triUp')
     : /^AB6$/.test(code) ? 'diamond' : /^B(30|51)$/.test(code) ? 'square' : /^(B|UVR:)/.test(code) ? 'circle' : code === 'J5' || code === 'C20a' ? 'square' : 'rect';
   const h = 0.5, k = Math.sqrt(3) / 2;
   switch (shape) {

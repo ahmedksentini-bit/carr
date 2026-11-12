@@ -7,7 +7,8 @@ import { DxfWriter } from './dxf-write.js';
 import { Viewer, THEMES, drawDesign, drawDxf, buildDxfCache, snapDxf, drawGrid, drawHud, niceStep } from './viewer.js';
 import { buildDesign, fmt, fmtGis } from './roundabout.js';
 import { PRESETS, RING_DEVERS, PLAN, GUIDE_NOTES, aciRow, checkDesign, hintFor, getPath, setPath, isPlan, defaultPlan, SECTION, sectionParams, TAD, SIGNS, signParams } from './norms.js';
-import { GAMMES, CATALOG } from './signs.js';
+import { GAMMES, CATALOG, widthOf } from './signs.js';
+import { curveSignage } from './virages.js';
 import { signSVG, signOutline } from './signicons.js';
 import { hwyParams, rampParams, endFrame, normRamp, buildEchangeur, trumpet, deriveTrumpet, crossingWith, xref, cloverleaf, halfCloverleaf, diamond, gradeRoundabout, HWY_CAT, RAMP_CAT, crossParams, roadAlignment, parseXref, tigeTpc } from './echangeur.js';
 import { pathProject, pathTangentAt, polySegs } from './clotho.js';
@@ -431,6 +432,7 @@ function update({ commit = true, panels = true } = {}) {
     S.ospans = structureSpans(S.prj, axes, S.ouvr?.list || []);
   } catch (e) { console.error(e); }
   try { cadreInvertsAll(); } catch (e) { console.error(e); }
+  try { virageSigns(); } catch (e) { console.error(e); S.vir = null; }
   for (const id of S.rampKinks || []) { const r = S.prj.ramps.find((q) => q.id === id); if (r) S.checks.push({ lvl: 'err', group: 'Échangeur', msg: `${r.name} : arrivée au giratoire non tangente (la courbe se termine dans la branche) — allongez le dernier alignement ou déplacez le dernier sommet dans l'axe de la branche.` }); }
   if (S.D?.hwy?.ok) try { // chaussées superposées hors ouvrage
     const juncs = [{ O: S.D.O, Rg: +S.prj.ring.Rg, kind: S.prj.kind }, ...(S.Do || []).map((d) => { const o = S.prj.others.find((q) => q.id === d.id); return { O: d.D.O, Rg: +o?.ring?.Rg || 20, kind: o?.kind }; })].filter((j) => j.O && (j.kind || 'giratoire') === 'giratoire');
@@ -4057,7 +4059,8 @@ function refreshDvAxis() {
   const curves = [];
   for (let i = 0; i < els.length; i++) {
     if (els[i].kind === 'L') continue;
-    const g = [els[i]]; while (i + 1 < els.length && els[i + 1].kind !== 'L' && (els[i + 1].pi == null || els[i + 1].pi === els[i].pi)) g.push(els[++i]);
+    const g = [els[i]]; let gpi = els[i].pi ?? null; // n° du sommet : les clothoïdes ne le portent pas toujours
+    while (i + 1 < els.length && els[i + 1].kind !== 'L' && (els[i + 1].pi == null || gpi == null || els[i + 1].pi === gpi)) { g.push(els[++i]); gpi = gpi ?? els[i].pi ?? null; }
     let km = 0, sm = g[0].s0, sg = 1;
     for (const e of g) for (const t of [0, e.len / 2, e.len]) { const kk = e.curvAt(t); if (Math.abs(kk) > Math.abs(km)) { km = kk; sm = e.s0 + t; } }
     if (Math.abs(km) < 1e-9) continue;
@@ -4380,10 +4383,40 @@ function buildSignFields() {
         f('dB21', 'B21-1 : distance de contrôle à la ligne') +
         '<label class="chk"><input type="checkbox" data-k="signs.d21"> D21 de sortie sur les îlots séparateurs</label>' +
         '<label class="chk"><input type="checkbox" data-k="signs.gc"> Route classée à grande circulation (AB6 après le giratoire)</label>' +
-        f('dAB6', 'AB6 après la sortie'));
+        f('dAB6', 'AB6 après la sortie')) +
+    '<h3>Virages des axes</h3><label class="chk"><input type="checkbox" data-k="signs.virages"> Signaler les virages d\'après le guide SETRA « Comment signaler les virages ? » (2002) — routes bidirectionnelles à 2 voies</label>';
 }
 
+// Signalisation des virages des axes (guide SETRA 2002, virages.js) : virages classés dans chaque sens, panneaux A1,
+// balises J1 et J4 posés sur le plan (calque SIGNALISATION) et ajoutés à la liste des panneaux.
+function virageSigns() {
+  S.vir = null;
+  const SP = signParams(S.prj);
+  if (!SP.on || !SP.virages || !S.D) return;
+  const axes = (S.prof?.axes || listAxes(S.prj, S.D)).filter((a) => /^(hwy|x:)/.test(a.key));
+  const R = curveSignage(axes, {
+    grade: (key, s) => { const A = S.axpl?.get(key); if (!A?.defined) return null; const v = A.PL.gradeAt(Math.max(A.PL.nodes[0].s, Math.min(A.PL.sEnd, s))); return Number.isFinite(v) ? v : null; },
+    pk0: (key) => pkOrigin(S.prj, key),
+  });
+  S.vir = R;
+  const TH = (S.prj.opts?.textH || 0.8) * 1.2;
+  S.D.signs = S.D.signs || [];
+  for (const sg of R.signs) {
+    const w = widthOf(sg.code, sg.small ? 'normale' : SP.gamme), pf = { x: -sg.face.y, y: sg.face.x };
+    S.D.prims.push({ k: 'circle', L: 'SIGNALISATION', c: sg.p, r: 0.1 });
+    S.D.prims.push({ k: 'path', L: 'SIGNALISATION', segs: [G.L(G.add(sg.p, G.mul(pf, -w / 2)), G.add(sg.p, G.mul(pf, w / 2)))], wm: 0.1 });
+    S.D.prims.push({ k: 'sign', L: 'SIGNALISATION', p: sg.p, out: sg.out, face: sg.face, code: sg.code, w: sg.small ? 0.6 : w, h: TH * 0.7 });
+    S.D.signs.push({ n: S.D.signs.length + 1, branch: `${sg.axis} (${sg.dir > 0 ? 'PK +' : 'PK −'})`, code: sg.code, where: `virage ${sg.row.n}, R ${fmt(sg.row.R, 0)} m`, x: sg.s, p: sg.p, gamme: sg.small ? 'normale' : SP.gamme, w, h: SP.hauteur, note: sg.note });
+  }
+  for (const r of R.rows) for (const f of r.flags) S.checks.push({ lvl: 'warn', group: 'Signalisation', msg: `${r.axis}, ${r.sens}, virage ${r.n} (PK ${pkStr(r.pkIn)}, R ${fmt(r.R, 0)} m) : ${f}.`, ax: r.key, s: (r.s0 + r.s1) / 2 });
+}
 function refreshSigns() {
+  const V = S.vir;
+  $('#virTable').innerHTML = !V ? '<tbody><tr><td class="note">Signalisation des virages désactivée (case ci-dessus) ou aucun axe.</td></tr></tbody>'
+    : !V.rows.length ? `<tbody><tr><td class="note">Aucun virage à classer sur les routes bidirectionnelles à 2 voies.${V.skipped.length ? ` Hors domaine : ${esc(V.skipped.map((q) => `${q.axis} — ${q.why}`).join(' ; '))}.` : ''}</td></tr></tbody>`
+      : '<thead><tr><th>Axe</th><th>Sens</th><th>N°</th><th>PK entrée</th><th>R min (m)</th><th>Virage</th><th>Alignement amont (m)</th><th>Pente amont</th><th>V virage préc.</th><th>Va (km/h)</th><th>Vv (km/h)</th><th>Va − Vv</th><th>Classe</th><th>Signalisation théorique</th><th>À examiner</th></tr></thead><tbody>'
+      + V.rows.map((r) => `<tr data-virs="${(r.s0 + r.s1) / 2}" data-virk="${esc(r.key)}"><td>${esc(r.axis)}</td><td>${r.dir > 0 ? 'PK +' : 'PK −'}</td><td class="mono">${r.n}</td><td class="mono">${pkStr(r.pkIn)}</td><td class="mono">${fmt(r.R, 0)}</td><td>${r.left ? 'à gauche' : 'à droite'}</td><td class="mono">${fmt(r.ald, 0)}</td><td class="mono">${fmt(r.pe, 1)} %</td><td class="mono">${fmt(r.vPrev, 0)}</td><td class="mono">${fmt(r.va, 0)}</td><td class="mono">${fmt(r.vv, 0)}</td><td class="mono"><b>${fmt(r.dv, 1)}</b></td><td><b>${r.cls}</b></td><td>${esc(r.text)}</td><td class="dim">${esc(r.flags.join(' ; '))}</td></tr>`).join('') + '</tbody>'
+      + (V.skipped.length ? `<tbody><tr><td colspan="15" class="note">Hors domaine de la méthode : ${esc(V.skipped.map((q) => `${q.axis} — ${q.why}`).join(' ; '))}.</td></tr></tbody>` : '');
   const list = S.D?.signs || [], SP = signParams(S.prj);
   $('#signInfo').textContent = !SP.on ? 'Signalisation désactivée.' : list.length ? `${list.length} panneau(x) et balise(s) — calque GIRA_SIGNALISATION, mâts dans les points d'implantation.` : 'Aucun panneau : dessinez les branches.';
   const c = (v, d = 2) => (v == null || v === '' || !Number.isFinite(+v) ? '—' : fmt(+v, d));
@@ -4996,6 +5029,7 @@ function drawOhMove(ctx, v) {
 }
 function bindPL() {
   $('#plBranch').addEventListener('change', (e) => { S.plSel = e.target.value; S.plPi = -1; refreshPL(); });
+  $('#virTable')?.addEventListener('click', (e) => { const tr = e.target.closest('tr[data-virs]'); if (!tr) return; const ax = (S.prof?.axes || listAxes(S.prj, S.D)).find((a) => a.key === tr.dataset.virk); if (ax) gotoCheck({ at: ax.at(+tr.dataset.virs).p }); });
   $('#dvAxis').addEventListener('change', (e) => { S.dvSel = e.target.value; refreshDevers(); });
   $('#tab-devers').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-dvs]'); if (!tr || !S.dvAx) return; const v = +tr.dataset.dvs; gotoCheck({ at: S.dvAx.at(Math.max(0, Math.min(S.dvAx.len, v))).p }); });
   $('#plVe').addEventListener('change', refreshPL);

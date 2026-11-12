@@ -94,12 +94,12 @@ export const SIGNS = {
   interurbain: {
     on: true, gamme: 'grande', gammeAv: 'normale', classe: 2, recul: 0.7, hauteur: 1.0,
     dA25: 150, dD42: 50, d42: true, d21: true, doubleAB3a: 'auto', dB21: 20, gc: false, dAB6: 30,
-    dAv: 150, dAB2: '', dir: true, dD40: 150, dD60: 300, main: true, regimeUrb: 'auto',
+    dAv: 150, dAB2: '', dir: true, dD40: 150, dD60: 300, main: true, regimeUrb: 'auto', virages: true,
   },
   urbain: {
     on: true, gamme: 'normale', gammeAv: 'normale', classe: 2, recul: 0.7, hauteur: 2.3,
     dA25: 30, dD42: 50, d42: false, d21: true, doubleAB3a: 'auto', dB21: 20, gc: false, dAB6: 20,
-    dAv: '', dAB2: '', dir: false, dD40: 100, dD60: 150, main: false, regimeUrb: 'auto',
+    dAv: '', dAB2: '', dir: false, dD40: 100, dD60: 150, main: false, regimeUrb: 'auto', virages: false,
   },
 };
 export function signParams(prj) {
