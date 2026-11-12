@@ -217,7 +217,8 @@ export function carteChamps(res, cle = "epsT", { largeur = 600, isolignes = true
   const sx = Wp / (2 * res.Xmax);
   const Hp = Math.max(230, Math.min(420, res.zMax * sx));
   const sz = Hp / res.zMax, exag = sz / sx;
-  const lPneu = 2 * res.a * sx, hPneu = Math.max(36, Math.min(58, 0.62 * lPneu));
+  // pneus debout : hauteur ≈ 1,7 × largeur, bornée ; au-delà, jumelageDeFace rétrécit le corps du pneu
+  const lPneu = 2 * res.a * sx, hPneu = Math.max(60, Math.min(130, 1.7 * lPneu));
   const y0 = 30 + hPneu + 14;
   const X = (x) => mg + (x + res.Xmax) * sx, Z = (z) => y0 + z * sz;
   const yBas = y0 + Hp;

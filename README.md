@@ -15,7 +15,7 @@ ou sur un fond topographique DXF.
   giratoire ou carrefour en T / X ; ex-« Anneau »), Branches, Profil, PSGR, Visibilité, Contrôles, Capacité, Échangeur,
   Ouvrages, Signalisation, Hydrologie, Vitesses / UVR, Chaussées. Les onglets forment une **barre de menu en haut**, sur
   toute la largeur sous l'en-tête (une ligne sur un écran large, deux à 1280 px ; sur téléphone, barre collée en haut
-  qui défile au doigt, et un onglet choisi fait descendre au panneau) ; leur contenu s'affiche dans le panneau de droite.
+  qui défile au doigt, et un onglet choisi fait descendre au panneau) ; leur contenu s'affiche dans le **panneau de gauche**, la barre d'outils du plan entre ce panneau et le plan (téléphone : plan en haut, panneau dessous).
 - **Onglet Projet** : ce qui vaut pour tout le projet — nom, contenu (axes du tracé, carrefours, bretelles, avec liens
   vers leurs onglets), système de coordonnées, fond de plan, fond DXF, calques KMZ, affichage. La liste des carrefours,
   le type et le contexte (interurbain / urbain) du carrefour actif sont en tête de l'onglet **Carrefours plans**.
