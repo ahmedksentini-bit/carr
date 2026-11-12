@@ -6,6 +6,7 @@
 // la page HTML produite s'imprime en PDF à l'échelle exacte.
 import * as G from './geom.js';
 import { plElements, lowCombined } from './pl.js';
+import { signSVG } from './signicons.js';
 
 export const PAPERS = { A4: [297, 210], A3: [420, 297], A2: [594, 420], A1: [841, 594], A0: [1189, 841] };
 const f2 = (v, d = 2) => (v == null || !Number.isFinite(+v) ? '—' : (+v).toFixed(d).replace('.', ',').replace('-', '−'));
@@ -265,10 +266,13 @@ function primSvg(pr, sty, T, k, phi = null) {
     const p = T(pr.p), h = Math.max(1.3, Math.min(3, (pr.h || 1) * k));
     return txt(p.x, p.y, String(pr.s), h, { a: pr.align === 'left' ? 'start' : pr.align === 'right' ? 'end' : 'middle', c: pr.color || sty.text, rot: upright(-((pr.rot || 0) - phi) * 180 / Math.PI), halo: true });
   }
-  // panneaux : carré au pied du mât, côté opposé à la chaussée, et code du panneau
+  // panneaux : pictogramme (miniature vectorielle du panneau) posé derrière le mât, côté opposé à la chaussée, et code
   if (pr.k === 'sign' && pr.code) {
-    const out = pr.out || { x: 0, y: 0 }, c = T({ x: pr.p.x + out.x * 1.2, y: pr.p.y + out.y * 1.2 }), a = 1.6;
-    return `<rect x="${(c.x - a / 2).toFixed(2)}" y="${(c.y - a / 2).toFixed(2)}" width="${a}" height="${a}" fill="#fff" stroke="${sty.stroke || '#111'}" stroke-width="0.2"/>` + txt(c.x + a / 2 + 0.4, c.y + 0.5, String(pr.code), 1.5, { c: sty.text || '#111', w: 'bold', halo: true });
+    const out = pr.out || { x: 0, y: 0 }, m = T(pr.p), c = T({ x: pr.p.x + out.x * 1.6, y: pr.p.y + out.y * 1.6 }), a = 3.4;
+    const body = signSVG(String(pr.code), 64).replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
+    return `<line x1="${m.x.toFixed(2)}" y1="${m.y.toFixed(2)}" x2="${c.x.toFixed(2)}" y2="${c.y.toFixed(2)}" stroke="#374151" stroke-width="0.15"/><circle cx="${m.x.toFixed(2)}" cy="${m.y.toFixed(2)}" r="0.25" fill="#374151"/>`
+      + `<svg x="${(c.x - a / 2).toFixed(2)}" y="${(c.y - a / 2).toFixed(2)}" width="${a}" height="${a}" viewBox="0 0 64 64" overflow="visible">${body}</svg>`
+      + txt(c.x + a / 2 + 0.4, c.y + 0.5, String(pr.code), 1.4, { c: sty.text || '#111', w: 'bold', halo: true });
   }
   return '';
 }
