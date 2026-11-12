@@ -28,7 +28,7 @@ export async function onRequestGet({ request }) {
   const url = UPSTREAM + '?' + q.toString();
   // En-têtes strictement ASCII (un caractère accentué empêche la requête de partir).
   const upstream = await fetch(url, {
-    headers: { 'User-Agent': 'GIRA/1.0 (hydrologie routiere; carr.ksr-infra.org)' },
+    headers: { 'User-Agent': 'INFRA-KSR/1.0 (hydrologie routiere; carr.ksr-infra.org)' },
     cf: { cacheEverything: true, cacheTtl: req === 'gettile' ? 30 * 86400 : 86400 },
   });
   const h = new Headers();

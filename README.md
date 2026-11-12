@@ -1,10 +1,23 @@
-# GIRA — conception de carrefours giratoires et de carrefours plans (T, X)
+# INFRA-KSR (ex-GIRA) — conception routière : tracés, carrefours, giratoires, échangeurs
+
+L'application s'appelait GIRA ; elle a été renommée INFRA-KSR quand elle a dépassé les seuls giratoires (tracés en
+plan, carrefours plans, échangeurs, ouvrages, hydrologie, vitesses). Les projets enregistrés sous GIRA (`.gira.json`,
+`app: "GIRA"`) s'ouvrent toujours ; les nouveaux sont enregistrés en `.ksr.json` (`app: "INFRA-KSR"`). Les calques DXF
+gardent leur préfixe `GIRA_` (gabarits CAO existants).
 
 Application web statique (HTML + JavaScript, sans serveur applicatif) pour dessiner à l'échelle un carrefour giratoire,
 un carrefour en T ou un carrefour en X (croix) selon le SETRA (ACI, interurbain) ou le CERTU (urbain), sur fond satellite
 ou sur un fond topographique DXF.
 
 ## Fonctions (version 1)
+
+- **Onglet Tracé** (premier onglet) : axes de la voie principale (autoroute ICTAAL ou route non autoroutière,
+  catégorie de conception, vitesse, profil en travers, PK origine) et des voies secondaires — dessin, import KMZ / KML,
+  tableau des sommets (X, Y, R, clothoïdes, rayon appliqué), raccordement aux carrefours et croisements. L'onglet
+  **Échangeur** reprend ces axes dans une liste « Voies de l'échangeur » où l'on choisit le rôle de chacun (voie
+  principale franchie / voie secondaire) ; ses boutons « + Voie principale » et « + Voie secondaire » dessinent toujours
+  un nouvel axe, qui apparaît aussi dans Tracé. Les paramètres des gabarits (trompette, losange, demi-échangeur,
+  giratoire dénivelé) restent dans l'onglet Échangeur.
 
 - **Vue CAD en mètres** : zoom au curseur, panoramique, accrochage aux sommets (F3), ortho (F8), grille (F7),
   ligne de commande (`x,y`, `@dx,dy`, `@d<angle`, distance directe), annuler / rétablir.
@@ -93,7 +106,7 @@ ou sur un fond topographique DXF.
   catégorie de conception ; L = 0 : arc seul ; A = √(L·R)), avec A, longueur d'arc, déviation et tangente ; pour une
   droite, longueur, gisement et abscisse. Les droites se déplacent par leurs poignées aux points de tangence (rondes :
   rotation autour de l'autre point de tangence ; losange : translation), les sommets restant déplaçables.
-  Le tableau des sommets (onglet Échangeur) donne X, Y au cm, R, la longueur de clothoïde et le rayon appliqué. Les
+  Le tableau des sommets (onglet Tracé) donne X, Y au cm, R, la longueur de clothoïde et le rayon appliqué. Les
   clothoïdes sont réduites, puis supprimées (moins de 1 m), jusqu'à ce que les raccordements de deux sommets voisins
   tiennent sur leur côté : un chevauchement faisait revenir l'axe en arrière et croiser les bords et le TPC.
   Un raccordement se supprime (« Supprimer le cercle » : le sommet devient un angle vif, cliquable) et se reconstruit
@@ -327,7 +340,7 @@ ou sur un fond topographique DXF.
   VIPP au-delà ; h_p ≈ L/13, L/18, L/17 ; entraxe ≈ 3 m) ; dessin en plan (tablier, poutres, culées, piles), au profil
   en long (tablier et appuis), cotes de chaussée et d'intrados, hauteur libre sur le TN ; lien PSIDA (onglet Ponts à
   poutres : travées, type, nombre et entraxe des poutres, hauteur, hourdis, chaussée, superstructures).
-- **Voie principale** (onglet Échangeur, « Tracer la voie principale ») : autoroute (ICTAAL L1 / L2) ou route non
+- **Voie principale** (onglet Tracé, « Tracer la voie principale ») : autoroute (ICTAAL L1 / L2) ou route non
   autoroutière (catégories de conception ARP R1 / R2 / artère 110, VSA 90 / 110, AU 70, libre ; 2×1 voies, BDD 2,00 m,
   berme 0,75 m par défaut, terre-plein central facultatif) : on peut croiser et raccorder des routes non autoroutières.
 - **Carrefour « cacahuète »** (onglet Anneau, forme de l'anneau ; `js/ringshape.js`) : deux lobes circulaires (Rg,
@@ -432,7 +445,7 @@ ou sur un fond topographique DXF.
     et signalée avec l'allongement nécessaire du demi-ouvrage ;
   - tests : `node tools/test-watershed.mjs`, `node tools/test-hydrology.mjs`, `node tools/test-culvert.mjs`,
     `node tools/test-basinedit.mjs`.
-- **Import d'un axe depuis un KMZ / KML** (onglet Échangeur, « Importer l'axe (KMZ / KML) » ; `js/axisimport.js`) :
+- **Import d'un axe depuis un KMZ / KML** (onglet Tracé, « Importer l'axe (KMZ / KML) » ; `js/axisimport.js`) :
   ligne Google Earth, GPS ou QGIS (choix de la ligne si le fichier en contient plusieurs) → voie principale, ou nouvelle
   voie secondaire si la principale existe et n'est pas remplacée. Droites, arcs et clothoïdes reconstitués par le
   diagramme des courbures (clofit.js), puis un sommet par virage : intersection des tangentes, R calé sur la flèche,

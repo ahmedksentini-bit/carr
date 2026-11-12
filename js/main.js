@@ -1,4 +1,4 @@
-// main.js — application GIRA : état du projet, outils de dessin, panneaux, imports / exports.
+// main.js — application INFRA-KSR (ex-GIRA) : état du projet, outils de dessin, panneaux, imports / exports.
 import * as G from './geom.js';
 import { makeCRS, CRS_PRESETS, utmZoneOf } from './crs.js';
 import { TileLayer, PROVIDERS } from './tiles.js';
@@ -52,6 +52,8 @@ import { analysePlan, gapParams, GAPS } from './capacity-plan.js';
 import { initUvr } from './uvrtab.js';
 import { axisFromPolyline, kmlLines } from './axisimport.js';
 
+// Identifiants d'application acceptés à l'ouverture : INFRA-KSR (actuel) et GIRA (projets enregistrés avant le renommage).
+const APP_IDS = ['INFRA-KSR', 'GIRA'];
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -97,7 +99,7 @@ function newCross(k) {
 function newProject(context = 'interurbain') {
   const R = PRESETS[context].ring, jid = uid();
   return {
-    app: 'GIRA', version: 1, name: 'Giratoire sans titre', context, kind: 'giratoire',
+    app: 'INFRA-KSR', version: 1, name: 'Giratoire sans titre', context, kind: 'giratoire',
     crs: { id: 'utm', zone: 32, south: false, def: '' },
     bg: { provider: 'esri', opacity: 1, places: true },
     center: { auto: true, x: null, y: null },
@@ -289,7 +291,7 @@ function init() {
   placeTiles.provider = 'places';
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem('gira.autosave') || 'null'); } catch { saved = null; }
-  S.prj = saved && saved.app === 'GIRA' ? migrate(saved) : newProject();
+  S.prj = saved && APP_IDS.includes(saved.app) ? migrate(saved) : newProject();
   try { const k = JSON.parse(localStorage.getItem('gira.kml') || '[]'); if (Array.isArray(k)) S.kml = k; } catch { S.kml = []; }
   applyCRS();
   rebuildTerrain();
@@ -881,6 +883,16 @@ function renderCrossFields() {
   $('#crossList').innerHTML = C.map((c, i) => (c.main ? '' : `<li data-xi="${i}" class="${i === S.xsel ? 'on' : ''}"><span class="dot"></span><b>${esc(c.name || `Voie secondaire ${i + 1}`)}</b><span>${c.kind === 'autoroute' ? 'autoroute (nœud)' : 'route ordinaire'}</span><span></span></li>`)).join('') || '<li class="empty-li">Aucune voie secondaire.</li>';
   $('#mainXFields').innerHTML = S.msel >= 0 ? crossFieldsHtml(S.msel) : '';
   $('#crossFields').innerHTML = S.xsel >= 0 ? crossFieldsHtml(S.xsel) : '';
+  renderEchAxes();
+}
+// Onglet Échangeur : les axes de l'onglet Tracé et leur rôle (voie principale franchie / voie secondaire).
+function renderEchAxes() {
+  const box = $('#echAxList'); if (!box) return;
+  const C = S.prj.crosses || [], H = hwyParams(S.prj), drawn = S.prj.hwy?.axis?.length >= 2;
+  const opt = (v, l, on) => `<option value="${v}"${on ? ' selected' : ''}>${l}</option>`;
+  box.innerHTML = `<li data-ea="hwy" class="${S.msel < 0 && S.echPick === 'hwy' ? 'on' : ''}"><span class="dot"></span><b>${esc(H.name)}</b><span>voie principale 1 · ${H.kind === 'autoroute' ? 'autoroute' : 'route'}${drawn ? '' : ' (à tracer dans Tracé)'}</span><span>${S.prj.hwy?.on === false ? 'inactive' : ''}</span></li>`
+    + C.map((c, i) => `<li data-ea="${i}" class="${S.echPick === i ? 'on' : ''}"><span class="dot"></span><b>${esc(c.name || (c.main ? `Voie principale ${i + 2}` : `Voie secondaire ${i + 1}`))}</b><span>${c.kind === 'autoroute' ? 'autoroute' : 'route'}${c.axis?.length >= 2 ? '' : ' (à tracer)'}${c.on === false ? ' · inactive' : ''}</span>`
+      + `<span><select data-earole="${i}" title="Rôle de l'axe dans l'échangeur">${opt('sec', 'voie secondaire', !c.main)}${opt('main', 'voie principale', !!c.main)}</select></span></li>`).join('');
 }
 function crossFieldsHtml(k) {
   const C = S.prj.crosses || [], p = `crosses.${k}.`, main = !!C[k]?.main;
@@ -923,7 +935,8 @@ function buildEchFields() {
   renderHwyFields();
   renderCrossFields();
   buildOuvrFields();
-  $('#hwyFields').innerHTML +=
+  // paramètres propres aux gabarits d'échangeur (trompette, losange, demi-échangeur, giratoire dénivelé) : onglet Échangeur
+  $('#echParams').innerHTML =
     '<div class="row">' + fld('hwy.trR2', 'Trompette : rayon R2 de la S-semi', 'm', { ph: '62', title: 'Grande courbe de la sortie semi-directe ; la boucle en est déduite (concentrique)' }) + fld('hwy.trGap', 'Trompette : écart boucle / S-semi', 'm', { ph: '0', title: 'Terre-plein entre la boucle et la sortie semi-directe, côté amont (0 : plates-formes tangentes)' }) + fld('hwy.trTpc', 'Trompette : séparation des voies de la tige (TPC)', 'm', { ph: '1', title: 'Entre les bords des deux voies de la tige, BDG comprises ; constante sur toute la tige et sur l\'ouvrage' }) + '</div>' +
     '<div class="row">' + fld('hwy.loY', 'Losange / demi-échangeur : distance des carrefours à l\'axe', 'm', { ph: 'auto', title: 'Centre des giratoires ou extrémité des bretelles, mesuré le long de la voie secondaire depuis l\'axe de l\'autoroute (auto : plate-forme + 100 m)' }) + fld('hwy.loRg', 'Losange : rayon Rg des giratoires', 'm', { ph: '20' }) + '</div>' +
     '<div class="row">' + sel('hwy.dmSide', 'Demi-échangeur : bretelles côté', [['debut', 'origine de l\'axe'], ['fin', 'fin de l\'axe']], { branch: false }) + sel('hwy.dmGir', 'Demi-échangeur : raccordement', [['gir', 'giratoires'], ['libre', 'extrémités libres']], { branch: false }) + fld('hwy.gdRg', 'Giratoire dénivelé : rayon Rg', 'm', { ph: 'auto ≥ 60', title: 'Rive extérieure de l\'anneau ; l\'anneau franchit l\'autoroute sur deux ouvrages' }) + '</div>';
@@ -1630,6 +1643,25 @@ function bindEch() {
   $('#btnAxisKml').addEventListener('click', () => $('#fileAxisKml').click());
   $('#fileAxisKml').addEventListener('change', async (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) await importAxisKml(f); });
   $('#btnMainAxis').addEventListener('click', () => { setTool('axis'); S.hwyDraw = S.prj.hwy?.axis?.length >= 2 ? 'main' : 'hwy'; setPrompt(); });
+  // Onglet Échangeur : dessin d'un axe (comme dans l'onglet Tracé), rôle des axes du tracé, accès à leurs réglages
+  $('#btnMainAxisE').addEventListener('click', () => $('#btnMainAxis').click());
+  $('#btnCrossAxisE').addEventListener('click', () => $('#btnCrossAxis').click());
+  $('#btnGoTrace').addEventListener('click', () => showTab('trace'));
+  $('#echAxList').addEventListener('change', (e) => {
+    const k = e.target.dataset.earole; if (k == null) return;
+    const c = S.prj.crosses[+k]; if (!c) return;
+    c.main = e.target.value === 'main';
+    if (c.main) S.msel = +k; else S.xsel = +k;
+    S.echSig = ''; update();
+  });
+  $('#echAxList').addEventListener('click', (e) => {
+    if (e.target.closest('select')) return;
+    const li = e.target.closest('li[data-ea]'); if (!li) return;
+    const k = li.dataset.ea;
+    if (k === 'hwy') { S.msel = -1; S.echPick = 'hwy'; }
+    else { const c = S.prj.crosses[+k]; S.echPick = +k; if (c?.main) S.msel = +k; else S.xsel = +k; }
+    S.echSig = ''; refreshPanels(); viewer.invalidate();
+  });
   $('#mainList').addEventListener('click', (e) => { const li = e.target.closest('li[data-mi]'); if (!li) return; S.msel = +li.dataset.mi; S.echSig = ''; refreshPanels(); viewer.invalidate(); });
   $('#crossFields').addEventListener('click', (e) => { const b = e.target.closest('[data-xconnect]'); if (!b) return; const msg = connectCross(+b.dataset.xconnect); if (msg) { S.echSig = ''; update(); toast(msg); } else toast('Aucun carrefour ni croisement à raccorder pour cette voie.', 'warn'); });
   $('#crossList').addEventListener('click', (e) => { const li = e.target.closest('li[data-xi]'); if (!li) return; S.xsel = +li.dataset.xi; S.echSig = ''; refreshPanels(); viewer.invalidate(); });
@@ -2855,7 +2887,7 @@ async function importAxisKml(file) {
     S.echSig = ''; update();
     const xs = R.axis.map((q) => q.x), ys = R.axis.map((q) => q.y);
     viewer.fit({ x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) });
-    toast(`${L.name} importée (${where}) : ${R.axis.length} sommets, ${R.virages} virage${R.virages > 1 ? 's' : ''} (rayons et clothoïdes reconstitués), écart maximal ${fmt(R.ecart, 2)} m aux points du fichier. Vérifiez le type de voie et sa catégorie (onglet Échangeur).`);
+    toast(`${L.name} importée (${where}) : ${R.axis.length} sommets, ${R.virages} virage${R.virages > 1 ? 's' : ''} (rayons et clothoïdes reconstitués), écart maximal ${fmt(R.ecart, 2)} m aux points du fichier. Vérifiez le type de voie et sa catégorie (onglet Tracé).`);
   } catch (e) { console.error(e); toast(`Import de l'axe impossible : ${e.message}`, 'err'); }
 }
 
@@ -6744,7 +6776,7 @@ function buildDxfText() {
       ? `Carrefour en ${S.prj.kind} ${S.prj.context === 'interurbain' ? 'interurbain (SETRA ACI)' : 'urbain (CERTU)'} — chaussée principale ${fmt(2 * D.plan.half)} m${D.plan.widened ? `, tourne-à-gauche ${fmt(D.plan.tag.width)} m` : ''}, régime ${D.plan.regime === 'stop' ? 'STOP' : 'cédez-le-passage'}`
       : `Carrefour giratoire ${S.prj.context === 'interurbain' ? 'interurbain (SETRA ACI)' : 'urbain (CERTU)'} — Rg ${fmt(D.Rg)} m, la ${fmt(D.la)} m, Ri ${fmt(D.Ri)} m, ${D.branches.length} branches`,
     `Coordonnées : ${S.crs.geo ? S.crs.label : 'locales'} · Altimétrie de principe (avant-projet)`,
-    `Établi le ${new Date().toLocaleDateString('fr-FR')} avec GIRA`,
+    `Établi le ${new Date().toLocaleDateString('fr-FR')} avec INFRA-KSR`,
   ];
   lines.forEach((s, i) => w.text(l, { x, y: y - i * TH * 1.8 }, i ? TH : TH * 1.6, 0, s));
   return w.toString();
@@ -6812,13 +6844,14 @@ function exportCSV() {
 
 function saveProject() {
   const data = JSON.stringify({ ...S.prj, view: { cx: viewer.cx, cy: viewer.cy, s: viewer.s }, ...(S.kml.length ? { kml: S.kml } : {}), savedAt: new Date().toISOString() }, null, 1);
-  download(fname('gira.json'), data, 'application/json');
+  download(fname('ksr.json'), data, 'application/json');
 }
 
 async function openProject(file) {
   try {
     const js = JSON.parse(await file.text());
-    if (js.app !== 'GIRA') throw new Error('ce fichier n\'est pas un projet GIRA');
+    if (!APP_IDS.includes(js.app)) throw new Error('ce fichier n\'est pas un projet INFRA-KSR (ni GIRA)');
+    js.app = 'INFRA-KSR';
     const kml = Array.isArray(js.kml) ? js.kml : null; delete js.kml;
     S.prj = migrate(js); S.D = null; S.trSig = new Map(); S.trGood = new Map();
     S.sel = -1; S.hist = []; S.fut = [];
