@@ -120,7 +120,7 @@ function newProject(context = 'interurbain') {
     crosses: [], // voies secondaires (une par échangeur : tige, route croisée ou seconde autoroute)
     traffic: { period: 'HPM', site: context === 'urbain' ? 'urbain' : 'rase', uvpPL: 2, od: {}, pl: {}, qp: {}, tad: {} },
     branches: [],
-    opts: { angleUnit: 'gon', textH: 0.8, theme: 'dark', vis: {}, dxfOpacity: 0.9 },
+    opts: { angleUnit: 'gon', textH: 0.8, theme: 'light', vis: {}, dxfOpacity: 0.9 },
     jid, jname: 'Carrefour 1', others: [], jorder: [jid], // carrefours du projet (le premier est actif)
   };
 }
@@ -300,6 +300,7 @@ function init() {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem('gira.autosave') || 'null'); } catch { saved = null; }
   S.prj = saved && APP_IDS.includes(saved.app) ? migrate(saved) : newProject();
+  S.prj.opts.theme = uiTheme();
   try { const k = JSON.parse(localStorage.getItem('gira.kml') || '[]'); if (Array.isArray(k)) S.kml = k; } catch { S.kml = []; }
   applyCRS();
   rebuildTerrain();
@@ -1859,7 +1860,7 @@ function bindEch() {
 
 // ================================================================ Rendu
 function renderScene(ctx, v, exp = null) {
-  const theme = S.prj.opts.theme === 'light' ? 'light' : 'dark', T = THEMES[theme];
+  const theme = document.documentElement.classList.contains('ui-light') ? 'light' : 'dark', T = THEMES[theme];
   ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
   ctx.fillStyle = T.bg; ctx.fillRect(0, 0, v.W, v.H);
   const imagery = S.crs.geo && S.prj.bg.provider !== 'none' && !exp?.noTiles;
@@ -3687,6 +3688,15 @@ function buildStaticPanels() {
   syncCtxUI(); syncCrsUI(); syncInputs();
 }
 
+// Thème de l'interface et du plan : préférence du navigateur (clair par défaut, comme BVTrace : panneaux gris clair,
+// plan sur fond gris clair), pas une donnée du projet — un projet reçu garde l'apparence choisie par l'utilisateur.
+function uiTheme(set) {
+  if (set) { try { localStorage.setItem('gira.theme', set); } catch { /* */ } }
+  let t = set; if (!t) { try { t = localStorage.getItem('gira.theme'); } catch { t = null; } }
+  t = t === 'dark' ? 'dark' : 'light';
+  document.documentElement.classList.toggle('ui-light', t === 'light');
+  return t;
+}
 function syncCtxUI() {
   const plan = isPlan(S.prj);
   buildSectionFields();
@@ -3752,7 +3762,7 @@ function syncInputs() {
   $('#centerAuto').checked = !!S.prj.center.auto;
   $('#prjName').value = S.prj.name;
   renderPrjSummary();
-  $('#themeSel').value = S.prj.opts.theme;
+  S.prj.opts.theme = uiTheme(); $('#themeSel').value = S.prj.opts.theme;
   $('#angSel').value = S.prj.opts.angleUnit;
   for (const el of $$('[data-vis]')) el.checked = S.prj.opts.vis[el.dataset.vis] !== false;
   const gl = $('[data-k="ring.gisPente"]')?.closest('.fld')?.querySelector('.un');
@@ -6969,7 +6979,7 @@ function bindUI() {
   $('#bgSel').addEventListener('change', (e) => { S.prj.bg.provider = e.target.value; $('#bgPlaces').disabled = e.target.value !== 'esri'; viewer.invalidate(); commitHistory(); autosave(); });
   $('#bgPlaces').addEventListener('change', (e) => { S.prj.bg.places = e.target.checked; viewer.invalidate(); autosave(); });
   $('#bgOpacity').addEventListener('input', (e) => { S.prj.bg.opacity = +e.target.value; viewer.invalidate(); autosave(); });
-  $('#themeSel').addEventListener('change', (e) => { S.prj.opts.theme = e.target.value; viewer.invalidate(); autosave(); });
+  $('#themeSel').addEventListener('change', (e) => { uiTheme(e.target.value); S.prj.opts.theme = uiTheme(); viewer.invalidate(); autosave(); });
   $('#angSel').addEventListener('change', (e) => { S.prj.opts.angleUnit = e.target.value; update(); });
   $('#centerAuto').addEventListener('change', (e) => { S.prj.center.auto = e.target.checked; update(); });
   $('#prjSummary').addEventListener('click', (e) => { const a = e.target.closest('[data-gotab]'); if (!a) return; e.preventDefault(); showTab(a.dataset.gotab); });
