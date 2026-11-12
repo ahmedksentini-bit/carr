@@ -172,25 +172,27 @@ function planBand(o) {
     if (dMaj) out += `<path d="${dMaj}" fill="none" stroke="#b8865a" stroke-width="0.16"/>`;
     out += lab;
   }
-  // points du terrain naturel (semis du MNT) et leur altitude ; étiquettes sans chevauchement (grille de 7 × 2,5 mm)
+  // projet dessiné
+  for (const L of LAYERS) for (const pr of o.prims || []) if (pr.L === L) out += primSvg(pr, STY[L], T, k);
+  // points du terrain naturel (semis du MNT) et leur altitude, par-dessus le projet (un MNT SRTM n'a pas d'autre fond) ;
+  // étiquettes sans chevauchement (grille de 7 × 2,5 mm)
   if (o.tnPts?.length) {
+    const srtm = o.tnSrc === 'srtm', col = srtm ? '#7c2d12' : '#7c5e2a', hz = srtm ? 1.6 : 1.3, cs = srtm ? 0.5 : 0.35;
     let cr = '', lab = '';
-    const used = new Set(), hz = 1.3;
+    const used = new Set();
     for (const q of o.tnPts) {
       const x = +q[0], y = +q[1], z = +q[2];
       if (!(x >= bb.x0 && x <= bb.x1 && y >= bb.y0 && y <= bb.y1) || !Number.isFinite(z)) continue;
       const t = T({ x, y });
       if (t.x < plotX0 || t.x > plotX0 + plotW || t.y < planR.y || t.y > planR.y + planR.h) continue;
-      cr += `M${P(t.x - 0.35, t.y)}h0.7M${P(t.x, t.y - 0.35)}v0.7`;
+      cr += `M${P(t.x - cs, t.y)}h${2 * cs}M${P(t.x, t.y - cs)}v${2 * cs}`;
       const key = `${Math.floor(t.x / 7)}:${Math.floor(t.y / 2.5)}`;
       if (used.has(key)) continue;
       used.add(key);
-      lab += txt(t.x + 0.5, t.y - 0.3, z.toFixed(2).replace('.', ','), hz, { c: '#7c5e2a' });
+      lab += txt(t.x + 0.6, t.y - 0.4, z.toFixed(2).replace('.', ','), hz, { c: col, halo: srtm });
     }
-    if (cr) out += `<path d="${cr}" stroke="#7c5e2a" stroke-width="0.12"/>` + lab;
+    if (cr) out += `<path d="${cr}" stroke="${col}" stroke-width="${srtm ? 0.18 : 0.12}"/>` + lab;
   }
-  // projet dessiné
-  for (const L of LAYERS) for (const pr of o.prims || []) if (pr.L === L) out += primSvg(pr, STY[L], T, k);
   // axe de la feuille, PK, profils implantés
   const half = (ax.half || 5) + 6, bar = Math.max(2, Math.min(ax.half || 5, 8)), pts = [];
   for (let s = Math.max(0, s0 - 30); s <= Math.min(ax.len, s1 + 30) + 1e-9; s += 1) pts.push(T(ax.at(s).p));
@@ -362,6 +364,11 @@ function profileBand(o) {
       const sm = (c.sA + c.sB) / 2;
       if (sm >= s0 && sm <= s1) out += txt(X(sm), plot.y + plot.h - 4, `R ${f2(c.R, 0)} ${c.type === 'convexe' ? 'saillant' : 'rentrant'}`, 1.9, { a: 'middle', c: '#b91c1c', halo: true });
     }
+  }
+  if (PL) for (const q of vis) { // dénivelée projet − TN de chaque profil, écrite à la verticale au-dessus de la ligne rouge
+    const z = zp(q.s), t = tn(q.s); if (z == null || t == null) continue;
+    const d = z - t, x = X(q.s) + 0.75, y = Math.max(plot.y + 6, Y(q.s, z) - 1.2);
+    out += `<text x="${x.toFixed(2)}" y="${y.toFixed(2)}" font-size="1.5" fill="${d >= 0 ? '#15803d' : '#b45309'}" transform="rotate(-90 ${x.toFixed(2)} ${y.toFixed(2)})" stroke="#fff" stroke-width="0.35" paint-order="stroke">${d >= 0 ? '+' : '−'}${f2(Math.abs(d))}</text>`;
   }
   for (const q of o.ohs || []) { // ouvrages : repère sous la ligne rouge, désignation au-dessus
     if (q.s < s0 || q.s > s1) continue;

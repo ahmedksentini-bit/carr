@@ -4764,7 +4764,7 @@ function bindPL() {
       R = combinedSheets({
         ax, PL, pk0: pkOrigin(S.prj, key), tnAt: (s) => (tin ? tinZ(tin, ax.at(s).p.x, ax.at(s).p.y) : null),
         stations: plCartStations(key, ax, A.PL), devAt, ohs, prims: [...(S.D?.prims || []), ...(S.Do || []).flatMap((d) => d.D?.prims || [])],
-        dxf: S.dxf, tnPts: Array.isArray(S.prj.tn?.pts) ? S.prj.tn.pts : [], tnPrims: combinedContours(), format, scale, zScale: zs > 0 ? zs : Math.max(1, Math.round(scale / 10)), title: ax.name, project: S.prj.name,
+        dxf: S.dxf, tnPts: Array.isArray(S.prj.tn?.pts) ? S.prj.tn.pts : [], tnSrc: S.prj.tn?.source || '', tnPrims: combinedContours(), format, scale, zScale: zs > 0 ? zs : Math.max(1, Math.round(scale / 10)), title: ax.name, project: S.prj.name,
       });
     } catch (e) { console.error(e); toast('Tracé combiné : ' + e.message, 'err'); return; }
     const html = combinedHtml(R.svgs, R.info, `Tracé combiné ${ax.name} — ${S.prj.name}`), url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
