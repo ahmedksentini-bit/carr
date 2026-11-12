@@ -15,7 +15,9 @@ ou sur un fond topographique DXF.
   giratoire ou carrefour en T / X ; ex-« Anneau »), Branches, Profil, PSGR, Visibilité, Contrôles, Capacité, Échangeur,
   Ouvrages, Signalisation, Hydrologie, Vitesses / UVR, Chaussées. Les onglets forment une **barre de menu en haut**, sur
   toute la largeur sous l'en-tête (une ligne sur un écran large, deux à 1280 px ; sur téléphone, barre collée en haut
-  qui défile au doigt, et un onglet choisi fait descendre au panneau) ; leur contenu s'affiche dans le **panneau de gauche**, la barre d'outils du plan entre ce panneau et le plan (téléphone : plan en haut, panneau dessous). **Thème clair par défaut**, comme BVTrace : en-tête ardoise, panneaux gris clair (#f7f8fa),
+  qui défile au doigt, et un onglet choisi fait descendre au panneau) ; leur contenu s'affiche dans le **panneau de gauche**, la barre d'outils du plan entre ce panneau et le plan (téléphone : plan en haut, panneau dessous). **Bandeau supérieur aux couleurs de KSR** (www.ksr-infra.org : noir-bleu #0c1016, filet jaune
+  #e6b800, texte crème, jaune vif #ffd000 pour l'action principale), avec le logo KSR et le lien du site (masqué sous
+  1180 px). **Thème clair par défaut**, comme BVTrace : panneaux gris clair (#f7f8fa),
   bordures grises, plan sur fond gris clair ; le thème sombre reste au choix (Projet › Affichage › Thème). Le thème est
   une préférence du navigateur, pas une donnée du projet : un projet reçu s'affiche dans le thème choisi. Le panneau est **redimensionnable** : poignée sur son bord droit (glisser ; largeur mémorisée
   dans le navigateur ; double-clic : largeur par défaut). Dans tous les onglets, les champs sont **alignés** : libellé à
