@@ -102,16 +102,12 @@ export class TileLayer {
     ctx.save();
     ctx.globalAlpha = this.opacity;
     ctx.imageSmoothingQuality = 'high';
+    this._budget = 4000; // morceaux dessinés au plus par image (vue très large)
     for (let ty = Math.max(0, y0); ty <= Math.min(n - 1, y1); ty++) {
       for (let tx = x0; tx <= x1; tx++) {
         const wx = ((tx % n) + n) % n;
-        const sNW = this._scr(view, crs, tx, ty, n), sNE = this._scr(view, crs, tx + 1, ty, n), sSW = this._scr(view, crs, tx, ty + 1, n);
-        ctx.setTransform(
-          (dpr * (sNE[0] - sNW[0])) / 256, (dpr * (sNE[1] - sNW[1])) / 256,
-          (dpr * (sSW[0] - sNW[0])) / 256, (dpr * (sSW[1] - sNW[1])) / 256,
-          dpr * sNW[0], dpr * sNW[1]);
         const e = this._get(z, wx, ty);
-        if (e.ok && !e.blank) { ctx.drawImage(e.img, 0, 0, 256, 256, -0.4, -0.4, 256.8, 256.8); continue; }
+        if (e.ok && !e.blank) { this._blit(ctx, view, crs, n, dpr, e.img, 0, 0, 256, tx, ty, 1, 0); continue; }
         if (P.overlay) continue; // textes : pas de tuile parente agrandie (écritures démesurées)
         // En attendant, ou si l'imagerie n'existe pas à ce niveau : tuile parente agrandie. Quand la tuile est vide
         // ou en erreur, la parente est demandée au serveur ; sinon, seules les tuiles déjà en cache servent.
@@ -121,13 +117,41 @@ export class TileLayer {
           if (p && !p.ok && !p.blank && !p.err) ask = false; // parente en cours de chargement
           if (p && p.ok && !p.blank) {
             const sz = 256 / 2 ** k;
-            ctx.drawImage(p.img, (wx - ((wx >> k) << k)) * sz, (ty - ((ty >> k) << k)) * sz, sz, sz, -0.4, -0.4, 256.8, 256.8);
+            this._blit(ctx, view, crs, n, dpr, p.img, (wx - ((wx >> k) << k)) * sz, (ty - ((ty >> k) << k)) * sz, sz, tx, ty, 1, 0);
             break;
           }
         }
       }
     }
     ctx.restore();
+  }
+
+  // Morceau de tuile (rectangle source carré sx, sy, ss de l'image ; carré tx, ty, ts en coordonnées de tuiles) dessiné
+  // par une transformation affine sur trois coins. La projection du projet (UTM, Lambert…) n'est pas affine à l'échelle
+  // d'une tuile peu zoomée : le 4e coin s'écarte, des coins voisins ne se rejoignent plus et des triangles vides
+  // (blancs) apparaissent entre les tuiles. Le morceau est alors coupé en quatre jusqu'à un écart de moins d'un pixel.
+  _blit(ctx, view, crs, n, dpr, img, sx, sy, ss, tx, ty, ts, depth) {
+    const NW = this._scr(view, crs, tx, ty, n), NE = this._scr(view, crs, tx + ts, ty, n), SW = this._scr(view, crs, tx, ty + ts, n);
+    if (![...NW, ...NE, ...SW].every(Number.isFinite)) return;
+    // hors écran (boîte des coins, marge) : rien à dessiner
+    const SE = this._scr(view, crs, tx + ts, ty + ts, n);
+    const xs = [NW[0], NE[0], SW[0], SE[0]], ys = [NW[1], NE[1], SW[1], SE[1]];
+    if (Math.max(...xs) < -50 || Math.min(...xs) > view.W + 50 || Math.max(...ys) < -50 || Math.min(...ys) > view.H + 50) {
+      if (Number.isFinite(SE[0]) && Math.max(...xs) - Math.min(...xs) < 4 * view.W) return;
+    }
+    const err = Number.isFinite(SE[0]) ? Math.hypot(NE[0] + SW[0] - NW[0] - SE[0], NE[1] + SW[1] - NW[1] - SE[1]) : Infinity;
+    if (err > 1 && depth < 6 && ss >= 8 && this._budget > 4) {
+      const h = ss / 2, t = ts / 2;
+      for (const [i, j] of [[0, 0], [1, 0], [0, 1], [1, 1]]) this._blit(ctx, view, crs, n, dpr, img, sx + i * h, sy + j * h, h, tx + i * t, ty + j * t, t, depth + 1);
+      return;
+    }
+    if (this._budget-- <= 0) return;
+    ctx.setTransform(
+      (dpr * (NE[0] - NW[0])) / ss, (dpr * (NE[1] - NW[1])) / ss,
+      (dpr * (SW[0] - NW[0])) / ss, (dpr * (SW[1] - NW[1])) / ss,
+      dpr * NW[0], dpr * NW[1]);
+    const o = (0.4 * ss) / 256 + 0.25; // léger recouvrement : pas de joint visible entre morceaux
+    ctx.drawImage(img, sx, sy, ss, ss, -o, -o, ss + 2 * o, ss + 2 * o);
   }
 
   _scr(view, crs, tx, ty, n) {

@@ -34,6 +34,8 @@ ou sur un fond topographique DXF.
 - **Systèmes de coordonnées** : UTM WGS84 (fuseau automatique), Nord / Sud Tunisie (Carthage), Nord Maroc,
   Lambert-93, ou toute définition proj4. Les coordonnées du projet sont celles du système choisi : un DXF topo
   dans le même système se superpose à l'imagerie. Changer de système reprojette les axes.
+  Les tuiles d'imagerie (Web Mercator) sont reprojetées par morceaux : une tuile peu zoomée, que la projection du
+  projet déforme, est recoupée jusqu'à un écart de moins d'un pixel (plus de triangles vides entre tuiles en vue large).
 - **Fonds** : Esri World Imagery (jusqu'au niveau 21 ; là où l'imagerie manque, la tuile du niveau inférieur est
   agrandie au lieu de « Map data not yet available »), OpenStreetMap, Esri Topo ; recherche de lieu (Nominatim)
   ou saisie « lat, lon ».
@@ -612,6 +614,11 @@ ou sur un fond topographique DXF.
   exemple axe importé d'un KMZ) sans aucune bretelle d'échangeur : y poser un carrefour la fait passer en route non
   autoroutière (AU70 en contexte urbain, artère 110 si elle a un TPC, sinon R1), profil en travers figé à l'identique
   (voies, BAU / BDD, TPC, berme), puis elle est coupée ; une autoroute qui porte des bretelles reste refusée (alerte).
+  La distance du centre à une voie se mesure à son **axe réel** (arcs, clothoïdes), plus au polygone des sommets :
+  dans une grande courbe, un centre posé sur l'axe en était à des dizaines de mètres et la voie n'était pas coupée.
+  Quand aucune voie n'est à portée (R + 15 m du centre, hors des extrémités), une alerte le dit au lieu de ne rien
+  faire. **Supprimer une voie** : bouton ✕ sur sa ligne dans les listes de l'onglet Tracé (voie principale : son axe
+  est effacé et peut être retracé ; voie secondaire : supprimée, ses bretelles deviennent libres).
 - **Cadres PICF et portiques PIPO** (onglet Ouvrages, **+ PICF / PIPO**, un clic sur l'axe de la voie portée) : nombre
   de cellules, ouverture, hauteur intérieure, remblai sur traverse, biais (gr), longueur (automatique : plate-forme +
   talus 3/2 jusqu'à la traverse, divisée par le sinus du biais), épaisseurs (automatiques e ≈ 0,15 + B/20), murs en aile.
