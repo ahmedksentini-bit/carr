@@ -423,6 +423,16 @@ ou sur un fond topographique DXF.
   travers est porté tout à droite de l'axe (voie + BDD), la BDG à gauche, dévers pivotant autour de ce bord ; les
   extrémités du profil en long se calent sur la rive peinte de la chaussée hôte. Projets antérieurs (axe au milieu de
   la chaussée) : les abscisses saisies sur les bretelles sont reportées une fois, point par point, sur le nouvel axe.
+- **Zone d'obliquité et grille CSPR** : sur le plan (calque COTATION), chaque bretelle porte les points du guide des
+  échangeurs (§ 2.3.1) S.0, S.1,00, S.5,00 (droite d'obliquité, 4/p après S.1,00) et E.4,00 (3/p avant E.1,00), E.1,00,
+  E.0, et une chaîne de cotes le long de l'axe de référence, côté extérieur : S.0 → S.1,00 → S.5,00 → tpl → origine de
+  la courbe → début de l'arc (et Ld), symétriquement au convergent (La). Sous la bretelle (onglet Échangeur), le tableau
+  « Grille CSPR — échangeurs » répond aux questions de la grille CSPR (conception détaillée, VRU type A, 2010) : EC1, EC2,
+  EC4, EC6 à EC11, EC15, EC19, EC23, EC34, EC36, EC39, EC40, EC47 — Oui / Non / NV (à apprécier sur plan ou sur site) /
+  SO, avec les valeurs. EC8 / EC19 comparent le profil en long de la bretelle au plan de la chaussée hôte (dévers 2,5 %)
+  jusqu'à S.5,00 / depuis E.4,00 (tolérance 5 cm) et indiquent la cote à caler ; EC39 / EC40 vérifient la visibilité
+  verticale (œil 1,00 m ; objet 0 m sur la courbe, 1,00 m pour le véhicule entrant à la distance d'arrêt, tr 2 s, γ de
+  l'ARP). Bouton « Copier (tableur) » pour reporter les réponses dans la grille.
 - **Bretelles sur chaussée en courbe** (guide des échangeurs 2013, version 2015, § 6.2 et 6.3, schémas 6-3, 6-4, 6-11,
   6-12) : à l'intérieur du virage, le bord gauche de la bretelle prolonge l'obliquité par une courbe de même rayon que le
   bord droit de la chaussée (arc d'extrémité) au lieu d'une droite qui recouperait la chaussée. Le rayon est celui de la
