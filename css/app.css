@@ -189,6 +189,11 @@ table.pts th { position: sticky; top: 0; background: var(--panel2); text-align: 
 table.pts td { padding: 4px 6px; border-bottom: 1px solid var(--line); }
 table.pts td.mono { text-align: right; white-space: nowrap; }
 /* sommets des axes d'échangeur : coordonnées complètes (au cm), rayon, longueur de clothoïde, rayon appliqué */
+table.pts.cspr td { vertical-align: top; }
+table.pts.cspr td.ans { font-weight: 700; text-align: center; }
+table.pts.cspr td.ans.ok { color: #1e7b34; }
+table.pts.cspr td.ans.ko { color: #c62828; }
+table.pts.cspr td.ans.nv { color: #8a6d00; }
 table.pts.vtx { table-layout: fixed; font-size: 11.5px; }
 table.pts.vtx col.c-n { width: 24px; } table.pts.vtx col.c-xy { width: 27%; } table.pts.vtx col.c-r { width: 13%; } table.pts.vtx col.c-ra { width: auto; }
 table.pts.vtx td, table.pts.vtx th { padding: 3px 3px; }

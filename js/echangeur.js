@@ -728,6 +728,19 @@ export function buildEchangeur(prj, D) {
       }
       if (Lpost > 0.01) elems.push(line(len - Lpost, Lpost));
       R.ref = { path: polySegs(pts), pts, len, Lpre, Lpost, sRef, elems };
+      // Points de la grille CSPR (VRU type A, 2010 ; guide des échangeurs § 2.3.1) sur l'axe de référence : S.1,00 / E.1,00
+      // (bord gauche à 1,00 m de la rive de la chaussée hôte), S.5,00 (EC8 : profil en long déduit de la chaussée émettrice
+      // jusque-là) et E.4,00 (EC19 : déduit de la chaussée réceptrice à partir de là), sur la droite d'obliquité.
+      const cs = { s0: 0, s1: Lpre, e1: len - Lpost, e0: len };
+      if (Fs && hF?.off) {
+        const p = rp.from.p || 0.03, u = 4 / p;
+        if (u <= termLen(al) + 1e-6) { const q = hF.off(Fs.s + hF.sd * u, 5), pr = pathProject(R.ref.path, q); cs.s5 = pr ? pr.s : Lpre + u; cs.pS5 = q; }
+      }
+      if (Ft && hT?.off) {
+        const p = rp.to.p || 0.03, u = 3 / p;
+        if (u <= termLen(al, true) + 1e-6) { const q = hT.off(Ft.s - hT.sd * u, 4), pr = pathProject(R.ref.path, q); cs.e4 = pr ? pr.s : len - Lpost - u; cs.pE4 = q; }
+      }
+      R.cspr = cs;
     }
     // Contrôles des rayons [ECH] tab. 3-1, § 3.2.1 à 3.2.3 ; boucles § 3.2.1, 6.2.4.
     // Courbes : sommets successifs de même sens reliés sans clothoïde (« arc continu ») = une seule courbe, éventuellement
@@ -961,6 +974,25 @@ export function buildEchangeur(prj, D) {
     // axe de référence : bord gauche de la voie, de la pointe peinte S.0 à E.0 (R.ref)
     P({ k: 'path', L: 'AXE', segs: R.ref?.path?.length ? R.ref.path : al.path, role: 'secondaire', arrow: true });
     const accLAt = (s) => add(al.pointAt(s), mul(rot90(unit(al.headAt(s))), lft(s)));
+    // Chaîne de cotes de la zone d'obliquité (points de la grille CSPR) le long de l'axe de référence, côté extérieur de la
+    // bretelle : repères et longueurs entre repères successifs.
+    const chain = (marks) => {
+      const ref = R.ref; if (!ref?.path?.length) return;
+      const ms = marks.filter((m) => Number.isFinite(m.s) && m.s >= -1e-6 && m.s <= ref.len + 1e-6).sort((a, b) => a.s - b.s);
+      const uniq = ms.filter((m, i) => !i || m.s - ms[i - 1].s > 0.3);
+      if (uniq.length < 2) return;
+      const dOff = -(rp.w + rp.bdd + rp.berme + 3);
+      const at = (s) => { const t = norm(pathTangentAt(ref.path, s)); return { p: add(G.pathPointAt(ref.path, s), mul(rot90(t), dOff)), t }; };
+      const a = uniq[0].s, b = uniq[uniq.length - 1].s, n = Math.max(2, Math.ceil(b - a));
+      P({ k: 'path', L: 'COTATION', segs: polySegs(Array.from({ length: n + 1 }, (_, i) => at(a + ((b - a) * i) / n).p)) });
+      uniq.forEach((m, i) => {
+        const { p, t } = at(m.s), nn = rot90(t);
+        P({ k: 'path', L: 'COTATION', segs: [G.L(add(p, mul(nn, 1.2)), add(p, mul(nn, -1.2)))] });
+        text('COTATION', add(p, mul(nn, -2.6)), m.label, ang(t) + Math.PI / 2, 'center', TH * 0.75);
+        if (i) { const q = uniq[i - 1], mid = at((q.s + m.s) / 2); text('COTATION', add(mid.p, mul(rot90(mid.t), 1.0)), `${fmt(m.s - q.s, 2)} m`, ang(mid.t), 'center', TH * 0.7); }
+      });
+    };
+    const cs = R.cspr || {};
     // Divergent (§ 4.1.3.1, 4.3, 6.1, 6.2 ; schémas 4-1, 4-8, 6-1, 6-2) : la voie de sortie se forme sur l'accotement de la
     // chaussée émettrice (BAU ou BDD), qui est interrompu et hachuré de S.1,00 m au tpl, puis rétabli après le nez.
     if (Fs) {
@@ -991,6 +1023,14 @@ export function buildEchangeur(prj, D) {
       P({ k: 'circle', L: 'SIGNALISATION', c: pJ14, r: 0.5 });
       text('SIGNALISATION', h.off(sNose + sd * 6, h.bau + J14_W / 2), 'J14', ang(Fs.d), 'center', TH * 0.8);
       if (!woven) pt(`${name} · origine du biseau (${fmt(e.biseau)} m)`, h.off(st0, 0));
+      if (R.ref?.Lpre > 0) pt(`${name} · S.0 (pointe peinte, origine de l'axe)`, R.ref.pts[0]);
+      if (cs.pS5) pt(`${name} · S.5,00 m`, cs.pS5);
+      {
+        const lad = R.lad ?? termLen(al), c0 = R.curves?.[0], sr = R.ref?.sRef || ((t) => t);
+        chain([{ s: cs.s0, label: 'S.0' }, { s: cs.s1, label: 'S.1,00' }, { s: cs.s5, label: 'S.5,00' }, { s: sr(R.sTplS), label: 'tpl' },
+          ...(c0 ? [{ s: sr(lad), label: 'origine courbe' }, { s: sr(lad + (c0.L1 || 0)), label: `début arc R ${fmt(c0.R, 0)}` }] : []),
+          ...(R.Ld > 0 && cs.s1 + R.Ld < (R.ref?.len || 0) ? [{ s: cs.s1 + R.Ld, label: `Ld ${fmt(R.Ld, 0)} m` }] : [])]);
+      }
       pt(`${name} · S.1,00 m`, Fs.S1);
       pt(`${name} · tpl (${fmt(e.tpl)} m)`, h.off(sNose, e.tpl / 2)); pt(`${name} · balise J14`, pJ14);
       if (!woven) text('COTATION', h.off(st0, -1.5), `origine du biseau ${fmt(e.biseau)} m`, ang(Fs.d), 'center', TH * 0.8);
@@ -1039,6 +1079,14 @@ export function buildEchangeur(prj, D) {
       P({ k: 'path', L: 'MARQUAGE', segs: polySegs(mus), wm: 0.15 });
       P({ k: 'path', L: 'BORDURE', segs: polySegs([h.off(sNoseE, h.bau), accLAt(L - R.sTplE)]) });
       pt(`${name} · tpl (${fmt(e.tpl)} m)`, h.off(sNoseE, e.tpl / 2)); pt(`${name} · E.1,00 m`, Ft.S1);
+      if (R.ref?.Lpost > 0) pt(`${name} · E.0 (pointe peinte, fin de l'axe)`, R.ref.pts[R.ref.pts.length - 1]);
+      if (cs.pE4) pt(`${name} · E.4,00 m`, cs.pE4);
+      {
+        const ladE = R.ladE ?? termLen(al, true), cN = R.curves?.[R.curves.length - 1], sr = R.ref?.sRef || ((t) => t);
+        chain([{ s: cs.e0, label: 'E.0' }, { s: cs.e1, label: 'E.1,00' }, { s: cs.e4, label: 'E.4,00' }, { s: sr(L - R.sTplE), label: 'tpl' },
+          ...(cN ? [{ s: sr(L - ladE), label: 'fin courbe' }, { s: sr(L - ladE - (cN.L2 || 0)), label: `fin arc R ${fmt(cN.R, 0)}` }] : []),
+          ...(R.La > 0 && cs.e1 - R.La > 0 ? [{ s: cs.e1 - R.La, label: `La ${fmt(R.La, 0)} m` }] : [])]);
+      }
       if (!wv) { pt(`${name} · fin de la voie d'insertion (${fmt(e.ins)} m)`, h.off(sIns, rp.w)); pt(`${name} · fin du biseau (${fmt(e.biseau)} m)`, h.off(sFin, 0)); }
       text('COTATION', h.off(Ft.s, -1.5), 'E.1,00', ang(Ft.d), 'center', TH * 0.8);
       text('COTATION', h.off(sNoseE, -1.5), `tpl ${fmt(e.tpl)} m · Lm ${fmt(e.Lm)} m`, ang(Ft.d), 'center', TH * 0.8);

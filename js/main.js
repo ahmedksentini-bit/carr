@@ -38,6 +38,7 @@ import { isohyetValueAt } from './hydro/isohyet.js';
 import { computeAll as hydroComputeAll, defaultHypotheses, listMontanaStations, TC_FORMULAS, FRANCOU_RODIER_REGIONS, suggestCiehRegressions, listCiehRegressions, OPTION_LISTS, resolveMontanaStation, montanaAfricaIdf, KR10_GEOLOGY_CATEGORIES } from './hydro/hydrology.js';
 import { sizeCulvert, culvertHydraulics, inletsForShape, defaultInletFor, slopeAboveCritical, controlLabel, chartLabel } from './hydro/culvert.js';
 import { hds5Svg, bceomSvg, basinMapSvg, overviewMapSvg, isohyetMapSvg } from './hydro/notefig.js';
+import { csprEchangeurs } from './cspr.js';
 import { DCAT, planChecks, platformChecks, catText, designCatOf, clothoidNeed, superPct } from './roadcat.js';
 import { isVsa } from './vsa.js';
 import { ringFrames } from './ringshape.js';
@@ -435,6 +436,8 @@ function update({ commit = true, panels = true } = {}) {
     for (const q of S.clear) if (q.lvl === 'err') S.checks.push({ lvl: 'err', group: 'Ouvrages', msg: q.msg });
     S.ospans = structureSpans(S.prj, axes, S.ouvr?.list || []);
   } catch (e) { console.error(e); }
+  S.cspr = null;
+  if (S.D?.ramps?.length) try { S.cspr = csprEchangeurs({ prj: S.prj, D: S.D, axes: S.prof?.axes || listAxes(S.prj, S.D), axpl: S.axpl }); } catch (e) { console.error(e); }
   try { cadreInvertsAll(); } catch (e) { console.error(e); }
   try { virageSigns(); } catch (e) { console.error(e); S.vir = null; }
   for (const id of S.rampKinks || []) { const r = S.prj.ramps.find((q) => q.id === id); if (r) S.checks.push({ lvl: 'err', group: 'Échangeur', msg: `${r.name} : arrivée au giratoire non tangente (la courbe se termine dans la branche) — allongez le dernier alignement ou déplacez le dernier sommet dans l'axe de la branche.` }); }
@@ -1073,6 +1076,27 @@ function refreshEch() {
     R.al.tangents.forEach((t) => rows.push([`PI ${t.i}${t.loop ? ' (boucle)' : ''} : R · A · L clothoïde`, `${fmt(t.R)} m · ${fmt(t.A)} · ${fmt(t.L)} m`]));
     $('#rampOut').innerHTML = kv(rows) + (R.issues.length ? '<ul class="rissues">' + R.issues.map((q) => `<li class="${q.lvl}">${esc(q.msg)}</li>`).join('') + '</ul>' : '');
   } else $('#rampOut').innerHTML = R?.issues?.length ? '<ul class="rissues">' + R.issues.map((q) => `<li class="${q.lvl}">${esc(q.msg)}</li>`).join('') + '</ul>' : '';
+  renderCspr();
+}
+
+// Grille CSPR (conception détaillée, VRU type A, 2010) — questions « Échangeurs » : une ligne par question et par
+// bretelle ; la bretelle sélectionnée en premier.
+document.addEventListener('change', (ev) => { if (ev.target?.id === 'csprSel') renderCspr(); });
+document.addEventListener('click', (ev) => {
+  if (ev.target?.id !== 'btnCsprCopy') return;
+  const tsv = ['Code\tQuestion\tBretelle\tRéponse\tConstat', ...(S.cspr || []).map((q) => [q.code, q.q, q.ramp, q.ans, q.note].join('\t'))].join('\n');
+  navigator.clipboard?.writeText(tsv).then(() => toast('Grille CSPR copiée (collez-la dans un tableur).'), () => toast('Copie impossible.'));
+});
+function renderCspr() {
+  const el = $('#csprOut'); if (!el) return;
+  const rows = S.cspr || [];
+  if (!rows.length) { el.innerHTML = '<p class="note">Aucune bretelle calculée.</p>'; return; }
+  const sel = S.D?.ramps?.[S.rsel]?.name, only = $('#csprSel')?.checked !== false;
+  const list = only && sel ? rows.filter((q) => q.ramp === sel) : rows;
+  const n = (a) => rows.filter((q) => q.ans === a).length;
+  el.innerHTML = `<p class="note">${rows.length} réponses : ${n('Oui')} Oui · ${n('Non')} Non · ${n('NV')} NV (à apprécier sur plan ou sur site) · ${n('SO')} SO.</p>` +
+    '<div class="tablewrap"><table class="pts cspr"><tr><th>Code</th><th>Question</th>' + (only ? '' : '<th>Bretelle</th>') + '<th>Réponse</th><th>Constat</th></tr>' +
+    list.map((q) => `<tr><td class="mono">${q.code}</td><td>${esc(q.q)}</td>${only ? '' : `<td>${esc(q.ramp)}</td>`}<td class="ans ${q.ans === 'Oui' ? 'ok' : q.ans === 'Non' ? 'ko' : 'nv'}">${q.ans}</td><td>${esc(q.note)}</td></tr>`).join('') + '</table></div>';
 }
 
 // Chaussée hôte sous le point cliqué : autoroute (sens selon le côté) ou bretelle existante.
