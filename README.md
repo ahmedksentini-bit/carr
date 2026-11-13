@@ -416,6 +416,13 @@ ou sur un fond topographique DXF.
   losange) est rendu rectiligne (perpendiculaire à l'autoroute pour le trèfle et le demi-trèfle, dans la direction du
   croisement pour le losange) et raccordé de part et d'autre au tracé saisi par une courbe (250 m sur route, Rdn
   au moins sur autoroute) ; le sens du tracé et les abscisses des raccordements sont conservés.
+- **Axe des bretelles et des boucles** : l'axe de référence (plan, PK, profil en long, profils en travers, ouvrages)
+  est le **bord gauche de la voie**, entre la voie et sa BDG — et non le milieu de la chaussée —, **prolongé jusqu'à la
+  peinture** : il part de la rive de la chaussée hôte au point S.0 (pointe du triangle de zébrage, à 1/p du point
+  S.1,00) et y revient au point E.0 au convergent ; les rayons affichés sont ceux de ce bord (R ∓ l/2). Le profil en
+  travers est porté tout à droite de l'axe (voie + BDD), la BDG à gauche, dévers pivotant autour de ce bord ; les
+  extrémités du profil en long se calent sur la rive peinte de la chaussée hôte. Projets antérieurs (axe au milieu de
+  la chaussée) : les abscisses saisies sur les bretelles sont reportées une fois, point par point, sur le nouvel axe.
 - **Bretelles sur chaussée en courbe** (guide des échangeurs 2013, version 2015, § 6.2 et 6.3, schémas 6-3, 6-4, 6-11,
   6-12) : à l'intérieur du virage, le bord gauche de la bretelle prolonge l'obliquité par une courbe de même rayon que le
   bord droit de la chaussée (arc d'extrémité) au lieu d'une droite qui recouperait la chaussée. Le rayon est celui de la
