@@ -105,7 +105,7 @@ function newCross(k) {
 function newProject(context = 'interurbain') {
   const R = PRESETS[context].ring, jid = uid();
   return {
-    app: 'INFRA-KSR', version: 1, name: 'Projet sans titre', context, kind: 'giratoire',
+    app: 'INFRA-KSR', version: 1, name: 'Projet sans titre', context, kind: 'giratoire', rampRef: 'bg',
     crs: { id: 'utm', zone: 32, south: false, def: '' },
     bg: { provider: 'esri', opacity: 1, places: true },
     center: { auto: true, x: null, y: null },
@@ -137,6 +137,8 @@ function migrate(p, opt = {}) {
     traffic: { ...base.traffic, ...p.traffic, od: { ...p.traffic?.od }, pl: { ...p.traffic?.pl }, qp: { ...p.traffic?.qp }, tad: { ...p.traffic?.tad } },
   };
   delete out.view; delete out.cross;
+  // axe des bretelles : projets antérieurs (milieu de chaussée) repérés pour le report des abscisses (remapRampStations)
+  out.rampRef = p.rampRef === 'bg' || !(Array.isArray(p.ramps) && p.ramps.length) ? 'bg' : 'centre';
   // type de la voie principale explicite (absent = autoroute, valeur par défaut) : la liste « Type » ne reste pas vide
   if (out.hwy.kind !== 'route') out.hwy.kind = 'autoroute';
   out.kind = ['T', 'X'].includes(p.kind) ? p.kind : 'giratoire';
@@ -365,6 +367,7 @@ function update({ commit = true, panels = true } = {}) {
   try { syncRoadProfiles(); } catch (e) { console.error(e); }
   try { syncRampBranches(); syncTrumpets(); } catch (e) { console.error(e); } // la tige peut avoir été raccourcie par une branche
   try { S.D = buildDesign(S.prj, { roads: roadConts(S.prj), keep: empKeep() }); } catch (e) { console.error(e); S.D = null; toast('Erreur de calcul : ' + e.message, 'err'); }
+  try { remapRampStations(); } catch (e) { console.error(e); }
   // Bretelle raccordée à un giratoire : elle doit y arriver en alignement droit dans l'axe de sa branche (tangence).
   // Un déplacement qui ferait arriver la courbe dans la branche (cassure) est refusé : les sommets reprennent leur
   // dernière position valide et le dessin ne change pas.
@@ -2445,6 +2448,32 @@ function echEnds() {
   if (S.prj.hwy?.on) add({ t: 'hwy' }, S.prj.hwy.axis);
   (S.prj.crosses || []).forEach((X, i) => { if (X.on !== false) add({ t: 'cross', i }, X.axis); });
   return out;
+}
+/** Projets antérieurs (axe des bretelles au milieu de la chaussée, de S.1,00 à E.1,00) : abscisses saisies sur les
+ *  bretelles reportées une fois sur l'axe de référence actuel (bord gauche de la voie prolongé jusqu'à la peinture,
+ *  R.ref.sRef) — profil en long, ouvrages, profils implantés, franchissements hydrologiques, plages de profils types. */
+function remapRampStations() {
+  if (S.prj.rampRef === 'bg') return;
+  const ramps = S.prj.ramps || [];
+  if (!ramps.length) { S.prj.rampRef = 'bg'; return; }
+  if (!S.D?.ramps || ramps.some((r, i) => S.D.ramps[i]?.al && !S.D.ramps[i].ref)) return; // géométrie pas encore calculée
+  let n = 0;
+  ramps.forEach((r, i) => {
+    const ref = S.D.ramps[i]?.ref, key = `r:${r.id}`;
+    if (!ref) return;
+    const f = (v) => (v === '' || v == null || !Number.isFinite(+v) ? v : (n++, +ref.sRef(+v).toFixed(3)));
+    for (const c of S.prj.cadres || []) if (c.axis === key) c.s = f(c.s);
+    for (const p of S.prj.axpl?.[key]?.pis || []) p.s = f(p.s);
+    for (const q of S.prj.prof?.series || []) if (q.axis === key) { q.s0 = f(q.s0); q.s1 = f(q.s1); }
+    for (const q of S.prj.prof?.manual || []) if (q.axis === key) q.s = f(q.s);
+    for (const c of S.prj.hydro?.res?.crossings || []) if (c.key === key) c.pk = f(c.pk);
+    for (const g of S.prj.ptt?.axes?.[key]?.ranges || []) { g.s0 = f(g.s0); g.s1 = f(g.s1); }
+  });
+  S.prj.rampRef = 'bg';
+  if (n) {
+    try { S.D = buildDesign(S.prj, { roads: roadConts(S.prj), keep: empKeep() }); } catch (e) { console.error(e); }
+    toast(`Axe des bretelles désormais au bord gauche de la voie, prolongé jusqu'à la peinture : ${n} abscisse${n > 1 ? 's' : ''} saisie${n > 1 ? 's' : ''} sur les bretelles reportée${n > 1 ? 's' : ''} sur ce nouvel axe (profil en long, ouvrages, profils).`, 'info');
+  }
 }
 /** Abscisses des éléments rattachés à un axe d'échangeur décalées de d (prolongement à l'origine) ; PK origine corrigé. */
 function shiftAxisStations(ref, d) {

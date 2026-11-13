@@ -36,12 +36,14 @@ export function listAxes(prj, D) {
   const road = (key, r, name) => fromPath(key, name, r.path, r.al?.elems?.some((e) => e.kind === 'C') ? alTan(r.al) : segTan(r.path), { half: r.E2, al: r.al, cat: r.cat, H: r.H });
   if (D?.hwy?.ok) road('hwy', D.hwy, D.hwy.H?.name || 'Autoroute');
   (D?.crosses || []).forEach((c, k) => { if (c?.ok) road(`x:${crossList(prj)[k]?.id || k}`, c, c.H?.name || `Voie secondaire ${k + 1}`); });
+  // Bretelles : axe de référence au bord gauche de la voie (entre la voie et sa BDG), prolongé jusqu'à la peinture de la
+  // chaussée hôte (R.ref, echangeur.js) ; la plate-forme est donc toute à droite de l'axe (voie + BDD).
   (prj.ramps || []).forEach((r, i) => {
-    const R = D?.ramps?.[i];
-    if (!R?.al?.path) return;
-    const els = R.al.elems || [], tan = [];
+    const R = D?.ramps?.[i], ref = R?.ref?.path?.length ? R.ref : null;
+    if (!ref && !R?.al?.path) return;
+    const els = (ref || R.al).elems || [], tan = [];
     for (let j = 1; j < els.length; j++) if (els[j].kind !== els[j - 1].kind || els[j].kind !== 'L') tan.push({ s: els[j].s0, type: `${KN[els[j - 1].kind] || els[j - 1].kind} / ${KN[els[j].kind] || els[j].kind}` });
-    fromPath(`r:${r.id}`, r.name, R.al.path, tan, { half: (R.rp?.w || 3.5) / 2 + (R.rp?.bdd ?? 1), al: R.al });
+    fromPath(`r:${r.id}`, r.name, ref ? ref.path : R.al.path, tan, { half: (R.rp?.w || 3.5) + (R.rp?.bdd ?? 1), al: ref ? { elems: ref.elems, length: ref.len } : R.al, rampRef: !!ref });
   });
   // Branches du carrefour actif : axe projet de la branche (alignement, puis axe suivi).
   for (const bd of D?.branches || []) {

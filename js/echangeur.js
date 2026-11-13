@@ -694,6 +694,41 @@ export function buildEchangeur(prj, D) {
     R.offR = (s) => -(half + (al.curvAt(s) < 0 ? R.surl(s) : 0));
     R.sTplS = Fs ? Math.min(al.length, rp.from.Lm) : 0;
     R.sTplE = Ft ? Math.min(al.length, rp.to.Lm) : 0;
+    // Axe de référence (plan, PK, profil en long, profils en travers, ouvrages) : BORD GAUCHE DE LA VOIE, entre la voie
+    // et sa BDG — et non le milieu de la chaussée —, prolongé jusqu'à la peinture : la rive de la chaussée hôte, au
+    // point S.0 (divergent) / E.0 (convergent), pointe du triangle de zébrage à 1/p du point S.1,00 / E.1,00, où le bord
+    // gauche de la bretelle se détache de la rive peinte. L'axe de construction (al, milieu de chaussée) reste interne.
+    {
+      const L = al.length, n = Math.max(1, Math.ceil(L)), edge = [], sc = [];
+      for (let i = 0; i <= n; i++) { const t = (L * i) / n; sc.push(t); edge.push(add(al.pointAt(t), mul(rot90(unit(al.headAt(t))), R.offL(t)))); }
+      let pre = null, post = null;
+      if (Fs && hF?.off) {
+        const e = rp.from, L0 = WV.byS.has(R.id) ? 0 : Math.min(1 / Math.max(0.01, e.p || 0.03), e.biseau);
+        if (L0 > 0.5) pre = hF.off(Fs.s - hF.sd * L0, 0);
+      }
+      if (Ft && hT?.off) {
+        const e = rp.to, wv = WV.byE.get(R.id), insL = wv ? wv.Z : e.ins, L0 = wv ? 0 : Math.min(1 / Math.max(0.01, e.p || 0.03), Math.max(0, insL - 1));
+        if (L0 > 0.5) post = hT.off(Ft.s + hT.sd * L0, 0);
+      }
+      const pts = [...(pre ? [pre] : []), ...edge, ...(post ? [post] : [])];
+      const cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
+      const Lpre = pre ? cum[1] : 0, k0 = pre ? 1 : 0, len = cum[cum.length - 1], Lpost = post ? len - cum[cum.length - 2] : 0;
+      // abscisse de l'axe de référence d'un point d'abscisse t sur l'axe de construction
+      const sRef = (t) => {
+        const c = Math.max(0, Math.min(L, t)), x = (c / L) * n, i = Math.min(n - 1, Math.floor(x)), f = x - i;
+        return cum[k0 + i] + f * (cum[k0 + i + 1] - cum[k0 + i]);
+      };
+      const half = rp.w / 2, line = (s0, l) => ({ kind: 'L', s0, len: l, R: 0, A: 0, sg: 0, curvAt: () => 0 });
+      const elems = [...(Lpre > 0.01 ? [line(0, Lpre)] : [])];
+      for (const e of al.elems) {
+        const a = sRef(e.s0), b = sRef(e.s0 + e.len), l = b - a; if (!(l > 1e-6)) continue;
+        // rayon au bord gauche : intérieur d'un virage à gauche (R − l/2), extérieur d'un virage à droite (R + l/2)
+        const Rg = e.kind === 'L' ? 0 : Math.max(1, e.R - (e.sg || 0) * half);
+        elems.push({ kind: e.kind, s0: a, len: l, R: Rg, A: e.A || 0, sg: e.sg || 0, out: !!e.out, ...(e.term ? { term: true } : {}), curvAt: (u) => { const k = e.curvAt((u * e.len) / l); return Math.abs(k) > 1e-12 ? 1 / (1 / k - half) : 0; } });
+      }
+      if (Lpost > 0.01) elems.push(line(len - Lpost, Lpost));
+      R.ref = { path: polySegs(pts), pts, len, Lpre, Lpost, sRef, elems };
+    }
     // Contrôles des rayons [ECH] tab. 3-1, § 3.2.1 à 3.2.3 ; boucles § 3.2.1, 6.2.4.
     // Courbes : sommets successifs de même sens reliés sans clothoïde (« arc continu ») = une seule courbe, éventuellement
     // à plusieurs rayons (courbe composée) ; R = plus petit rayon, Rs = rayons successifs.
@@ -923,7 +958,8 @@ export function buildEchangeur(prj, D) {
       P({ k: 'path', L: 'BORDURE', segs: polySegs(offsetPolyline(al, rgt, stp, a, b)) });
       P({ k: 'path', L: 'ACCOTEMENT', segs: polySegs(offsetPolyline(al, (s) => rgt(s) - rp.berme, stp, a, b)) });
     }
-    P({ k: 'path', L: 'AXE', segs: al.path, role: 'secondaire', arrow: true });
+    // axe de référence : bord gauche de la voie, de la pointe peinte S.0 à E.0 (R.ref)
+    P({ k: 'path', L: 'AXE', segs: R.ref?.path?.length ? R.ref.path : al.path, role: 'secondaire', arrow: true });
     const accLAt = (s) => add(al.pointAt(s), mul(rot90(unit(al.headAt(s))), lft(s)));
     // Divergent (§ 4.1.3.1, 4.3, 6.1, 6.2 ; schémas 4-1, 4-8, 6-1, 6-2) : la voie de sortie se forme sur l'accotement de la
     // chaussée émettrice (BAU ou BDD), qui est interrompu et hachuré de S.1,00 m au tpl, puis rétabli après le nez.

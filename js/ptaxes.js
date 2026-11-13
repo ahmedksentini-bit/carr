@@ -45,9 +45,10 @@ export function axisType(prj, D, key) {
   }
   const r = (prj.ramps || []).find((q) => `r:${q.id}` === key), C = RAMP_CAT[r?.cat] || RAMP_CAT.b70;
   const w = (num(r?.lanes, C.lanes) || 1) * 3.5 + (C.two ? 0 : 0), bdd = num(r?.bdd, C.bdd), bdg = num(r?.bdg, C.bdg), berme = num(r?.berme, 0.75);
-  const half = w / 2;
-  const L = [{ w: half, label: `voie ${fmt(w, 2)}`, paved: true }, ...(bdg > 0 ? [{ w: bdg, label: `BDD ${fmt(bdg, 2)} (BDG)`, paved: true }] : []), ...(berme > 0 ? [{ w: berme, label: `berme ${fmt(berme, 2)}`, paved: false, berme: true }] : [])];
-  const R = [{ w: half, label: `voie ${fmt(w, 2)}`, paved: true }, ...(bdd > 0 ? [{ w: bdd, label: `BDD ${fmt(bdd, 2)}`, paved: true }] : []), ...(berme > 0 ? [{ w: berme, label: `berme ${fmt(berme, 2)}`, paved: false, berme: true }] : [])];
+  // axe de référence au bord gauche de la voie (echangeur.js, R.ref) : à gauche la BDG et la berme, à droite toute la
+  // largeur de voie, la BDD et la berme ; dévers unique pivotant autour de ce bord
+  const L = [...(bdg > 0 ? [{ w: bdg, label: `BDG ${fmt(bdg, 2)}`, paved: true }] : []), ...(berme > 0 ? [{ w: berme, label: `berme ${fmt(berme, 2)}`, paved: false, berme: true }] : [])];
+  const R = [{ w, label: `voie ${fmt(w, 2)}`, paved: true }, ...(bdd > 0 ? [{ w: bdd, label: `BDD ${fmt(bdd, 2)}`, paved: true }] : []), ...(berme > 0 ? [{ w: berme, label: `berme ${fmt(berme, 2)}`, paved: false, berme: true }] : [])];
   return { kind: 'bretelle', left: L, right: R, C, single: true };
 }
 
