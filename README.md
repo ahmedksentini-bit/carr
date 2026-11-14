@@ -6,7 +6,13 @@
 minifié et brouillé, verrou de domaine — l'application ne démarre que sur ksr-infra.org — et garde de connexion :
 au démarrage puis toutes les 15 min, la réponse signée de `/lic` (functions/lic.js) est exigée ; hors ligne ou sur une
 copie, l'application s'arrête, après 3 échecs de suite en cours de travail le projet est conservé et l'écran bloqué
-jusqu'au retour de la connexion). Réglages Cloudflare Pages :
+jusqu'au retour de la connexion).
+
+**Calculs sur le serveur** (version publiée) : le moteur hydrologique et hydraulique (js/hydro/engine.js →
+hydrology.js, culvert.js, notefig-cv.js et leurs tables) s'exécute dans la fonction Cloudflare `functions/api/hydro.js`
+et n'est pas publié dans `dist/` ; le navigateur (js/hydro/remote.js) envoie les bassins et les ouvrages et reçoit débits,
+dimensionnements, vérifications et abaques de la note. En développement (racine servie sans fonctions), remote.js
+charge le moteur localement. Offre Cloudflare Workers Paid conseillée (temps de calcul par requête). Réglages Cloudflare Pages :
 commande de build `cd tools && npm ci && npm run build`, répertoire de sortie `dist` (les fonctions de `functions/` restent servies). En
 développement, servir la racine du dépôt (code lisible, sans verrou).
 
