@@ -60,6 +60,7 @@ import { initProfEdit } from './profedit.js';
 import { initAmorces } from './amorces.js';
 import { stopDistCerema, finishedSurface, composite, scanAxis, insufficientRuns, TARGETS as S3D_TARGETS } from './sight3d.js';
 import { axisFromPolyline, kmlLines } from './axisimport.js';
+import { parseTRF, parseLandXML, elementsToAxis, rasanteToPis, axisEcart } from './trfxml.js';
 
 // Identifiants d'application acceptés à l'ouverture : INFRA-KSR (actuel) et GIRA (projets enregistrés avant le renommage).
 const APP_IDS = ['INFRA-KSR', 'GIRA'];
@@ -1717,6 +1718,8 @@ function bindEch() {
   // + Voie principale : la voie principale 1 tant qu'elle n'est pas tracée, sinon une voie de plus (autoroute par défaut)
   $('#btnAxisKml').addEventListener('click', () => $('#fileAxisKml').click());
   $('#fileAxisKml').addEventListener('change', async (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) await importAxisKml(f); });
+  $('#btnAxisTrf')?.addEventListener('click', () => $('#fileAxisTrf').click());
+  $('#fileAxisTrf')?.addEventListener('change', async (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) await importAxisTrfXml(f); });
   $('#btnMainAxis').addEventListener('click', () => { setTool('axis'); S.hwyDraw = S.prj.hwy?.axis?.length >= 2 ? 'main' : 'hwy'; setPrompt(); });
   // Onglet Échangeur : dessin d'un axe (comme dans l'onglet Tracé), rôle des axes du tracé, accès à leurs réglages
   $('#btnMainAxisE').addEventListener('click', () => $('#btnMainAxis').click());
@@ -3088,6 +3091,45 @@ async function importAxisKml(file) {
     const xs = R.axis.map((q) => q.x), ys = R.axis.map((q) => q.y);
     viewer.fit({ x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) });
     toast(`${L.name} importée (${where}) : ${R.axis.length} sommets, ${R.virages} virage${R.virages > 1 ? 's' : ''} (rayons et clothoïdes reconstitués), écart maximal ${fmt(R.ecart, 2)} m aux points du fichier. Vérifiez le type de voie et sa catégorie (onglet Tracé).`);
+  } catch (e) { console.error(e); toast(`Import de l'axe impossible : ${e.message}`, 'err'); }
+}
+
+// Axe d'un fichier TRF (Piste 5) ou LandXML (trfxml.js) : géométrie exacte ramenée aux sommets, profil en long et
+// origine des PK. Coordonnées prises telles quelles dans le système du projet (le fichier doit y être exprimé).
+async function importAxisTrfXml(file) {
+  try {
+    const txt = await file.text(), xml = /^\s*<\?xml|<LandXML/i.test(txt.slice(0, 2000));
+    let els, pis = [], pk0 = 0, name = file.name.replace(/\.[^.]+$/, ''), note = '';
+    if (xml) {
+      const al = parseLandXML(txt).filter((a) => a.elements.length);
+      if (!al.length) { toast(`${file.name} : aucun alignement (Alignment / CoordGeom) dans ce LandXML.`, 'warn'); return; }
+      let A = al[0];
+      if (al.length > 1) {
+        const ans = prompt(`${file.name} contient ${al.length} alignements. Numéro de l'alignement à importer :\n${al.map((q, i) => `${i + 1}. ${q.name} (${q.elements.length} éléments${q.pis.length ? ', profil en long' : ''})`).join('\n')}`, '1');
+        if (ans == null) return;
+        A = al[Math.max(1, Math.min(al.length, parseInt(ans, 10) || 1)) - 1];
+      }
+      els = A.elements; pis = A.pis; pk0 = A.sta0; name = A.name || name; note = 'LandXML';
+    } else {
+      const T = parseTRF(txt);
+      if (!T.elements.length) { toast(`${file.name} : aucun élément d'axe (bloc TYPE 3 « … 400 … ») — est-ce bien un TRF Piste ?`, 'warn'); return; }
+      els = T.elements; pk0 = T.elements[0].s0 ?? T.tab[0]?.s ?? 0; pis = rasanteToPis(T.rasante, pk0); note = `TRF Piste : ${T.note}`;
+    }
+    const R = elementsToAxis(els), ecart = axisEcart(R.axis, els);
+    if (R.axis.length < 2) { toast(`${file.name} : axe illisible.`, 'warn'); return; }
+    // le fichier doit être dans le système du projet : contrôle grossier de distance au projet existant
+    const xs = R.axis.map((q) => q.x), ys = R.axis.map((q) => q.y), bb = { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+    const has = S.prj.hwy?.axis?.length || S.prj.crosses.some((c) => c.axis?.length) || S.prj.branches.length;
+    if (has) { const d = designBBox?.(); if (d && Number.isFinite(d.x0) && (bb.x1 < d.x0 - 20000 || bb.x0 > d.x1 + 20000 || bb.y1 < d.y0 - 20000 || bb.y0 > d.y1 + 20000)) toast(`${file.name} : l'axe est à plus de 20 km du projet — vérifiez le système de coordonnées du fichier (onglet Projet).`, 'warn'); }
+    const axis = R.axis.map(({ _compound, ...q }) => q);
+    let where, key;
+    if (S.prj.hwy?.axis?.length >= 2 && !confirm(`Remplacer l'axe de la voie principale « ${S.prj.hwy.name || 'voie principale'} » ?\n(Annuler : l'axe est ajouté comme nouvelle voie secondaire.)`)) {
+      const k = S.prj.crosses.length, X = { ...newCross(k), axis, name, pk0: Math.round(pk0 * 1000) / 1000 }; S.prj.crosses.push(X); S.xsel = k; where = 'nouvelle voie secondaire'; key = `x:${X.id}`;
+    } else { S.prj.hwy.axis = axis; S.prj.hwy.on = true; S.prj.hwy.name = name; S.prj.hwy.pk0 = Math.round(pk0 * 1000) / 1000; S.msel = -1; where = 'voie principale'; key = 'hwy'; }
+    if (pis.length >= 2) { S.prj.axpl = S.prj.axpl || {}; S.prj.axpl[key] = { pis }; }
+    S.echSig = ''; update();
+    viewer.fit(bb);
+    toast(`${name} importé (${where}, ${note}) : ${axis.length} sommets, ${R.virages} virage(s) ; écart maximal ${fmt(ecart, 2)} m à la géométrie du fichier${R.compound ? ` ; ${R.compound} virage(s) à plusieurs rayons ramené(s) au plus petit` : ''}${pis.length >= 2 ? ` ; profil en long : ${pis.length} sommets` : ' ; pas de profil en long'} ; origine PK ${pkText(pk0)}.`, ecart > 0.5 || R.compound ? 'warn' : 'info');
   } catch (e) { console.error(e); toast(`Import de l'axe impossible : ${e.message}`, 'err'); }
 }
 
