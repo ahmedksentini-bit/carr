@@ -66,7 +66,7 @@ export function csprEchangeurs({ prj, D, axes = [], axpl = null }) {
       }
       add('EC2', 'La géométrie de la sortie est-elle conforme au guide ?', ...verdict(own(/déboîtement|obliquité de sortie|biseau|Lm =|point d'accès|S\.1,00 à l'abscisse/),
         `Biseau ${fmt(e.biseau, 0)} m, obliquité ${fmt(e.p * 100, 2)} %, tpl ${fmt(e.tpl, 2)} m, Lm ${fmt(e.Lm, 1)} m (§ 4.1, 6.1)${cs.lbS ? `. Marquage : lb = L/6 + l2 = ${fmt(cs.lbS.L6, 2)} + ${fmt(cs.lbS.l2, 2)} = ${fmt(cs.lbS.lb, 2)} m avant S.1,00 (L = ${cs.lbS.L} m à ${cs.lbS.V} km/h)` : ''}.`));
-      add('EC4', 'Le panneau D30 et le musoir sont-ils visibles simultanément ?', 'NV', 'Implantation de la signalisation de direction : à vérifier sur le plan de signalisation.');
+      add('EC4', 'Le panneau D30 et le musoir sont-ils visibles simultanément ?', 'NV', `Signalisation de direction dessinée — ${R.signs?.rule || '—'} : ${(R.signs?.list || []).map((q) => q.back ? `${q.code} à ${fmt(q.back, 0)} m en amont du D30` : `${q.code} au point S.1,50 m`).join(', ')}. Visibilité simultanée sur la balise du musoir (S.5,00) et la face du D30 à vérifier sur le profil en long et les masques.`);
       {
         const okL = R.lad + 1e-6 >= e.Lm, okP = e.p <= 0.05 + 1e-9;
         add('EC6', 'Les règles d\'obliquité sont-elles respectées à partir de S.1,00 ?', okL && okP ? 'Oui' : 'Non',
