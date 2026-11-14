@@ -988,8 +988,8 @@ export function buildEchangeur(prj, D) {
       uniq.forEach((m, i) => {
         const { p, t } = at(m.s), nn = rot90(t);
         P({ k: 'path', L: 'COTATION', segs: [G.L(add(p, mul(nn, 1.2)), add(p, mul(nn, -1.2)))] });
-        text('COTATION', add(p, mul(nn, -2.6)), m.label, ang(t) + Math.PI / 2, 'center', TH * 0.75);
-        if (i) { const q = uniq[i - 1], mid = at((q.s + m.s) / 2); text('COTATION', add(mid.p, mul(rot90(mid.t), 1.0)), `${fmt(m.s - q.s, 2)} m`, ang(mid.t), 'center', TH * 0.7); }
+        text('COTATION', add(p, mul(nn, -2.6)), m.label, ang(t) + Math.PI / 2, 'center', TH);
+        if (i) { const q = uniq[i - 1], mid = at((q.s + m.s) / 2); text('COTATION', add(mid.p, mul(rot90(mid.t), 1.0)), `${fmt(m.s - q.s, 2)} m`, ang(mid.t), 'center', TH * 0.9); }
       });
     };
     const cs = R.cspr || {};

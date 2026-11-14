@@ -1082,21 +1082,29 @@ function refreshEch() {
 // Grille CSPR (conception détaillée, VRU type A, 2010) — questions « Échangeurs » : une ligne par question et par
 // bretelle ; la bretelle sélectionnée en premier.
 document.addEventListener('change', (ev) => { if (ev.target?.id === 'csprSel') renderCspr(); });
+document.addEventListener('click', (ev) => { if (ev.target?.id === 'btnCsprJump') $('#csprHead')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
 document.addEventListener('click', (ev) => {
   if (ev.target?.id !== 'btnCsprCopy') return;
   const tsv = ['Code\tQuestion\tBretelle\tRéponse\tConstat', ...(S.cspr || []).map((q) => [q.code, q.q, q.ramp, q.ans, q.note].join('\t'))].join('\n');
   navigator.clipboard?.writeText(tsv).then(() => toast('Grille CSPR copiée (collez-la dans un tableur).'), () => toast('Copie impossible.'));
 });
 function renderCspr() {
-  const el = $('#csprOut'); if (!el) return;
-  const rows = S.cspr || [];
-  if (!rows.length) { el.innerHTML = '<p class="note">Aucune bretelle calculée.</p>'; return; }
-  const sel = S.D?.ramps?.[S.rsel]?.name, only = $('#csprSel')?.checked !== false;
-  const list = only && sel ? rows.filter((q) => q.ramp === sel) : rows;
-  const n = (a) => rows.filter((q) => q.ans === a).length;
-  el.innerHTML = `<p class="note">${rows.length} réponses : ${n('Oui')} Oui · ${n('Non')} Non · ${n('NV')} NV (à apprécier sur plan ou sur site) · ${n('SO')} SO.</p>` +
-    '<div class="tablewrap"><table class="pts cspr"><tr><th>Code</th><th>Question</th>' + (only ? '' : '<th>Bretelle</th>') + '<th>Réponse</th><th>Constat</th></tr>' +
-    list.map((q) => `<tr><td class="mono">${q.code}</td><td>${esc(q.q)}</td>${only ? '' : `<td>${esc(q.ramp)}</td>`}<td class="ans ${q.ans === 'Oui' ? 'ok' : q.ans === 'Non' ? 'ko' : 'nv'}">${q.ans}</td><td>${esc(q.note)}</td></tr>`).join('') + '</table></div>';
+  const rows = S.cspr || [], n = (a) => rows.filter((q) => q.ans === a).length;
+  const sum = rows.length ? `<p class="note">${rows.length} réponses : ${n('Oui')} Oui · ${n('Non')} Non · ${n('NV')} NV (à apprécier sur plan ou sur site) · ${n('SO')} SO.</p>` : '';
+  const table = (list, withRamp) => '<div class="tablewrap"><table class="pts cspr"><tr><th>Code</th><th>Question</th>' + (withRamp ? '<th>Bretelle</th>' : '') + '<th>Réponse</th><th>Constat</th></tr>' +
+    list.map((q) => `<tr><td class="mono">${q.code}</td><td>${esc(q.q)}</td>${withRamp ? `<td>${esc(q.ramp)}</td>` : ''}<td class="ans ${q.ans === 'Oui' ? 'ok' : q.ans === 'Non' ? 'ko' : 'nv'}">${q.ans}</td><td>${esc(q.note)}</td></tr>`).join('') + '</table></div>';
+  const el = $('#csprOut');
+  if (el) {
+    if (!rows.length) el.innerHTML = '<p class="note">Aucune bretelle calculée.</p>';
+    else {
+      const sel = S.D?.ramps?.[S.rsel]?.name, only = $('#csprSel')?.checked !== false && !!sel;
+      el.innerHTML = sum + table(only ? rows.filter((q) => q.ramp === sel) : rows, !only);
+    }
+  }
+  // onglet Contrôles : toutes les bretelles
+  const box = $('#csprCtl');
+  if (box) { box.hidden = !rows.length; if (rows.length) $('#csprAll').innerHTML = sum + table(rows, true); }
+  const jb = $('#btnCsprJump'); if (jb) jb.textContent = rows.length ? `Grille CSPR (${n('Non')} Non, ${n('NV')} NV) ↓` : 'Grille CSPR ↓';
 }
 
 // Chaussée hôte sous le point cliqué : autoroute (sens selon le côté) ou bretelle existante.
@@ -4348,6 +4356,7 @@ function refreshChecks() {
   bd.textContent = n ? String(n) : w ? String(w) : '';
   bd.className = 'badge' + (n ? ' err' : w ? ' warn' : '');
   refreshFixPanel();
+  renderCspr();
 }
 
 // --------------------------------------------------------- Corrections des épures de giration
