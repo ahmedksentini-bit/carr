@@ -427,6 +427,9 @@ ou sur un fond topographique DXF.
   travers est porté tout à droite de l'axe (voie + BDD), la BDG à gauche, dévers pivotant autour de ce bord ; les
   extrémités du profil en long se calent sur la rive peinte de la chaussée hôte. Projets antérieurs (axe au milieu de
   la chaussée) : les abscisses saisies sur les bretelles sont reportées une fois, point par point, sur le nouvel axe.
+- **Carte des fuseaux UTM** (onglet Projet, sous « Système de coordonnées », reprise de BVTrace) : carte interactive
+  (Leaflet, imagerie Esri) des 60 fuseaux nord et sud ; un clic sur un fuseau en fait le système du projet (UTM WGS 84),
+  le fuseau courant est surligné, l'axe principal est tracé et « Fuseau du projet » applique le fuseau où il se trouve.
 - **Import d'axe TRF / LandXML** (onglet Tracé, « Importer l'axe (TRF / LandXML) », portage de BVTrace) : fichier TRF
   de transfert Piste 5 du SETRA (blocs 1 tabulation, 3 axe en plan, 4 profil en long ; colonnes fixes du format 400)
   ou LandXML (Alignment : Line, Curve, Spiral ; Profile : PVI, ParaCurve, CircCurve ; coordonnées « nord est »).
