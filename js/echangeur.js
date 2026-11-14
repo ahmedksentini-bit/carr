@@ -740,6 +740,18 @@ export function buildEchangeur(prj, D) {
         const p = rp.to.p || 0.03, u = 3 / p;
         if (u <= termLen(al, true) + 1e-6) { const q = hT.off(Ft.s - hT.sd * u, 4), pr = pathProject(R.ref.path, q); cs.e4 = pr ? pr.s : len - Lpost - u; cs.pE4 = q; }
       }
+      // lb (marquage des divergents et convergents) : distance de l'extrémité de la ligne T2-5u au point S.1,00 / E.1,00.
+      // L = module fondamental de la signalisation horizontale (39 / 78 / 117 / 195 m à 50 / 70 / 90 / 110 km/h et plus),
+      // l1 = (0,75 − 0,375) / p, l2 = (1,00 − 0,75) / p ; sortie en déboîtement : lb = L/6 + l2 ; entrée en insertion :
+      // lb = L/6 + l2 si L/6 ≥ l1, sinon l1 + l2. Ligne portée sur la rive de la chaussée hôte, en amont de S.1,00 et en
+      // aval de E.1,00.
+      const lbOf = (e, entry) => {
+        const V = +e.host?.V || 90, L = V <= 50 ? 39 : V <= 70 ? 78 : V <= 90 ? 117 : 195, p = e.p || 0.03;
+        const l1 = 0.375 / p, l2 = 0.25 / p, L6 = L / 6, lb = !entry || L6 >= l1 ? L6 + l2 : l1 + l2;
+        return { V, L, L6, l1, l2, lb };
+      };
+      if (Fs && hF?.off && rp.from) { const b = lbOf(rp.from, false); cs.lbS = b; cs.pLbS = hF.off(Fs.s - hF.sd * b.lb, 0); cs.sLbS = Lpre - b.lb; }
+      if (Ft && hT?.off && rp.to) { const b = lbOf(rp.to, true); cs.lbE = b; cs.pLbE = hT.off(Ft.s + hT.sd * b.lb, 0); cs.sLbE = len - Lpost + b.lb; }
       R.cspr = cs;
     }
     // Contrôles des rayons [ECH] tab. 3-1, § 3.2.1 à 3.2.3 ; boucles § 3.2.1, 6.2.4.
@@ -978,11 +990,12 @@ export function buildEchangeur(prj, D) {
     // bretelle : repères et longueurs entre repères successifs.
     const chain = (marks) => {
       const ref = R.ref; if (!ref?.path?.length) return;
-      const ms = marks.filter((m) => Number.isFinite(m.s) && m.s >= -1e-6 && m.s <= ref.len + 1e-6).sort((a, b) => a.s - b.s);
+      const ms = marks.filter((m) => Number.isFinite(m.s) && m.s >= -150 && m.s <= ref.len + 150).sort((a, b) => a.s - b.s);
       const uniq = ms.filter((m, i) => !i || m.s - ms[i - 1].s > 0.3);
       if (uniq.length < 2) return;
       const dOff = -(rp.w + rp.bdd + rp.berme + 3);
-      const at = (s) => { const t = norm(pathTangentAt(ref.path, s)); return { p: add(G.pathPointAt(ref.path, s), mul(rot90(t), dOff)), t }; };
+      // au-delà des extrémités de l'axe (lb peut dépasser S.0 / E.0) : prolongement en droite selon la tangente
+      const at = (s) => { const c = Math.max(0, Math.min(ref.len, s)), t = norm(pathTangentAt(ref.path, c)); return { p: add(add(G.pathPointAt(ref.path, c), mul(t, s - c)), mul(rot90(t), dOff)), t }; };
       const a = uniq[0].s, b = uniq[uniq.length - 1].s, n = Math.max(2, Math.ceil(b - a));
       P({ k: 'path', L: 'COTATION', segs: polySegs(Array.from({ length: n + 1 }, (_, i) => at(a + ((b - a) * i) / n).p)) });
       uniq.forEach((m, i) => {
@@ -1025,9 +1038,10 @@ export function buildEchangeur(prj, D) {
       if (!woven) pt(`${name} · origine du biseau (${fmt(e.biseau)} m)`, h.off(st0, 0));
       if (R.ref?.Lpre > 0) pt(`${name} · S.0 (pointe peinte, origine de l'axe)`, R.ref.pts[0]);
       if (cs.pS5) pt(`${name} · S.5,00 m`, cs.pS5);
+      if (cs.pLbS) pt(`${name} · extrémité de la ligne T2-5u (lb = ${fmt(cs.lbS.lb, 2)} m avant S.1,00)`, cs.pLbS);
       {
         const lad = R.lad ?? termLen(al), c0 = R.curves?.[0], sr = R.ref?.sRef || ((t) => t);
-        chain([{ s: cs.s0, label: 'S.0' }, { s: cs.s1, label: 'S.1,00' }, { s: cs.s5, label: 'S.5,00' }, { s: sr(R.sTplS), label: 'tpl' },
+        chain([...(cs.lbS ? [{ s: cs.sLbS, label: `lb ${fmt(cs.lbS.lb, 2)}` }] : []), { s: cs.s0, label: 'S.0' }, { s: cs.s1, label: 'S.1,00' }, { s: cs.s5, label: 'S.5,00' }, { s: sr(R.sTplS), label: 'tpl' },
           ...(c0 ? [{ s: sr(lad), label: 'origine courbe' }, { s: sr(lad + (c0.L1 || 0)), label: `début arc R ${fmt(c0.R, 0)}` }] : []),
           ...(R.Ld > 0 && cs.s1 + R.Ld < (R.ref?.len || 0) ? [{ s: cs.s1 + R.Ld, label: `Ld ${fmt(R.Ld, 0)} m` }] : [])]);
       }
@@ -1081,9 +1095,10 @@ export function buildEchangeur(prj, D) {
       pt(`${name} · tpl (${fmt(e.tpl)} m)`, h.off(sNoseE, e.tpl / 2)); pt(`${name} · E.1,00 m`, Ft.S1);
       if (R.ref?.Lpost > 0) pt(`${name} · E.0 (pointe peinte, fin de l'axe)`, R.ref.pts[R.ref.pts.length - 1]);
       if (cs.pE4) pt(`${name} · E.4,00 m`, cs.pE4);
+      if (cs.pLbE) pt(`${name} · extrémité de la ligne T2-5u (lb = ${fmt(cs.lbE.lb, 2)} m après E.1,00)`, cs.pLbE);
       {
         const ladE = R.ladE ?? termLen(al, true), cN = R.curves?.[R.curves.length - 1], sr = R.ref?.sRef || ((t) => t);
-        chain([{ s: cs.e0, label: 'E.0' }, { s: cs.e1, label: 'E.1,00' }, { s: cs.e4, label: 'E.4,00' }, { s: sr(L - R.sTplE), label: 'tpl' },
+        chain([...(cs.lbE ? [{ s: cs.sLbE, label: `lb ${fmt(cs.lbE.lb, 2)}` }] : []), { s: cs.e0, label: 'E.0' }, { s: cs.e1, label: 'E.1,00' }, { s: cs.e4, label: 'E.4,00' }, { s: sr(L - R.sTplE), label: 'tpl' },
           ...(cN ? [{ s: sr(L - ladE), label: 'fin courbe' }, { s: sr(L - ladE - (cN.L2 || 0)), label: `fin arc R ${fmt(cN.R, 0)}` }] : []),
           ...(R.La > 0 && cs.e1 - R.La > 0 ? [{ s: cs.e1 - R.La, label: `La ${fmt(R.La, 0)} m` }] : [])]);
       }

@@ -65,7 +65,7 @@ export function csprEchangeurs({ prj, D, axes = [], axpl = null }) {
         add('EC1', 'La sortie est-elle bien distincte des accès voisins ?', ...verdict(bad, 'Aucun conflit d\'enchaînement ni d\'entrecroisement relevé avec les accès voisins (§ 7.3).'));
       }
       add('EC2', 'La géométrie de la sortie est-elle conforme au guide ?', ...verdict(own(/déboîtement|obliquité de sortie|biseau|Lm =|point d'accès|S\.1,00 à l'abscisse/),
-        `Biseau ${fmt(e.biseau, 0)} m, obliquité ${fmt(e.p * 100, 2)} %, tpl ${fmt(e.tpl, 2)} m, Lm ${fmt(e.Lm, 1)} m (§ 4.1, 6.1).`));
+        `Biseau ${fmt(e.biseau, 0)} m, obliquité ${fmt(e.p * 100, 2)} %, tpl ${fmt(e.tpl, 2)} m, Lm ${fmt(e.Lm, 1)} m (§ 4.1, 6.1)${cs.lbS ? `. Marquage : lb = L/6 + l2 = ${fmt(cs.lbS.L6, 2)} + ${fmt(cs.lbS.l2, 2)} = ${fmt(cs.lbS.lb, 2)} m avant S.1,00 (L = ${cs.lbS.L} m à ${cs.lbS.V} km/h)` : ''}.`));
       add('EC4', 'Le panneau D30 et le musoir sont-ils visibles simultanément ?', 'NV', 'Implantation de la signalisation de direction : à vérifier sur le plan de signalisation.');
       {
         const okL = R.lad + 1e-6 >= e.Lm, okP = e.p <= 0.05 + 1e-9;
@@ -134,7 +134,7 @@ export function csprEchangeurs({ prj, D, axes = [], axpl = null }) {
           `Alignement droit jusqu'à E.1,00 : ${fmt(R.ladE, 1)} m ${okL ? '≥' : '<'} Lm ${fmt(e.Lm, 1)} m ; obliquité ${fmt(e.p * 100, 2)} %${okP ? '' : ' hors de 3 à 5 %'} (§ 6.1). E.1,00 → E.0 = ${fmt(cs.e0 - cs.e1, 1)} m${Number.isFinite(cs.e4) ? `, E.4,00 → E.1,00 = ${fmt(cs.e1 - cs.e4, 1)} m` : ''}.`);
       }
       add('EC36', 'La géométrie de l\'entrée est-elle conforme au guide ?', ...verdict(own(/voie d'insertion|biseau d'insertion|obliquité d'entrée|zone d'accélération|insertion dépasse|fin de l'insertion/),
-        `Voie d'insertion ${fmt(e.ins, 0)} m + biseau ${fmt(e.biseau, 0)} m, obliquité ${fmt(e.p * 100, 2)} %${R.La != null ? `, La = ${fmt(R.La, 1)} m ≤ ${fmt(R.Ladisp, 1)} m disponibles` : ''} (§ 3.2.5, 5).`));
+        `Voie d'insertion ${fmt(e.ins, 0)} m + biseau ${fmt(e.biseau, 0)} m, obliquité ${fmt(e.p * 100, 2)} %${R.La != null ? `, La = ${fmt(R.La, 1)} m ≤ ${fmt(R.Ladisp, 1)} m disponibles` : ''} (§ 3.2.5, 5)${cs.lbE ? `. Marquage : lb = ${cs.lbE.L6 >= cs.lbE.l1 ? `L/6 + l2 = ${fmt(cs.lbE.L6, 2)}` : `l1 + l2 = ${fmt(cs.lbE.l1, 2)}`} + ${fmt(cs.lbE.l2, 2)} = ${fmt(cs.lbE.lb, 2)} m après E.1,00 (L = ${cs.lbE.L} m à ${cs.lbE.V} km/h)` : ''}.`));
       {
         const hk = hostKey(prj, r?.to?.ref), H = hk && axpl?.get?.(hk), hax = hk && byKey.get(hk), V = +e.host?.V || 70, d = stopDist(V);
         let ans = 'NV', note = `Distance d'arrêt sur la chaussée réceptrice : ${fmt(d, 0)} m à ${fmt(V, 0)} km/h (tr 2 s).`;
