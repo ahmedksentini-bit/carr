@@ -7910,7 +7910,10 @@ function buildDxfText() {
       }
     } else if (pr.k === 'circle') w.circle(L, pr.c, pr.r);
     else if (pr.k === 'text') w.text(L, pr.p, pr.h, pr.rot, pr.s, pr.align);
-    else if (pr.k === 'hatch') for (const [a, b] of pr.lines) w.line(L, a, b);
+    else if (pr.k === 'hatch' && pr.band) for (const [a, b] of pr.lines) { // zébra : contour de chaque hachure (largeur wm)
+      const n = G.mul(G.rot90(G.norm(G.sub(b, a))), (pr.wm || 0.5) / 2), q = [G.add(a, n), G.add(b, n), G.sub(b, n), G.sub(a, n)];
+      for (let i = 0; i < 4; i++) w.line(L, q[i], q[(i + 1) % 4]);
+    } else if (pr.k === 'hatch') for (const [a, b] of pr.lines) w.line(L, a, b);
     else if (pr.k === 'cross') {
       const r = pr.size, p = pr.p;
       w.line(L, { x: p.x - r, y: p.y }, { x: p.x + r, y: p.y }); w.line(L, { x: p.x, y: p.y - r }, { x: p.x, y: p.y + r });

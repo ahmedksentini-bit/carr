@@ -801,6 +801,11 @@ ou sur un fond topographique DXF.
   à l'autoroute, `js/psidatrace.js`) ; travure le long de l'axe et tablier calculé en plaque.
 - **Triangle de zébrage** des divergents et convergents : la rive de la chaussée et la rive gauche de la bretelle sont
   prolongées au-delà de S.1,00 / E.1,00 jusqu'à leur rencontre (1/p, soit 33 m à 3 %), la ligne T2 s'y arrête.
+- **Marquage des échangeurs selon l'IISR 7ᵉ partie** (vc 2025-04-04) : u = 7,5 cm sur autoroute et chaussées séparées
+  (art. 113-1 C) — lignes de voie T1 2u, rives et contours de zébra 3u, ligne T2 5u des voies de décélération et
+  d'insertion (art. 117-3) ; sur autoroute, la ligne de voie qui jouxte la sortie devient une T3 2u dissuasive de L avant
+  le D30 jusqu'à S.0 (art. 117-3 B) ; zébras en hachures de 0,50 m espacées de 1,35 m, inclinées à 2 pour 1 vers la
+  chaussée principale, à 2u des lignes 3u (art. 117-2 A), exportées en DXF avec leur contour.
 - **Axe de l'autoroute trop court pour un gabarit** : il est prolongé en ligne droite à ses extrémités (emprise des
   biseaux et insertions + 50 m), les abscisses des raccordements existants et le PK origine sont décalés (PK
   inchangés) ; un point S.1,00 / E.1,00 hors de l'axe est signalé en erreur (auparavant ramené en bout d'axe, d'où des

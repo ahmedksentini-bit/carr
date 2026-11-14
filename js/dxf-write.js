@@ -8,6 +8,7 @@ const LTYPES = {
   CONSTRUCTION: { desc: 'Construction . . .', pat: [0.6, -0.6] },
   CLP: { desc: 'Cedez-le-passage 0.50/0.50', pat: [0.5, -0.5] },
   T1: { desc: 'Marquage T1 3/10', pat: [3, -10] },
+  T2: { desc: 'Marquage T2 3/3.5', pat: [3, -3.5] },
   T3: { desc: 'Marquage T3 3/1.33', pat: [3, -1.33] },
 };
 
