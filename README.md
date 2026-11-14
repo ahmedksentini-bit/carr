@@ -433,6 +433,10 @@ ou sur un fond topographique DXF.
   jusqu'à S.5,00 / depuis E.4,00 (tolérance 5 cm) et indiquent la cote à caler ; EC39 / EC40 vérifient la visibilité
   verticale (œil 1,00 m ; objet 0 m sur la courbe, 1,00 m pour le véhicule entrant à la distance d'arrêt, tr 2 s, γ de
   l'ARP). Bouton « Copier (tableur) » pour reporter les réponses dans la grille.
+  **lb** (marquage des divergents et convergents) : extrémité de la ligne T2-5u portée sur la rive de la chaussée hôte
+  à lb de S.1,00 (en amont) ou de E.1,00 (en aval), avec L = module fondamental (39 / 78 / 117 / 195 m à 50 / 70 / 90 /
+  110 km/h et plus), l1 = 0,375 / p, l2 = 0,25 / p : sortie en déboîtement lb = L/6 + l2 ; entrée lb = L/6 + l2 si
+  L/6 ≥ l1, sinon l1 + l2. Coté dans la chaîne et rappelé dans les constats EC2 / EC36.
 - **Bretelles sur chaussée en courbe** (guide des échangeurs 2013, version 2015, § 6.2 et 6.3, schémas 6-3, 6-4, 6-11,
   6-12) : à l'intérieur du virage, le bord gauche de la bretelle prolonge l'obliquité par une courbe de même rayon que le
   bord droit de la chaussée (arc d'extrémité) au lieu d'une droite qui recouperait la chaussée. Le rayon est celui de la
