@@ -2400,7 +2400,8 @@ function setTool(t) {
   if (t !== 'profser') S.profA = null;
   if (t !== 'bvcut') S.bvCut = null;
   if (t !== 'tiein') S.tie = null;
-  if (t !== 'amorce') S.amA = null;
+  S.amA = null;
+  if (t === 'amorce') toast('Amorce : touchez (ou cliquez) près du bord de la route, puis à l\'extrémité de l\'amorce.');
   $$('.tools [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
   updateCursor(); setPrompt(); viewer.invalidate();
 }
@@ -2413,14 +2414,14 @@ const DRAW_TOOLS = { amorce: 'Amorce (2 points)', axis: 'Axe', bvcut: 'Coupe du 
 function refreshDrawBar() {
   const bar = $('#drawBar'); if (!bar) return;
   const on = !!DRAW_TOOLS[S.tool]; bar.hidden = !on; if (!on) return;
-  const n = S.tool === 'axis' ? S.draft.length : S.tool === 'bvcut' ? (S.bvCut?.pts.length || 0) : S.tool === 'measure' ? S.meas.length : 0;
-  $('#dbInfo').textContent = `${DRAW_TOOLS[S.tool]}${['axis', 'bvcut', 'measure'].includes(S.tool) ? ` · ${n} point${n > 1 ? 's' : ''}` : ''}`;
-  $('#dbUndo').hidden = !['axis', 'bvcut', 'measure', 'center', 'profser', 'tiein'].includes(S.tool);
-  $('#dbUndo').disabled = ['axis', 'bvcut', 'measure'].includes(S.tool) && !n;
-  $('#dbDone').disabled = S.tool === 'axis' && n < 2;
+  const n = S.tool === 'axis' ? S.draft.length : S.tool === 'bvcut' ? (S.bvCut?.pts.length || 0) : S.tool === 'measure' ? S.meas.length : S.tool === 'amorce' ? (S.amA ? 1 : 0) : 0;
+  $('#dbInfo').textContent = `${DRAW_TOOLS[S.tool]}${['axis', 'bvcut', 'measure', 'amorce'].includes(S.tool) ? ` · ${n} point${n > 1 ? 's' : ''}` : ''}`;
+  $('#dbUndo').hidden = !['axis', 'bvcut', 'measure', 'center', 'profser', 'tiein', 'amorce'].includes(S.tool);
+  $('#dbUndo').disabled = ['axis', 'bvcut', 'measure', 'amorce'].includes(S.tool) && !n;
+  $('#dbDone').disabled = (S.tool === 'axis' && n < 2) || S.tool === 'amorce'; // l'amorce se termine d'elle-même au second point
 }
 function bindDrawBar() {
-  $('#dbUndo').addEventListener('click', () => { undoPoint(); refreshDrawBar(); });
+  $('#dbUndo').addEventListener('click', () => { if (S.tool === 'amorce') { S.amA = null; viewer.invalidate(); } else undoPoint(); refreshDrawBar(); });
   $('#dbDone').addEventListener('click', () => {
     if (S.tool === 'axis') finishAxis(); else if (S.tool === 'bvcut') bvFinishCut(); else setTool('select');
     refreshDrawBar();
@@ -7198,7 +7199,7 @@ function bindUI() {
   $('#btnS3d')?.addEventListener('click', runSight3D);
   $('#s3dForm')?.addEventListener('change', (e) => { const k = e.target.dataset.s3; if (!k) return; const C = s3dCfg(); C[k] = ['V', 'step', 'h'].includes(k) ? (e.target.value === '' ? '' : parseNum(e.target.value)) : e.target.value; update({ panels: false }); renderS3dForm(); });
   $('#s3dOut')?.addEventListener('click', (e) => { const tr = e.target.closest('tr[data-s3s]'); if (!tr || !S.s3d) return; const ax = (S.prof?.axes || listAxes(S.prj, S.D)).find((a) => a.key === S.s3d.key); if (ax) gotoCheck({ at: ax.at(+tr.dataset.s3s).p }); });
-  AM = initAmorces({ S, $, viewer, update, toast, esc, fmt, uid, listAxes, setTool, showTab }); AM.bind();
+  AM = initAmorces({ S, $, viewer, update, toast, esc, fmt, uid, listAxes, setTool, showTab, refreshDrawBar }); AM.bind();
   if (/[?&]debug\b/.test(location.search)) window.__gira = { S, get viewer() { return viewer; }, get v3d() { return v3d; }, lineGrips: () => gripAxes().flatMap(axisLineGrips), ew: () => earthworkCorridors(), ohOpen: (id) => ohOpen(id) }; // tests de navigateur (?debug)
   bind3D();
   bindEch();
