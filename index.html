@@ -538,6 +538,7 @@
         <p class="note">Contrôles automatiques des valeurs saisies par rapport aux recommandations du guide retenu. Ils ne remplacent pas le jugement du projeteur.</p>
         <ul id="checks" class="checks"></ul>
         <div id="fixPanel"></div>
+        <div id="csprCtl" hidden><h3>Grille CSPR — échangeurs</h3><p class="note">Réponses aux questions « Échangeurs » de la grille CSPR (conception détaillée, VRU type A, 2010), toutes bretelles. Détail et copie vers un tableur : onglet Échangeur.</p><div id="csprAll"></div></div>
       </div>
 
       <div class="tab" id="tab-visibilite" hidden>
@@ -576,6 +577,7 @@
 
       <div class="tab" id="tab-echangeur" hidden>
         <p class="note">Diffuseur sur autoroute : section courante (ICTAAL 2015, maj 2021), bretelles de sortie par déboîtement (Sd1) et d'entrée en insertion (Ei1) avec clothoïdes, divergents et convergents, d'après le guide Cerema « Les échangeurs sur routes de type Autoroute » (2013, maj 2021). L'extrémité des bretelles se raccorde à la voirie ordinaire comme un demi-carrefour (guide § 8) : le giratoire ou le carrefour plan du projet.</p>
+        <div class="row"><button id="btnCsprJump" title="Aller au tableau des réponses à la grille CSPR, en bas de cet onglet">Grille CSPR ↓</button></div>
         <h3>Voies de l'échangeur</h3>
         <p class="note">Les axes se dessinent et se règlent dans l'onglet <b>Tracé</b> (voie principale, voies secondaires) ; choisissez ici le rôle de chacun dans l'échangeur. Les boutons ci-dessous dessinent un nouvel axe comme dans l'onglet Tracé.</p>
         <ul id="echAxList" class="blist"></ul>
@@ -602,7 +604,7 @@
         <div id="rampForm"></div>
         <div id="rampOut"></div>
         </div>
-        <h3>Grille CSPR — échangeurs</h3>
+        <h3 id="csprHead">Grille CSPR — échangeurs</h3>
         <p class="note">Réponses aux questions « Échangeurs » de la grille CSPR (conception détaillée, VRU type A, 2010) d'après la géométrie et les profils en long du projet. Points de référence du guide des échangeurs (§ 2.3.1) cotés sur le plan : S.0, S.1,00, S.5,00, E.4,00, E.1,00, E.0. NV : à apprécier sur plan ou sur site.</p>
         <div class="row"><label class="chk"><input type="checkbox" id="csprSel" checked> Bretelle sélectionnée seulement</label><button id="btnCsprCopy">Copier (tableur)</button></div>
         <div id="csprOut"></div>
