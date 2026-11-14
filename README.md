@@ -427,6 +427,13 @@ ou sur un fond topographique DXF.
   travers est porté tout à droite de l'axe (voie + BDD), la BDG à gauche, dévers pivotant autour de ce bord ; les
   extrémités du profil en long se calent sur la rive peinte de la chaussée hôte. Projets antérieurs (axe au milieu de
   la chaussée) : les abscisses saisies sur les bretelles sont reportées une fois, point par point, sur le nouvel axe.
+- **Import d'axe TRF / LandXML** (onglet Tracé, « Importer l'axe (TRF / LandXML) », portage de BVTrace) : fichier TRF
+  de transfert Piste 5 du SETRA (blocs 1 tabulation, 3 axe en plan, 4 profil en long ; colonnes fixes du format 400)
+  ou LandXML (Alignment : Line, Curve, Spiral ; Profile : PVI, ParaCurve, CircCurve ; coordonnées « nord est »).
+  Droites, arcs et clothoïdes exacts ramenés aux sommets de l'axe (intersection des tangentes, rayon du virage,
+  clothoïdes d'entrée / sortie moyennées ; virages à plusieurs rayons ramenés au plus petit et signalés), écart à la
+  géométrie du fichier affiché ; profil en long (sommets, rayons des paraboles) et origine des PK repris. Les
+  coordonnées du fichier sont lues dans le système du projet ; voie principale, ou nouvelle voie secondaire.
 - **Amorces** (onglet Amorces) : simple accès d'une voie secondaire ou d'une desserte sur une route du projet, sans
   carrefour. Bouton « + Amorce », puis deux clics (une droite) : le premier point se cale sur le bord de chaussée de la
   route la plus proche, du côté de l'amorce, et suit la route si son axe change ; l'amorce s'arrête sur la ligne du bord,
