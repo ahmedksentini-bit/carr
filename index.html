@@ -140,6 +140,7 @@
       <button data-tab="controles">Contrôles <span id="chkBadge" class="badge"></span></button>
       <button data-tab="capacite">Capacité</button>
       <button data-tab="echangeur">Échangeur</button>
+      <button data-tab="amorces" title="Amorces : simples accès raccordant une voie au bord de la chaussée principale">Amorces</button>
       <button data-tab="ouvrages">Ouvrages</button>
       <button data-tab="signalisation">Signalisation</button>
       <button data-tab="hydro">Hydrologie</button>
@@ -661,6 +662,12 @@
         <span id="hyDetHome" hidden></span>
         <div id="hyDetail"></div>
         <p class="note" id="hyNote"></p>
+      </div>
+      <div class="tab" id="tab-amorces" hidden>
+        <p class="note">Amorce : simple accès (pas un carrefour) qui raccorde une voie secondaire au bord de la chaussée principale. Tracez une droite : premier point près du bord de la route (il s'y cale, du côté de l'amorce), second point à l'extrémité. Profil en long : TN du modèle de terrain ; projet en droite de la cote du bord de chaussée principale au TN de l'extrémité. Sur le plan, un clic sur une amorce : déplacer, supprimer, propriétés.</p>
+        <div class="row"><button id="btnAmNew" class="primary">+ Amorce (tracer une droite)</button></div>
+        <p class="note" id="amSummary"></p>
+        <div id="amProps"></div>
       </div>
       <div class="tab" id="tab-uvr" hidden>
         <p class="note">Déclencheurs UVR et plan de gestion des vitesses (Guide M1 ESCWA/UNRSF, B.5.4, C1.5, C1.6, E.4, AD 1.1 – AD 1.2) : générateurs d'usagers vulnérables à moins de 200 m des axes (écoles, marchés, arrêts TC, santé, culte, gares routières) et traversées de localité de plus de 400 m, cherchés le long des tracés comme les bassins versants ; catégories A à E et vitesses-cibles par section, transitions (portail d'entrée, bandes rugueuses, rétrécissement, plateaux, zone 30), aménagements MUST / SHOULD placés aux PK et V85 géométrique (formules de BVTrace) pour juger la crédibilité des vitesses.</p>
