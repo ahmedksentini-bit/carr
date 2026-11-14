@@ -91,7 +91,7 @@ export function profParams(prj) {
 }
 
 // PK origine d'un axe (voie principale, voies secondaires ; 0 ailleurs) et écriture 12+345,67.
-function pk0Of(prj, key) {
+export function pk0Of(prj, key) {
   const v = (x) => (x === '' || x == null || !Number.isFinite(+x) ? 0 : +x);
   if (key === 'hwy') return v(prj.hwy?.pk0);
   if (key.startsWith('x:')) return v(crossList(prj).find((c) => `x:${c.id}` === key)?.pk0);

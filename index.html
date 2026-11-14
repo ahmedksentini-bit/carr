@@ -548,6 +548,11 @@
         <h3>Zones de visibilité par branche</h3>
         <div class="tablewrap"><table id="visTable" class="pts"></table></div>
         <p class="note" id="visNote"></p>
+        <h3>Visibilité 3D du corridor</h3>
+        <p class="note">Méthode de BVTrace (guide Visibilité Cerema 2018) : ligne de visée œil (1,10 m, sur la voie du conducteur) → obstacle, dans l'espace, sur la surface finie (plateforme et talus des profils en travers calculés, terrain naturel au-delà). Elle capte ensemble les masques du profil en long (angle saillant) et du plan (talus de déblai, terrain en virage). La distance de visée disponible est comparée, station par station et dans chaque sens, à la distance d'arrêt requise (pente locale). Il faut un modèle de terrain et le profil en long de l'axe.</p>
+        <div id="s3dForm"></div>
+        <div class="row"><button id="btnS3d" class="primary">Calculer la visibilité 3D</button><span id="s3dProg" class="note"></span></div>
+        <div id="s3dOut"></div>
       </div>
 
       <div class="tab" id="tab-capacite" hidden>

@@ -26,7 +26,7 @@ import { LAYERS } from './layers.js';
 import { PSGR_GAB, psgrParams, psgrSection, psgrProfile, psgrChecks, psgrPlan, psgrProfileSVG, psgrSectionSVG, psgrProfileDXF, psgrSectionDXF } from './psgr.js';
 import { kmlTextOf, parseKML, newKmlLayer, buildKmlCache, drawKml, kmlStats, kmlBBoxLL, folderShown } from './kml.js';
 import { buildOuvrages, W_CLASSES, psidaLink, psidaProject, psidaWarnings, PSIDA_URL } from './ouvrage.js';
-import { buildProfils, listAxes, nearestAxis, profParams, profilsCsv } from './profils.js';
+import { buildProfils, listAxes, nearestAxis, profParams, profilsCsv, pk0Of, pkText } from './profils.js';
 import { cadreGeoms, drawCadre, cadreChecks, cadreLink, cadreProject, CADRE_DEF, PP_TYPES, parseSpansTxt, poutresSupports, cadreHeadPolys, HEAD_TYPES } from './cadres.js';
 import { axisSections, axisType, typeParams, typeText, axisPlatform } from './ptaxes.js';
 import { demFromSRTM, demFromTIN } from './hydro/dem.js';
@@ -58,6 +58,7 @@ import { analysePlan, gapParams, GAPS } from './capacity-plan.js';
 import { initUvr } from './uvrtab.js';
 import { initProfEdit } from './profedit.js';
 import { initAmorces } from './amorces.js';
+import { stopDistCerema, finishedSurface, composite, scanAxis, insufficientRuns, TARGETS as S3D_TARGETS } from './sight3d.js';
 import { axisFromPolyline, kmlLines } from './axisimport.js';
 
 // Identifiants d'application acceptés à l'ouverture : INFRA-KSR (actuel) et GIRA (projets enregistrés avant le renommage).
@@ -2000,6 +2001,7 @@ function drawOverlay(ctx, v, T) {
   try { UV?.overlay(ctx, v); } catch (e) { console.error(e); }
   try { PE?.overlay(ctx, v); } catch (e) { console.error(e); }
   try { AM?.overlay(ctx, v); } catch (e) { console.error(e); }
+  try { drawSight3D(ctx, v); } catch (e) { console.error(e); }
   try { drawOhMove(ctx, v); } catch (e) { console.error(e); }
   try { drawCheckFlash(ctx, v); } catch (e) { console.error(e); }
   if (S.D?.O) {
@@ -6785,7 +6787,103 @@ function bind3D() {
 }
 
 // --------------------------------------------------------- Visibilité
+// ------------------------------------------------------------------ Visibilité 3D du corridor (sight3d.js)
+// Paramètres (prj.s3d) : axe, vitesse, NPV, hauteur d'obstacle, pas. Résultat (S.s3d) non enregistré : il est
+// recalculé à la demande et signalé comme périmé si le projet a changé depuis.
+const s3dCfg = () => (S.prj.s3d = { axis: '', V: '', npv: 'B', h: 0.5, step: 10, ...(S.prj.s3d || {}) });
+const s3dSig = () => JSON.stringify({ ...S.prj, s3d: null, opts: null, view: null, signs: null, uvr: null, amorces: null, tn: S.tnSig });
+function s3dAxes() { return (S.prof?.axes || listAxes(S.prj, S.D) || []).filter((a) => !a.key.startsWith('b:') && S.axpl?.get(a.key)?.defined); }
+function renderS3dForm() {
+  const el = $('#s3dForm'); if (!el) return;
+  const C = s3dCfg(), axes = s3dAxes();
+  if (!axes.some((a) => a.key === C.axis)) C.axis = axes[0]?.key || '';
+  const ax = axes.find((a) => a.key === C.axis), Vd = +ax?.H?.V || 80;
+  const sig = JSON.stringify([axes.map((a) => [a.key, a.name]), C]);
+  if (el.dataset.sig !== sig) {
+    el.dataset.sig = sig;
+    el.innerHTML = !axes.length ? '<p class="note">Aucun axe avec un profil en long défini : saisissez le profil en long (onglet Profil long).</p>'
+      : `<div class="row"><label class="fld"><span class="lb">Axe</span><select data-s3="axis">${axes.map((a) => `<option value="${esc(a.key)}"${a.key === C.axis ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label></div>
+      <div class="row"><label class="fld"><span class="lb">Vitesse (km/h)</span><input data-s3="V" inputmode="decimal" value="${esc(String(C.V || ''))}" placeholder="${fmt(Vd, 0)}"></label></div>
+      <div class="row"><label class="fld"><span class="lb">Niveau de performance (NPV)</span><select data-s3="npv">${['A', 'B', 'C'].map((k) => `<option value="${k}"${k === C.npv ? ' selected' : ''}>NPV ${k}${k === 'B' ? ' (courant)' : ''}</option>`).join('')}</select></label></div>
+      <div class="row"><label class="fld"><span class="lb">Cible</span><select data-s3="h">${Object.entries(S3D_TARGETS).map(([k, l]) => `<option value="${k}"${+k === +C.h ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label></div>
+      <div class="row"><label class="fld"><span class="lb">Pas des stations (m)</span><input data-s3="step" inputmode="decimal" value="${fmt(+C.step || 10, 0)}"></label></div>`;
+  }
+  $('#btnS3d').disabled = !axes.length || !S.tn?.tin;
+  if (!S.tn?.tin) $('#s3dProg').textContent = 'Modèle de terrain requis (onglet Terrain).';
+  renderS3dOut();
+}
+async function runSight3D() {
+  const C = s3dCfg(), ax = s3dAxes().find((a) => a.key === C.axis), A = ax && S.axpl?.get(ax.key), tin = S.tn?.tin;
+  if (!ax || !A?.defined || !tin) { toast('Visibilité 3D : axe avec profil en long et modèle de terrain requis.', 'warn'); return; }
+  const prog = $('#s3dProg'), btn = $('#btnS3d'), V = parseNum(String(C.V)) || +ax.H?.V || 80, step = Math.max(2, parseNum(String(C.step)) || 10), h = +C.h || 0.5;
+  btn.disabled = true; prog.textContent = 'Profils en travers de la surface finie…';
+  await new Promise((r) => setTimeout(r, 30));
+  try {
+    // 1. surface finie : coupes calculées de l'axe (plateforme + talus jusqu'au TN), tous les 10 m
+    const profs = []; for (let s = 0; s < ax.len - 0.5; s += 10) profs.push({ s, name: '' }); profs.push({ s: ax.len, name: '' });
+    const secs = axisSections(S.prj, S.D, ax, A, profs, tin).list.filter((cs) => cs.proj?.length >= 2).map((cs) => { const t = ax.at(cs.s).t; return { s: cs.s, p: cs.p, n: cs.n, t, proj: cs.proj.map((q) => ({ y: q.y, z: q.z })) }; });
+    const surf = composite(finishedSurface([secs]), { heightAt: (x, y) => tinZ(tin, x, y) });
+    // 2. œil sur la voie du conducteur : axe de la voie (voie contre l'axe ou le TPC) moins 0,25 m
+    const H = ax.H || {}, lane = Math.max(0, (+H.median > 0 ? +H.median / 2 + (+H.bdg || 0) : 0) + (+H.wLane || 3.5) / 2 - 0.25);
+    const zAt = (s) => A.PL.zAt(Math.max(0, Math.min(ax.len, s)));
+    const grade = (s) => (zAt(s + 5) - zAt(s - 5)) / 10;
+    const reqAt = (s, dir) => stopDistCerema(V, dir * grade(s), C.npv);
+    // 3. balayage par morceaux de 100 m (l'interface reste fluide)
+    const out = [];
+    for (let s0 = 0; s0 <= ax.len + 1e-9; s0 += step * Math.max(1, Math.round(100 / step))) {
+      const s1 = Math.min(ax.len, s0 + step * Math.max(1, Math.round(100 / step)) - step * 0.5);
+      out.push(...scanAxis(ax, zAt, surf, reqAt, lane, { tgtH: h, step, s0, s1 }));
+      prog.textContent = `Balayage : ${fmt(Math.min(100, (100 * s1) / ax.len), 0)} %`;
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    S.s3d = { key: ax.key, name: ax.name, V, npv: C.npv, h, step, lane, out, runs: { 1: insufficientRuns(out, 1, step), [-1]: insufficientRuns(out, -1, step) }, pk0: pk0Of(S.prj, ax.key), sig: s3dSig(), nSec: secs.length };
+    prog.textContent = '';
+  } catch (e) { console.error(e); prog.textContent = `Erreur : ${e.message}`; }
+  btn.disabled = false; renderS3dOut(); viewer.invalidate();
+}
+function renderS3dOut() {
+  const el = $('#s3dOut'); if (!el) return;
+  const R = S.s3d; if (!R) { el.innerHTML = ''; return; }
+  const ax = (S.prof?.axes || listAxes(S.prj, S.D)).find((a) => a.key === R.key), stale = R.sig !== s3dSig();
+  const pk = (s) => pkText(R.pk0 + s), nKo = R.out.filter((v) => v.status === 'ko').length, nNd = R.out.filter((v) => v.status === 'nd').length;
+  const rows = [1, -1].flatMap((d) => R.runs[d].map((r) => ({ ...r, d })));
+  const dmax = Math.max(...R.out.map((v) => v.req));
+  let h = `<p class="note">${stale ? '<b>Résultat périmé : le projet a changé, relancez le calcul.</b> ' : ''}${esc(R.name)} · ${fmt(R.V, 0)} km/h · NPV ${R.npv} · ${esc(S3D_TARGETS[R.h] || `cible ${fmt(R.h, 2)} m`)} · œil à ${fmt(R.lane, 2)} m de l'axe · ${R.nSec} coupes · distance d'arrêt jusqu'à ${fmt(dmax, 0)} m.</p>`;
+  h += `<p class="note">${R.out.length} stations × sens : <b>${nKo} masquée(s)</b>, ${nNd} indéterminée(s) (fin des données ou du profil en long).</p>`;
+  h += rows.length ? '<div class="tablewrap"><table class="pts"><tr><th>Sens</th><th>Du PK</th><th>au PK</th><th>Longueur</th><th>Visée disponible / requise (pire station)</th></tr>' + rows.map((r) => `<tr class="goto" data-s3s="${r.from}" data-s3d="${r.d}"><td>${r.d > 0 ? 'PK croissants' : 'PK décroissants'}</td><td>${pk(r.from)}</td><td>${pk(r.to)}</td><td>${fmt(r.to - r.from + R.step, 0)} m</td><td>${fmt(r.worst.avail, 0)} / ${fmt(r.worst.req, 0)} m${r.worst.sBlock != null ? ` (premier point caché au PK ${pk(r.worst.sBlock)})` : ''}</td></tr>`).join('') + '</table></div>' : '<p class="note">Aucune zone masquée dans les deux sens.</p>';
+  h += s3dChart(R);
+  el.innerHTML = h;
+}
+// Distance de visée disponible (bornée au balayage) et requise, par sens, le long de l'axe.
+function s3dChart(R) {
+  const W = 760, H = 210, M = { l: 46, r: 10, t: 14, b: 26 }, L = Math.max(...R.out.map((v) => v.s)) || 1, top = Math.max(...R.out.map((v) => Math.max(v.req * 1.25, v.avail))) || 100;
+  const X = (s) => M.l + (s / L) * (W - M.l - M.r), Y = (d, k) => (k ? M.t + (H - M.t - M.b) / 2 : M.t) + (1 - d / top) * ((H - M.t - M.b) / 2 - 6);
+  let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif" font-size="10" style="background:#fff">`;
+  [1, -1].forEach((d, k) => {
+    const v = R.out.filter((q) => q.dir === d).sort((a, b) => a.s - b.s);
+    for (const q of v) if (q.status !== 'ok') s += `<rect x="${X(q.s - R.step / 2)}" y="${Y(top, k)}" width="${Math.max(1, X(R.step) - X(0))}" height="${Y(0, k) - Y(top, k)}" fill="${q.status === 'ko' ? 'rgba(220,38,38,.18)' : 'rgba(148,163,184,.25)'}"/>`;
+    s += `<polyline fill="none" stroke="#16a34a" stroke-width="1.5" points="${v.map((q) => `${X(q.s).toFixed(1)},${Y(Math.min(top, q.avail), k).toFixed(1)}`).join(' ')}"/>`;
+    s += `<polyline fill="none" stroke="#dc2626" stroke-dasharray="4 3" stroke-width="1.2" points="${v.map((q) => `${X(q.s).toFixed(1)},${Y(q.req, k).toFixed(1)}`).join(' ')}"/>`;
+    s += `<text x="${M.l + 4}" y="${Y(top, k) + 10}" fill="#334155">${d > 0 ? 'Sens des PK croissants' : 'Sens des PK décroissants'}</text><path d="M${M.l},${Y(0, k)}H${W - M.r}" stroke="#94a3b8"/><text x="${M.l - 4}" y="${Y(0, k) + 3}" text-anchor="end" fill="#64748b">0</text><text x="${M.l - 4}" y="${Y(top, k) + 8}" text-anchor="end" fill="#64748b">${fmt(top, 0)}</text>`;
+  });
+  s += `<text x="${M.l}" y="${H - 8}" fill="#64748b">PK ${pkText(R.pk0)}</text><text x="${W - M.r}" y="${H - 8}" text-anchor="end" fill="#64748b">PK ${pkText(R.pk0 + L)}</text>`;
+  s += `<text x="${W / 2}" y="${H - 8}" text-anchor="middle"><tspan fill="#16a34a">— visée disponible (m)</tspan>  <tspan fill="#dc2626">- - distance d'arrêt requise</tspan>  <tspan fill="#dc2626">▮ masqué</tspan>  <tspan fill="#94a3b8">▮ indéterminé</tspan></text>`;
+  return s + '</svg>';
+}
+// Sur le plan : tronçons masqués, décalés de 3 m du côté du conducteur (rouge : PK croissants, orange : décroissants).
+function drawSight3D(ctx, v) {
+  const R = S.s3d; if (!R) return;
+  const ax = (S.prof?.axes || listAxes(S.prj, S.D)).find((a) => a.key === R.key); if (!ax) return;
+  const stale = R.sig !== s3dSig();
+  for (const d of [1, -1]) for (const r of R.runs[d]) {
+    ctx.save(); ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.strokeStyle = d > 0 ? 'rgba(220,38,38,.8)' : 'rgba(234,88,12,.8)'; if (stale) ctx.setLineDash([6, 6]);
+    ctx.beginPath();
+    for (let s = Math.max(0, r.from - R.step / 2), k = 0; s <= Math.min(ax.len, r.to + R.step / 2) + 1e-9; s += 2, k++) { const { p, t } = ax.at(s), [x, y] = v.w2s(p.x + t.y * 3 * d, p.y - t.x * 3 * d); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    ctx.stroke(); ctx.restore();
+  }
+}
 function refreshVisibility() {
+  try { renderS3dForm(); } catch (e) { console.error(e); }
   const plan = isPlan(S.prj), V = S.D?.vis || [];
   // Branche dont la zone est dessinée : toutes, ou une seule pour la lisibilité (le tableau les donne toutes).
   const opts = [['', 'Toutes les branches'], ...(S.D?.branches || []).filter((bd) => !plan || bd.role === 'secondaire').map((bd) => [String(bd.id), bd.name])];
@@ -7097,6 +7195,9 @@ function bindUI() {
   bindHydro(); bindBvSheet(); bindDrawBar();
   UV = initUvr({ S, $, toast, update, listAxes, viewer, setTool, esc, fmt, parseNum, download, fname, G }); UV.bind();
   PE = initProfEdit({ S, viewer, update, toast, esc, uid });
+  $('#btnS3d')?.addEventListener('click', runSight3D);
+  $('#s3dForm')?.addEventListener('change', (e) => { const k = e.target.dataset.s3; if (!k) return; const C = s3dCfg(); C[k] = ['V', 'step', 'h'].includes(k) ? (e.target.value === '' ? '' : parseNum(e.target.value)) : e.target.value; update({ panels: false }); renderS3dForm(); });
+  $('#s3dOut')?.addEventListener('click', (e) => { const tr = e.target.closest('tr[data-s3s]'); if (!tr || !S.s3d) return; const ax = (S.prof?.axes || listAxes(S.prj, S.D)).find((a) => a.key === S.s3d.key); if (ax) gotoCheck({ at: ax.at(+tr.dataset.s3s).p }); });
   AM = initAmorces({ S, $, viewer, update, toast, esc, fmt, uid, listAxes, setTool, showTab }); AM.bind();
   if (/[?&]debug\b/.test(location.search)) window.__gira = { S, get viewer() { return viewer; }, get v3d() { return v3d; }, lineGrips: () => gripAxes().flatMap(axisLineGrips), ew: () => earthworkCorridors(), ohOpen: (id) => ohOpen(id) }; // tests de navigateur (?debug)
   bind3D();
@@ -7678,7 +7779,7 @@ function download(name, data, type) {
 
 function exportDXF() {
   const D = S.D;
-  if (!D?.ok || !D.branches.length) { toast('Rien à exporter : dessinez au moins une branche.', 'warn'); return; }
+  if (!D || (!(D.ok && D.branches.length) && !D.prims?.length && !(S.prj.amorces || []).length)) { toast('Rien à exporter : dessinez au moins une voie, une branche ou une amorce.', 'warn'); return; }
   download(fname('dxf'), buildDxfText(), 'application/dxf');
   toast('Plan DXF exporté (calques GIRA_*).');
 }
@@ -7722,6 +7823,16 @@ function buildDxfText() {
   if (S.prj.opts.vis.IMPLANTATION !== false) for (const q of D.points) {
     w.point(lay('IMPLANTATION'), q.p, q.z ?? 0);
     w.text(lay('IMPLANTATION'), { x: q.p.x + 0.25, y: q.p.y + 0.25 }, TH * 0.5, 0, String(q.n));
+  }
+  // amorces (onglet Amorces) : contour avec raccordements au bord de chaussée, axe, étiquette
+  const ams = AM?.dxfItems() || [];
+  if (ams.length) {
+    w.layer('GIRA_AMORCES', 30); w.layer('GIRA_AMORCES_AXE', 8, 'AXE');
+    for (const q of ams) {
+      w.path('GIRA_AMORCES', q.poly.map((p, i) => G.L(p, q.poly[(i + 1) % q.poly.length])), true);
+      w.line('GIRA_AMORCES_AXE', q.axis[0], q.axis[1]);
+      w.text('GIRA_AMORCES', q.label, TH * 0.8, q.rot, `${q.name} — ${fmt(q.L, 2)} × ${fmt(q.w, 2)} m`, 'center');
+    }
   }
   kmlToDxf(w);
   // Cartouche sommaire

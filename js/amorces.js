@@ -56,7 +56,28 @@ export function initAmorces(api) {
     // côté route, l'amorce s'arrête sur le bord de chaussée (coins sur la ligne du bord, amorce biaise comprise)
     let a1 = add(a, mul(n, w)), a2 = add(a, mul(n, -w));
     if (h) { const tn = h.t.x * n.x + h.t.y * n.y; if (Math.abs(tn) > 0.35) { a1 = add(a, mul(h.t, w / tn)); a2 = add(a, mul(h.t, -w / tn)); } }
-    return { h, a, b, u, n, L: dist(a, b), poly: [a1, add(b, mul(n, w)), add(b, mul(n, -w)), a2] };
+    // Raccordement au bord de chaussée : de chaque côté, arc de rayon R tangent au bord de l'amorce et au bord de la
+    // chaussée principale (évasement). Coin C, demi-droites d1 (le long de l'amorce) et d2 (le long du bord, en
+    // s'éloignant de l'amorce) ; tangente T = R / tan(θ/2) ; aire ajoutée = R·T − R²(π − θ)/2.
+    const R = Math.max(0, num(am.R, 6)), L = dist(a, b), fil = [], side = (C, sg) => {
+      if (!h || R < 0.05) return { pts: [C], area: 0, T: 0 };
+      let d2 = h.t; if (d2.x * n.x * sg + d2.y * n.y * sg < 0) d2 = mul(d2, -1);
+      const d1 = u, cos = Math.max(-1, Math.min(1, d1.x * d2.x + d1.y * d2.y)), th = Math.acos(cos);
+      if (th < 0.2 || th > Math.PI - 0.05) return { pts: [C], area: 0, T: 0 };
+      let T = R / Math.tan(th / 2); const Tmax = Math.max(0, L - 0.5); let Rr = R;
+      if (T > Tmax) { T = Tmax; Rr = T * Math.tan(th / 2); }
+      const P1 = add(C, mul(d1, T)), P2 = add(C, mul(d2, T)), bis = unit(add(d1, d2)), O = add(C, mul(bis, Rr / Math.sin(th / 2)));
+      const a0 = Math.atan2(P2.y - O.y, P2.x - O.x); let a1 = Math.atan2(P1.y - O.y, P1.x - O.x), da = a1 - a0;
+      while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+      const k = Math.max(2, Math.ceil(Math.abs(da) / 0.12)), pts = [];
+      for (let i = 0; i <= k; i++) { const t = a0 + (da * i) / k; pts.push({ x: O.x + Rr * Math.cos(t), y: O.y + Rr * Math.sin(t) }); }
+      fil.push({ O, R: Rr, P1, P2, a0, da });
+      return { pts, area: Rr * T - (Rr * Rr * (Math.PI - th)) / 2, T, R: Rr };
+    };
+    const sp = side(a1, 1), sm = side(a2, -1);
+    // contour : bord de chaussée (côté +) → arc → bord + de l'amorce → extrémité → bord − → arc → bord de chaussée (côté −)
+    const poly = [...sp.pts, add(b, mul(n, w)), add(b, mul(n, -w)), ...[...sm.pts].reverse()];
+    return { h, a, b, u, n, L, poly, rect: [a1, add(b, mul(n, w)), add(b, mul(n, -w)), a2], fil, fillet: { area: sp.area + sm.area, R: Math.max(sp.R || 0, sm.R || 0), Rset: R } };
   }
 
   // ---------------------------------------------------------------- profil en long et métré
@@ -80,7 +101,8 @@ export function initAmorces(api) {
       rem += ((r0 + r1) / 2) * dt; deb += ((d0 + d1) / 2) * dt;
     }
     const grade = z0 != null && L > 0 ? ((zEnd - z0) / L) * 100 : null;
-    return { g, pts, z0, z0src, zEnd, grade, struct, E, w, L, surf: w * L, layers: struct.map((c) => ({ ...c, v: w * L * c.e })), rem, deb, hasTn: !!tin };
+    const surf = w * L + g.fillet.area;
+    return { g, pts, z0, z0src, zEnd, grade, struct, E, w, L, surf, layers: struct.map((c) => ({ ...c, v: surf * c.e })), rem, deb, hasTn: !!tin };
   }
 
   // ---------------------------------------------------------------- repérage, surbrillance, menu
@@ -138,7 +160,7 @@ export function initAmorces(api) {
       S.amA = w; viewer.invalidate(); return;
     }
     if (dist(w, S.amA) < 2) { toast('Amorce trop courte (2 m au moins).', 'warn'); return; }
-    const nb = list().length + 1, am = { id: uid(), name: `Amorce ${nb}`, a: { ...S.amA }, b: { x: w.x, y: w.y }, w: 5, dev: 2.5, struct: DEF_STRUCT() };
+    const nb = list().length + 1, am = { id: uid(), name: `Amorce ${nb}`, a: { ...S.amA }, b: { x: w.x, y: w.y }, w: 5, dev: 2.5, R: 6, struct: DEF_STRUCT() };
     list().push(am); S.amA = null; setTool('select');
     update({ panels: false }); openProps(am.id);
     toast(`${am.name} créée : ${fmt(geom(am).L, 1)} m.`);
@@ -236,6 +258,7 @@ export function initAmorces(api) {
         <label class="fld">Nom <input data-af="name" value="${esc(am.name)}"></label>
         <label class="fld">Largeur (m) <input data-af="w" value="${fmt(r.w, 2)}" inputmode="decimal"></label>
         <label class="fld">Pente transversale (%) <input data-af="dev" value="${fmt(dev, 1)}" inputmode="decimal"></label>
+        <label class="fld">Rayon de raccordement au bord de chaussée (m) <input data-af="R" value="${fmt(num(am.R, 6), 1)}" inputmode="decimal"></label>
       </div>
       ${kv([
         ['Longueur', `${fmt(r.L, 2)} m`],
@@ -250,7 +273,7 @@ export function initAmorces(api) {
       <h4>Profil type</h4>${typeSvg(r, dev)}
       <h4>Profil en long</h4>${plSvg(r)}
       <h4>Métré</h4>${kv([
-        ['Surface de chaussée', `${fmt(r.surf, 1)} m²`],
+        ['Surface de chaussée', `${fmt(r.surf, 1)} m² (dont raccordements ${fmt(r.g.fillet.area, 1)} m²${r.g.fillet.R > 0 && r.g.fillet.R < r.g.fillet.Rset - 0.05 ? `, rayon réduit à ${fmt(r.g.fillet.R, 1)} m faute de longueur` : ''})`],
         ...r.layers.map((c) => [esc(c.n), `${fmt(c.v, 2)} m³ (${fmt(c.e * 100, 0)} cm × ${fmt(r.surf, 1)} m²)`]),
         ['Remblai', r.hasTn ? `${fmt(r.rem, 1)} m³` : '— (pas de modèle de terrain)'],
         ['Déblai', r.hasTn ? `${fmt(r.deb, 1)} m³` : '— (pas de modèle de terrain)'],
@@ -267,6 +290,7 @@ export function initAmorces(api) {
       if (f === 'name') { am.name = e.target.value || am.name; if (commit) { update({ panels: false }); render(); } viewer.invalidate(); return; }
       if (f === 'w') { const v = num(e.target.value, null); if (v != null && v >= 2 && v <= 30) am.w = v; }
       else if (f === 'dev') { const v = num(e.target.value, null); if (v != null && v >= 0 && v <= 10) am.dev = v; }
+      else if (f === 'R') { const v = num(e.target.value, null); if (v != null && v >= 0 && v <= 30) am.R = v; }
       else if (li != null) { const c = am.struct[+li]; if (!c) return; if (e.target.dataset.k === 'n') c.n = e.target.value; else { const v = num(e.target.value, null); if (v != null && v >= 0) c.e = v / 100; } }
       else return;
       viewer.invalidate();
@@ -286,5 +310,10 @@ export function initAmorces(api) {
     });
   }
 
-  return { hit, hover, menu, pick, start, moveTo, drop, cancel, overlay, render, bind, compute, openProps };
+  // Export DXF : contour (bords et arcs de raccordement), axe et étiquette de chaque amorce.
+  function dxfItems() {
+    return list().map((am) => { const g = geom(am), m = mul(add(g.a, g.b), 0.5); let rot = Math.atan2(g.u.y, g.u.x); if (Math.cos(rot) < 0) rot += Math.PI; return { name: am.name, poly: g.poly, axis: [g.a, g.b], label: add(m, mul(g.n, num(am.w, 5) / 2 + 0.8)), rot, L: g.L, w: num(am.w, 5) }; });
+  }
+
+  return { hit, hover, menu, pick, start, moveTo, drop, cancel, overlay, render, bind, compute, openProps, dxfItems };
 }
