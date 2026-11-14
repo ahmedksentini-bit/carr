@@ -435,6 +435,18 @@ ou sur un fond topographique DXF.
   structure de chaussée (couches modifiables), profil type sommaire, profil en long (TN du modèle de terrain ; projet en
   droite de la cote projet du bord de chaussée — dévers 2,5 % depuis l'axe ; TN à défaut — au TN de l'extrémité) et
   métré (surface, volume de chaque couche, remblai et déblai jusqu'au fond de forme, talus 3/2 et 1/1, sans décapage).
+  Raccordement au bord de chaussée : arc de rayon R (6 m par défaut, réduit si l'amorce est trop courte) de chaque
+  côté, tangent au bord de l'amorce et au bord de la chaussée principale ; surface et couches du métré comprennent les
+  évasements. Export DXF : calques GIRA_AMORCES (contour, raccordements, étiquette) et GIRA_AMORCES_AXE.
+- **Visibilité 3D du corridor** (onglet Visibilité, portage de BVTrace — guide Visibilité Cerema 2018) : ligne de visée
+  œil (1,10 m, sur la voie du conducteur : axe de la voie contre l'axe ou le TPC, moins 0,25 m) → obstacle (0,50 m route
+  non isolée ; 0,70 / 0,85 / 0,15 m au choix) dans l'espace, sur la surface finie : coupes calculées de l'axe tous les
+  10 m (plateforme et talus jusqu'au TN), terrain naturel au-delà. Masques du profil en long et du plan captés ensemble.
+  Pour chaque station (pas réglable) et chaque sens : distance de visée disponible (arc jusqu'au premier point caché)
+  comparée à la distance d'arrêt d = NPV·(1,8 v + v²/(2g(γ + p))), γ = 0,46 / 0,44 / 0,41, p pente locale dans le sens
+  de parcours. Tronçons masqués listés (PK, visée disponible / requise, premier point caché), graphique par sens et
+  tronçons en rouge (PK croissants) ou orange (décroissants) sur le plan, décalés de 3 m du côté du conducteur ;
+  « indéterminé » quand la visée atteint la fin de l'axe ou du profil en long.
 - **Déplacer un ouvrage** (cadres, buses, ponts, y compris ceux placés par l'hydrologie) : un clic sur l'ouvrage ouvre
   son menu (fiche, coupe longitudinale, déplacer, supprimer) ; « Déplacer » : l'ouvrage suit le curseur le long de son
   axe et se reconstruit en temps réel (longueur, têtes, cotes fil d'eau), clic pour poser, Échap pour annuler. La poignée
