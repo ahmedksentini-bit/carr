@@ -47,6 +47,23 @@ export function deversOfRadius(R, cat) {
 }
 // [ECH] tab. 4-4 / 5-2 : longueur d'insertion Li (adjonction) ; Ei1 : 200 m + biseau 75 m (schéma 5-1).
 export const LI = { 130: 470, 110: 310, 90: 234 };
+// Marquage ([IISR] 7e partie, vc 2025-04-04) : unité u (art. 113-1 C) = 7,5 cm sur les autoroutes et les routes à
+// chaussées séparées, 5 cm ailleurs (ancienne valeur unique de l'outil) ; module L (art. 115-3 A, VRU A § 1.6).
+export const markU = (Q) => (Q && (Q.kind === 'autoroute' || Q.median > 0) ? 0.075 : 0.05);
+export const modL = (V) => (V <= 50 ? 39 : V <= 70 ? 78 : V <= 90 ? 117 : 195);
+// Zébras ([IISR] art. 117-2 A) : hachures blanches de 0,50 m, espacées de 1,35 m (intervalle mesuré entre parallèles),
+// inclinées à 2 (parallèlement à la rive) pour 1 et tournées vers la chaussée que l'usager quitte (d : sens de
+// circulation, rot90(d) : côté de la chaussée principale) ; un espace de 2u les sépare des lignes continues de 3u qui
+// bordent la zone : chaque hachure (bout carré) est raccourcie pour que ses angles restent à 1,5u + 2u du contour.
+export const ZEBRA = { w: 0.5, gap: 1.35, slope: 0.5 };
+export function zebraLines(poly, d, u) {
+  const dir = norm(add(d, mul(rot90(d), ZEBRA.slope))), al = Math.atan(ZEBRA.slope);
+  const trim = (3.5 * u + (ZEBRA.w / 2) * Math.cos(al)) / Math.sin(al);
+  return G.hatchPolygon(poly, ang(dir), ZEBRA.w + ZEBRA.gap).flatMap(([a, b]) => {
+    const t = norm(sub(b, a)), l = dist(a, b) - 2 * trim;
+    return l > 0.3 ? [[add(a, mul(t, trim)), add(b, mul(t, -trim))]] : [];
+  });
+}
 export const J14_W = 2.0; // emprise de la balise J14 au musoir, déduite du schéma 6-1 (5,20 − 2,50 − 0,70)
 
 // Voie principale : autoroute (catégories ICTAAL, par défaut) ou route non autoroutière (catégorie de conception
@@ -383,14 +400,20 @@ export function buildEchangeur(prj, D) {
       if (sg.r >= H.C.Rm && sg.r < H.C.Rdn) issues.push({ lvl: 'warn', msg: `${H.name} : rayon ${fmt(sg.r)} m < Rdn = ${H.C.Rdn} m → courbe déversée ; pas d'échangeur dans une courbe déversée (guide échangeurs § 1).` });
     });
     // Interruptions des rives et des bords de plate-forme au droit des bretelles (stations le long de l'axe).
-    const gaps = { 1: { rive: [], bord: [] }, '-1': { rive: [], bord: [] } };
+    const gaps = { 1: { rive: [], bord: [], lane: [] }, '-1': { rive: [], bord: [], lane: [] } };
     for (const r of prj.ramps || []) {
       const rp = rampParams(prj, r), I = (a, b) => [Math.min(a, b), Math.max(a, b)];
       for (const e of [rp.from, rp.to]) {
         if (!e?.isHwy || e.host.road !== key) continue;
         const s0 = Math.max(0, Math.min(sEnd, e.s)), sg = e.host.sens === 1 ? -1 : 1, sd = e.host.sens === 1 ? 1 : -1;
         const bis = e.role === 'div' && WV.byS.has(r.id) ? 0 : e.biseau, wv = e.role === 'conv' ? WV.byE.get(r.id) : null;
-        if (e.role === 'div') { gaps[sg].rive.push(I(s0 - sd * bis, s0)); gaps[sg].bord.push(I(s0 - sd * bis, s0 + sd * e.Lm)); }
+        if (e.role === 'div') {
+          gaps[sg].rive.push(I(s0 - sd * bis, s0)); gaps[sg].bord.push(I(s0 - sd * bis, s0 + sd * e.Lm));
+          // [IISR] art. 117-3 B : sur autoroute, la ligne T1 2u qui jouxte la T2 de la voie de décélération est remplacée
+          // par une ligne dissuasive T3 2u, de L avant le D30 (S.1,50) jusqu'au début de la ligne continue de séparation
+          // des courants (S.0, pointe du zébra).
+          if (bis > 0 && e.host.roadKind === 'autoroute' && H.lanes >= 2) { const p = e.p || 0.03; gaps[sg].lane.push(I(s0 + sd * (0.5 / p - modL(+e.host.V || 90)), s0 - sd / p)); }
+        }
         else { const sFin = wv ? wv.sS : s0 + sd * (e.ins + e.biseau); gaps[sg].rive.push(I(s0, sFin)); gaps[sg].bord.push(I(s0 - sd * e.Lm, sFin)); }
       }
     }
@@ -402,12 +425,15 @@ export function buildEchangeur(prj, D) {
         const [c, d] = cuts[i]; if (b <= c || a >= d) continue;
         cuts.splice(i, 1, ...[[c, a], [b, d]].filter(([x, y]) => y - x > 0.5));
       }
-      return cuts.map(([a, b]) => {
-        const n = Math.max(1, Math.ceil((b - a) / 2)), pts = [];
-        for (let i = 0; i <= n; i++) { const st = a + ((b - a) * i) / n; pts.push(add(G.pathPointAt(path, st), mul(rot90(pathTangentAt(path, st)), tap(delta, st)))); }
-        return polySegs(pts);
-      });
+      return cuts.map(([a, b]) => piece(delta, a, b));
     };
+    const piece = (delta, a, b) => {
+      const n = Math.max(1, Math.ceil((b - a) / 2)), pts = [];
+      for (let i = 0; i <= n; i++) { const st = a + ((b - a) * i) / n; pts.push(add(G.pathPointAt(path, st), mul(rot90(pathTangentAt(path, st)), tap(delta, st)))); }
+      return polySegs(pts);
+    };
+    // Morceaux de la ligne décalée sur les intervalles g eux-mêmes (bornés à la partie dessinée).
+    const onPieces = (delta, g) => g.map(([a, b]) => [Math.max(a, sA), Math.min(b, sB)]).filter(([a, b]) => b - a > 0.5).map(([a, b]) => piece(delta, a, b));
     // Chaussées, TPC, accotements.
     const ring = (a, b) => { const pts = [...G.samplePath(a, 2), ...G.samplePath(G.revPath(b), 2)]; return polySegs([...pts, pts[0]]); };
     for (const sg of [1, -1]) { // +1 : côté gauche de l'axe (sens 2), −1 : côté droit (sens 1)
@@ -415,9 +441,15 @@ export function buildEchangeur(prj, D) {
       P({ k: 'fill', L: 'CHAUSSEE', rings: [ring(off(sg * H.median / 2), off(sg * E2))], role: 'chaussee', rule: 'nonzero' });
       for (const segs of offPieces(sg * E2, gaps[sg].bord)) P({ k: 'path', L: 'BORDURE', segs });
       for (const segs of offPieces(sg * (E2 + H.berme), gaps[sg].bord)) P({ k: 'path', L: 'ACCOTEMENT', segs });
-      for (let i = 1; i < H.lanes; i++) P({ k: 'path', L: 'MARQUAGE', segs: off(sg * (E0 + i * H.wLane)), dash: [3, 10], wm: 0.15 }); // T1 3u
-      for (const segs of offPieces(sg * E1, gaps[sg].rive)) P({ k: 'path', L: 'MARQUAGE', segs, wm: 0.15 }); // rive continue 3u, axée sur le bord de voie (comme les branches et bretelles)
-      if (H.median > 0) P({ k: 'path', L: 'MARQUAGE', segs: off(sg * E0), wm: 0.15 }); // rive gauche 3u (bord de voie)
+      // Chaussées séparées : lignes de voie T1 2u, rives 3u ([IISR] art. 113-1 C, 117-3 B) ; ailleurs 3u à u = 5 cm.
+      const u = markU(H), wT1 = H.median > 0 || H.kind === 'autoroute' ? 2 * u : 0.15;
+      for (let i = 1; i < H.lanes; i++) {
+        const dl = sg * (E0 + i * H.wLane), g = i === H.lanes - 1 ? gaps[sg].lane : [];
+        for (const segs of offPieces(dl, g)) P({ k: 'path', L: 'MARQUAGE', segs, dash: [3, 10], wm: wT1, lt: 'T1' });
+        if (g.length) for (const segs of onPieces(dl, g)) P({ k: 'path', L: 'MARQUAGE', segs, dash: [3, 1.33], wm: 2 * u, lt: 'T3' }); // T3 2u dissuasive
+      }
+      for (const segs of offPieces(sg * E1, gaps[sg].rive)) P({ k: 'path', L: 'MARQUAGE', segs, wm: 3 * u }); // rive continue 3u, axée sur le bord de voie (comme les branches et bretelles)
+      if (H.median > 0) P({ k: 'path', L: 'MARQUAGE', segs: off(sg * E0), wm: 3 * u }); // rive gauche 3u (bord de voie)
     }
     if (H.median > 0) {
       P({ k: 'fill', L: 'ILOT_SEP', rings: [ring(off(H.median / 2), off(-H.median / 2))], role: 'ilot' });
@@ -426,9 +458,10 @@ export function buildEchangeur(prj, D) {
     if (tp && Lt > 1) { // fin du TPC de la tige : bords intérieurs des voies convergeant vers l'axe (nez), zébra
       const [a, b] = tp.at === 'start' ? [sA, sA + Lt] : [sB - Lt, sB];
       const L1 = offS(1e-6, a, b), L2 = offS(-1e-6, a, b);
-      P({ k: 'path', L: 'MARQUAGE', segs: L1, wm: 0.15 }); P({ k: 'path', L: 'MARQUAGE', segs: L2, wm: 0.15 });
+      const u = markU(H);
+      P({ k: 'path', L: 'MARQUAGE', segs: L1, wm: 3 * u }); P({ k: 'path', L: 'MARQUAGE', segs: L2, wm: 3 * u });
       const poly = [...G.samplePath(L1, 1), ...G.samplePath(G.revPath(L2), 1)];
-      if (poly.length > 3) P({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon([poly], ang(pathTangentAt(path, (a + b) / 2)) + Math.PI / 4, 1.0), wm: 0.12 });
+      if (poly.length > 3) P({ k: 'hatch', L: 'MARQUAGE', lines: zebraLines([poly], norm(pathTangentAt(path, (a + b) / 2)), u), wm: ZEBRA.w, band: true });
     }
     P({ k: 'path', L: 'AXE', segs: pathD, role: 'principale' });
     const sLab = Math.min(sB, sA + 30);
@@ -539,14 +572,14 @@ export function buildEchangeur(prj, D) {
   const hostRoad = (road, sens) => {
     const sd = sens === 1 ? 1 : -1, { path, sEnd, E1, H: Q } = road;
     return mkOff({
-      kind: 'hwy', road: road.key, roadKind: road.isRoute ? 'route' : 'autoroute', dcat: Q.dcat, ref: road.key === 'hwy' ? 'hwy' + sens : xref(road.k, sens), sens, sd, sEnd, name: `${Q.name} sens ${sens}`, lanes: Q.lanes, bau: Q.bau, berme: Q.berme, V: Q.V, C: Q.C, path,
+      kind: 'hwy', road: road.key, roadKind: road.isRoute ? 'route' : 'autoroute', dcat: Q.dcat, ref: road.key === 'hwy' ? 'hwy' + sens : xref(road.k, sens), sens, sd, sEnd, name: `${Q.name} sens ${sens}`, lanes: Q.lanes, bau: Q.bau, berme: Q.berme, V: Q.V, C: Q.C, u: markU(Q), path,
       pointAt: (st) => G.pathPointAt(path, cl(st, 0, sEnd)),
       dirAt: (st) => { const t = pathTangentAt(path, cl(st, 0, sEnd)); return sd === 1 ? t : neg(t); },
       edgeOff: () => E1,
     });
   };
   const hostRamp = (R) => mkOff({
-    kind: 'ramp', ref: R.id, R, sd: 1, sEnd: R.al.length, name: R.name, lanes: R.rp.lanes, bau: R.rp.bdd, berme: R.rp.berme, V: R.C.V,
+    kind: 'ramp', ref: R.id, R, sd: 1, sEnd: R.al.length, name: R.name, u: markU(hwy.H), lanes: R.rp.lanes, bau: R.rp.bdd, berme: R.rp.berme, V: R.C.V,
     pointAt: (s) => R.al.pointAt(cl(s, 0, R.al.length)), dirAt: (s) => unit(R.al.headAt(cl(s, 0, R.al.length))), edgeOff: (s) => -R.offR(cl(s, 0, R.al.length)),
   });
   const hosts = { hwy1: hostRoad(hwy, 1), hwy2: hostRoad(hwy, 2) };
@@ -746,7 +779,7 @@ export function buildEchangeur(prj, D) {
       // lb = L/6 + l2 si L/6 ≥ l1, sinon l1 + l2. Ligne portée sur la rive de la chaussée hôte, en amont de S.1,00 et en
       // aval de E.1,00.
       const lbOf = (e, entry) => {
-        const V = +e.host?.V || 90, L = V <= 50 ? 39 : V <= 70 ? 78 : V <= 90 ? 117 : 195, p = e.p || 0.03;
+        const V = +e.host?.V || 90, L = modL(V), p = e.p || 0.03;
         const l1 = 0.375 / p, l2 = 0.25 / p, L6 = L / 6, lb = !entry || L6 >= l1 ? L6 + l2 : l1 + l2;
         return { V, L, L6, l1, l2, lb };
       };
@@ -1026,11 +1059,12 @@ export function buildEchangeur(prj, D) {
       // S.1,00 m jusqu'à leur point de rencontre (S.0, à 1/p du point S.1,00 le long de l'obliquité) ; la ligne T2 du
       // biseau s'y arrête.
       const L0 = woven ? 0 : Math.min(1 / Math.max(0.01, e.p || 0.03), Math.abs(Fs.s - st0)), s00 = Fs.s - sd * L0;
-      if (!woven) P({ k: 'path', L: 'MARQUAGE', segs: polySegs(along(h, st0, s00, () => 0)), dash: [3, 3.5], wm: 0.15 }); // T2 3u
+      const u = h.u || 0.05;
+      if (!woven) P({ k: 'path', L: 'MARQUAGE', segs: polySegs(along(h, st0, s00, () => 0)), dash: [3, 3.5], wm: 5 * u, lt: 'T2' }); // T2 5u ([IISR] art. 117-3 B)
       const apex = L0 > 0.5 ? [h.off(s00, 0)] : [];
       const mus = [...apex, ...along(h, Fs.s, sNose, () => 0), ...edgeN.slice().reverse(), ...apex];
-      P({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(mus, ang(Fs.d) + Math.PI / 4, 1.0), wm: 0.12 });
-      P({ k: 'path', L: 'MARQUAGE', segs: polySegs(mus), wm: 0.15 });
+      P({ k: 'hatch', L: 'MARQUAGE', lines: zebraLines(mus, norm(h.dirAt(Fs.s)), u), wm: ZEBRA.w, band: true });
+      P({ k: 'path', L: 'MARQUAGE', segs: polySegs(mus), wm: 3 * u }); // lignes continues 3u (art. 117-2 A)
       P({ k: 'path', L: 'BORDURE', segs: polySegs([h.off(sNose, h.bau), accLAt(R.sTplS)]) }); // nez du musoir (tpl)
       const pJ14 = h.off(sNose + sd * 1.5, h.bau + J14_W / 2); // balise J14 sur le nez (assimilée au point S.5,00 m, § 2.3.1)
       P({ k: 'circle', L: 'SIGNALISATION', c: pJ14, r: 0.5 });
@@ -1096,11 +1130,12 @@ export function buildEchangeur(prj, D) {
       // Triangle de zébrage prolongé en aval de E.1,00 m jusqu'à la rencontre des deux rives (E.0, à 1/p) ; la ligne de
       // l'insertion commence à ce point et se poursuit le long du biseau jusqu'à sa fin (rive de la chaussée rétablie).
       const L0 = wv ? 0 : Math.min(1 / Math.max(0.01, e.p || 0.03), Math.max(0, insL - 1)), sE0 = Ft.s + sd * L0;
-      P({ k: 'path', L: 'MARQUAGE', segs: polySegs(along(h, sE0, sFin, () => 0)), dash: [3, 3.5], wm: 0.15 });
+      const mu = h.u || 0.05;
+      P({ k: 'path', L: 'MARQUAGE', segs: polySegs(along(h, sE0, sFin, () => 0)), dash: [3, 3.5], wm: 5 * mu, lt: 'T2' }); // T2 5u ([IISR] art. 117-3 A)
       const apexE = L0 > 0.5 ? [h.off(sE0, 0)] : [];
       const mus = [...edgeN, ...apexE, ...along(h, Ft.s, sNoseE, () => 0)];
-      P({ k: 'hatch', L: 'MARQUAGE', lines: G.hatchPolygon(mus, ang(Ft.d) + Math.PI / 4, 1.0), wm: 0.12 });
-      P({ k: 'path', L: 'MARQUAGE', segs: polySegs(mus), wm: 0.15 });
+      P({ k: 'hatch', L: 'MARQUAGE', lines: zebraLines(mus, norm(h.dirAt(Ft.s)), mu), wm: ZEBRA.w, band: true });
+      P({ k: 'path', L: 'MARQUAGE', segs: polySegs(mus), wm: 3 * mu }); // lignes continues 3u (art. 117-2 A)
       P({ k: 'path', L: 'BORDURE', segs: polySegs([h.off(sNoseE, h.bau), accLAt(L - R.sTplE)]) });
       pt(`${name} · tpl (${fmt(e.tpl)} m)`, h.off(sNoseE, e.tpl / 2)); pt(`${name} · E.1,00 m`, Ft.S1);
       if (R.ref?.Lpost > 0) pt(`${name} · E.0 (pointe peinte, fin de l'axe)`, R.ref.pts[R.ref.pts.length - 1]);
