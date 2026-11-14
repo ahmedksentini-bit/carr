@@ -892,6 +892,8 @@ function restore(js) {
 }
 
 let saveTimer = null;
+// Enregistrement immédiat quand la page est quittée ou bloquée (garde de connexion de la version publiée).
+window.addEventListener('pagehide', () => { clearTimeout(saveTimer); try { localStorage.setItem('gira.autosave', JSON.stringify({ ...S.prj, view: { cx: viewer.cx, cy: viewer.cy, s: viewer.s } })); } catch { /* stockage indisponible */ } });
 function autosave() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
