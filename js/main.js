@@ -35,9 +35,9 @@ import { splitCells, mergeCells, basinOf } from './hydro/basinedit.js';
 import { createWorldCover } from './hydro/worldcover.js';
 import { openMontanaMap, initMontanaMap } from './montanamap.js';
 import { isohyetValueAt } from './hydro/isohyet.js';
-import { computeAll as hydroComputeAll, defaultHypotheses, listMontanaStations, TC_FORMULAS, FRANCOU_RODIER_REGIONS, suggestCiehRegressions, listCiehRegressions, OPTION_LISTS, resolveMontanaStation, montanaAfricaIdf, KR10_GEOLOGY_CATEGORIES } from './hydro/hydrology.js';
-import { sizeCulvert, culvertHydraulics, inletsForShape, defaultInletFor, slopeAboveCritical, controlLabel, chartLabel } from './hydro/culvert.js';
-import { hds5Svg, bceomSvg, basinMapSvg, overviewMapSvg, isohyetMapSvg } from './hydro/notefig.js';
+import * as HY from './hydro/remote.js';
+import { defaultHypotheses, listMontanaStations, TC_FORMULAS, FRANCOU_RODIER_REGIONS, suggestCiehRegressions, listCiehRegressions, OPTION_LISTS, resolveMontanaStation, montanaAfricaIdf, KR10_GEOLOGY_CATEGORIES, inletsForShape, defaultInletFor, slopeAboveCritical, controlLabel, chartLabel } from './hydro/remote.js';
+import { basinMapSvg, overviewMapSvg, isohyetMapSvg } from './hydro/notefig.js';
 import { csprEchangeurs } from './cspr.js';
 import { DCAT, planChecks, platformChecks, catText, designCatOf, clothoidNeed, superPct } from './roadcat.js';
 import { isVsa } from './vsa.js';
@@ -5855,21 +5855,47 @@ async function runHydro() {
   finally { btn.disabled = false; }
 }
 // Débits et ouvrages (mis en cache tant que les bassins, les hypothèses et les profils en long ne changent pas).
+// Calcul hydrologique et hydraulique : exécuté sur le serveur (hydro/remote.js). computeHydro() rend le dernier
+// résultat valide pour l'état du projet ; si l'état a changé, il lance le calcul et rend l'ancien résultat (ou null)
+// en attendant ; l'affichage est rafraîchi à l'arrivée. computeHydroNow() attend le résultat à jour.
 function computeHydro() {
   const h = hyCfg(), R = h.res;
   if (!R?.crossings?.length) { S.hyRes = null; return null; }
+  const sig = hySig();
+  if (S.hyRes && S.hySig === sig) return S.hyRes;
+  if (S.hyPending !== sig) {
+    S.hyPending = sig;
+    const job = computeHydroAsync(sig).then((out) => {
+      if (S.hyPending !== sig) return;
+      S.hyRes = out; S.hySig = sig; S.hyPending = null;
+      try { update({ commit: false }); if ($('#dlgBV')?.open) renderBvSheet(); } catch (e) { console.error(e); }
+    }, (e) => { if (S.hyPending === sig) S.hyPending = null; console.error(e); toast(`Calcul hydrologique : ${e.message}`, 'err'); });
+    S.hyJob = job;
+  }
+  return S.hyRes;
+}
+async function computeHydroNow() {
+  for (let k = 0; k < 4; k++) { computeHydro(); if (!S.hyPending) break; try { await S.hyJob; } catch { /* signalé */ } }
+  return S.hyPending ? null : S.hyRes;
+}
+function hySig() {
+  const h = hyCfg(), R = h.res;
+  const zRoad = (c) => { const A = S.axpl?.get(c.key); return A?.defined ? A.PL.zAt(c.pk) : null; };
+  return JSON.stringify([R.date, R.rev, h.hyp, h.hyd, h.upstream, h.qsel, h.bin, !!S.tn, R.crossings.map((c) => [c.id, zRoad(c), c.cover?.pct]), (S.cadres || []).filter((g) => g.c.hydro).map((g) => [g.c.id, g.c.zam, g.c.zav, g.K?.Lm, g.K?.Lp, g.K?.type, g.K?.spans, g.K?.n, g.K?.B, g.K?.H, g.K?.L, g.K?.ang, g.K?.inlet, g.s])]);
+}
+// Corps du calcul (asynchrone : moteurs sur le serveur).
+async function computeHydroAsync() {
+  const h = hyCfg(), R = h.res;
   const zRoad = (c) => { const A = S.axpl?.get(c.key); return A?.defined ? A.PL.zAt(c.pk) : null; };
   // ouvrage d'un bassin : même axe de préférence, sinon par l'identifiant seul (axe coupé depuis par un carrefour)
   const linkOf = (c) => (S.prj.cadres || []).find((q) => q.hydro?.id === c.id && q.axis === c.key) || (S.prj.cadres || []).find((q) => q.hydro?.id === c.id);
-  const sig = JSON.stringify([R.date, R.rev, h.hyp, h.hyd, h.upstream, h.qsel, h.bin, !!S.tn, R.crossings.map((c) => [c.id, zRoad(c), c.cover?.pct]), (S.cadres || []).filter((g) => g.c.hydro).map((g) => [g.c.id, g.c.zam, g.c.zav, g.K?.Lm, g.K?.Lp, g.K?.type, g.K?.spans, g.K?.n, g.K?.B, g.K?.H, g.K?.L, g.K?.ang, g.K?.inlet, g.s])]);
-  if (S.hyRes && S.hySig === sig) return S.hyRes;
   const hyp = { ...h.hyp };
   // FAO 54 sans régression CIEH choisie : régressions proposées d'après Pan et la longitude du projet (comme le bouton
   // « Proposer » de BVTrace) — sinon le CIEH ne donnait aucun débit et la crue de projet restait vide
   h.ciehAuto = null;
   if (hyp.methodSet === 'fao54' && !(hyp.ciehRegressionIds || []).length) {
     const ll = R.crossings.filter((c) => Number.isFinite(c.lon)), lon = ll.length ? ll.reduce((t, c) => t + c.lon, 0) / ll.length : null;
-    const sg = suggestCiehRegressions({ lon, pan: hyp.pan > 0 ? hyp.pan : null });
+    const sg = await HY.suggestCiehAsync({ lon, pan: hyp.pan > 0 ? hyp.pan : null });
     if (sg.length) { hyp.ciehRegressionIds = sg.map((q) => q.no); h.ciehAuto = sg; }
   }
   const ids = new Set(R.crossings.map((c) => c.id));
@@ -5888,7 +5914,7 @@ function computeHydro() {
     if (e.dd > 0) b.drainageDensity = e.dd;
     if (e.ig > 0) b.igMPerKm = e.ig;
   });
-  let res = hydroComputeAll(basins, hyp);
+  let res = await HY.computeAll(basins, hyp);
   if (Object.keys(h.qsel || {}).length) {
     let again = false;
     basins.forEach((b, i) => {
@@ -5896,10 +5922,11 @@ function computeHydro() {
       if (q.mode === 'manual' && q.Q > 0) { b.selectedDischarge = q.Q; b.selectedMethodLabel = 'saisi'; again = true; }
       else if (q.mode === 'method') { const v = hyMethodQ(res[i], q.id); if (v > 0) { b.selectedDischarge = v; b.selectedMethodLabel = q.label || q.id; again = true; } }
     });
-    if (again) res = hydroComputeAll(basins, hyp);
+    if (again) res = await HY.computeAll(basins, hyp);
   }
   const out = { list: [], byId: {} };
-  R.crossings.forEach((c, i) => {
+  // 1re passe : ouvrages à vérifier ou à dimensionner (calculs envoyés ensemble au serveur), 2e passe : résultats
+  const jobs = [], pre = R.crossings.map((c, i) => {
     const r = res[i], Qp = r.retained?.Q, Q = r.effectiveQ ?? Qp, ax = hyAxes().find((a) => a.key === c.key);
     // orientation de l'ouvrage : direction de l'écoulement au franchissement (20 à 180 gr, 100 = droit)
     let biais = 100;
@@ -5912,29 +5939,35 @@ function computeHydro() {
     // bornée à 0,5 – 5 %) sur la demi-longueur ; la pente du radier qui en résulte entre dans le calcul hydraulique.
     const bridge = lg?.K?.type === 'poutres';
     const inv = lg?.K && !bridge ? cadreInverts(lg, { flowDir: c.flowDir, fb: hyInverts(c, null, lg.K.L, zt) }) || hyInverts(c, null, lg.K.L, zt) : hyInverts(c, null, L, zt); // pont à poutres placé : pas de calcul de dalot (revanche sous poutres sur la ligne d'eau du lit)
-    let cvPar = null, cvSec = null; // section et paramètres hydrauliques retenus (figures de la note de calcul)
+    let cvPar = null, cvSec = null, job = -1; // section et paramètres hydrauliques retenus (figures de la note de calcul)
     if (Q > 0 && lg?.K && !bridge) { // ouvrage déjà placé (éventuellement modifié par l'utilisateur) : vérification de sa section
       const K = lg.K, section = K.type === 'buse' ? { shape: 'circular', diameter: K.B, cells: K.n } : { shape: 'box', width: K.B, height: K.H, cells: K.n };
       const params = { length: K.L, StricklerK: h.hyd.StricklerK, inlet: K.inlet ?? h.hyd.inlet, ...(inv ? { upstreamInvert: inv.zam, slope: Math.max(1e-4, inv.J) } : {}), ...(zr != null && inv ? { roadLevel: zr, minFreeboard: h.hyd.minFreeboard, maxHeadwater: Math.max(0.5, zr - h.hyd.minFreeboard - inv.zam) } : {}) };
       cvPar = params; cvSec = section;
-      try { verif = culvertHydraulics(section, Q, params); } catch (e) { verif = { warnings: [e.message] }; }
-    }
-    if (Q > 0 && !verif && !bridge) {
+      job = jobs.push({ kind: 'verif', section, Q, params }) - 1;
+    } else if (Q > 0 && !bridge) {
       const params = { length: L, StricklerK: h.hyd.StricklerK, ...(h.hyd.inlet ? { inlet: h.hyd.inlet } : {}), ...(inv ? { upstreamInvert: inv.zam, slope: Math.max(1e-4, inv.J) } : {}), ...(zr != null && inv ? { roadLevel: zr, minFreeboard: h.hyd.minFreeboard } : {}) };
       cvPar = params;
-      try { sz = sizeCulvert(Q, { shape: h.hyd.shape, maxHeadwaterRatio: h.hyd.maxHeadwaterRatio, ...(zr != null && inv ? { maxHeadwater: Math.max(0.5, zr - h.hyd.minFreeboard - inv.zam) } : {}) }, params); } catch (e) { sz = { error: e.message }; }
+      job = jobs.push({ kind: 'size', Q, shape: h.hyd.shape, constraints: { shape: h.hyd.shape, maxHeadwaterRatio: h.hyd.maxHeadwaterRatio, ...(zr != null && inv ? { maxHeadwater: Math.max(0.5, zr - h.hyd.minFreeboard - inv.zam) } : {}) }, params }) - 1;
     }
+    return { c, i, r, Qp, Q, ax, biais, zr, zt, L, linked, lg, bridge, inv, cvPar, cvSec, job };
+  });
+  const cvRes = jobs.length ? await HY.culverts(jobs) : [];
+  pre.forEach(({ c, i, r, Qp, Q, biais, zr, zt, L, linked, lg, bridge, inv, cvPar, cvSec, job }) => {
+    const J = job >= 0 ? cvRes[job] || { error: 'pas de réponse' } : null;
+    let sz = null, verif = null;
+    if (J && jobs[job].kind === 'verif') verif = J.error ? { warnings: [J.error] } : J.r;
+    else if (J) sz = J.error ? { error: J.error } : J.sz;
     let ret = sz?.retained, rr = ret?.result;
     if (!cvSec && ret) cvSec = h.hyd.shape === 'circular' ? { shape: 'circular', diameter: ret.diameter, cells: ret.cells } : { shape: 'box', width: ret.width, height: ret.height, cells: ret.cells };
     if (verif) { const K = lg.K; ret = { cells: K.n, width: K.B, height: K.H, diameter: K.type === 'buse' ? K.B : undefined }; rr = verif; biais = K.ang; }
     if (bridge) biais = lg.K.ang;
     const size = bridge ? `${lg.name || ''} pont à poutres ${lg.K.spans.map((v) => fmt(v, 1)).join(' + ')}`.trim() : verif ? `${lg.name || ''} ${lg.K.type === 'buse' ? `${lg.K.n > 1 ? `${lg.K.n} × ` : ''}Ø ${fmt(lg.K.B, 2)}` : `${lg.K.n > 1 ? `${lg.K.n} × ` : ''}${fmt(lg.K.B, 2)} × ${fmt(lg.K.H, 2)}`}`.trim() : ret ? (h.hyd.shape === 'circular' ? `${ret.cells > 1 ? `${ret.cells} × ` : ''}Ø ${fmt(ret.width ?? ret.diameter ?? ret.section?.diameter, 2)}` : `${ret.cells > 1 ? `${ret.cells} × ` : ''}${fmt(ret.width, 2)} × ${fmt(ret.height, 2)}`) : null;
-    const o = { c, r, Q, Qp, linked, lg, verif: !!verif, ok: rr ? !(rr.headwaterOk === false) && (rr.valid !== false) && !((rr.velocities?.outlet ?? rr.velocities?.full ?? 0) > 3.0001) && !(rr.freeboard != null && rr.freeboard < h.hyd.minFreeboard - 1e-6) : null, up: basins[i].upstreamUids, T: r.values?.returnPeriod ?? hyp.returnPeriod, biais, L, zr, zt, inv, sz, ret, rr, size, hw: rr?.headwater, v: rr?.velocities?.outlet ?? rr?.velocities?.full ?? null, cv: cvSec && cvPar ? { section: cvSec, params: { ...cvPar, inlet: rr?.inlet?.key ?? cvPar.inlet } } : null };
+    const o = { figs: J?.figs || null, c, r, Q, Qp, linked, lg, verif: !!verif, ok: rr ? !(rr.headwaterOk === false) && (rr.valid !== false) && !((rr.velocities?.outlet ?? rr.velocities?.full ?? 0) > 3.0001) && !(rr.freeboard != null && rr.freeboard < h.hyd.minFreeboard - 1e-6) : null, up: basins[i].upstreamUids, T: r.values?.returnPeriod ?? hyp.returnPeriod, biais, L, zr, zt, inv, sz, ret, rr, size, hw: rr?.headwater, v: rr?.velocities?.outlet ?? rr?.velocities?.full ?? null, cv: cvSec && cvPar ? { section: cvSec, params: { ...cvPar, inlet: rr?.inlet?.key ?? cvPar.inlet } } : null };
     o.invChecks = invertChecks(lg?.name || c.id, inv, rr);
     if (lg) lg.inv = inv;
     out.list.push(o); out.byId[c.id] = o;
   });
-  S.hyRes = out; S.hySig = sig;
   return out;
 }
 // Hypothèses hydrologiques (reprises des panneaux de BVTrace) : jeu Tunisie XOR FAO 54 — les champs basculent avec le
@@ -6357,8 +6390,8 @@ function hyNoteHtml(HR) {
       ['Vitesse', `${fmt(o.v, 2)} m/s${o.v > 3 ? ' — > 3 m/s : protection aval' : ''}`], ['Revanche', Number.isFinite(rr.freeboard) ? `${fmt(rr.freeboard, 2)} m (minimum ${fmt(h.hyd.minFreeboard, 2)} m)` : 'chaussée à définir (profil en long)'],
       ...(rr.bceom ? [['Contre-épreuve BCEOM', `figure ${rr.bceom.figure}, Q* = ${fmt(rr.bceom.qStar, 4)}, H1* = ${fmt(rr.bceom.h1Star, 3)} → H1 = ${fmt(rr.bceom.headwater, 3)} m`]] : [])];
     return `<h3>Ouvrage hydraulique</h3><table>${rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>`
-      + fig(hds5Svg(o.cv, rr), 'Abaque du contrôle à l\'entrée (FHWA HDS-5) : toutes les configurations d\'entrée de la forme, retracées par les équations du calcul avec la section retenue — la configuration retenue en trait plein, le point calculé en rouge.')
-      + fig(bceomSvg(rr.bceom), 'Abaque BCEOM de niveau amont (contre-épreuve) : toutes les courbes de la figure, la courbe de la tête retenue en trait plein, le point lu en rouge.');
+      + fig(o.figs?.hds5 || '', 'Abaque du contrôle à l\'entrée (FHWA HDS-5) : toutes les configurations d\'entrée de la forme, retracées par les équations du calcul avec la section retenue — la configuration retenue en trait plein, le point calculé en rouge.')
+      + fig(o.figs?.bceom || '', 'Abaque BCEOM de niveau amont (contre-épreuve) : toutes les courbes de la figure, la courbe de la tête retenue en trait plein, le point lu en rouge.');
   };
   const basins = HR.list.map((o) => `<h2>${esc(o.c.id)} — ${esc(o.c.traceName)}, PK ${fmt(o.c.pk, 0)} · S = ${fmt(o.c.totalKm2, 3)} km²</h2>${fig(basinMapSvg(o.c, axPts(o.c.key), { others: HR.list.filter((q) => q !== o).map((q) => q.c), tiles: noteTiles }), `Bassin ${o.c.id} : contour, écoulement principal et exutoire au droit du tracé`)}${hyDetailHtml(o.r.values?.detail, true)}${ouvHtml(o)}`
     + `<p><b>Débit propre retenu :</b> ${o.Qp > 0 ? `${fmt(o.Qp, 2)} m³/s (${esc(o.r.retained?.method || '')})` : '—'}${o.up?.length ? ` · <b>bassins amont</b> ${esc(o.up.join(', '))} → ${o.r.cumulative?.Q != null ? `${fmt(o.r.cumulative.Q, 2)} m³/s` : esc(o.r.cumulative?.error || '—')}` : ''} · <b>débit de dimensionnement :</b> ${o.Q > 0 ? `${fmt(o.Q, 2)} m³/s` : '—'}</p>`).join('');
@@ -6696,12 +6729,12 @@ function bindHydro() {
     const ex = S.prj.cadres.find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key) || S.prj.cadres.find((q) => q.hydro?.id === o.c.id);
     if (ex) { const keep = { s: ex.s, L: ex.L, Lg: ex.Lg, Ld: ex.Ld, name: ex.name }; Object.assign(ex, data, over.keepPos === false ? {} : { s: keep.s }); if (over.keepL !== false) for (const f of ['L', 'Lg', 'Ld']) if (keep[f] != null) ex[f] = keep[f]; } else S.prj.cadres.push({ id: uid(), ...data });
   };
-  $('#hyDetail').addEventListener('click', (e) => {
+  $('#hyDetail').addEventListener('click', async (e) => {
     const ap = e.target.closest('[data-hyohapply]'), rs = e.target.closest('[data-hyohreset]'), go = e.target.closest('[data-hyohgo]');
     if (go) { S.osel = `c:${go.dataset.hyohgo}`; showTab('ouvrages'); refreshPanels(); return; }
     if (!ap && !rs) return;
     const o = S.hyRes?.byId?.[(ap || rs).dataset[ap ? 'hyohapply' : 'hyohreset']]; if (!o) return;
-    if (rs) { const ex = (S.prj.cadres || []).find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key) || (S.prj.cadres || []).find((q) => q.hydro?.id === o.c.id); if (ex) S.prj.cadres = S.prj.cadres.filter((q) => q !== ex); S.hySig = null; computeHydro(); const o2 = S.hyRes?.byId?.[o.c.id]; if (o2?.ret) hyPlace(o2, { keepL: false }); update(); toast(`${o.c.id} : ouvrage remis au dimensionnement proposé.`); return; }
+    if (rs) { const ex = (S.prj.cadres || []).find((q) => q.hydro?.id === o.c.id && q.axis === o.c.key) || (S.prj.cadres || []).find((q) => q.hydro?.id === o.c.id); if (ex) S.prj.cadres = S.prj.cadres.filter((q) => q !== ex); S.hySig = null; S.hyRes = null; const o2 = (await computeHydroNow())?.byId?.[o.c.id]; if (o2?.ret) hyPlace(o2, { keepL: false }); update(); toast(`${o.c.id} : ouvrage remis au dimensionnement proposé.`); return; }
     const over = {}; for (const el of $('#hyDetail').querySelectorAll('[data-hyoh]')) { const k = el.dataset.hyoh, v = k === 'type' || k === 'spans' ? el.value.trim() : parseNum(el.value); if (k === 'type' || k === 'spans' || Number.isFinite(v)) over[k] = v; }
     if (over.type === 'poutres') { if (!parseSpansTxt(over.spans).length || !parseSpansTxt(over.spans).every((x) => x >= 4)) { toast('Travées du pont : longueurs d\'au moins 4 m séparées par « ; ».', 'warn'); return; } }
     else if (!(over.B > 0.2) || (over.type !== 'buse' && !(over.H > 0.2))) { toast('Dimensions de l\'ouvrage à saisir (m).', 'warn'); return; }
@@ -6711,8 +6744,8 @@ function bindHydro() {
   $('#hyDetail').addEventListener('click', (e) => { const b = e.target.closest('[data-bvopen]'); if (b) openBvSheet(b.dataset.bvopen); });
   $('#hyDetail').addEventListener('click', (e) => { const b = e.target.closest('[data-hyzoom]'); const o = b && S.hyRes?.byId?.[b.dataset.hyzoom]; if (!o) return; viewer.cx = o.c.x; viewer.cy = o.c.y; viewer.s = Math.max(viewer.s, 1.5); viewer.invalidate(); });
   $('#btnHyClear').addEventListener('click', () => { if (S.prj.hydro) delete S.prj.hydro.res; S.hyRes = null; update(); });
-  $('#btnHyCsv').addEventListener('click', () => {
-    const HR = computeHydro(); if (!HR) { toast('Aucun bassin.', 'warn'); return; }
+  $('#btnHyCsv').addEventListener('click', async () => {
+    const HR = await computeHydroNow(); if (!HR) { toast('Aucun bassin ou calcul indisponible.', 'warn'); return; }
     const c = (v, k = 2) => (v == null || !Number.isFinite(+v) ? '' : (+v).toFixed(k).replace('.', ','));
     // une colonne par temps de concentration et par méthode de débit (titres des étapes du détail)
     const tcIds = ['Kirpich', 'Ventura', 'Passini', 'Giandotti'];
@@ -6723,15 +6756,15 @@ function bindHydro() {
     for (const o of HR.list) { const v = o.r.values || {}; rows.push([o.c.id, o.c.traceName, c(o.c.pk, 1), c(o.c.x, 2), c(o.c.y, 2), c(o.c.totalKm2, 4), c((o.c.m.lengthM || 0) / 1000, 3), c(o.c.m.slopePct), ...tcIds.map((k) => c(v.tc?.[k]?.minutes > 0 ? v.tc[k].minutes : null, 1)), c(v.tcRetained?.minutes, 1), v.tcRetained?.formula || '', c(v.intensityMmH), c(v.runoffCoeff?.C), ...meth.map((id) => c(qOf(o, id))), c(v.stats?.median), c(o.Qp), o.r.retained?.method || '', (o.up || []).join(' '), c(o.Q), o.T, o.size || '', c(o.L, 1), o.biais, c(o.hw), c(o.v)].join(';')); }
     download(fname('csv').replace(/\.csv$/, '_hydrologie.csv'), '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
   });
-  $('#btnHyNote').addEventListener('click', () => {
-    const HR = computeHydro(); if (!HR) { toast('Aucun bassin.', 'warn'); return; }
+  $('#btnHyNote').addEventListener('click', async () => {
+    const HR = await computeHydroNow(); if (!HR) { toast('Aucun bassin ou calcul indisponible.', 'warn'); return; }
     const html = hyNoteHtml(HR), url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
     const w = window.open(url, '_blank');
     if (!w) download(fname('csv').replace(/\.csv$/, '_note_hydrologique.html'), html, 'text/html;charset=utf-8');
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   });
-  $('#btnHyOH').addEventListener('click', () => {
-    const HR = computeHydro(); if (!HR) { toast('Aucun bassin.', 'warn'); return; }
+  $('#btnHyOH').addEventListener('click', async () => {
+    const HR = await computeHydroNow(); if (!HR) { toast('Aucun bassin ou calcul indisponible.', 'warn'); return; }
     let n = 0, kept = 0;
     for (const o of HR.list) {
       if (o.linked) { kept++; continue; } // ouvrage déjà placé (peut-être modifié) : conservé
@@ -8016,6 +8049,9 @@ function toast(msg, lvl = 'info') {
   toastTimer = setTimeout(() => (t.hidden = true), lvl === 'err' ? 7000 : 4500);
 }
 
+// Démarrage : listes du moteur hydrologique (serveur de calcul) lues avant le premier affichage.
+HY.setOnUpdate(() => { try { if (!$('#tab-hydro')?.hidden) renderHydro(); } catch (e) { console.error(e); } });
+await HY.ready().catch((e) => { console.error(e); setTimeout(() => toast(`Moteur hydrologique : ${e.message}`, 'err'), 500); });
 init();
 // Poignée de débogage (console du navigateur).
 window.GIRA = { S, update, kmlToDxf, deleteBranch, deleteJunction, get viewer() { return viewer; }, zoomGira, newBranch, finishAxis, setTool, buildDxfText, parseDXF, buildDxfGeometry, setTerrainPoints, tinZ, hitElement, openPop, closePop };

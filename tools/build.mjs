@@ -39,12 +39,20 @@ const stop=(m)=>{document.documentElement.innerHTML='<body style="font:16px syst
 let ov=null;const block=()=>{if(ov)return;try{window.dispatchEvent(new Event('pagehide'))}catch(e){}ov=document.createElement('div');ov.style.cssText='position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.94);color:#fff;font:16px system-ui;display:flex;align-items:center;justify-content:center;text-align:center;padding:30px';ov.innerHTML='<div><h2>INFRA-KSR — connexion requise</h2><p>L\\'application ne fonctionne qu\\'en ligne. Votre projet est conservé dans le navigateur ; le travail reprend dès le retour de la connexion.</p></div>';document.body.appendChild(ov);const w=setInterval(async()=>{if(await ck()){clearInterval(w);ov.remove();ov=null;n=0}},3e4)};
 let n=0;(async()=>{let ok=!1;for(let k=0;k<3&&!ok;k++){ok=await ck();if(!ok)await new Promise(r=>setTimeout(r,2500))}if(!ok){stop('Cette application ne fonctionne qu\\'en ligne : la connexion au serveur INFRA-KSR a échoué. Vérifiez votre connexion Internet puis rechargez la page.');return}setInterval(async()=>{if(ov)return;if(await ck())n=0;else if(++n>=3)block()},9e5)})()})();\n`;
 
+// Moteurs exécutés sur le serveur (Pages Functions de functions/api/) : jamais publiés dans le site.
+const SERVER_ONLY = new Set([
+  'js/hydro/engine.js', 'js/hydro/hydrology.js', 'js/hydro/culvert.js', 'js/hydro/notefig-cv.js',
+  'js/hydro/data/montana-tunisie.js', 'js/hydro/data/montana-afrique.js', 'js/hydro/data/cieh-fao54.js', 'js/hydro/data/orstom-fao54.js',
+  'js/hydro/data/fao54-checklist.js', 'js/hydro/data/bceom_abaques_71_84.js', 'js/hydro/data/culvert-catalog.js',
+].map((f) => f.split('/').join(path.sep)));
+
 fs.rmSync(OUT, { recursive: true, force: true });
 const files = [];
 (function copy(rel) {
   for (const e of fs.readdirSync(path.join(ROOT, rel), { withFileTypes: true })) {
     if (!rel && SKIP.has(e.name)) continue;
     const r = path.join(rel, e.name), src = path.join(ROOT, r), dst = path.join(OUT, r);
+    if (SERVER_ONLY.has(r)) continue;
     if (e.isDirectory()) { fs.mkdirSync(dst, { recursive: true }); copy(r); continue; }
     fs.mkdirSync(path.dirname(dst), { recursive: true }); fs.copyFileSync(src, dst); files.push(r);
   }
@@ -63,7 +71,7 @@ for (const r of files) {
     let code = fs.readFileSync(f, 'utf8');
     if (r === path.join('js', 'main.js')) code = GUARD + (process.env.NO_LIC ? '' : LIC) + code;
     const isModule = /^\s*(import|export)\s/m.test(code);
-    const m = await transform(code, { minify: true, legalComments: 'none', target: 'es2020', loader: 'js', ...(isModule ? { format: 'esm' } : {}) });
+    const m = await transform(code, { minify: true, legalComments: 'none', target: 'es2022', loader: 'js', ...(isModule ? { format: 'esm' } : {}) });
     code = m.code;
     if (r.startsWith('js' + path.sep)) { code = JavaScriptObfuscator.obfuscate(code, { ...OBF, sourceType: isModule ? 'module' : 'script' }).getObfuscatedCode(); nObf++; }
     fs.writeFileSync(f, `${BANNER}\n${code}`); nJs++;
