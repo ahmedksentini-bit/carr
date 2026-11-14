@@ -427,6 +427,18 @@ ou sur un fond topographique DXF.
   travers est porté tout à droite de l'axe (voie + BDD), la BDG à gauche, dévers pivotant autour de ce bord ; les
   extrémités du profil en long se calent sur la rive peinte de la chaussée hôte. Projets antérieurs (axe au milieu de
   la chaussée) : les abscisses saisies sur les bretelles sont reportées une fois, point par point, sur le nouvel axe.
+- **Amorces** (onglet Amorces) : simple accès d'une voie secondaire ou d'une desserte sur une route du projet, sans
+  carrefour. Bouton « + Amorce », puis deux clics (une droite) : le premier point se cale sur le bord de chaussée de la
+  route la plus proche, du côté de l'amorce, et suit la route si son axe change ; l'amorce s'arrête sur la ligne du bord,
+  même biaise. Sur le plan : surbrillance au survol ; un clic (ou un toucher) ouvre Déplacer / Supprimer / Propriétés.
+  Propriétés, recalculées en temps réel : largeur, pente transversale, longueur, route et abscisse de raccordement,
+  structure de chaussée (couches modifiables), profil type sommaire, profil en long (TN du modèle de terrain ; projet en
+  droite de la cote projet du bord de chaussée — dévers 2,5 % depuis l'axe ; TN à défaut — au TN de l'extrémité) et
+  métré (surface, volume de chaque couche, remblai et déblai jusqu'au fond de forme, talus 3/2 et 1/1, sans décapage).
+- **Déplacer un ouvrage** (cadres, buses, ponts, y compris ceux placés par l'hydrologie) : un clic sur l'ouvrage ouvre
+  son menu (fiche, coupe longitudinale, déplacer, supprimer) ; « Déplacer » : l'ouvrage suit le curseur le long de son
+  axe et se reconstruit en temps réel (longueur, têtes, cotes fil d'eau), clic pour poser, Échap pour annuler. La poignée
+  centrale se glisse aussi directement.
 - **Zone d'obliquité et grille CSPR** : sur le plan (calque COTATION), chaque bretelle porte les points du guide des
   échangeurs (§ 2.3.1) S.0, S.1,00, S.5,00 (droite d'obliquité, 4/p après S.1,00) et E.4,00 (3/p avant E.1,00), E.1,00,
   E.0, et une chaîne de cotes le long de l'axe de référence, côté extérieur : S.0 → S.1,00 → S.5,00 → tpl → origine de

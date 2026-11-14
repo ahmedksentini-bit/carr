@@ -57,6 +57,7 @@ import { initLang, getLang, t } from './i18n.js';
 import { analysePlan, gapParams, GAPS } from './capacity-plan.js';
 import { initUvr } from './uvrtab.js';
 import { initProfEdit } from './profedit.js';
+import { initAmorces } from './amorces.js';
 import { axisFromPolyline, kmlLines } from './axisimport.js';
 
 // Identifiants d'application acceptés à l'ouverture : INFRA-KSR (actuel) et GIRA (projets enregistrés avant le renommage).
@@ -1998,6 +1999,7 @@ function drawOverlay(ctx, v, T) {
   try { drawEmprise(ctx, v); } catch (e) { console.error(e); }
   try { UV?.overlay(ctx, v); } catch (e) { console.error(e); }
   try { PE?.overlay(ctx, v); } catch (e) { console.error(e); }
+  try { AM?.overlay(ctx, v); } catch (e) { console.error(e); }
   try { drawOhMove(ctx, v); } catch (e) { console.error(e); }
   try { drawCheckFlash(ctx, v); } catch (e) { console.error(e); }
   if (S.D?.O) {
@@ -2250,6 +2252,7 @@ function hitElement(px, py) {
   for (const o of S.ouvr?.list || []) if (o.poly?.length > 2 && (inPolyW(wq, o.poly) || polyDist([...o.poly, o.poly[0]]) < 6)) cands.push({ type: 'ouvr', i: o.key, sc: -300 });
   for (const g of S.cadres || []) if (g.poly?.length > 2 && (inPolyW(wq, g.poly) || polyDist([...g.poly, g.poly[0]]) < 6)) cands.push({ type: 'ouvr', i: `c:${g.c.id}`, sc: -310 });
   if (S.tool === 'select') { const h = UV?.hit(px, py); if (h) cands.push({ type: 'uvram', i: h, sc: -400 + h.d }); } // aménagement de l'onglet Vitesses / UVR
+  if (S.tool === 'select') { const id = AM?.hit(px, py); if (id) cands.push({ type: 'amorce', i: id, sc: -350 }); } // amorces (onglet Amorces)
   if (!cands.length) { const id = bvAt(wq); if (id) cands.push({ type: 'bv', i: id, sc: 5000 }); } // bassin versant : seulement hors des éléments du projet
   cands.sort((a, b) => a.sc - b.sc);
   const c0 = cands[0];
@@ -2395,6 +2398,7 @@ function setTool(t) {
   if (t !== 'profser') S.profA = null;
   if (t !== 'bvcut') S.bvCut = null;
   if (t !== 'tiein') S.tie = null;
+  if (t !== 'amorce') S.amA = null;
   $$('.tools [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
   updateCursor(); setPrompt(); viewer.invalidate();
 }
@@ -2403,7 +2407,7 @@ function updateCursor() {
 }
 // Barre de saisie : visible pendant les outils qui posent des points (indispensable sur téléphone : pas de clic droit,
 // de touche Échap ni de Retour arrière).
-const DRAW_TOOLS = { axis: 'Axe', bvcut: 'Coupe du bassin', measure: 'Mesure', uvrpt: 'Déclencheurs UVR', uvram: 'Aménagements', profser: 'Série de profils', profone: 'Profils isolés', tiein: 'Raccordement', center: 'Centre' };
+const DRAW_TOOLS = { amorce: 'Amorce (2 points)', axis: 'Axe', bvcut: 'Coupe du bassin', measure: 'Mesure', uvrpt: 'Déclencheurs UVR', uvram: 'Aménagements', profser: 'Série de profils', profone: 'Profils isolés', tiein: 'Raccordement', center: 'Centre' };
 function refreshDrawBar() {
   const bar = $('#drawBar'); if (!bar) return;
   const on = !!DRAW_TOOLS[S.tool]; bar.hidden = !on; if (!on) return;
@@ -3396,7 +3400,9 @@ function bindCanvas() {
       if (S.ohMove) { ohMoveCancel(); return; }
       if (S.tool === 'select') { const h = UV?.hit(px, py); if (h) { UV.menu(h, e.clientX, e.clientY); return; } }
       if (S.tool === 'select') { const q = PE?.hit(px, py); if (q) { PE.menu(q, e.clientX, e.clientY); return; } }
-      if (S.tool === 'select') { const el = hitElement(px, py); if (el?.type === 'ouvr') { ouvrMenu(el.i, e.clientX, e.clientY, px, py); return; } }
+      if (S.amMove) { AM?.cancel(); return; }
+      if (S.tool === 'amorce') { if (AM?.cancel()) return; }
+      if (S.tool === 'select') { const el = hitElement(px, py); if (el?.type === 'ouvr') { ouvrMenu(el.i, e.clientX, e.clientY, px, py); return; } if (el?.type === 'amorce') { AM?.menu(el.i, e.clientX, e.clientY); return; } }
       if (S.tool === 'axis') finishAxis();
       else if (S.tool === 'bvcut') bvFinishCut();
       else if (S.tool === 'measure') { S.meas = []; viewer.invalidate(); }
@@ -3406,10 +3412,13 @@ function bindCanvas() {
     if (e.button !== 0) return;
     if (S.uvrMove) { UV?.drop(); return; } // pose de l'aménagement déplacé
     if (S.profMode) { PE?.drop(); return; } // pose du profil déplacé ou ajouté
-    if (S.ohMove) { ohMoveDrop(); return; } // pose de l'ouvrage déplacé
+    // pose de l'ouvrage / de l'amorce déplacés, au point touché (écran tactile : pas de survol avant le toucher)
+    if (S.ohMove) { const wq = pickPoint(px, py); ohMoveTo(wq); ohMoveDrop(); return; }
+    if (S.amMove) { AM?.moveTo(pickPoint(px, py)); AM?.drop(); return; }
     const w = pickPoint(px, py);
     if (S.tool === 'axis') { S.draft.push(w); setPrompt(); }
     else if (S.tool === 'center') placeCenterAt(w);
+    else if (S.tool === 'amorce') AM?.pick(w);
     else if (S.tool === 'ramp') addRampAt(w);
     else if (S.tool === 'pickx') pickSecondary(w, px, py);
     else if (['profser', 'profone', 'cadre', 'poutres'].includes(S.tool)) pickOnAxis(w);
@@ -3441,9 +3450,15 @@ function bindCanvas() {
       // extrémité d'une voie secondaire amenée sur un carrefour : raccordement (branche tangente, même profil)
       if (d.kind === 'cvx' && (d.k === 0 || d.k === (S.prj.crosses[d.c]?.axis?.length || 0) - 1)) { const X = S.prj.crosses[d.c]; if (X?.free) delete X.free[d.k === 0 ? 0 : 1]; const msg = connectCross(d.c, { ends: true }); if (msg) { update(); toast(msg); } }
     }
-    else if (['cadm', 'cadr', 'cadl'].includes(d.kind) && !d.moved) { const [px, py] = viewer.w2s(d.start.x, d.start.y); openPop({ type: 'ouvr', i: `c:${d.id}` }, px, py); } // simple clic sur une poignée : fiche de l'ouvrage
+    else if (['cadm', 'cadr', 'cadl'].includes(d.kind) && !d.moved) { const [px, py] = viewer.w2s(d.start.x, d.start.y), r = $('#cv').getBoundingClientRect(); ouvrMenu(`c:${d.id}`, r.left + px, r.top + py, px, py); } // simple clic sur une poignée : menu de l'ouvrage (fiche, coupe, déplacer, supprimer)
     else if (d.kind === 'pan') {
-      if (!d.moved && d.clickEl) openPop(d.clickEl, d.cpx, d.cpy);
+      if (!d.moved && d.clickEl) {
+        // amorces et ouvrages : un clic ouvre leur menu (déplacer, supprimer, propriétés) — utilisable sans clic droit
+        const r = $('#cv').getBoundingClientRect(), cx = r.left + d.cpx, cy = r.top + d.cpy;
+        if (d.clickEl.type === 'amorce') AM?.menu(d.clickEl.i, cx, cy);
+        else if (d.clickEl.type === 'ouvr') ouvrMenu(d.clickEl.i, cx, cy, d.cpx, d.cpy);
+        else openPop(d.clickEl, d.cpx, d.cpy);
+      }
       else if (!d.moved && d.deselect) { if (S.sel >= 0) selectBranch(-1); closePop(); }
       autosave();
     }
@@ -3500,8 +3515,10 @@ function onMove(px, py) {
   else if (!d && S.uvrMove) { if (UV?.moveTo(w)) viewer.invalidate(); $('#cv').style.cursor = 'move'; }
   else if (!d && S.profMode) { if (PE?.moveTo(w)) viewer.invalidate(); $('#cv').style.cursor = 'move'; }
   else if (!d && S.ohMove) { if (ohMoveTo(w)) viewer.invalidate(); $('#cv').style.cursor = 'move'; }
+  else if (!d && S.amMove) { if (AM?.moveTo(w)) viewer.invalidate(); $('#cv').style.cursor = 'move'; }
+  else if (!d && S.tool === 'amorce' && S.amA) viewer.invalidate();
   else if (!d && S.tool === 'select') {
-    if (UV?.hover(px, py) | PE?.hover(px, py)) viewer.invalidate();
+    if (UV?.hover(px, py) | PE?.hover(px, py) | (AM?.hover(px, py) || false)) viewer.invalidate();
     const h = hitAxis(px, py);
     if (h !== S.hover) S.hover = h;
     const hh = hitHandle(px, py), el = hh ? null : hitElement(px, py);
@@ -3561,7 +3578,7 @@ function bindKeys() {
     if (typing) return;
     if ($('#dlgHelp').open) return;
     switch (e.key) {
-      case 'Escape': if (UV?.cancelMove()) return; if (PE?.cancel()) return; if (ohMoveCancel()) return; if (S.ttr) { S.ttr = null; toast(t('Raccordement annulé.')); return; } if (S.pop) { closePop(); return; } cancelTool(); return;
+      case 'Escape': if (UV?.cancelMove()) return; if (PE?.cancel()) return; if (ohMoveCancel()) return; if (AM?.cancel()) return; if (S.ttr) { S.ttr = null; toast(t('Raccordement annulé.')); return; } if (S.pop) { closePop(); return; } cancelTool(); return;
       case 'Enter': if (S.tool === 'axis') finishAxis(); else if (S.tool === 'bvcut') { e.preventDefault(); bvFinishCut(); } return; // sans preventDefault, l'appui atteindrait le premier bouton de la fiche rouverte
       case 'Backspace': if (undoPoint()) e.preventDefault(); return;
       case 'Delete': if (S.pop) { popDelete(); return; } if (S.sel >= 0) deleteBranch(S.sel); return;
@@ -3899,6 +3916,7 @@ function refreshPanels() {
   refreshPT();
   try { renderHydro(); } catch (e) { console.error(e); }
   try { UV?.render(); } catch (e) { console.error(e); }
+  if (!$('#tab-amorces')?.hidden) try { AM?.render(); } catch (e) { console.error(e); }
   setPrompt();
 }
 
@@ -5174,13 +5192,24 @@ function ouvrMenu(key, cx, cy, px, py) {
     const b = e.target.closest('button[data-m]'); if (!b) return; close();
     if (b.dataset.m === 'fiche') openPop({ type: 'ouvr', i: key }, px, py);
     else if (b.dataset.m === 'coupe') ohOpen(cid);
-    else if (b.dataset.m === 'move') { S.ohMove = { id: cid, s: g.s }; toast(`Déplacez ${g.name} le long de ${g.ax.name}, cliquez pour le poser (Échap : annuler).`); viewer.invalidate(); }
+    else if (b.dataset.m === 'move') { S.ohMove = { id: cid, s: g.s, s0: g.c.s ?? g.s }; toast(`Déplacez ${g.name} le long de ${g.ax.name}, cliquez pour le poser (Échap : annuler).`); viewer.invalidate(); }
     else if (b.dataset.m === 'del') { if (!confirm(t(`Supprimer l'ouvrage ${g.name} ?`))) return; S.prj.cadres = S.prj.cadres.filter((q) => q.id !== cid); S.osel = null; update(); }
   };
 }
-function ohMoveTo(w) { const M = S.ohMove; if (!M) return false; const g = (S.cadres || []).find((q) => q.c?.id === M.id), pr = g?.ax?.project(w); if (!pr) return false; M.s = Math.round(Math.max(0, Math.min(g.ax.len, pr.s)) * 100) / 100; return true; }
-function ohMoveDrop() { const M = S.ohMove; if (!M) return false; S.ohMove = null; const c = (S.prj.cadres || []).find((q) => q.id === M.id); if (c) { c.s = M.s; update(); toast(`Ouvrage déplacé à l'abscisse ${fmt(M.s, 2)} m.`); } return true; }
-function ohMoveCancel() { if (!S.ohMove) return false; S.ohMove = null; viewer.invalidate(); return true; }
+// Déplacement en temps réel : l'ouvrage est reconstruit à chaque position (longueur, têtes, biais, remblai), au plus une
+// fois par image ; la position n'est enregistrée (annulable) qu'à la pose.
+function ohMoveTo(w) {
+  const M = S.ohMove; if (!M) return false;
+  const g = (S.cadres || []).find((q) => q.c?.id === M.id), pr = g?.ax?.project(w); if (!pr) return false;
+  const s = Math.round(Math.max(0, Math.min(g.ax.len, pr.s)) * 100) / 100; if (s === M.s) return false;
+  M.s = s;
+  const c = (S.prj.cadres || []).find((q) => q.id === M.id); if (!c) return true;
+  c.s = s;
+  if (!M.raf) M.raf = requestAnimationFrame(() => { M.raf = 0; if (S.ohMove === M) update({ commit: false, panels: false }); });
+  return true;
+}
+function ohMoveDrop() { const M = S.ohMove; if (!M) return false; S.ohMove = null; if (M.raf) cancelAnimationFrame(M.raf); const c = (S.prj.cadres || []).find((q) => q.id === M.id); if (c) { c.s = M.s; update(); toast(`Ouvrage déplacé à l'abscisse ${fmt(M.s, 2)} m.`); } return true; }
+function ohMoveCancel() { const M = S.ohMove; if (!M) return false; S.ohMove = null; if (M.raf) cancelAnimationFrame(M.raf); const c = (S.prj.cadres || []).find((q) => q.id === M.id); if (c && M.s0 != null) { c.s = M.s0; update({ commit: false }); } else viewer.invalidate(); return true; }
 function drawOhMove(ctx, v) {
   const M = S.ohMove; if (!M) return;
   const g = (S.cadres || []).find((q) => q.c?.id === M.id); if (!g?.poly?.length) return;
@@ -5631,6 +5660,7 @@ function bindPT() {
 // Vitesses / UVR (Guide M1 ESCWA/UNRSF) : onglet et calcul dans js/uvrtab.js, moteur dans js/uvr.js.
 let UV = null;
 let PE = null; // édition des profils en travers sur le plan (profedit.js)
+let AM = null; // amorces (amorces.js)
 
 // --------------------------------------------------------- Hydrologie et hydraulique (moteur BVTrace)
 const HY_T = [2, 5, 10, 20, 50, 100];
@@ -6926,6 +6956,7 @@ function showTab(name) {
   $$('.tab').forEach((t) => (t.hidden = t.id !== 'tab-' + name));
   if (name === 'implantation') try { refreshTabAxes(); } catch (e) { console.error(e); }
   if (name === 'uvr') try { UV?.render(); } catch (e) { console.error(e); }
+  if (name === 'amorces') try { AM?.render(); } catch (e) { console.error(e); }
   // Chaussées : le bureau occupe toute la largeur (plan masqué) ; chargé à la première ouverture
   const full = name === 'chaussee', app = $('main.app'), was = app?.classList.contains('full-tab');
   app?.classList.toggle('full-tab', full);
@@ -7066,6 +7097,7 @@ function bindUI() {
   bindHydro(); bindBvSheet(); bindDrawBar();
   UV = initUvr({ S, $, toast, update, listAxes, viewer, setTool, esc, fmt, parseNum, download, fname, G }); UV.bind();
   PE = initProfEdit({ S, viewer, update, toast, esc, uid });
+  AM = initAmorces({ S, $, viewer, update, toast, esc, fmt, uid, listAxes, setTool, showTab }); AM.bind();
   if (/[?&]debug\b/.test(location.search)) window.__gira = { S, get viewer() { return viewer; }, get v3d() { return v3d; }, lineGrips: () => gripAxes().flatMap(axisLineGrips), ew: () => earthworkCorridors(), ohOpen: (id) => ohOpen(id) }; // tests de navigateur (?debug)
   bind3D();
   bindEch();
