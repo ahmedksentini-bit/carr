@@ -346,7 +346,11 @@ ou sur un fond topographique DXF.
   (coordonnées du projet). Rendu three.js (vendu dans `js/vendor`, licence MIT), sans serveur.
 - **Échangeur** (onglet Échangeur) : section courante d'autoroute (ICTAAL 2015, maj 2021 : catégories L1 / L2, voies,
   BDG, BAU, bande médiane, PK), bretelles de sortie par déboîtement (Sd1 : biseau 150 / 110 / 90 m, point S.1,00 m,
-  tpl, Lm = (tpl − 1) / p, musoir hachuré, balise J14 à S.5,00 m, D30 / D40 / D50 aux distances du tab. 4-2) et
+  tpl, Lm = (tpl − 1) / p, musoir hachuré, balise J14 à S.5,00 m, signalisation de direction selon la chaussée principale — D30 au
+  point S.1,50 m dans le musoir ; autoroute : D40 à 750 / 900 / 1000 m et D50 à 1500 / 1800 / 2000 m du D30 à 90 / 110 /
+  130 km/h (tab. 4-2) ; VSA : d1 / d du guide VRU A (p. 39) ; autre route à chaussées séparées : D40 à 600 / 800 /
+  1000 m, D50 à — / 1500 / 2000 m pour V ≤ 90 / ≤ 110 / > 110 km/h (VRU A p. 10, ≈ 30 s et 60 s) ; sortie depuis une
+  bretelle : D30 seul) et
   d'entrée en insertion (Ei1 : voie de 200 m + biseau de 75 m) ; axe des bretelles par sommets avec arcs et
   **clothoïdes** (paramètre A), surlargeur 50/R, dévers en 1/R ; contrôles du guide Cerema « Les échangeurs sur routes
   de type Autoroute » (2013, maj 2021) : rayons limites (tab. 3-1), premier rayon de sortie, enchaînement des courbes,

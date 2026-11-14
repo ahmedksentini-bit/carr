@@ -1050,15 +1050,25 @@ export function buildEchangeur(prj, D) {
       if (!woven) text('COTATION', h.off(st0, -1.5), `origine du biseau ${fmt(e.biseau)} m`, ang(Fs.d), 'center', TH * 0.8);
       text('COTATION', h.off(Fs.s, -1.5), 'S.1,00', ang(Fs.d), 'center', TH * 0.8);
       text('COTATION', h.off(sNose, -1.5), `tpl ${fmt(e.tpl)} m · Lm ${fmt(e.Lm)} m`, ang(Fs.d), 'center', TH * 0.8);
-      // Signalisation de direction (schémas 4-1, 4-8, tab. 4-2) : D30 au point S.1,50 m ; D40 et D50 en amont (autoroute).
+      // Signalisation de direction d'une sortie en déboîtement, selon la chaussée principale :
+      //  - D30 (signalisation avancée) au point S.1,50 m, dans le musoir (milieu des 1,50 m qui séparent les deux rives) ;
+      //  - autoroute ([ECH] § 4.1.2, tab. 4-2) : D40 à d3 = 750 / 900 / 1000 m et D50 à d2 = 1500 / 1800 / 2000 m en
+      //    amont du D30 pour 90 / 110 / 130 km/h ;
+      //  - VSA ([VRUA] p. 10 et 39) : D40 à d1 (ramené à d1m si l'enchaînement l'impose), D50 à d (aucun en VSA 90) ;
+      //  - autre route à chaussées séparées ([VRUA] p. 10 : D40 à ≈ 30 s, D50 à ≈ 60 s du D30) : d1 = 600 / 800 / 1000 m
+      //    et d = — / 1500 / 2000 m pour V ≤ 90 / ≤ 110 / > 110 km/h ;
+      //  - sortie depuis une bretelle : D30 seul.
       const sD30 = Fs.s + sd * 0.5 / e.p;
-      // VSA : D40 à d1, D50 à d du D30 ([VRUA] p. 12 et 39 ; pas de D50 sur VSA 90).
-      const Vs = h.kind === 'hwy' && h.roadKind === 'route' ? vsaRules(h.dcat, h.lanes) : null;
-      const signs = [['D30', 0], ...(Vs ? [['D40', vsaD40.get(R.id) ?? Vs.d1], ...(Vs.d ? [['D50', Vs.d]] : [])] : h.kind === 'hwy' ? [['D40', { 90: 750, 110: 900, 130: 1000 }[h.V] || 900], ['D50', { 90: 1500, 110: 1800, 130: 2000 }[h.V] || 1800]] : [])];
+      const Vs = h.kind === 'hwy' && h.roadKind === 'route' ? vsaRules(h.dcat, h.lanes) : null, Vh = +h.V || 90;
+      const tab = (a, b, c) => (Vh <= 90 ? a : Vh <= 110 ? b : c);
+      const signs = [['D30', 0], ...(Vs ? [['D40', vsaD40.get(R.id) ?? Vs.d1], ...(Vs.d ? [['D50', Vs.d]] : [])]
+        : h.kind === 'hwy' && h.roadKind === 'route' ? [['D40', tab(600, 800, 1000)], ...(Vh > 90 ? [['D50', tab(null, 1500, 2000)]] : [])]
+        : h.kind === 'hwy' ? [['D40', tab(750, 900, 1000)], ['D50', tab(1500, 1800, 2000)]] : [])];
+      R.signs = { list: signs.map(([code, back]) => ({ code, back })), rule: Vs ? `${Vs.label} (VRU A p. 39)` : h.kind !== 'hwy' ? 'sortie depuis une bretelle' : h.roadKind === 'route' ? `route à ${fmt(Vh, 0)} km/h (VRU A p. 10 : ≈ 30 s / 60 s)` : `autoroute à ${fmt(Vh, 0)} km/h (guide des échangeurs, tab. 4-2)` };
       for (const [code, back] of signs) {
         const st = sD30 - sd * back;
         if (st < 0 || st > h.sEnd) { if (back) { const msg = `${code} à ${fmt(back)} m en amont de D30 : hors de l'axe dessiné.`; issues.push({ lvl: 'info', msg: `${name} : ${msg}` }); R.issues.push({ lvl: 'info', msg }); } continue; }
-        const qp = h.off(st, code === 'D30' ? 1.5 + rp.w + rp.bdd + 0.7 : h.bau + h.berme);
+        const qp = h.off(st, code === 'D30' ? 0.75 : h.bau + h.berme);
         P({ k: 'circle', L: 'SIGNALISATION', c: qp, r: 0.25 });
         text('SIGNALISATION', add(qp, mul(neg(rot90(h.dirAt(st))), 1.5)), code, ang(h.dirAt(st)), 'center', TH * 0.8);
         pt(`${name} · ${code}${back ? ` (${fmt(back)} m en amont de D30)` : ' (S.1,50 m)'}`, qp);
