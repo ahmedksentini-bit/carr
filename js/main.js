@@ -3839,7 +3839,22 @@ function syncCtxUI() {
   $('#dvChartHead').textContent = plan ? 'Profil en long de la route principale' : 'Profil en long des bords de l\'anneau';
 }
 
+// Contexte envoyé à la carte des fuseaux : fuseau courant, fuseau suggéré (où se trouve le projet) et axe principal.
+function pushUtmContext() {
+  const fr = $('#utmFrame'); if (!fr?.contentWindow || !fr.src) return;
+  const c = S.prj.crs, epsg = c?.id === 'utm' ? `EPSG:${(c.south ? 32700 : 32600) + (+c.zone || 0)}` : null;
+  let lon = NaN, lat = NaN, line = null;
+  if (S.crs.geo) {
+    const ax = S.prj.hwy?.axis?.length >= 2 ? S.prj.hwy.axis : S.prj.crosses.find((q) => q.axis?.length >= 2)?.axis || S.prj.branches.find((b) => b.axis?.length >= 2)?.axis;
+    if (ax) { line = ax.map((p) => { const q = S.crs.toLL(p.x, p.y); return [q.lon, q.lat]; }); }
+    else { const b = designBBox(); if (Number.isFinite(b?.x0)) { const q = S.crs.toLL((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2); line = null; lon = q.lon; lat = q.lat; } }
+    if (line) { const m = line[Math.floor(line.length / 2)]; lon = m[0]; lat = m[1]; }
+  }
+  const sug = Number.isFinite(lon) && Number.isFinite(lat) ? `EPSG:${(lat < 0 ? 32700 : 32600) + utmZoneOf(lon)}` : null;
+  fr.contentWindow.postMessage({ type: 'setUtmContext', epsg, suggestEpsg: sug, lon, lat, line }, '*');
+}
 function syncCrsUI() {
+  try { if ($('#utmMapBox')?.open) pushUtmContext(); } catch (e) { console.error(e); }
   const c = S.prj.crs;
   $('#crsSel').value = c.id;
   $('#crsUtm').hidden = c.id !== 'utm';
@@ -7209,6 +7224,20 @@ function bindUI() {
   });
   $('#crsZone').addEventListener('change', (e) => { const z = Math.round(+e.target.value); if (z >= 1 && z <= 60) changeCRS({ ...S.prj.crs, zone: z }); else syncCrsUI(); });
   $('#crsSouth').addEventListener('change', (e) => changeCRS({ ...S.prj.crs, south: e.target.checked }));
+  // Carte des fuseaux UTM (comme BVTrace) : chargée à la première ouverture ; un clic sur un fuseau change le système
+  if ($('#utmMapBox')?.open) $('#utmFrame').src = 'utm-zones.html';
+  $('#utmMapBox')?.addEventListener('toggle', (e) => { if (e.target.open && !$('#utmFrame').src) $('#utmFrame').src = 'utm-zones.html'; else if (e.target.open) pushUtmContext(); });
+  window.addEventListener('message', (ev) => {
+    const fr = $('#utmFrame'); if (!fr || ev.source !== fr.contentWindow) return;
+    const m = ev.data || {};
+    if (m.type === 'utmReady') pushUtmContext();
+    if (m.type === 'utmCrs' && /EPSG:32[67]\d\d/.test(m.epsg)) {
+      const n = +m.epsg.slice(5), zone = n % 100, south = n >= 32700;
+      if (S.prj.crs?.id === 'utm' && +S.prj.crs.zone === zone && !!S.prj.crs.south === south) return;
+      changeCRS({ id: 'utm', zone, south, def: '' });
+      toast(`Système du projet : UTM WGS 84 fuseau ${zone}${south ? 'S' : 'N'} (${m.epsg}).`);
+    }
+  });
   $('#crsDef').addEventListener('change', (e) => changeCRS({ ...S.prj.crs, id: 'custom', def: e.target.value.trim() }));
   $('#bgSel').addEventListener('change', (e) => { S.prj.bg.provider = e.target.value; $('#bgPlaces').disabled = e.target.value !== 'esri'; viewer.invalidate(); commitHistory(); autosave(); });
   $('#bgPlaces').addEventListener('change', (e) => { S.prj.bg.places = e.target.checked; viewer.invalidate(); autosave(); });

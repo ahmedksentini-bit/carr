@@ -251,6 +251,9 @@
         </div>
         <label class="fld wide" id="crsCustomRow" hidden><span class="lb">proj4</span><input id="crsDef" type="text" spellcheck="false" placeholder="+proj=… +units=m"></label>
         <p class="note" id="crsNote"></p>
+        <details id="utmMapBox" open><summary>Carte des fuseaux UTM</summary>
+          <iframe id="utmFrame" title="Carte des fuseaux UTM" loading="lazy" style="width:100%;height:340px;border:1px solid var(--line);border-radius:6px;margin-top:6px"></iframe>
+        </details>
 
         <h3>Fond de plan</h3>
         <label class="fld wide"><span class="lb">Imagerie</span><select id="bgSel">
