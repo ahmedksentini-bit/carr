@@ -22,7 +22,7 @@ const DEF_STRUCT = () => [
 ];
 
 export function initAmorces(api) {
-  const { S, $, viewer, update, toast, esc, fmt, uid, listAxes, setTool, showTab } = api;
+  const { S, $, viewer, update, toast, esc, fmt, uid, listAxes, setTool, showTab, refreshDrawBar } = api;
   const list = () => (S.prj.amorces = Array.isArray(S.prj.amorces) ? S.prj.amorces : []);
   const byId = (id) => list().find((q) => q.id === id);
   const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y }), add = (a, b) => ({ x: a.x + b.x, y: a.y + b.y }), mul = (a, k) => ({ x: a.x * k, y: a.y * k });
@@ -152,16 +152,19 @@ export function initAmorces(api) {
   function openProps(id) { S.amSel = id; showTab('amorces'); render(); viewer.invalidate(); }
 
   // ---------------------------------------------------------------- saisie (outil Amorce) et déplacement
-  function start() { S.amA = null; setTool('amorce'); toast('Amorce : cliquez près du bord de la route, puis à l\'extrémité de l\'amorce.'); }
+  // Sur téléphone, le plan est au-dessus du panneau : on le ramène à l'écran pour poser les deux points.
+  function start() { setTool('amorce'); if (window.innerWidth <= 760) document.querySelector('.stage')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
   function pick(w) {
     if (S.tool !== 'amorce') return;
     if (!S.amA) {
-      if (!snap(w, w)) { toast('Aucune route à proximité : cliquez près du bord d\'une chaussée du projet.', 'warn'); return; }
-      S.amA = w; viewer.invalidate(); return;
+      const h = snap(w, w);
+      if (!h) { toast('Aucune route à proximité : touchez près du bord d\'une chaussée du projet.', 'warn'); return; }
+      S.amA = w; viewer.invalidate(); refreshDrawBar?.();
+      toast(`Départ posé sur le bord de ${h.name} : touchez maintenant l'extrémité de l'amorce.`); return;
     }
     if (dist(w, S.amA) < 2) { toast('Amorce trop courte (2 m au moins).', 'warn'); return; }
     const nb = list().length + 1, am = { id: uid(), name: `Amorce ${nb}`, a: { ...S.amA }, b: { x: w.x, y: w.y }, w: 5, dev: 2.5, R: 6, struct: DEF_STRUCT() };
-    list().push(am); S.amA = null; setTool('select');
+    list().push(am); S.amA = null; setTool('select'); refreshDrawBar?.();
     update({ panels: false }); openProps(am.id);
     toast(`${am.name} créée : ${fmt(geom(am).L, 1)} m.`);
   }
@@ -207,7 +210,11 @@ export function initAmorces(api) {
       ctx.restore();
     }
     // aperçu de l'outil Amorce
-    if (S.tool === 'amorce' && S.amA && S.cursorW) {
+    if (S.tool === 'amorce' && S.amA) { // point de départ calé sur le bord (visible aussi sans survol : écran tactile)
+      const h = snap(S.amA, S.cursorW || S.amA), q = h ? h.p : S.amA, [x, y] = v.w2s(q.x, q.y);
+      ctx.save(); ctx.fillStyle = '#38bdf8'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
+    }
+    if (S.tool === 'amorce' && S.amA && S.cursorW && dist(S.cursorW, S.amA) > 1) {
       const am = { a: S.amA, b: S.cursorW, w: 5 }, g = geom(am);
       ctx.save(); path(g.poly); ctx.fillStyle = 'rgba(56,189,248,.25)'; ctx.fill(); ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 1.5; ctx.stroke();
       const [xa, ya] = v.w2s(g.a.x, g.a.y); ctx.beginPath(); ctx.arc(xa, ya, 5, 0, Math.PI * 2); ctx.fillStyle = '#38bdf8'; ctx.fill(); ctx.restore();
