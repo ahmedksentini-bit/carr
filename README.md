@@ -3,7 +3,10 @@
 © 2026 Ste Ksentini de Sécurité Routière (KSR) — tous droits réservés (voir LICENSE).
 
 **Publication** : le site publie la version de `dist/` produite par `cd tools && npm ci && npm run build` (tools/build.mjs : JavaScript
-minifié et brouillé, verrou de domaine — l'application ne démarre que sur ksr-infra.org). Réglages Cloudflare Pages :
+minifié et brouillé, verrou de domaine — l'application ne démarre que sur ksr-infra.org — et garde de connexion :
+au démarrage puis toutes les 15 min, la réponse signée de `/lic` (functions/lic.js) est exigée ; hors ligne ou sur une
+copie, l'application s'arrête, après 3 échecs de suite en cours de travail le projet est conservé et l'écran bloqué
+jusqu'au retour de la connexion). Réglages Cloudflare Pages :
 commande de build `cd tools && npm ci && npm run build`, répertoire de sortie `dist` (les fonctions de `functions/` restent servies). En
 développement, servir la racine du dépôt (code lisible, sans verrou).
 
