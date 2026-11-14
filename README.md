@@ -1,5 +1,12 @@
 # INFRA-KSR (ex-GIRA) — conception routière : tracés, carrefours, giratoires, échangeurs
 
+© 2026 Ste Ksentini de Sécurité Routière (KSR) — tous droits réservés (voir LICENSE).
+
+**Publication** : le site publie la version de `dist/` produite par `cd tools && npm ci && npm run build` (tools/build.mjs : JavaScript
+minifié et brouillé, verrou de domaine — l'application ne démarre que sur ksr-infra.org). Réglages Cloudflare Pages :
+commande de build `cd tools && npm ci && npm run build`, répertoire de sortie `dist` (les fonctions de `functions/` restent servies). En
+développement, servir la racine du dépôt (code lisible, sans verrou).
+
 L'application s'appelait GIRA ; elle a été renommée INFRA-KSR quand elle a dépassé les seuls giratoires (tracés en
 plan, carrefours plans, échangeurs, ouvrages, hydrologie, vitesses). Les projets enregistrés sous GIRA (`.gira.json`,
 `app: "GIRA"`) s'ouvrent toujours ; les nouveaux sont enregistrés en `.ksr.json` (`app: "INFRA-KSR"`). Les calques DXF

@@ -1,0 +1,12 @@
+INFRA-KSR (carr.ksr-infra.org)
+Copyright (c) 2026 Ste Ksentini de Sécurité Routière (KSR), Sfax, Tunisie. Tous droits réservés.
+
+Ce logiciel, son code source, sa documentation et ses données sont la propriété exclusive de KSR.
+L'utilisation en ligne de l'application à l'adresse https://carr.ksr-infra.org est autorisée.
+Toute autre utilisation est interdite sans l'accord écrit préalable de KSR, notamment : la copie, le
+clonage, le téléchargement pour une exécution locale ou sur un autre hébergement, la modification, la
+traduction, la décompilation ou la remise en forme du code publié, la redistribution, la vente ou la
+mise à disposition de tout ou partie du logiciel.
+
+Les bibliothèques et données de tiers incluses restent soumises à leurs propres licences
+(three.js : MIT ; proj4js : MIT ; Leaflet : BSD-2 ; ESA WorldCover : CC BY 4.0 ; imagerie Esri : conditions d'Esri).
